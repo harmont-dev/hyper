@@ -31,6 +31,7 @@ defmodule Hyper.Node do
   def init(_opts) do
     children = [
       {Horde.Registry, name: @registry, keys: :unique, members: :auto},
+      Hyper.Node.ImageStore,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
     ]
 
