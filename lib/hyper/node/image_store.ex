@@ -1,16 +1,22 @@
 defmodule Hyper.Node.ImageStore do
   @moduledoc """
-  Node-local image/snapshot cache and copy-on-write provisioner.
+  Node-local content-addressed blob cache.
+
+  Manages blobs and nothing else: fetch-on-miss from the truth tier, local
+  caching, refcount leases, and LRU eviction. One `Blob` process per cached hash
+  owns that blob's refcount/leases; the `Janitor` evicts cold blobs.
+
+  It does **not** do copy-on-write provisioning or jail staging — that lives in
+  the VM provisioning layer, which *uses* this store to obtain base blobs by hash.
 
   Supervises:
 
     * `BlobRegistry`   — `{:blob, hash}` -> `Hyper.Node.ImageStore.Blob` pid
     * `TaskSupervisor` — fetches / uploads
-    * `BlobSupervisor` — one `Blob` per cached base
+    * `BlobSupervisor` — one `Blob` per cached blob
     * `Janitor`        — LRU eviction + GC
 
-  The public functions are the seam other subsystems (e.g. `Hyper.Node.FireVMM.State`)
-  call. Skeleton only: the facade raises until implemented.
+  Skeleton only: the facade raises until implemented.
   """
 
   use Supervisor
@@ -21,14 +27,8 @@ defmodule Hyper.Node.ImageStore do
   @blob_supervisor Hyper.Node.ImageStore.BlobSupervisor
   @task_supervisor Hyper.Node.ImageStore.TaskSupervisor
 
-  @typedoc "What to materialise for a VM; resolved by the store into blobs."
-  @type source :: Hyper.vm_source()
-
-  @typedoc "Paths, relative to the jail root, of the staged artifacts."
-  @type staged :: %{kernel: Path.t(), rootfs: Path.t()}
-
-  @typedoc "A content-addressed handle to a published snapshot."
-  @type snapshot_ref :: String.t()
+  @typedoc "A content hash addressing an immutable blob, e.g. \"sha256:abc...\"."
+  @type hash :: String.t()
 
   @typedoc "A point-in-time view of cache usage."
   @type stats :: %{
@@ -55,21 +55,20 @@ defmodule Hyper.Node.ImageStore do
   end
 
   @doc """
-  Stage a VM's kernel (hardlink) and a copy-on-write rootfs into `jail_root`,
-  leasing the base blobs to `owner` (auto-released when `owner` dies). Returns
-  the staged paths relative to the jail root.
+  Ensure the blob `hash` is present locally (fetching on a miss) and lease it to
+  `owner` — bumps the refcount and monitors `owner` so the lease auto-releases
+  when it dies. Returns the local path of the cached blob.
   """
-  @spec provision(owner :: pid(), source(), jail_root :: Path.t()) ::
-          {:ok, staged()} | {:error, term()}
-  def provision(_owner, _source, _jail_root), do: raise("not implemented")
+  @spec acquire(hash(), owner :: pid()) :: {:ok, Path.t()} | {:error, term()}
+  def acquire(_hash, _owner), do: raise("not implemented")
 
-  @doc "Release every lease held by `owner` and tear down its copy-on-write volumes."
-  @spec release(owner :: pid()) :: :ok
-  def release(_owner), do: raise("not implemented")
+  @doc "Release `owner`'s lease on the blob `hash`."
+  @spec release(hash(), owner :: pid()) :: :ok
+  def release(_hash, _owner), do: raise("not implemented")
 
-  @doc "Snapshot the running VM `vm`, publish it to the truth tier, return its ref."
-  @spec snapshot(owner :: pid(), vm :: pid()) :: {:ok, snapshot_ref()} | {:error, term()}
-  def snapshot(_owner, _vm), do: raise("not implemented")
+  @doc "Ingest a local file as a content-addressed blob; returns its hash."
+  @spec put(src :: Path.t()) :: {:ok, hash()} | {:error, term()}
+  def put(_src), do: raise("not implemented")
 
   @doc "Current cache statistics."
   @spec stats() :: stats()

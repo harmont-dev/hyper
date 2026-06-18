@@ -3,12 +3,9 @@ defmodule Hyper do
   `Hyper` is a distrubuted elixir virtual machine orchestrator.
   """
 
-  @type vm :: pid()
-
   @type vm_source ::
-    {:image, kernel: Path.t(), rootfs: Path.t()}
-    | {:snapshot, Path.t()}
-    | {:vm, vm()}
+    {:snapshot, Path.t()}
+    | {:vm, Hyper.Vm.t()}
 
   @typedoc """
   The specification for creating a new VM.
@@ -25,6 +22,11 @@ defmodule Hyper do
     {:ok, state}
   end
 
+  @impl true
+  def handle_call({:create_vm, _source}, _from, state) do
+    {:noreply, state}
+  end
+
   @doc """
   Fork an existing virtual machine into another virtual machine.
 
@@ -36,30 +38,12 @@ defmodule Hyper do
   If, however, the candidate node is currently overloaded, this will create a
   snapshot of the given VM, and will create the requested VM on the most available node.
   """
-  @impl true
-  def handle_cast({:create_vm, %{source: {:vm, _vm}}}, state) do
-    Tracer.with_span "hyper.create_vm" do
-      Tracer.set_attribute("vm.source.type", "vm")
-      # ... clone from a running VM ...
-      {:noreply, state}
-    end
+  def create_vm(%{source: {:vm, vm}}) do
+    GenServer.call(__MODULE__, {:create_vm, %{source: {:vm, vm}}})
   end
 
-  @impl true
-  def handle_call({:create_vm, %{source: {:snapshot, _snapshot}}}, _from, state) do
-    Tracer.with_span "hyper.create_vm" do
-      Tracer.set_attribute("vm.source.type", "snapshot")
-      # ... restore from a snapshot ...
-      {:reply, :ok, state}
-    end
-  end
-
-  @impl true
-  def handle_call({:create_vm, %{source: {:image, _kernel, _rootfs}}}, _from, state) do
-    Tracer.with_span "hyper.create_vm" do
-      Tracer.set_attribute("vm.source.type", "image")
-      # ... boot from a kernel + rootfs image ...
-      {:reply, :ok, state}
-    end
+  @doc "Create a new virtual machine with the given snapshot."
+  def create_vm(%{source: {:snapshot, snapshot}}) do
+    GenServer.call(__MODULE__, {:create_vm, %{source: {:snapshot, snapshot}}})
   end
 end

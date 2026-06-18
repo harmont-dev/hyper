@@ -5,22 +5,28 @@ defmodule Hyper.Node do
 
   Children:
 
-    * `Horde.Registry` (named `Hyper.Node.Registry`) - a **cluster-wide** registry
-      member. Maps `{vm_id, role}` -> pid; `node(pid)` answers "which machine
+    * `Horde.Registry` (named `Hyper.Vm.Registry`) - a **cluster-wide** registry
+      member. Maps `{vm_id, component}` -> pid; `node(pid)` answers "which machine
       owns this VM". Each node writes its own VMs; every node can read all of
       them. `members: :auto` joins peers over Distributed Erlang (wire up
       connectivity with libcluster).
+
+    * `Hyper.Node.ImageStore` - a node-local content-addressed blob cache. Started
+      before the VM supervisor so VMs can pull base images on boot.
 
     * `Hyper.Node.VMSupervisor` - a **local** `DynamicSupervisor` that starts one
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
       this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
       VMs on a surviving node — cold-booting a ghost).
+
+    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
+      and group id.
   """
 
   use Supervisor
 
-  @registry Hyper.Node.Registry
+  @registry Hyper.Vm.Registry
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
@@ -32,7 +38,8 @@ defmodule Hyper.Node do
     children = [
       {Horde.Registry, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.ImageStore,
-      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
+      Hyper.Node.Users,
+      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -45,7 +52,7 @@ defmodule Hyper.Node do
   end
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.vm()) :: node() | nil
+  @spec whereis(Hyper.Vm.t()) :: node() | nil
   def whereis(vm_id) do
     case Horde.Registry.lookup(@registry, {vm_id, :supervisor}) do
       [{pid, _}] -> node(pid)

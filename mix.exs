@@ -24,6 +24,7 @@ defmodule Hyper.MixProject do
     [
       {:horde, "~> 0.9"},
       {:muontrap, "~> 1.5"},
+      {:open_telemetry_decorator, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"}

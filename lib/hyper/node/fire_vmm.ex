@@ -26,10 +26,11 @@ defmodule Hyper.Node.FireVMM do
   jailer command and the host-side socket are derived here — see `init/1`.
   """
   @type opts :: %{
-          required(:id) => String.t(),
-          required(:source) => Hyper.vm_source(),
-          required(:type) => Hyper.Vm.Instance.t()
-        }
+    required(:id) => String.t(),
+    required(:user) => {integer(), integer()},
+    required(:source) => Hyper.vm_source(),
+    required(:type) => Hyper.Vm.Instance.t()
+  }
 
   @spec start_link(opts()) :: Supervisor.on_start()
   def start_link(%{id: id} = opts) do
@@ -53,7 +54,7 @@ defmodule Hyper.Node.FireVMM do
     # controller will talk to) here, so neither the caller nor the controller
     # has to know host conventions. `Map.put_new` lets tests inject a stand-in
     # daemon (e.g. a sleeping shell) and an accessible socket path.
-    cmd = Hyper.Vm.Jailer.command(opts)
+    cmd = Hyper.Node.Jailer.command(opts)
 
     vm_opts =
       opts
@@ -63,12 +64,12 @@ defmodule Hyper.Node.FireVMM do
 
     children = [
       {DynamicSupervisor,
-       name: {:via, Horde.Registry, {Hyper.Node.Registry, {id, :daemon_sup}}}, strategy: :one_for_one},
+       name: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :daemon_sup}}}, strategy: :one_for_one},
       {State, vm_opts}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
-  defp via(id), do: {:via, Horde.Registry, {Hyper.Node.Registry, {id, :supervisor}}}
+  defp via(id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :supervisor}}}
 end

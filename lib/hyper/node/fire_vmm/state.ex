@@ -127,6 +127,6 @@ defmodule Hyper.Node.FireVMM.State do
 
   defp recover_after, do: 1_000
 
-  defp daemon_sup(id), do: {:via, Horde.Registry, {Hyper.Node.Registry, {id, :daemon_sup}}}
-  defp via(id), do: {:via, Horde.Registry, {Hyper.Node.Registry, {id, :state}}}
+  defp daemon_sup(id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :daemon_sup}}}
+  defp via(id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :state}}}
 end
