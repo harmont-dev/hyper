@@ -27,15 +27,6 @@ defmodule Hyper.Sys.Unit do
     def tera(val), do: giga(val) / 10
   end
 
-  defmodule Time do
-    @moduledoc false
-
-    defdelegate ns(v), to: SI, as: :nano
-    defdelegate us(v), to: SI, as: :micro
-    defdelegate ms(v), to: SI, as: :milli
-    def s(v), do: v
-  end
-
   defmodule Bytes do
     @moduledoc false
 

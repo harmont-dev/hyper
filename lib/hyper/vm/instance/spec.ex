@@ -14,9 +14,13 @@ defmodule Hyper.Vm.Instance.Spec do
   @spec cgroup_v2(t()) :: Hyper.Sys.Linux.Cgroup.V2.Config.t()
   def cgroup_v2(spec) do
     alias Hyper.Sys.Linux.Cgroup.V2.Config
+    alias Hyper.Sys.Unit.Time
+
+    period_us = Time.as_us(Hyper.Node.FireVMM.cpu_period())
+    quota_us = round(spec.vcpus * period_us)
 
     Config.new()
-    |> Config.cpu_max(round(spec.vcpus * Hyper.Node.FireVMM.cpu_period()), Hyper.Node.FireVMM.cpu_period())
+    |> Config.cpu_max(quota_us, period_us)
     |> Config.memory_max(spec.mem)
   end
 end

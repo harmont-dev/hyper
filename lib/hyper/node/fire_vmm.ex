@@ -22,7 +22,8 @@ defmodule Hyper.Node.FireVMM do
   alias Hyper.Node.FireVMM.State
 
   @doc "The scheduler period of each VM."
-  def cpu_period, do: Hyper.Sys.Unit.Time.ns(100)
+  @spec cpu_period() :: Hyper.Sys.Unit.Time.t()
+  def cpu_period, do: Hyper.Sys.Unit.Time.ms(100)
 
   defmodule Opts do
     @moduledoc "Options to pass into the jailer command."
