@@ -89,9 +89,14 @@ defmodule Hyper.Node.FireVMM.Jailer do
     %{binary: Hyper.Config.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
   end
 
-  # Flatten the cgroup cap map into repeated `--cgroup file=value` jailer args.
+  # Find the appropriate jailer cgroup flags for the given instance type.
+  @spec cgroup_flags(Instance.t()) :: [String.t()]
   defp cgroup_flags(type) do
-    Enum.flat_map(Instance.cgroup(type), fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
+    type
+    |> Instance.spec
+    |> Instance.Spec.cgroup_v2
+    |> Hyper.Sys.Linux.Cgroup.V2.Config.as_linux
+    |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 
   # Host-side path of the API socket firecracker opens inside the jail.

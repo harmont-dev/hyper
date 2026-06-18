@@ -20,6 +20,11 @@ defmodule Hyper.Sys.Linux.Cgroup.V2 do
             optional(:memory_max) => pos_integer()
           }
 
+    @type linux_t :: %{
+            optional(:"cpu.max") => String.t(),
+            optional(:"memory.max") => String.t()
+    }
+
     @spec new :: t()
     def new do
       %{}
@@ -32,5 +37,14 @@ defmodule Hyper.Sys.Linux.Cgroup.V2 do
 
     @spec memory_max(t(), pos_integer()) :: t()
     def memory_max(cfg, val), do: Map.put(cfg, :memory_max, val)
+
+    @doc "Render the config into cgroup v2 interface-file => value pairs."
+    @spec as_linux(t()) :: linux_t()
+    def as_linux(cfg) do
+      Map.new(cfg, fn
+        {:cpu_max, %{quota_us: quota, period_us: period}} -> {:"cpu.max", "#{quota} #{period}"}
+        {:memory_max, bytes} -> {:"memory.max", to_string(bytes)}
+      end)
+    end
   end
 end
