@@ -12,7 +12,7 @@ defmodule Hyper.Vm.Instance do
   jailer command.
   """
 
-  alias Hyper.Sys.Unit.Bw
+  alias Hyper.Sys.Unit.Bandwidth
   alias Hyper.Sys.Unit.Information
   alias Hyper.Vm.Instance.Spec
 
@@ -31,17 +31,17 @@ defmodule Hyper.Vm.Instance do
           | :tera
 
   @specs %{
-    micro: %Spec{vcpus: 0.25, mem: Information.mib(128), disk: Information.gib(2), disk_bw: Bw.mibps(16), net_bw: Bw.mibps(8)},
-    milli: %Spec{vcpus: 0.5, mem: Information.mib(256), disk: Information.gib(4), disk_bw: Bw.mibps(32), net_bw: Bw.mibps(16)},
-    centi: %Spec{vcpus: 1, mem: Information.mib(512), disk: Information.gib(8), disk_bw: Bw.mibps(64), net_bw: Bw.mibps(32)},
-    deci: %Spec{vcpus: 2, mem: Information.mib(1024), disk: Information.gib(16), disk_bw: Bw.mibps(128), net_bw: Bw.mibps(64)},
-    base: %Spec{vcpus: 4, mem: Information.mib(2048), disk: Information.gib(32), disk_bw: Bw.mibps(256), net_bw: Bw.mibps(128)},
-    deca: %Spec{vcpus: 8, mem: Information.mib(4096), disk: Information.gib(64), disk_bw: Bw.mibps(512), net_bw: Bw.mibps(256)},
-    hecto: %Spec{vcpus: 16, mem: Information.mib(8192), disk: Information.gib(128), disk_bw: Bw.mibps(1024), net_bw: Bw.mibps(512)},
-    kilo: %Spec{vcpus: 32, mem: Information.mib(16384), disk: Information.gib(256), disk_bw: Bw.mibps(2048), net_bw: Bw.mibps(1024)},
-    mega: %Spec{vcpus: 64, mem: Information.mib(32768), disk: Information.gib(512), disk_bw: Bw.mibps(4096), net_bw: Bw.mibps(2048)},
-    giga: %Spec{vcpus: 128, mem: Information.mib(65536), disk: Information.gib(1024), disk_bw: Bw.mibps(8192), net_bw: Bw.mibps(4096)},
-    tera: %Spec{vcpus: 256, mem: Information.mib(131_072), disk: Information.gib(2048), disk_bw: Bw.mibps(16384), net_bw: Bw.mibps(8192)}
+    micro: %Spec{vcpus: 0.25, mem: Information.mib(128), disk: Information.gib(2), disk_bw: Bandwidth.mibps(16), net_bw: Bandwidth.mibps(8)},
+    milli: %Spec{vcpus: 0.5, mem: Information.mib(256), disk: Information.gib(4), disk_bw: Bandwidth.mibps(32), net_bw: Bandwidth.mibps(16)},
+    centi: %Spec{vcpus: 1, mem: Information.mib(512), disk: Information.gib(8), disk_bw: Bandwidth.mibps(64), net_bw: Bandwidth.mibps(32)},
+    deci: %Spec{vcpus: 2, mem: Information.mib(1024), disk: Information.gib(16), disk_bw: Bandwidth.mibps(128), net_bw: Bandwidth.mibps(64)},
+    base: %Spec{vcpus: 4, mem: Information.mib(2048), disk: Information.gib(32), disk_bw: Bandwidth.mibps(256), net_bw: Bandwidth.mibps(128)},
+    deca: %Spec{vcpus: 8, mem: Information.mib(4096), disk: Information.gib(64), disk_bw: Bandwidth.mibps(512), net_bw: Bandwidth.mibps(256)},
+    hecto: %Spec{vcpus: 16, mem: Information.mib(8192), disk: Information.gib(128), disk_bw: Bandwidth.mibps(1024), net_bw: Bandwidth.mibps(512)},
+    kilo: %Spec{vcpus: 32, mem: Information.mib(16384), disk: Information.gib(256), disk_bw: Bandwidth.mibps(2048), net_bw: Bandwidth.mibps(1024)},
+    mega: %Spec{vcpus: 64, mem: Information.mib(32768), disk: Information.gib(512), disk_bw: Bandwidth.mibps(4096), net_bw: Bandwidth.mibps(2048)},
+    giga: %Spec{vcpus: 128, mem: Information.mib(65536), disk: Information.gib(1024), disk_bw: Bandwidth.mibps(8192), net_bw: Bandwidth.mibps(4096)},
+    tera: %Spec{vcpus: 256, mem: Information.mib(131_072), disk: Information.gib(2048), disk_bw: Bandwidth.mibps(16384), net_bw: Bandwidth.mibps(8192)}
   }
 
   @doc "All known instance types."

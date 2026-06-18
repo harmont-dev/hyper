@@ -5,8 +5,8 @@ defmodule Hyper.Vm.Instance.Spec do
           vcpus: number(),
           mem: Hyper.Sys.Unit.Information.t(),
           disk: Hyper.Sys.Unit.Information.t(),
-          disk_bw: pos_integer(),
-          net_bw: pos_integer()
+          disk_bw: Hyper.Sys.Unit.Bandwidth.t(),
+          net_bw: Hyper.Sys.Unit.Bandwidth.t()
         }
 
   defstruct [:vcpus, :mem, :disk, :disk_bw, :net_bw]
