@@ -51,6 +51,31 @@ defmodule Hyper.Node.Users do
     end
   end
 
+  @doc """
+  Verify the configured uid/gid range is free, raising if anything occupies it.
+
+  Run at node startup so we fail closed: handing out a uid that collides with an
+  existing user would let a VM run as that user — a security hazard. Checks NSS
+  users and groups (via `getent`) and the subordinate-id ranges in `/etc/subuid`
+  and `/etc/subgid` for overlap with the configured range.
+  """
+  @spec scan_availability() :: :ok
+  def scan_availability do
+    {min, max} = Hyper.Config.uid_gid_range()
+
+    conflicts =
+      passwd_conflicts(min, max) ++
+        group_conflicts(min, max) ++
+        subid_conflicts("subuid", Hyper.Sys.Linux.Subid.subuid_ranges(), min, max) ++
+        subid_conflicts("subgid", Hyper.Sys.Linux.Subid.subgid_ranges(), min, max)
+
+    if conflicts == [] do
+      :ok
+    else
+      raise "uid/gid range #{min}..#{max} is not free; occupied by: #{Enum.join(conflicts, ", ")}"
+    end
+  end
+
   @impl true
   def init(_opts) do
     {min, max} = Hyper.Config.uid_gid_range()
@@ -75,5 +100,46 @@ defmodule Hyper.Node.Users do
   @impl true
   def handle_cast({:free, id}, %State{freed: freed} = state) do
     {:noreply, %{state | freed: [id | freed]}}
+  end
+
+  # Passwd entries whose uid falls within [min, max].
+  defp passwd_conflicts(min, max) do
+    Hyper.Sys.Linux.Nss.Passwd.entries()
+    |> unwrap!("passwd")
+    |> Enum.filter(&(&1.uid in min..max))
+    |> Enum.map(&"passwd:#{&1.name}(#{&1.uid})")
+  end
+
+  # Group entries whose gid falls within [min, max].
+  defp group_conflicts(min, max) do
+    Hyper.Sys.Linux.Nss.Group.entries()
+    |> unwrap!("group")
+    |> Enum.filter(&(&1.gid in min..max))
+    |> Enum.map(&"group:#{&1.name}(#{&1.gid})")
+  end
+
+  # Subid ranges store an EXCLUSIVE max_id (start + count), so a range overlaps
+  # the inclusive [min, max] iff min_id <= max and max_id > min.
+  defp subid_conflicts(label, result, min, max) do
+    case result do
+      {:ok, ranges} ->
+        ranges
+        |> Enum.filter(fn r -> r.min_id <= max and r.max_id > min end)
+        |> Enum.map(&"#{label}:#{&1.name}(#{&1.min_id}..#{&1.max_id})")
+
+      # A missing subid file just means nothing is allocated.
+      {:error, :enoent} ->
+        []
+
+      # Any other failure means we couldn't verify — fail closed.
+      {:error, reason} ->
+        raise "cannot read #{label} to verify uid/gid range: #{inspect(reason)}"
+    end
+  end
+
+  defp unwrap!({:ok, value}, _label), do: value
+
+  defp unwrap!({:error, reason}, label) do
+    raise "cannot read #{label} to verify uid/gid range: #{inspect(reason)}"
   end
 end

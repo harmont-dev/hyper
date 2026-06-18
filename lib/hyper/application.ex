@@ -7,7 +7,12 @@ defmodule Hyper.Application do
   def start(_type, _args) do
     # :opentelemetry starts as its own OTP application (a dependency of :hyper),
     # so it is already running before this supervisor boots.
+    topologies = Application.get_env(:libcluster, :topologies, [])
+
     children = [
+      # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
+      # can discover peer nodes. Gossip strategy in dev — see config/config.exs.
+      {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
       # This machine's participation in the cluster: owns the cluster-wide VM
       # registry and the local supervisor that runs this node's microVMs.
       Hyper.Node

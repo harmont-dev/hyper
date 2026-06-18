@@ -23,6 +23,7 @@ defmodule Hyper.MixProject do
   defp deps do
     [
       {:horde, "~> 0.9"},
+      {:libcluster, "~> 3.3"},
       {:muontrap, "~> 1.5"},
       {:open_telemetry_decorator, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},

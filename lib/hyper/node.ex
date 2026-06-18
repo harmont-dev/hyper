@@ -31,6 +31,7 @@ defmodule Hyper.Node do
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
+    Hyper.Node.Users.scan_availability()
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
@@ -51,16 +52,6 @@ defmodule Hyper.Node do
   @decorate with_span("Hyper.Node.start_vm", include: [:opts])
   def start_vm(%{id: _} = opts) do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
-  end
-
-  @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.t()) :: node() | nil
-  def whereis(vm_id) do
-    # TODO(markovejnovic): I don't think this belongs here.
-    case Horde.Registry.lookup(@registry, {vm_id, :supervisor}) do
-      [{pid, _}] -> node(pid)
-      [] -> nil
-    end
   end
 
   @doc false

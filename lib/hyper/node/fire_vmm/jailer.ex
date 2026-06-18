@@ -1,4 +1,4 @@
-defmodule Hyper.Node.Jailer do
+defmodule Hyper.Node.FireVMM.Jailer do
   @moduledoc """
   Builds the firecracker
   [jailer](https://github.com/firecracker-microvm/firecracker/blob/main/docs/jailer.md)
@@ -17,9 +17,11 @@ defmodule Hyper.Node.Jailer do
   `:jailer_chroot_base`, `:cgroup_parent`, `:jailer_uid`, `:jailer_gid`.
   """
 
-  alias Hyper.Vm.Instance
+  use OpenTelemetryDecorator
 
-  @cgroup_version 2
+  alias Hyper.Vm.Instance
+  alias Hyper.Sys
+
   # firecracker's API socket path *inside* the chroot.
   @jail_socket "api.socket"
 
@@ -38,6 +40,34 @@ defmodule Hyper.Node.Jailer do
 
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
+  @doc "Test whether the jailer and system pre-requisites are available."
+  @spec sys_available?() :: :ok | {:error, atom()}
+  @decorate with_span("Hyper.Node.FireVMM.Jailer.available", include: [:result])
+  def sys_available? do
+    cond do
+      not Sys.Posix.executable?(Hyper.Config.jailer_bin()) ->
+        {:error, :jailer_unavailable}
+
+      not Sys.Posix.executable?(Hyper.Config.firecracker_bin()) ->
+        {:error, :firecracker_unavailable}
+
+      not File.exists?("/dev/kvm") ->
+        {:error, :kvm_unavailable}
+
+      Sys.Linux.Cgroup.versions() not in [{:cgroup2}, {:cgroup, :cgroup2}] ->
+        {:error, :cgroup_v2_unavailable}
+
+      not Sys.Linux.Cgroup.V2.named_exists?(Hyper.Config.parent_cgroup()) ->
+        {:error, :missing_parent_cgroup}
+
+      true ->
+        case Sys.Posix.ensure_writable_dir(Hyper.Config.chroot_base()) do
+          {:ok} -> :ok
+          {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
+        end
+    end
+  end
+
   @spec command(Opts.t()) :: t()
   def command(opts) do
     args =
@@ -53,7 +83,7 @@ defmodule Hyper.Node.Jailer do
         "--chroot-base-dir",
         Hyper.Config.chroot_base(),
         "--cgroup-version",
-        to_string(@cgroup_version),
+        "2",
         "--parent-cgroup",
         Hyper.Config.parent_cgroup()
       ] ++

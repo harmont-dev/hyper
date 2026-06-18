@@ -14,36 +14,23 @@ defmodule Hyper do
     required(:source) => vm_source(),
   }
 
-  use GenServer
-  require OpenTelemetry.Tracer, as: Tracer
-
-  @impl true
-  def init(state) do
-    {:ok, state}
-  end
-
-  @impl true
-  def handle_call({:create_vm, _source}, _from, state) do
-    {:noreply, state}
-  end
-
   @doc """
-  Fork an existing virtual machine into another virtual machine.
+  Create a new virtual machine from the given source.
 
-  This effectively creates a new virtual machine in the same state as the previous virtual machine.
-
-  This cast will attempt to co-locate VMs on the same `Hyper.Node` as the parent VM, as that
-  ensures the fastest possible bootup time.
-
-  If, however, the candidate node is currently overloaded, this will create a
-  snapshot of the given VM, and will create the requested VM on the most available node.
+  Placement: a `{:vm, _}` source is co-located on the same `Hyper.Node` as the
+  parent VM for the fastest boot; if that node is overloaded the VM is snapshotted
+  and placed on the most available node. A `{:snapshot, _}` source is placed on the
+  most available node.
   """
-  def create_vm(%{source: {:vm, vm}}) do
-    GenServer.call(__MODULE__, {:create_vm, %{source: {:vm, vm}}})
-  end
+  @spec create_vm(vm_spec()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
+  def create_vm(%{source: _source}), do: raise("not implemented")
 
-  @doc "Create a new virtual machine with the given snapshot."
-  def create_vm(%{source: {:snapshot, snapshot}}) do
-    GenServer.call(__MODULE__, {:create_vm, %{source: {:snapshot, snapshot}}})
+  @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
+  @spec whereis(Hyper.Vm.t()) :: node() | nil
+  def whereis(vm_id) do
+    case Horde.Registry.lookup(Hyper.Vm.Registry, {vm_id, :supervisor}) do
+      [{pid, _}] -> node(pid)
+      [] -> nil
+    end
   end
 end
