@@ -17,7 +17,7 @@ defmodule Hyper.Node.ImageStoreTest do
   end
 
   test "facade functions are not implemented yet" do
-    src = {:image, kernel: "k", rootfs: "r"}
+    src = {:snapshot, "/tmp/snap"}
 
     assert_raise RuntimeError, "not implemented", fn -> ImageStore.provision(self(), src, "/jail") end
     assert_raise RuntimeError, "not implemented", fn -> ImageStore.release(self()) end
