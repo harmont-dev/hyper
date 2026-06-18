@@ -27,15 +27,6 @@ defmodule Hyper.Sys.Unit do
     def tera(val), do: giga(val) / 10
   end
 
-  defmodule Bytes do
-    @moduledoc false
-
-    defdelegate kib(val), to: Binary, as: :kibi
-    defdelegate mib(val), to: Binary, as: :mebi
-    defdelegate gib(val), to: Binary, as: :gibi
-    defdelegate tib(val), to: Binary, as: :tebi
-  end
-
   defmodule Bw do
     @moduledoc false
 

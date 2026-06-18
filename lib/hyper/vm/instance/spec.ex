@@ -3,8 +3,8 @@ defmodule Hyper.Vm.Instance.Spec do
 
   @type t :: %__MODULE__{
           vcpus: number(),
-          mem: pos_integer(),
-          disk: pos_integer(),
+          mem: Hyper.Sys.Unit.Information.t(),
+          disk: Hyper.Sys.Unit.Information.t(),
           disk_bw: pos_integer(),
           net_bw: pos_integer()
         }
@@ -21,6 +21,6 @@ defmodule Hyper.Vm.Instance.Spec do
 
     Config.new()
     |> Config.cpu_max(quota_us, period_us)
-    |> Config.memory_max(spec.mem)
+    |> Config.memory_max(Hyper.Sys.Unit.Information.as_bytes(spec.mem))
   end
 end
