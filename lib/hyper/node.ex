@@ -25,6 +25,7 @@ defmodule Hyper.Node do
   """
 
   use Supervisor
+  use OpenTelemetryDecorator
 
   @registry Hyper.Vm.Registry
   @vm_sup Hyper.Node.VMSupervisor
@@ -39,14 +40,15 @@ defmodule Hyper.Node do
       {Horde.Registry, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.ImageStore,
       Hyper.Node.Users,
-      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
+      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  @doc "Start a microVM on THIS node."
+  @doc "Start a microVM on this node."
   @spec start_vm(Hyper.Node.FireVMM.opts()) :: DynamicSupervisor.on_start_child()
+  @decorate with_span("Hyper.Node.start_vm", include: [:opts])
   def start_vm(%{id: _} = opts) do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
   end
@@ -54,6 +56,7 @@ defmodule Hyper.Node do
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.t()) :: node() | nil
   def whereis(vm_id) do
+    # TODO(markovejnovic): I don't think this belongs here.
     case Horde.Registry.lookup(@registry, {vm_id, :supervisor}) do
       [{pid, _}] -> node(pid)
       [] -> nil
