@@ -36,7 +36,7 @@ defmodule Hyper.Node.FireVMM do
   def start_link(%{id: id} = opts) do
     # Refuse to start a VM if the jailer / firecracker / KVM / cgroup prerequisites
     # aren't present on this host — fail fast rather than mid-boot.
-    case sys_available?() do
+    case test_system() do
       :ok -> Supervisor.start_link(__MODULE__, opts, name: via(id))
       {:error, _reason} = error -> error
     end
@@ -80,8 +80,8 @@ defmodule Hyper.Node.FireVMM do
   defp via(id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :supervisor}}}
 
   @doc "Test whether the system can run firecracker VMMs."
-  @spec sys_available? :: :ok | {:error, atom() | {atom(), atom()}}
-  def sys_available? do
-    Hyper.Node.FireVMM.Jailer.sys_available?
+  @spec test_system() :: :ok | {:error, atom() | {atom(), atom()}}
+  def test_system() do
+    Hyper.Node.FireVMM.Jailer.test_system()
   end
 end

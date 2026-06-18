@@ -56,4 +56,8 @@ defmodule Hyper.Node do
 
   @doc false
   def registry, do: @registry
+
+  def test_system do
+    Hyper.Node.FireVMM.test_system()
+  end
 end

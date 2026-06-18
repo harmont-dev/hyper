@@ -33,3 +33,6 @@ hyper-*.tar
 
 # Claude Slop
 docs/superpowers/**/*
+
+# Dialyzer PLT cache
+/priv/plts/

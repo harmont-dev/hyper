@@ -7,7 +7,14 @@ defmodule Hyper.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      dialyzer: [
+        # Cache the PLTs in a stable, gitignored dir so CI can cache them.
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts",
+        # Verify @specs against actual returns, and flag ignored return values.
+        flags: [:unmatched_returns, :extra_return, :missing_return]
+      ]
     ]
   end
 
@@ -22,6 +29,8 @@ defmodule Hyper.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:horde, "~> 0.9"},
       {:libcluster, "~> 3.3"},
       {:muontrap, "~> 1.5"},

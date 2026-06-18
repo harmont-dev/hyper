@@ -41,9 +41,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
   @doc "Test whether the jailer and system pre-requisites are available."
-  @spec sys_available?() :: :ok | {:error, atom()}
+  @spec test_system() :: :ok | {:error, atom()}
   @decorate with_span("Hyper.Node.FireVMM.Jailer.available", include: [:result])
-  def sys_available? do
+  def test_system() do
     cond do
       not Sys.Posix.executable?(Hyper.Config.jailer_bin()) ->
         {:error, :jailer_unavailable}
