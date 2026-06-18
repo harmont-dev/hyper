@@ -4,6 +4,7 @@ defmodule Hyper.Node.ImageStore.BlobTest do
   alias Hyper.Node.ImageStore.Blob
 
   test "exposes the per-blob lifecycle API" do
+    Code.ensure_loaded!(Blob)
     assert function_exported?(Blob, :start_link, 1)
     assert function_exported?(Blob, :child_spec, 1)
     assert function_exported?(Blob, :acquire, 2)

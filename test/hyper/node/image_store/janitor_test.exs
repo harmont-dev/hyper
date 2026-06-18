@@ -4,6 +4,7 @@ defmodule Hyper.Node.ImageStore.JanitorTest do
   alias Hyper.Node.ImageStore.Janitor
 
   test "exposes the sweep API" do
+    Code.ensure_loaded!(Janitor)
     assert function_exported?(Janitor, :start_link, 1)
     assert function_exported?(Janitor, :sweep, 0)
   end

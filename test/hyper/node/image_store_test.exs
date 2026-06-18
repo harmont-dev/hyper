@@ -4,6 +4,7 @@ defmodule Hyper.Node.ImageStoreTest do
   alias Hyper.Node.ImageStore
 
   test "exposes the provisioning facade" do
+    Code.ensure_loaded!(ImageStore)
     assert function_exported?(ImageStore, :start_link, 1)
     assert function_exported?(ImageStore, :provision, 3)
     assert function_exported?(ImageStore, :release, 1)
