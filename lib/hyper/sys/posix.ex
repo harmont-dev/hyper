@@ -1,4 +1,6 @@
 defmodule Hyper.Sys.Posix do
+  @moduledoc "POSIX filesystem helpers."
+
   @doc "Check whether a file exists and is executable."
   @spec executable?(Path.t()) :: boolean()
   def executable?(path) do

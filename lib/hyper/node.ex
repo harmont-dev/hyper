@@ -31,8 +31,10 @@ defmodule Hyper.Node do
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
-    Hyper.Node.Users.scan_availability()
-    Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+    case test_system() do
+      :ok -> Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @impl true
@@ -57,7 +59,9 @@ defmodule Hyper.Node do
   @doc false
   def registry, do: @registry
 
+  @spec test_system :: :ok | {:error, term()}
   def test_system do
+    Hyper.Node.Users.test_system()
     Hyper.Node.FireVMM.test_system()
   end
 end

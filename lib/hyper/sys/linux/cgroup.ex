@@ -6,24 +6,22 @@ defmodule Hyper.Sys.Linux.Cgroup do
   @doc """
   Detect which cgroup versions are mounted on this system, from `/proc/mounts`.
 
-    * `{:cgroup, :cgroup2}` — hybrid (v1 controllers + the v2 unified hierarchy)
-    * `{:cgroup2}`          — v2 only (the modern default)
-    * `{:cgroup}`           — v1 only (legacy)
-    * `nil`                 — none mounted (or `/proc/mounts` unreadable)
+  Returns a set of the mounted versions — `:cgroup` (v1) and/or `:cgroup2` (v2).
+  An empty set means none are mounted; a set with both means a hybrid hierarchy.
   """
-  @spec versions :: {:cgroup, :cgroup2} | {:cgroup2} | {:cgroup} | nil
+  @spec versions :: {:ok, MapSet.t(:cgroup | :cgroup2)} | {:error, atom()}
   def versions do
-    with {:ok, mounts} <- Mounts.list() do
-      types = mounts |> Enum.map(& &1.fs_type) |> MapSet.new()
+    case Mounts.list() do
+      {:ok, mounts} ->
+        versions =
+          for %{fs_type: fs} <- mounts, fs in ~w(cgroup cgroup2), into: MapSet.new() do
+            String.to_existing_atom(fs)
+          end
 
-      case {MapSet.member?(types, "cgroup"), MapSet.member?(types, "cgroup2")} do
-        {true, true} -> {:cgroup, :cgroup2}
-        {false, true} -> {:cgroup2}
-        {true, false} -> {:cgroup}
-        {false, false} -> nil
-      end
-    else
-      {:error, _} -> nil
+        {:ok, versions}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 end

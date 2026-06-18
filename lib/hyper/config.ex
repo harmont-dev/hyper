@@ -1,4 +1,6 @@
 defmodule Hyper.Config do
+  @moduledoc "Compile-time host configuration, read from `config :hyper, ...` (see `config/config.exs`)."
+
   @jailer_bin Application.compile_env!(:hyper, :jailer_bin)
   @firecracker_bin Application.compile_env!(:hyper, :firecracker_bin)
   @chroot_base Application.compile_env!(:hyper, :jailer_chroot_base)

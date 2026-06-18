@@ -21,32 +21,32 @@ defmodule Hyper.Node.FireVMM do
 
   alias Hyper.Node.FireVMM.State
 
-  @typedoc """
-  What the caller supplies: *what* to run, not *where*. The runtime paths, the
-  jailer command and the host-side socket are derived here — see `init/1`.
-  """
-  @type opts :: %{
-          required(:id) => String.t(),
-          required(:user) => {integer(), integer()},
-          required(:source) => Hyper.vm_source(),
-          required(:type) => Hyper.Vm.Instance.t()
-        }
+  @doc "The scheduler period of each VM."
+  def cpu_period, do: Hyper.Sys.Unit.Time.ns(100)
 
-  @spec start_link(opts()) :: Supervisor.on_start()
-  def start_link(%{id: id} = opts) do
-    # Refuse to start a VM if the jailer / firecracker / KVM / cgroup prerequisites
-    # aren't present on this host — fail fast rather than mid-boot.
-    case test_system() do
-      :ok -> Supervisor.start_link(__MODULE__, opts, name: via(id))
-      {:error, _reason} = error -> error
-    end
+  defmodule Opts do
+    @moduledoc "Options to pass into the jailer command."
+
+    defstruct [:vm_id, :uid, :gid, :type]
+
+    @type t :: %__MODULE__{
+            vm_id: integer(),
+            uid: Hyper.Node.Users.id(),
+            gid: Hyper.Node.Users.id(),
+            type: Hyper.Vm.Instance.t()
+          }
   end
 
-  def child_spec(%{id: id} = opts) do
+  @spec start_link(Opts.t()) :: Supervisor.on_start()
+  def start_link(opts) do
+    Supervisor.start_link(__MODULE__, opts, name: via(opts.vm_id))
+  end
+
+  def child_spec(opts) do
     # Keyed by VM id and :transient so a cleanly-stopped VM is not rebooted by
     # the node-level DynamicSupervisor.
     %{
-      id: {__MODULE__, id},
+      vm_id: {__MODULE__, opts.vm_id},
       start: {__MODULE__, :start_link, [opts]},
       type: :supervisor,
       restart: :transient
@@ -54,7 +54,7 @@ defmodule Hyper.Node.FireVMM do
   end
 
   @impl true
-  def init(%{id: id} = opts) do
+  def init(opts) do
     # Resolve the jailer command (binary + args + the host-side socket the
     # controller will talk to) here, so neither the caller nor the controller
     # has to know host conventions. `Map.put_new` lets tests inject a stand-in
@@ -69,7 +69,7 @@ defmodule Hyper.Node.FireVMM do
 
     children = [
       {DynamicSupervisor,
-       name: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :daemon_sup}}},
+       name: {:via, Horde.Registry, {Hyper.Vm.Registry, {opts.vm_id, :daemon_sup}}},
        strategy: :one_for_one},
       {State, vm_opts}
     ]
@@ -77,11 +77,11 @@ defmodule Hyper.Node.FireVMM do
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
-  defp via(id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {id, :supervisor}}}
+  defp via(vm_id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {vm_id, :supervisor}}}
 
   @doc "Test whether the system can run firecracker VMMs."
-  @spec test_system() :: :ok | {:error, atom() | {atom(), atom()}}
-  def test_system() do
+  @spec test_system() :: :ok | {:error, term()}
+  def test_system do
     Hyper.Node.FireVMM.Jailer.test_system()
   end
 end

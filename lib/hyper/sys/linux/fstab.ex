@@ -2,6 +2,8 @@ defmodule Hyper.Sys.Linux.Fstab do
   @moduledoc "Parsing of `/etc/fstab`-style entries."
 
   defmodule Spec do
+    @moduledoc "A parsed `/etc/fstab` entry."
+
     @type t :: %__MODULE__{
             device: String.t(),
             mount_point: Path.t(),

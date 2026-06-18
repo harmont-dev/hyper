@@ -1,4 +1,6 @@
 defmodule Hyper.Vm do
+  @moduledoc "A microVM handle (its controller pid) and cluster-wide fork operations."
+
   use OpenTelemetryDecorator
 
   @type t :: pid()

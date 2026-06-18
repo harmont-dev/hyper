@@ -59,20 +59,18 @@ defmodule Hyper.Node.Users do
   users and groups (via `getent`) and the subordinate-id ranges in `/etc/subuid`
   and `/etc/subgid` for overlap with the configured range.
   """
-  @spec scan_availability() :: :ok
-  def scan_availability do
+  @spec test_system() :: :ok | {:error, term()}
+  def test_system do
+    alias Hyper.Sys.Linux.Subid
+
     {min, max} = Hyper.Config.uid_gid_range()
 
-    conflicts =
-      passwd_conflicts(min, max) ++
-        group_conflicts(min, max) ++
-        subid_conflicts("subuid", Hyper.Sys.Linux.Subid.subuid_ranges(), min, max) ++
-        subid_conflicts("subgid", Hyper.Sys.Linux.Subid.subgid_ranges(), min, max)
-
-    if conflicts == [] do
-      :ok
-    else
-      raise "uid/gid range #{min}..#{max} is not free; occupied by: #{Enum.join(conflicts, ", ")}"
+    cond do
+      passwd_conflicts(min, max) != [] -> {:error, :passwd_conflicts}
+      group_conflicts(min, max) != [] -> {:error, :group_conflicts}
+      subid_conflicts("subuid", Subid.subuid_ranges(), min, max) != [] -> {:error, :subuid_conflicts}
+      subid_conflicts("subgid", Subid.subgid_ranges(), min, max) != [] -> {:error, :subgid_conflicts}
+      true -> :ok
     end
   end
 

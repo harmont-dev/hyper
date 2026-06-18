@@ -6,6 +6,8 @@ defmodule Hyper.Sys.Linux.Nss do
     @getent_db "passwd"
 
     defmodule Spec do
+      @moduledoc "A parsed `passwd` entry."
+
       @type t :: %__MODULE__{
               name: String.t(),
               password: String.t(),
@@ -62,6 +64,8 @@ defmodule Hyper.Sys.Linux.Nss do
     @getent_db "group"
 
     defmodule Spec do
+      @moduledoc "A parsed `group` entry."
+
       @type t :: %__MODULE__{
               name: String.t(),
               password: String.t(),

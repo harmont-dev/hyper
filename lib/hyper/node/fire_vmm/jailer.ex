@@ -21,54 +21,50 @@ defmodule Hyper.Node.FireVMM.Jailer do
 
   alias Hyper.Vm.Instance
   alias Hyper.Sys
+  alias Hyper.Node.FireVMM
 
   # firecracker's API socket path *inside* the chroot.
   @jail_socket "api.socket"
 
-  defmodule Opts do
-    @moduledoc "Options to pass into the jailer command."
-
-    defstruct [:vm_id, :uid, :gid, :type]
-
-    @type t :: %__MODULE__{
-            vm_id: integer(),
-            uid: Hyper.Node.Users.id(),
-            gid: Hyper.Node.Users.id(),
-            type: Hyper.Vm.Instance.t()
-          }
-  end
-
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
   @doc "Test whether the jailer and system pre-requisites are available."
-  @spec test_system() :: :ok | {:error, atom()}
+  @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.Node.FireVMM.Jailer.available", include: [:result])
-  def test_system() do
-    cond do
-      not Sys.Posix.executable?(Hyper.Config.jailer_bin()) ->
-        {:error, :jailer_unavailable}
-
-      not Sys.Posix.executable?(Hyper.Config.firecracker_bin()) ->
-        {:error, :firecracker_unavailable}
-
-      not File.exists?("/dev/kvm") ->
-        {:error, :kvm_unavailable}
-
-      Sys.Linux.Cgroup.versions() not in [{:cgroup2}, {:cgroup, :cgroup2}] ->
-        {:error, :cgroup_v2_unavailable}
-
-      not Sys.Linux.Cgroup.V2.named_exists?(Hyper.Config.parent_cgroup()) ->
-        {:error, :missing_parent_cgroup}
-
-      true ->
-        case Sys.Posix.ensure_writable_dir(Hyper.Config.chroot_base()) do
-          {:ok} -> :ok
-          {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
-        end
+  def test_system do
+    with :ok <- ok_if(Sys.Posix.executable?(Hyper.Config.jailer_bin()), :jailer_unavailable),
+         :ok <-
+           ok_if(Sys.Posix.executable?(Hyper.Config.firecracker_bin()), :firecracker_unavailable),
+         :ok <- ok_if(File.exists?("/dev/kvm"), :kvm_unavailable),
+         :ok <- cgroup_v2_available(),
+         :ok <-
+           ok_if(
+             Sys.Linux.Cgroup.V2.named_exists?(Hyper.Config.parent_cgroup()),
+             :missing_parent_cgroup
+           ),
+         :ok <- chroot_writable() do
+      :ok
     end
   end
 
-  @spec command(Opts.t()) :: t()
+  defp ok_if(true, _reason), do: :ok
+  defp ok_if(false, reason), do: {:error, reason}
+
+  defp cgroup_v2_available do
+    case Sys.Linux.Cgroup.versions() do
+      {:ok, versions} -> ok_if(MapSet.member?(versions, :cgroup2), :cgroup_v2_unavailable)
+      {:error, reason} -> {:error, {:cgroup_query_failed, reason}}
+    end
+  end
+
+  defp chroot_writable do
+    case Sys.Posix.ensure_writable_dir(Hyper.Config.chroot_base()) do
+      {:ok} -> :ok
+      {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
+    end
+  end
+
+  @spec command(FireVMM.Opts.t()) :: t()
   def command(opts) do
     args =
       [
