@@ -1,4 +1,4 @@
-defmodule Sys.Mon.Ewma do
+defmodule Controls.Ewma do
   @moduledoc """
   First-order exponential moving average — a discrete low-pass filter (LPF) with
   an irregular-sampling-correct gain.

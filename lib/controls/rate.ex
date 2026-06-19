@@ -1,4 +1,4 @@
-defmodule Sys.Mon.Rate do
+defmodule Controls.Rate do
   @moduledoc """
   Turns a monotonically increasing byte counter (e.g. `/proc/diskstats` sectors
   or `/proc/net/dev` bytes) into a per-second rate.
