@@ -4,7 +4,7 @@
 
 **Goal:** Extract `Hyper.Sys.*` into a standalone top-level `Sys.*` package under `lib/sys`, then add `Sys.Mon` — a supervised set of per-node monitors (`Cpu`, `Mem`, `DiskBw`, `NetBw`) that periodically sample instantaneous load and low-pass-filter it into an exponential moving average for the scheduler's soft-budget (β) decisions.
 
-**Architecture:** Each monitor is one `Sys.Mon.Server` GenServer parameterized by a `Sys.Mon.Sampler` implementation. The sampler reads `/proc` directly (matching the existing `Sys.Linux.Proc.Mounts` precedent — no `:os_mon`). Each raw reading is folded into `Sys.Mon.Ewma`, a first-order discrete low-pass filter whose gain `α = 1 − exp(−Δt/τ)` is derived from the *measured* elapsed time, so the filter's cutoff is invariant to scheduler jitter and to the differing prime sample periods. Monitors emit `:telemetry` events and answer a synchronous `value/0` call returning instantaneous + smoothed readings in domain units (`Unit.Information`, `Unit.Bandwidth`).
+**Architecture:** Each monitor is one `Sys.Mon.Server` GenServer parameterized by a `Sys.Mon.Sampler` implementation. The sampler reads `/proc` directly (matching the existing `Sys.Linux.Proc.Mounts` precedent — no `:os_mon`). Each raw reading is folded into `Controls.Ewma`, a first-order discrete low-pass filter whose gain `α = 1 − exp(−Δt/τ)` is derived from the *measured* elapsed time, so the filter's cutoff is invariant to scheduler jitter and to the differing prime sample periods. Monitors emit `:telemetry` events and answer a synchronous `value/0` call returning instantaneous + smoothed readings in domain units (`Unit.Information`, `Unit.Bandwidth`).
 
 **Tech Stack:** Elixir 1.20, OTP supervision, `:telemetry` (already in the lock via `horde`), `/proc` parsing, `Unit.*` value structs, ExUnit.
 
@@ -82,8 +82,8 @@ Call sites updated by the same global rename: `lib/hyper/node.ex`, `lib/hyper/no
 
 | File | Responsibility |
 |------|----------------|
-| `lib/sys/mon/ewma.ex` | `Sys.Mon.Ewma` — pure first-order LPF (variable-`Δt` gain) |
-| `lib/sys/mon/rate.ex` | `Sys.Mon.Rate` — pure counter → bytes/sec, skipping resets & first sample |
+| `lib/controls/ewma.ex` | `Controls.Ewma` — pure first-order LPF (variable-`Δt` gain) |
+| `lib/controls/rate.ex` | `Controls.Rate` — pure counter → bytes/sec, skipping resets & first sample |
 | `lib/sys/mon/sampler.ex` | `Sys.Mon.Sampler` — behaviour every probe implements |
 | `lib/sys/mon/server.ex` | `Sys.Mon.Server` — generic monitor GenServer (`Opts`, `Reading`, scheduling, telemetry) |
 | `lib/sys/linux/proc/stat.ex` | `Sys.Linux.Proc.Stat` — parse `/proc/stat`, compute CPU utilization |
@@ -157,28 +157,28 @@ git commit -m "refactor: extract Hyper.Sys into top-level Sys package under lib/
 
 ---
 
-### Task 2: `Sys.Mon.Ewma` — the low-pass filter core
+### Task 2: `Controls.Ewma` — the low-pass filter core
 
 The pure controls primitive. Variable-`Δt` gain, first-sample seeding. No process, no I/O — trivially testable.
 
 **Files:**
-- Create: `lib/sys/mon/ewma.ex`
-- Test: `test/sys/mon/ewma_test.exs`
+- Create: `lib/controls/ewma.ex`
+- Test: `test/controls/ewma_test.exs`
 
 **Interfaces:**
 - Produces:
-  - `Sys.Mon.Ewma.t()` — opaque-ish struct `%Sys.Mon.Ewma{tau_ms: pos_integer(), value: float() | nil}`
-  - `Sys.Mon.Ewma.new(tau_ms :: pos_integer()) :: t()`
-  - `Sys.Mon.Ewma.update(t(), sample :: number(), dt_ms :: pos_integer()) :: t()`
-  - `Sys.Mon.Ewma.value(t()) :: float() | nil`
+  - `Controls.Ewma.t()` — opaque-ish struct `%Controls.Ewma{tau_ms: pos_integer(), value: float() | nil}`
+  - `Controls.Ewma.new(tau_ms :: pos_integer()) :: t()`
+  - `Controls.Ewma.update(t(), sample :: number(), dt_ms :: pos_integer()) :: t()`
+  - `Controls.Ewma.value(t()) :: float() | nil`
 
 - [ ] **Step 1: Write the failing test**
 
 ```elixir
-defmodule Sys.Mon.EwmaTest do
+defmodule Controls.EwmaTest do
   use ExUnit.Case, async: true
 
-  alias Sys.Mon.Ewma
+  alias Controls.Ewma
 
   test "value is nil before any sample" do
     assert Ewma.value(Ewma.new(1000)) == nil
@@ -210,13 +210,13 @@ end
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `mix test test/sys/mon/ewma_test.exs`
-Expected: FAIL — `Sys.Mon.Ewma.__struct__/1 is undefined`.
+Run: `mix test test/controls/ewma_test.exs`
+Expected: FAIL — `Controls.Ewma.__struct__/1 is undefined`.
 
 - [ ] **Step 3: Write the implementation**
 
 ```elixir
-defmodule Sys.Mon.Ewma do
+defmodule Controls.Ewma do
   @moduledoc """
   First-order exponential moving average — a discrete low-pass filter (LPF) with
   an irregular-sampling-correct gain.
@@ -269,38 +269,38 @@ end
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `mix test test/sys/mon/ewma_test.exs`
+Run: `mix test test/controls/ewma_test.exs`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lib/sys/mon/ewma.ex test/sys/mon/ewma_test.exs
+git add lib/controls/ewma.ex test/controls/ewma_test.exs
 git commit -m "feat(sys.mon): add Ewma low-pass filter with variable-dt gain"
 ```
 
 ---
 
-### Task 3: `Sys.Mon.Rate` — counter → bytes/sec
+### Task 3: `Controls.Rate` — counter → bytes/sec
 
 Pure helper turning a monotonic byte counter into a per-second rate, skipping the first sample (no baseline) and counter resets (reboot).
 
 **Files:**
-- Create: `lib/sys/mon/rate.ex`
-- Test: `test/sys/mon/rate_test.exs`
+- Create: `lib/controls/rate.ex`
+- Test: `test/controls/rate_test.exs`
 
 **Interfaces:**
 - Produces:
-  - `Sys.Mon.Rate.state() :: {count :: non_neg_integer(), mono_ms :: integer()} | nil`
-  - `Sys.Mon.Rate.compute(state(), count :: non_neg_integer(), mono_ms :: integer()) :: {:ok, float(), state()} | {:skip, state()}`
+  - `Controls.Rate.state() :: {count :: non_neg_integer(), mono_ms :: integer()} | nil`
+  - `Controls.Rate.compute(state(), count :: non_neg_integer(), mono_ms :: integer()) :: {:ok, float(), state()} | {:skip, state()}`
 
 - [ ] **Step 1: Write the failing test**
 
 ```elixir
-defmodule Sys.Mon.RateTest do
+defmodule Controls.RateTest do
   use ExUnit.Case, async: true
 
-  alias Sys.Mon.Rate
+  alias Controls.Rate
 
   test "the first sample skips and stores the baseline" do
     assert {:skip, {100, 5}} = Rate.compute(nil, 100, 5)
@@ -325,13 +325,13 @@ end
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `mix test test/sys/mon/rate_test.exs`
-Expected: FAIL — `Sys.Mon.Rate.compute/3 is undefined`.
+Run: `mix test test/controls/rate_test.exs`
+Expected: FAIL — `Controls.Rate.compute/3 is undefined`.
 
 - [ ] **Step 3: Write the implementation**
 
 ```elixir
-defmodule Sys.Mon.Rate do
+defmodule Controls.Rate do
   @moduledoc """
   Turns a monotonically increasing byte counter (e.g. `/proc/diskstats` sectors
   or `/proc/net/dev` bytes) into a per-second rate.
@@ -370,13 +370,13 @@ end
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `mix test test/sys/mon/rate_test.exs`
+Run: `mix test test/controls/rate_test.exs`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lib/sys/mon/rate.ex test/sys/mon/rate_test.exs
+git add lib/controls/rate.ex test/controls/rate_test.exs
 git commit -m "feat(sys.mon): add Rate helper (counter to bytes/sec)"
 ```
 
@@ -392,7 +392,7 @@ The reusable engine. One GenServer drives any sampler: it self-schedules ticks, 
 - Test: `test/sys/mon/server_test.exs`
 
 **Interfaces:**
-- Consumes: `Sys.Mon.Ewma` (Task 2), `Unit.Time` (existing — `Unit.Time.as_ms/1`, `Unit.Time.s/1`).
+- Consumes: `Controls.Ewma` (Task 2), `Unit.Time` (existing — `Unit.Time.as_ms/1`, `Unit.Time.s/1`).
 - Produces:
   - Behaviour `Sys.Mon.Sampler` with callbacks:
     - `init() :: {:ok, private :: term()} | {:error, term()}`
@@ -529,7 +529,7 @@ end
 defmodule Sys.Mon.Server do
   @moduledoc """
   Generic monitor process: drives a `Sys.Mon.Sampler` on a fixed period, folds
-  each reading through a `Sys.Mon.Ewma` low-pass filter, emits a `:telemetry`
+  each reading through a `Controls.Ewma` low-pass filter, emits a `:telemetry`
   event, and answers `value/0`.
 
   Ticks self-schedule with `Process.send_after` *after* each sample completes, so
@@ -540,7 +540,7 @@ defmodule Sys.Mon.Server do
   use GenServer
   require Logger
 
-  alias Sys.Mon.Ewma
+  alias Controls.Ewma
 
   defmodule Reading do
     @moduledoc "A monitor reading: the latest instantaneous and filtered values (raw floats)."
@@ -1475,14 +1475,14 @@ git commit -m "feat(sys.mon): add Mem monitor (/proc/meminfo used bytes)"
 
 ### Task 11: `Sys.Mon.DiskBw` — disk-bandwidth monitor
 
-A rate sampler over `/proc/diskstats`. Private state is a `Sys.Mon.Rate` state holding the previous byte count and monotonic timestamp. `value/0` wraps the filtered float (bytes/sec) into `Unit.Bandwidth`.
+A rate sampler over `/proc/diskstats`. Private state is a `Controls.Rate` state holding the previous byte count and monotonic timestamp. `value/0` wraps the filtered float (bytes/sec) into `Unit.Bandwidth`.
 
 **Files:**
 - Create: `lib/sys/mon/disk_bw.ex`
 - Test: `test/sys/mon/disk_bw_test.exs`
 
 **Interfaces:**
-- Consumes: `Sys.Linux.Proc.Diskstats` (Task 7), `Sys.Mon.Rate` (Task 3), `Sys.Mon.Server` (Task 4), `Unit.Bandwidth`, `Unit.Time`.
+- Consumes: `Sys.Linux.Proc.Diskstats` (Task 7), `Controls.Rate` (Task 3), `Sys.Mon.Server` (Task 4), `Unit.Bandwidth`, `Unit.Time`.
 - Produces:
   - `Sys.Mon.DiskBw` implements `Sys.Mon.Sampler`.
   - `Sys.Mon.DiskBw.Reading.t()` — `%Sys.Mon.DiskBw.Reading{instant: Unit.Bandwidth.t() | nil, smoothed: Unit.Bandwidth.t() | nil}`
@@ -1541,7 +1541,7 @@ defmodule Sys.Mon.DiskBw do
 
   Samples cumulative read+write bytes across whole physical disks from
   `/proc/diskstats` every 7 seconds and differentiates them into bytes/sec via
-  `Sys.Mon.Rate` (the first read only establishes a baseline). The rate series is
+  `Controls.Rate` (the first read only establishes a baseline). The rate series is
   smoothed with a 20-second time constant. Readings are `Unit.Bandwidth`.
 
   Telemetry: `[:sys, :mon, :disk_bw]` with measurements `%{instant: float, smoothed: float}` (bytes/sec).
@@ -1550,7 +1550,7 @@ defmodule Sys.Mon.DiskBw do
   @behaviour Sys.Mon.Sampler
 
   alias Sys.Linux.Proc.Diskstats
-  alias Sys.Mon.Rate
+  alias Controls.Rate
   alias Sys.Mon.Server
   alias Unit.Bandwidth
   alias Unit.Time
@@ -1629,7 +1629,7 @@ Identical shape to `DiskBw`, over `/proc/net/dev`.
 - Test: `test/sys/mon/net_bw_test.exs`
 
 **Interfaces:**
-- Consumes: `Sys.Linux.Proc.NetDev` (Task 8), `Sys.Mon.Rate` (Task 3), `Sys.Mon.Server` (Task 4), `Unit.Bandwidth`, `Unit.Time`.
+- Consumes: `Sys.Linux.Proc.NetDev` (Task 8), `Controls.Rate` (Task 3), `Sys.Mon.Server` (Task 4), `Unit.Bandwidth`, `Unit.Time`.
 - Produces:
   - `Sys.Mon.NetBw` implements `Sys.Mon.Sampler`.
   - `Sys.Mon.NetBw.Reading.t()` — `%Sys.Mon.NetBw.Reading{instant: Unit.Bandwidth.t() | nil, smoothed: Unit.Bandwidth.t() | nil}`
@@ -1687,7 +1687,7 @@ defmodule Sys.Mon.NetBw do
 
   Samples cumulative rx+tx bytes across non-loopback interfaces from
   `/proc/net/dev` every 11 seconds and differentiates them into bytes/sec via
-  `Sys.Mon.Rate` (the first read only establishes a baseline). The rate series is
+  `Controls.Rate` (the first read only establishes a baseline). The rate series is
   smoothed with a 20-second time constant. Readings are `Unit.Bandwidth`.
 
   Telemetry: `[:sys, :mon, :net_bw]` with measurements `%{instant: float, smoothed: float}` (bytes/sec).
@@ -1696,7 +1696,7 @@ defmodule Sys.Mon.NetBw do
   @behaviour Sys.Mon.Sampler
 
   alias Sys.Linux.Proc.NetDev
-  alias Sys.Mon.Rate
+  alias Controls.Rate
   alias Sys.Mon.Server
   alias Unit.Bandwidth
   alias Unit.Time
@@ -1902,10 +1902,12 @@ In `lib/hyper/application.ex`, add `Sys.Mon` as the last entry of the `children`
 In `mix.exs`, inside `groups_for_modules`, add after the `System:` group:
 
 ```elixir
+        Controls: [
+          Controls.Ewma,
+          Controls.Rate
+        ],
         Monitoring: [
           Sys.Mon,
-          Sys.Mon.Ewma,
-          Sys.Mon.Rate,
           Sys.Mon.Sampler,
           Sys.Mon.Server,
           Sys.Mon.Cpu,
@@ -1980,7 +1982,7 @@ period is well under `τ`, so we never alias the dynamics we care about).
 ## The low-pass filter
 
 Raw `/proc` readings are noisy. Each monitor smooths its stream with
-`Sys.Mon.Ewma`, a first-order exponential moving average — the discrete form of
+`Controls.Ewma`, a first-order exponential moving average — the discrete form of
 the classic analog low-pass filter `τ·ẏ + y = x`:
 
 $$
@@ -2014,7 +2016,7 @@ Every monitor also emits a `:telemetry` event per sample —
 ## Extending
 
 Adding a metric is mechanical: implement `Sys.Mon.Sampler` over the relevant
-`/proc` file (reusing `Sys.Mon.Rate` if the source is a cumulative counter), give
+`/proc` file (reusing `Controls.Rate` if the source is a cumulative counter), give
 it a `child_spec/1` that starts a `Sys.Mon.Server`, and add it to the `Sys.Mon`
 supervisor's child list with its own prime period.
 ```
@@ -2056,20 +2058,20 @@ git commit -m "docs(sys.mon): document soft-metric monitoring and the LPF"
 - "New `Sys.Mon` package" → Tasks 4 & 13 (`Sampler`/`Server` engine, `Sys.Mon` supervisor).
 - "`Sys.Mon.Cpu`, `Sys.Mon.Mem`, etc." → Tasks 9–12 (Cpu, Mem, DiskBw, NetBw — the architecture's β metrics plus Mem, per the chosen scope).
 - "Read instantaneous load periodically, prime periods to minimize overlap" → periods 2/5/7/11 s (pairwise coprime), self-scheduled in `Server` (Task 4); rationale in the doc (Task 14).
-- "EXP moving average / LPF" → `Sys.Mon.Ewma` (Task 2), with the variable-`Δt` gain.
+- "EXP moving average / LPF" → `Controls.Ewma` (Task 2), with the variable-`Δt` gain.
 - "Research great packages / catch bad ideas early" → "Research & Design Rationale" section (os_mon and telemetry_poller rejected with reasons; eight EWMA/sampling pitfalls enumerated and each defended against in code).
 - "Good documentation and `@specs`" → every public function has `@spec`/`@doc`/`@moduledoc`; `monitoring.md` cookbook page; `mix check` enforces it.
 - "Elixir 1.20 good types" → typed structs (`Opts`, `Reading`, `Snapshot`, `State`) with `@type`; domain `Unit.*` at boundaries; strict dialyzer flags honored.
 
 **2. Placeholder scan**
 
-No `TBD`/`TODO`/"add error handling"/"similar to Task N" — every code step shows full code; every command states its expected outcome; the one cross-task abstraction (`Sys.Mon.Rate`) is shared by DiskBw and NetBw rather than duplicated.
+No `TBD`/`TODO`/"add error handling"/"similar to Task N" — every code step shows full code; every command states its expected outcome; the one cross-task abstraction (`Controls.Rate`) is shared by DiskBw and NetBw rather than duplicated.
 
 **3. Type consistency**
 
 - `Sys.Mon.Server.value/1` and `sample_now/1` return `Server.Reading.t()` everywhere; Cpu returns it directly; Mem/DiskBw/NetBw destructure it (`%Server.Reading{instant:, smoothed:}`) and re-wrap — field names match the struct defined in Task 4.
 - `Sys.Mon.Sampler` callbacks (`init/0`, `sample/1`) and their return shapes (`{:ok, float, private}` / `{:skip, private}` / `{:error, term}`) are consistent across all four sampler implementations and the `Server.do_sample/1` that consumes them.
-- `Sys.Mon.Rate.compute/3` state shape `{count, mono_ms} | nil` matches how DiskBw/NetBw thread it as their sampler-private state.
+- `Controls.Rate.compute/3` state shape `{count, mono_ms} | nil` matches how DiskBw/NetBw thread it as their sampler-private state.
 - `Unit.Time.as_ms/1`, `Unit.Information.as_bytes/1`/`bytes/1`/`kib/1`, `Unit.Bandwidth.bps/1` match the existing `Unit.*` APIs read from source.
 - `Sys.Linux.Proc.Stat.Snapshot` / `Meminfo.Snapshot` field names (`idle`/`total`, `total`/`available`) are consistent between parser, tests, and the sampler that destructures them.
 ```
