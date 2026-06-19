@@ -32,13 +32,15 @@ defmodule Hyper.MixProject do
     [
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
+      {:ecto_sql, "~> 3.13"},
       {:horde, "~> 0.9"},
       {:libcluster, "~> 3.3"},
       {:muontrap, "~> 1.5"},
       {:open_telemetry_decorator, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
-      {:opentelemetry_exporter, "~> 1.8"}
+      {:opentelemetry_exporter, "~> 1.8"},
+      {:postgrex, "~> 0.20"}
     ]
   end
 
