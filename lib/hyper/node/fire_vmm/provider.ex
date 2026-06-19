@@ -123,4 +123,86 @@ defmodule Hyper.Node.FireVMM.Provider do
       Hyper.Sys.Posix.executable?(jail) and
       File.read(marker) == {:ok, @version}
   end
+
+  @doc """
+  Ensure the firecracker + jailer binaries are installed for this node.
+
+  Idempotent: returns `:ok` immediately if the pinned version is already
+  installed. Otherwise downloads, verifies, extracts, and installs, always
+  cleaning up the temporary directory.
+
+  Options (default to production values; overridden in tests):
+
+    * `:arch` - target architecture string (default: `target_arch/0`)
+    * `:install_dir` - install location (default: `Hyper.Config.firecracker_install_dir/0`)
+    * `:checksums` - `%{arch => sha256_hex}` (default: pinned `@checksums`)
+    * `:fetch` - `(url, dest_path -> :ok | {:error, term})` (default: `Req`)
+  """
+  @spec ensure_installed(keyword()) :: :ok | {:error, term()}
+  def ensure_installed(opts \\ []) do
+    install_dir = Keyword.get(opts, :install_dir, Hyper.Config.firecracker_install_dir())
+
+    with {:ok, arch} <- resolve_arch(opts) do
+      if installed?(install_dir) do
+        :ok
+      else
+        do_install(arch, install_dir, opts)
+      end
+    end
+  end
+
+  @doc false
+  @spec tarball_url(String.t()) :: String.t()
+  def tarball_url(arch) do
+    "#{@github_base}/v#{@version}/firecracker-v#{@version}-#{arch}.tgz"
+  end
+
+  defp resolve_arch(opts) do
+    case Keyword.fetch(opts, :arch) do
+      {:ok, arch} -> {:ok, arch}
+      :error -> target_arch()
+    end
+  end
+
+  defp do_install(arch, install_dir, opts) do
+    checksums = Keyword.get(opts, :checksums, @checksums)
+    fetch = Keyword.get(opts, :fetch, &default_fetch/2)
+
+    with {:ok, expected} <- fetch_checksum(checksums, arch) do
+      tmp = make_tmp_dir!()
+
+      try do
+        tar = Path.join(tmp, "firecracker-#{arch}.tgz")
+
+        with :ok <- fetch.(tarball_url(arch), tar),
+             :ok <- verify_checksum(tar, expected),
+             :ok <- extract_and_install(tar, arch, install_dir) do
+          :ok
+        end
+      after
+        File.rm_rf!(tmp)
+      end
+    end
+  end
+
+  defp fetch_checksum(checksums, arch) do
+    case Map.fetch(checksums, arch) do
+      {:ok, sha} -> {:ok, sha}
+      :error -> {:error, {:unsupported_arch, arch}}
+    end
+  end
+
+  defp make_tmp_dir! do
+    dir = Path.join(System.tmp_dir!(), "hyper-firecracker-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    dir
+  end
+
+  defp default_fetch(url, dest_path) do
+    case Req.get(url, into: File.stream!(dest_path), redirect: true, max_redirects: 5) do
+      {:ok, %Req.Response{status: 200}} -> :ok
+      {:ok, %Req.Response{status: status}} -> {:error, {:download_failed, status}}
+      {:error, reason} -> {:error, {:download_error, reason}}
+    end
+  end
 end
