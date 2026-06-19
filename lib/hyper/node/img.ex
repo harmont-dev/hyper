@@ -4,11 +4,8 @@ defmodule Hyper.Node.Img do
   operations. Owns a unique `Registry` (`img_id -> Img.Server`) and a
   `DynamicSupervisor` that holds those servers.
 
-  Two responsibilities sit on top of that tree:
-
-    * leasing an image for the lifetime of a VM (`with_image/3`), and
-    * asking which active images depend on a given layer (`images_using_layer/1`),
-      answered by walking the live image servers rather than the database.
+  On top of that tree it leases an image for the lifetime of a VM
+  (`with_image/3`).
   """
   use Supervisor
 
@@ -49,18 +46,6 @@ defmodule Hyper.Node.Img do
   @spec active() :: [Hyper.Img.id()]
   def active do
     Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
-  end
-
-  @doc """
-  The active images on this node that depend on `layer_id`, found by asking each
-  live image server for its layer set.
-  """
-  @spec images_using_layer(Hyper.Layer.id()) :: [Hyper.Img.id()]
-  def images_using_layer(layer_id) do
-    for img_id <- active(),
-        [{pid, _}] <- [Registry.lookup(@registry, img_id)],
-        layer_id in Server.layers(pid),
-        do: img_id
   end
 
   @doc """
