@@ -19,50 +19,90 @@ defmodule Hyper.Node.FireVMM.Jailer do
 
   use OpenTelemetryDecorator
 
-  alias Hyper.Vm.Instance
-  alias Hyper.Sys
   alias Hyper.Node.FireVMM
+  alias Hyper.Vm.Instance
 
   # firecracker's API socket path *inside* the chroot.
   @jail_socket "api.socket"
 
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
+  defmodule Checks do
+    @moduledoc """
+    Host pre-requisite checks for running the jailer. Each check returns
+    `:ok | {:error, reason}`; `run/0` evaluates them in order and stops at the
+    first failure.
+    """
+
+    alias Hyper.Config
+    alias Hyper.Sys
+
+    @doc "Run every pre-requisite check, halting at the first failure."
+    @spec run() :: :ok | {:error, term()}
+    def run do
+      Enum.reduce_while(all(), :ok, fn check, :ok ->
+        case check.() do
+          :ok -> {:cont, :ok}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+    end
+
+    defp all do
+      [
+        &jailer_executable/0,
+        &firecracker_executable/0,
+        &kvm_present/0,
+        &cgroup_v2_available/0,
+        &parent_cgroup_present/0,
+        &chroot_writable/0
+      ]
+    end
+
+    defp jailer_executable do
+      if Sys.Posix.executable?(Config.jailer_bin()),
+        do: :ok,
+        else: {:error, :jailer_unavailable}
+    end
+
+    defp firecracker_executable do
+      if Sys.Posix.executable?(Config.firecracker_bin()),
+        do: :ok,
+        else: {:error, :firecracker_unavailable}
+    end
+
+    defp kvm_present do
+      if File.exists?("/dev/kvm"), do: :ok, else: {:error, :kvm_unavailable}
+    end
+
+    defp parent_cgroup_present do
+      if Sys.Linux.Cgroup.V2.named_exists?(Config.parent_cgroup()),
+        do: :ok,
+        else: {:error, :missing_parent_cgroup}
+    end
+
+    defp cgroup_v2_available do
+      case Sys.Linux.Cgroup.versions() do
+        {:ok, versions} ->
+          if MapSet.member?(versions, :cgroup2), do: :ok, else: {:error, :cgroup_v2_unavailable}
+
+        {:error, reason} ->
+          {:error, {:cgroup_query_failed, reason}}
+      end
+    end
+
+    defp chroot_writable do
+      case Sys.Posix.ensure_writable_dir(Config.chroot_base()) do
+        {:ok} -> :ok
+        {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
+      end
+    end
+  end
+
   @doc "Test whether the jailer and system pre-requisites are available."
   @spec test_system() :: :ok | {:error, term()}
-  @decorate with_span("Hyper.Node.FireVMM.Jailer.available", include: [:result])
-  def test_system do
-    with :ok <- ok_if(Sys.Posix.executable?(Hyper.Config.jailer_bin()), :jailer_unavailable),
-         :ok <-
-           ok_if(Sys.Posix.executable?(Hyper.Config.firecracker_bin()), :firecracker_unavailable),
-         :ok <- ok_if(File.exists?("/dev/kvm"), :kvm_unavailable),
-         :ok <- cgroup_v2_available(),
-         :ok <-
-           ok_if(
-             Sys.Linux.Cgroup.V2.named_exists?(Hyper.Config.parent_cgroup()),
-             :missing_parent_cgroup
-           ),
-         :ok <- chroot_writable() do
-      :ok
-    end
-  end
-
-  defp ok_if(true, _reason), do: :ok
-  defp ok_if(false, reason), do: {:error, reason}
-
-  defp cgroup_v2_available do
-    case Sys.Linux.Cgroup.versions() do
-      {:ok, versions} -> ok_if(MapSet.member?(versions, :cgroup2), :cgroup_v2_unavailable)
-      {:error, reason} -> {:error, {:cgroup_query_failed, reason}}
-    end
-  end
-
-  defp chroot_writable do
-    case Sys.Posix.ensure_writable_dir(Hyper.Config.chroot_base()) do
-      {:ok} -> :ok
-      {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
-    end
-  end
+  @decorate with_span("Hyper.Node.FireVMM.Jailer.test_system", include: [:result])
+  def test_system, do: Checks.run()
 
   @spec command(FireVMM.Opts.t()) :: t()
   def command(opts) do
