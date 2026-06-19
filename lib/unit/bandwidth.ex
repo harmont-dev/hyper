@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Unit.Bandwidth do
+defmodule Unit.Bandwidth do
   @moduledoc """
   A throughput, stored canonically in bytes per second. Build with `bps/1` or the
   binary-prefix constructors (`kibps/1`, `mibps/1`, `gibps/1`, `tibps/1`); read back

@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Unit.Information do
+defmodule Unit.Information do
   @moduledoc """
   A quantity of data, stored canonically in bytes. Build with `bytes/1` or the
   binary-prefix constructors (`kib/1`, `mib/1`, `gib/1`, `tib/1`); read back with

@@ -12,9 +12,9 @@ defmodule Hyper.Vm.Instance do
   jailer command.
   """
 
-  alias Hyper.Sys.Unit.Bandwidth
-  alias Hyper.Sys.Unit.Information
   alias Hyper.Vm.Instance.Spec
+  alias Unit.Bandwidth
+  alias Unit.Information
 
   @typedoc "An instance size."
   @type t ::

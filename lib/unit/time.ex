@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Unit.Time do
+defmodule Unit.Time do
   @moduledoc """
   A duration, stored canonically in nanoseconds. Build with `ns/1`/`us/1`/`ms/1`/`s/1`,
   read back with the matching `as_*` accessor. A `Time` is a distinct struct, so it
