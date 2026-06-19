@@ -31,7 +31,6 @@ if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
   config :libcluster, topologies: []
-  config :hyper, work_dir: Path.expand("../test/support/firecracker_work_dir", __DIR__)
 end
 
 config :hyper, Hyper.Img.Db.Repo,
