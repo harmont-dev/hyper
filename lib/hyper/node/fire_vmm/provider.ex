@@ -76,16 +76,44 @@ defmodule Hyper.Node.FireVMM.Provider do
   jailer binaries into `install_dir`, writing the version marker on success.
   """
   @spec extract_and_install(Path.t(), String.t(), Path.t()) ::
-          :ok | {:error, {:extract_failed, term()} | {:missing_binary, Path.t()}}
+          :ok
+          | {:error,
+             {:extract_failed, term()}
+             | {:missing_binary, Path.t()}
+             | {:unsafe_tar_entry, String.t()}}
   def extract_and_install(tar_path, arch, install_dir) do
     extract_dir = Path.join(Path.dirname(tar_path), "extract")
     File.mkdir_p!(extract_dir)
 
-    case :erl_tar.extract(String.to_charlist(tar_path),
-           [:compressed, {:cwd, String.to_charlist(extract_dir)}]) do
-      :ok -> install_binaries(extract_dir, arch, install_dir)
-      {:error, reason} -> {:error, {:extract_failed, reason}}
+    case :erl_tar.table(String.to_charlist(tar_path), [:compressed]) do
+      {:ok, entries} ->
+        case find_unsafe_entry(entries) do
+          {:unsafe, name} ->
+            {:error, {:unsafe_tar_entry, name}}
+
+          :safe ->
+            case :erl_tar.extract(String.to_charlist(tar_path),
+                   [:compressed, :keep_old_files, {:cwd, String.to_charlist(extract_dir)}]) do
+              :ok -> install_binaries(extract_dir, arch, install_dir)
+              {:error, reason} -> {:error, {:extract_failed, reason}}
+            end
+        end
+
+      {:error, reason} ->
+        {:error, {:extract_failed, reason}}
     end
+  end
+
+  defp find_unsafe_entry(entries) do
+    Enum.reduce_while(entries, :safe, fn entry, _acc ->
+      name = to_string(entry)
+
+      if String.starts_with?(name, "/") or ".." in Path.split(name) do
+        {:halt, {:unsafe, name}}
+      else
+        {:cont, :safe}
+      end
+    end)
   end
 
   defp install_binaries(extract_dir, arch, install_dir) do
