@@ -14,6 +14,14 @@ defmodule Hyper do
     required(:source) => vm_source(),
   }
 
+  defmodule Layer do
+    @type id :: String.t()
+  end
+
+  defmodule Img do
+    @type id :: String.t()
+  end
+
   @doc """
   Create a new virtual machine from the given source.
 

@@ -6,45 +6,41 @@ defmodule Hyper.Img.Db.Image do
   """
   use Ecto.Schema
   import Ecto.Changeset
- 
-  alias Hyper.Img.Db.{ImageLayer, Lease}
- 
+  import Ecto.Query
+
+  alias Hyper.Img.Db.{Blob, ImageLayer, Lease, Repo}
+
   @primary_key {:id, :string, autogenerate: false}
   schema "images" do
     field :label, :string
- 
+
     has_many :layers, ImageLayer,
       foreign_key: :image_id,
       references: :id,
       preload_order: [asc: :position]
- 
+
     has_many :leases, Lease, foreign_key: :image_id, references: :id
- 
+
     timestamps(updated_at: false, type: :utc_datetime_usec)
   end
- 
+
   def changeset(image, attrs) do
     image
     |> cast(attrs, [:id, :label])
-    |> validate_required([:id, :sectors])
-    |> validate_number(:sectors, greater_than: 0)
+    |> validate_required([:id])
     |> cast_assoc(:layers, with: &ImageLayer.changeset/2)
     |> unique_constraint(:id, name: :images_pkey)
   end
 
-  @doc "Ordered assembly of image layers necessary to assemble the given layer."
-  defp resolve_chain(id) do
-    from(l in ImageLayer,
-      where: l.id == ^id,
-      order_by: [asc: l.position],
-      select: %{l.id}
+  @doc "Ordered blobs needed to assemble `image_id`, base (position 0) first."
+  @spec resolve_chain(String.t()) :: [%Blob{}]
+  def resolve_chain(image_id) do
+    Repo.all(
+      from l in ImageLayer,
+        where: l.image_id == ^image_id,
+        join: b in assoc(l, :blob),
+        order_by: [asc: l.position],
+        select: b
     )
-    |> Repo.all()
-  end
-
-  @doc """
-  Take a lease on this image, bumping it if one already exists.
-  """
-  def bump_lease(image_id, node_id, vm_id, ttl_seconds) do
   end
 end

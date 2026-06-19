@@ -7,6 +7,8 @@ defmodule Hyper.Config do
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
   @socket_dir Application.compile_env!(:hyper, :socket_dir)
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
+  @layer_dir Application.compile_env!(:hyper, :layer_dir)
+  @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
 
   @doc "jailer binary path installed on each node. The path must be identical across nodes."
   def jailer_bin, do: @jailer_bin
@@ -43,4 +45,20 @@ defmodule Hyper.Config do
   """
   @spec uid_gid_range :: {integer(), integer()}
   def uid_gid_range, do: @uid_gid_range
+
+  @doc """
+  Location of all image layers on all nodes.
+
+  Hyper expects you to keep your layers in a flat directory, which may be backed by anything you
+  like: a plain filesystem, an NFS drive. This registry only ever is used to find paths to layers
+  but not anything more.
+
+  Must be stable across all nodes, and must be a directory. If it does not exist, `Hyper.Node`
+  will attempt to create one.
+  """
+  @spec layer_dir :: Path.t()
+  def layer_dir, do: @layer_dir
+
+  @doc "Path to the losetup binary."
+  def losetup_path, do: @losetup_path
 end

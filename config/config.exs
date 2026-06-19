@@ -28,9 +28,18 @@ if config_env() == :test do
 end
 
 config :hyper,
+  ecto_repos: [Hyper.Img.Db.Repo],
   jailer_bin: "/opt/firecracker/jailer-v1.16.0-x86_64",
   firecracker_bin: "/opt/firecracker/firecracker-v1.16.0-x86_64",
   cgroup_parent: "hyper",
   jailer_chroot_base: "/srv/hyper/jails",
   socket_dir: "/srv/hyper/socks",
-  uid_gid_range: {900000, 999999}
+  uid_gid_range: {900_000, 999_999},
+  layer_dir: "/srv/hyper/layers"
+
+config :hyper, Hyper.Img.Db.Repo,
+  database: "hyper_dev",
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  pool_size: 10

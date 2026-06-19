@@ -1,46 +1,34 @@
 defmodule Hyper.Node.Img.Server do
-  @moduledoc """
-  Behaviour for a block-device server backing a VM's images.
+  @moduledoc "GenServer responsible for managing a single mounted image."
 
-  `use Hyper.Node.Img.Server` marks the module as a server and injects
-  `with_image/2`, which opens a device, runs the callable, then closes it — on
-  the module it is called in.
-  """
+  use GenServer
 
-  require Logger
+  defmodule State do
+    @moduledoc false
 
-  alias Hyper.Node.Img
+    @type t :: %__MODULE__{}
 
-  @type blkdev_path :: Path.t()
-
-  @callback open_block_device(Img.image_id()) :: {:ok, blkdev_path()} | {:error, term()}
-  @callback close_block_device(blkdev_path()) :: :ok | {:error, term()}
-
-  defmacro __using__(_opts) do
-    quote do
-      @behaviour Hyper.Node.Img.Server
-
-      @doc "Open this server's block device for `img`, run `callable` with it, then close it."
-      def with_image(img, callable) do
-        Hyper.Node.Img.Server.with_image(__MODULE__, img, callable)
-      end
-    end
+    defstruct [:state]
   end
 
-  @doc false
-  @spec with_image(module(), Img.image_id(), (blkdev_path() -> result)) ::
-          result | {:error, term()}
-        when result: var
-  def with_image(server, img, callable) do
-    with {:ok, blkdev} <- server.open_block_device(img) do
-      try do
-        callable.(blkdev)
-      after
-        case server.close_block_device(blkdev) do
-          :ok -> :ok
-          {:error, reason} -> Logger.error("failed to close block device: #{inspect(reason)}")
-        end
-      end
-    end
+  defmodule Opts do
+    @moduledoc "Options for starting an image server."
+
+    @type t :: %__MODULE__{
+            img_id: Hyper.Img.id()
+          }
+    defstruct [:img_id]
+  end
+
+  @doc "Create a new image server, which manages a single image on the current running node."
+  @spec start_link(Opts.t()) :: GenServer.on_start()
+  def start_link(%Opts{} = opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
+  @impl true
+  @spec init(Opts.t()) :: {:ok, State.t()}
+  def init(%Opts{} = opts) do
+    {:ok, %State{}}
   end
 end

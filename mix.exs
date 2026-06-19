@@ -39,8 +39,10 @@ defmodule Hyper.MixProject do
       {:open_telemetry_decorator, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
+      {:opentelemetry_ecto, "~> 1.2"},
       {:opentelemetry_exporter, "~> 1.8"},
-      {:postgrex, "~> 0.20"}
+      {:postgrex, "~> 0.20"},
+      {:uuidv4, "~> 1.0"}
     ]
   end
 

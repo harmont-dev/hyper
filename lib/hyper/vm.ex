@@ -4,6 +4,7 @@ defmodule Hyper.Vm do
   use OpenTelemetryDecorator
 
   @type t :: pid()
+  @type id :: String.t()
 
   @doc """
   Attempt to create a fast fork of this VM.
