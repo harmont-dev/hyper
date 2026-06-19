@@ -111,4 +111,16 @@ defmodule Hyper.Node.FireVMM.Provider do
     File.cp!(src, dest)
     File.chmod!(dest, 0o755)
   end
+
+  @doc "Whether the pinned-version binaries are already installed and executable."
+  @spec installed?(Path.t()) :: boolean()
+  def installed?(install_dir) do
+    fc = Path.join(install_dir, "firecracker")
+    jail = Path.join(install_dir, "jailer")
+    marker = Path.join(install_dir, ".fc-version")
+
+    Hyper.Sys.Posix.executable?(fc) and
+      Hyper.Sys.Posix.executable?(jail) and
+      File.read(marker) == {:ok, @version}
+  end
 end
