@@ -23,7 +23,8 @@ defmodule Hyper.Sys.Linux.Nss do
     @doc "Queries the system for passwd entries."
     @spec entries ::
             {:ok, [Spec.t()]}
-            | {:error, {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
+            | {:error,
+               {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
       with {:ok, output} <- Hyper.Sys.Linux.Nss.getent(@getent_db) do
         output
@@ -78,7 +79,8 @@ defmodule Hyper.Sys.Linux.Nss do
     @doc "Queries the system for group entries."
     @spec entries ::
             {:ok, [Spec.t()]}
-            | {:error, {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
+            | {:error,
+               {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
       with {:ok, output} <- Hyper.Sys.Linux.Nss.getent(@getent_db) do
         output

@@ -1,0 +1,25 @@
+Hyper
+Copyright (C) 2026 Marko Vejnovic <marko@harmont.dev>
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version (AGPL-3.0-or-later).
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details. The full license text is in the LICENSE file at the root of this
+repository, and also available at <https://www.gnu.org/licenses/agpl-3.0.txt>.
+
+----------------------------------------------------------------------------
+
+COPYRIGHT ASSIGNMENT
+
+All contributions to this project are governed by the Contributor License
+Agreement in CLA.md. By submitting a contribution (a patch, pull request, or
+any other form), you assign your copyright in that contribution to Marko
+Vejnovic, who remains the sole copyright holder of this project. This
+assignment exists so the copyright can be enforced from a single owner and so
+the project may be relicensed or dual-licensed in the future at the owner's
+discretion. See CLA.md for the full terms.

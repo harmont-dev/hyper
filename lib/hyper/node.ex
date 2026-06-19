@@ -63,7 +63,8 @@ defmodule Hyper.Node do
   @spec test_system :: :ok | {:error, term()}
   def test_system do
     with :ok <- Hyper.Node.Users.test_system(),
-         :ok <- Hyper.Node.Layer.Repo.test_system() do
+         :ok <- Hyper.Node.Layer.Repo.test_system(),
+         :ok <- Hyper.Sys.Linux.Dmsetup.test_system() do
       Hyper.Node.FireVMM.test_system()
     end
   end

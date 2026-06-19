@@ -159,7 +159,7 @@ defmodule Hyper.Node.Layer.Server do
   defp cancel_idle(%State{idle_ref: nil} = state), do: state
 
   defp cancel_idle(%State{idle_ref: ref} = state) do
-    Process.cancel_timer(ref)
+    _ = Process.cancel_timer(ref)
     %{state | idle_ref: nil}
   end
 

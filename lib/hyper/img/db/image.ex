@@ -33,7 +33,7 @@ defmodule Hyper.Img.Db.Image do
   end
 
   @doc "Ordered blobs needed to assemble `image_id`, base (position 0) first."
-  @spec resolve_chain(String.t()) :: [%Blob{}]
+  @spec resolve_chain(String.t()) :: [Blob.t()]
   def resolve_chain(image_id) do
     Repo.all(
       from l in ImageLayer,

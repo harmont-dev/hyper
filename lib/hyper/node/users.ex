@@ -66,11 +66,20 @@ defmodule Hyper.Node.Users do
     {min, max} = Hyper.Config.uid_gid_range()
 
     cond do
-      passwd_conflicts(min, max) != [] -> {:error, :passwd_conflicts}
-      group_conflicts(min, max) != [] -> {:error, :group_conflicts}
-      subid_conflicts("subuid", Subid.subuid_ranges(), min, max) != [] -> {:error, :subuid_conflicts}
-      subid_conflicts("subgid", Subid.subgid_ranges(), min, max) != [] -> {:error, :subgid_conflicts}
-      true -> :ok
+      passwd_conflicts(min, max) != [] ->
+        {:error, :passwd_conflicts}
+
+      group_conflicts(min, max) != [] ->
+        {:error, :group_conflicts}
+
+      subid_conflicts("subuid", Subid.subuid_ranges(), min, max) != [] ->
+        {:error, :subuid_conflicts}
+
+      subid_conflicts("subgid", Subid.subgid_ranges(), min, max) != [] ->
+        {:error, :subgid_conflicts}
+
+      true ->
+        :ok
     end
   end
 

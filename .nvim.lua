@@ -5,9 +5,9 @@
 -- `:trust` it. Because exrc loads from the cwd, Neovim's working directory is
 -- the project root here, so the `mix format` fallback resolves `.formatter.exs`.
 --
--- Behaviour: format Elixir buffers on save. Prefer an attached Elixir LSP
--- (elixir-ls / lexical / next-ls) since it's instant; otherwise pipe the buffer
--- through `mix format`.
+-- Behaviour: format Elixir and Rust buffers on save. Prefer an attached LSP
+-- (elixir-ls / lexical / next-ls for Elixir, rust-analyzer for Rust) since it's
+-- instant; otherwise pipe the buffer through `mix format` / `rustfmt`.
 
 local group = vim.api.nvim_create_augroup("hyper_autoformat", { clear = true })
 local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
@@ -22,13 +22,13 @@ local function has_lsp_formatter(bufnr)
   return false
 end
 
-local function mix_format(bufnr)
-  local file = vim.api.nvim_buf_get_name(bufnr)
+-- Pipe the buffer through `cmd` (a list), replacing it with stdout on success.
+local function pipe_format(bufnr, cmd)
   local input = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-  local out = vim.fn.system({ "mix", "format", "--stdin-filename", file, "-" }, input)
+  local out = vim.fn.system(cmd, input)
 
   if vim.v.shell_error ~= 0 then
-    vim.notify("mix format failed:\n" .. out, vim.log.levels.WARN)
+    vim.notify(cmd[1] .. " failed:\n" .. out, vim.log.levels.WARN)
     return
   end
 
@@ -36,14 +36,25 @@ local function mix_format(bufnr)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(out, "\n"))
 end
 
+-- Fallback formatters keyed by file extension.
+local function fallback_format(bufnr)
+  local file = vim.api.nvim_buf_get_name(bufnr)
+  if file:match("%.rs$") then
+    -- rustfmt defaults to edition 2015; the crate is 2021.
+    pipe_format(bufnr, { "rustfmt", "--emit", "stdout", "--edition", "2021" })
+  else
+    pipe_format(bufnr, { "mix", "format", "--stdin-filename", file, "-" })
+  end
+end
+
 vim.api.nvim_create_autocmd("BufWritePre", {
   group = group,
-  pattern = { "*.ex", "*.exs", "*.heex" },
+  pattern = { "*.ex", "*.exs", "*.heex", "*.rs" },
   callback = function(args)
     if has_lsp_formatter(args.buf) then
       vim.lsp.buf.format({ bufnr = args.buf, async = false, timeout_ms = 5000 })
     else
-      mix_format(args.buf)
+      fallback_format(args.buf)
     end
   end,
 })

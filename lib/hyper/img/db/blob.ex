@@ -10,6 +10,8 @@ defmodule Hyper.Img.Db.Blob do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @primary_key {:id, :string, autogenerate: false}
   schema "blobs" do
     field :kind, Ecto.Enum, values: [:base, :delta]

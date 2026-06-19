@@ -4,21 +4,23 @@ defmodule Hyper do
   """
 
   @type vm_source ::
-    {:snapshot, Path.t()}
-    | {:vm, Hyper.Vm.t()}
+          {:snapshot, Path.t()}
+          | {:vm, Hyper.Vm.t()}
 
   @typedoc """
   The specification for creating a new VM.
   """
   @type vm_spec :: %{
-    required(:source) => vm_source(),
-  }
+          required(:source) => vm_source()
+        }
 
   defmodule Layer do
+    @moduledoc "A content-addressed image layer."
     @type id :: String.t()
   end
 
   defmodule Img do
+    @moduledoc "A content-addressed image: an ordered stack of layers."
     @type id :: String.t()
   end
 

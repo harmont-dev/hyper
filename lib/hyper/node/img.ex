@@ -1,8 +1,11 @@
 defmodule Hyper.Node.Img do
   @moduledoc """
   Supervisor for this node's active images, and the entry point for image
-  operations. Owns a unique `Registry` (`img_id -> Img.Server`) and a
-  `DynamicSupervisor` that holds those servers.
+  operations. Owns:
+
+    * a unique `Registry` (`img_id -> Img.Server`),
+    * a `DynamicSupervisor` holding the (shared, read-only) image servers, and
+    * a `DynamicSupervisor` holding the per-VM `Img.Writable` layers.
 
   On top of that tree it leases an image for the lifetime of a VM
   (`with_image/3`).
@@ -11,9 +14,11 @@ defmodule Hyper.Node.Img do
 
   alias Hyper.Img.Db
   alias Hyper.Node.Img.Server
+  alias Hyper.Node.Img.Writable
 
   @registry Hyper.Node.Img.Registry
   @server_sup Hyper.Node.Img.Supervisor
+  @writable_sup Hyper.Node.Img.WritableSupervisor
 
   def start_link(opts \\ []) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -23,7 +28,8 @@ defmodule Hyper.Node.Img do
   def init(_opts) do
     children = [
       {Registry, keys: :unique, name: @registry},
-      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup}
+      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup},
+      {DynamicSupervisor, strategy: :one_for_one, name: @writable_sup}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -40,6 +46,19 @@ defmodule Hyper.Node.Img do
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, _} = err -> err
     end
+  end
+
+  @doc """
+  Start a per-VM writable layer over `img_id` for `vm_id`. The returned process
+  owns the read-write device (`Img.Writable.blk_path/1`) and holds the image
+  active for its lifetime.
+  """
+  @spec start_writable(Hyper.Img.id(), Hyper.Vm.id()) :: DynamicSupervisor.on_start_child()
+  def start_writable(img_id, vm_id) do
+    DynamicSupervisor.start_child(
+      @writable_sup,
+      {Writable, %Writable.Opts{img_id: img_id, vm_id: vm_id}}
+    )
   end
 
   @doc "Every image id currently active on this node."
@@ -86,11 +105,12 @@ defmodule Hyper.Node.Img do
   defp heartbeat(img, vm_id, ttl) do
     Process.sleep(div(Unit.Time.as_ms(ttl), 3))
 
-    try do
-      _ = Db.Lease.bump(img, vm_id, ttl)
-    rescue
-      _ -> :ok
-    end
+    _ =
+      try do
+        Db.Lease.bump(img, vm_id, ttl)
+      rescue
+        _ -> :ok
+      end
 
     heartbeat(img, vm_id, ttl)
   end

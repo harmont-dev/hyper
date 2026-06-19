@@ -47,7 +47,7 @@ defmodule Hyper.Img.Db.Lease do
   Upserts on `(node_id, vm_id)` — the same call both takes a fresh lease and
   heartbeats a live one.
   """
-  @spec bump(Hyper.Img.t(), Hyper.Vm.id(), Unit.Time.t()) ::
+  @spec bump(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::
           {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t()}
   def bump(image_id, vm_id, ttl) do
     expires_at = DateTime.add(DateTime.utc_now(), Unit.Time.as_s(ttl), :second)

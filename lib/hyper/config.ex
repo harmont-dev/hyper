@@ -9,6 +9,12 @@ defmodule Hyper.Config do
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
   @layer_dir Application.compile_env!(:hyper, :layer_dir)
   @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
+  @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
+  @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
+  @scratch_dir Application.compile_env!(:hyper, :scratch_dir)
+  # dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
+  # Standardised repo-wide; deltas must be created with this chunk size.
+  @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
 
   @doc "jailer binary path installed on each node. The path must be identical across nodes."
   def jailer_bin, do: @jailer_bin
@@ -61,4 +67,31 @@ defmodule Hyper.Config do
 
   @doc "Path to the losetup binary."
   def losetup_path, do: @losetup_path
+
+  @doc "Path to the dmsetup binary."
+  def dmsetup_path, do: @dmsetup_path
+
+  @doc "Path to the blockdev binary."
+  def blockdev_path, do: @blockdev_path
+
+  @doc """
+  Path to the privileged device helper (setuid root), or `nil` to run device
+  commands directly (e.g. when the node itself runs as root in dev). When set,
+  `losetup`/`dmsetup`/`blockdev` are invoked through it.
+
+  Runtime config (host-specific), so it can be set per node without recompiling.
+  """
+  @spec device_helper :: Path.t() | nil
+  def device_helper, do: Application.get_env(:hyper, :device_helper)
+
+  @doc """
+  Directory for per-VM scratch (writable-layer COW) files. Must be node-local and
+  writable. If it does not exist, `Hyper.Node` will attempt to create one.
+  """
+  @spec scratch_dir :: Path.t()
+  def scratch_dir, do: @scratch_dir
+
+  @doc "dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB)."
+  @spec chunk_sectors :: pos_integer()
+  def chunk_sectors, do: @chunk_sectors
 end

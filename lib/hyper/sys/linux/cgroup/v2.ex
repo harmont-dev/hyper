@@ -23,7 +23,7 @@ defmodule Hyper.Sys.Linux.Cgroup.V2 do
     @type linux_t :: %{
             optional(:"cpu.max") => String.t(),
             optional(:"memory.max") => String.t()
-    }
+          }
 
     @spec new :: t()
     def new do

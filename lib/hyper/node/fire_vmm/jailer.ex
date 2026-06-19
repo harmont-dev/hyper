@@ -133,9 +133,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @spec cgroup_flags(Instance.t()) :: [String.t()]
   defp cgroup_flags(type) do
     type
-    |> Instance.spec
-    |> Instance.Spec.cgroup_v2
-    |> Hyper.Sys.Linux.Cgroup.V2.Config.as_linux
+    |> Instance.spec()
+    |> Instance.Spec.cgroup_v2()
+    |> Hyper.Sys.Linux.Cgroup.V2.Config.as_linux()
     |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 

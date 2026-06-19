@@ -1,0 +1,4 @@
+[toolchain]
+# `SafeBin<"losetup">` uses `&'static str` const generics (adt_const_params /
+# unsized_const_params), which are nightly-only.
+channel = "nightly"

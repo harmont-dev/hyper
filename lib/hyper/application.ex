@@ -10,7 +10,7 @@ defmodule Hyper.Application do
     #
     # Bridge Ecto's query telemetry into OpenTelemetry spans. The prefix matches
     # the repo's default telemetry_prefix (its module path, underscored).
-    OpentelemetryEcto.setup([:hyper, :img, :db, :repo])
+    _ = OpentelemetryEcto.setup([:hyper, :img, :db, :repo])
 
     topologies = Application.get_env(:libcluster, :topologies, [])
 

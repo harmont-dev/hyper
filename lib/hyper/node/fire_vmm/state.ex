@@ -120,7 +120,9 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defp stop_daemon(%State{daemon: nil}), do: :ok
-  defp stop_daemon(%State{id: id, daemon: pid}), do: DynamicSupervisor.terminate_child(daemon_sup(id), pid)
+
+  defp stop_daemon(%State{id: id, daemon: pid}),
+    do: DynamicSupervisor.terminate_child(daemon_sup(id), pid)
 
   defp monitor(data, pid), do: %{data | daemon: pid, daemon_ref: Process.monitor(pid)}
   defp clear_daemon(data), do: %{data | daemon: nil, daemon_ref: nil}
