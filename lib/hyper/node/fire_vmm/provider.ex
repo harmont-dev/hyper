@@ -70,4 +70,45 @@ defmodule Hyper.Node.FireVMM.Provider do
       :eof -> ctx
     end
   end
+
+  @doc """
+  Extract `tar_path` into a sibling `extract/` dir and copy the firecracker +
+  jailer binaries into `install_dir`, writing the version marker on success.
+  """
+  @spec extract_and_install(Path.t(), String.t(), Path.t()) ::
+          :ok | {:error, {:extract_failed, term()} | {:missing_binary, Path.t()}}
+  def extract_and_install(tar_path, arch, install_dir) do
+    extract_dir = Path.join(Path.dirname(tar_path), "extract")
+    File.mkdir_p!(extract_dir)
+
+    case :erl_tar.extract(String.to_charlist(tar_path),
+           [:compressed, {:cwd, String.to_charlist(extract_dir)}]) do
+      :ok -> install_binaries(extract_dir, arch, install_dir)
+      {:error, reason} -> {:error, {:extract_failed, reason}}
+    end
+  end
+
+  defp install_binaries(extract_dir, arch, install_dir) do
+    base = "release-v#{@version}-#{arch}"
+    fc_src = Path.join([extract_dir, base, "firecracker-v#{@version}-#{arch}"])
+    jail_src = Path.join([extract_dir, base, "jailer-v#{@version}-#{arch}"])
+
+    with :ok <- check_exists(fc_src),
+         :ok <- check_exists(jail_src) do
+      File.mkdir_p!(install_dir)
+      install_one(fc_src, Path.join(install_dir, "firecracker"))
+      install_one(jail_src, Path.join(install_dir, "jailer"))
+      File.write!(Path.join(install_dir, ".fc-version"), @version)
+      :ok
+    end
+  end
+
+  defp check_exists(path) do
+    if File.regular?(path), do: :ok, else: {:error, {:missing_binary, path}}
+  end
+
+  defp install_one(src, dest) do
+    File.cp!(src, dest)
+    File.chmod!(dest, 0o755)
+  end
 end
