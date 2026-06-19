@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Linux.Fstab do
+defmodule Sys.Linux.Fstab do
   @moduledoc "Parsing of `/etc/fstab`-style entries."
 
   defmodule Spec do

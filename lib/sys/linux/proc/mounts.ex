@@ -1,7 +1,7 @@
-defmodule Hyper.Sys.Linux.Proc.Mounts do
+defmodule Sys.Linux.Proc.Mounts do
   @moduledoc "Reads the currently-mounted filesystems from `/proc/mounts`."
 
-  alias Hyper.Sys.Linux.Fstab
+  alias Sys.Linux.Fstab
 
   @path "/proc/mounts"
 

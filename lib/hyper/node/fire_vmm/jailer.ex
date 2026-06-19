@@ -35,7 +35,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     """
 
     alias Hyper.Config
-    alias Hyper.Sys
+    alias Sys
 
     @doc "Run every pre-requisite check, halting at the first failure."
     @spec run() :: :ok | {:error, term()}
@@ -135,7 +135,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     type
     |> Instance.spec()
     |> Instance.Spec.cgroup_v2()
-    |> Hyper.Sys.Linux.Cgroup.V2.Config.as_linux()
+    |> Sys.Linux.Cgroup.V2.Config.as_linux()
     |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 

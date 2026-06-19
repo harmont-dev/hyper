@@ -97,15 +97,15 @@ defmodule Hyper.MixProject do
         ],
         System: [
           Hyper.SuidHelper,
-          Hyper.Sys.Posix,
-          Hyper.Sys.Linux.Cgroup,
-          Hyper.Sys.Linux.Cgroup.V2,
-          Hyper.Sys.Linux.Dmsetup,
-          Hyper.Sys.Linux.Fstab,
-          Hyper.Sys.Linux.Losetup,
-          Hyper.Sys.Linux.Nss,
-          Hyper.Sys.Linux.Proc.Mounts,
-          Hyper.Sys.Linux.Subid
+          Sys.Posix,
+          Sys.Linux.Cgroup,
+          Sys.Linux.Cgroup.V2,
+          Sys.Linux.Dmsetup,
+          Sys.Linux.Fstab,
+          Sys.Linux.Losetup,
+          Sys.Linux.Nss,
+          Sys.Linux.Proc.Mounts,
+          Sys.Linux.Subid
         ],
         Units: [Unit.Time, Unit.Information, Unit.Bandwidth]
       ]

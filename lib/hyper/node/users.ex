@@ -61,7 +61,7 @@ defmodule Hyper.Node.Users do
   """
   @spec test_system() :: :ok | {:error, term()}
   def test_system do
-    alias Hyper.Sys.Linux.Subid
+    alias Sys.Linux.Subid
 
     {min, max} = Hyper.Config.uid_gid_range()
 
@@ -111,7 +111,7 @@ defmodule Hyper.Node.Users do
 
   # Passwd entries whose uid falls within [min, max].
   defp passwd_conflicts(min, max) do
-    Hyper.Sys.Linux.Nss.Passwd.entries()
+    Sys.Linux.Nss.Passwd.entries()
     |> unwrap!("passwd")
     |> Enum.filter(&(&1.uid in min..max))
     |> Enum.map(&"passwd:#{&1.name}(#{&1.uid})")
@@ -119,7 +119,7 @@ defmodule Hyper.Node.Users do
 
   # Group entries whose gid falls within [min, max].
   defp group_conflicts(min, max) do
-    Hyper.Sys.Linux.Nss.Group.entries()
+    Sys.Linux.Nss.Group.entries()
     |> unwrap!("group")
     |> Enum.filter(&(&1.gid in min..max))
     |> Enum.map(&"group:#{&1.name}(#{&1.gid})")
