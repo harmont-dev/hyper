@@ -40,4 +40,34 @@ defmodule Hyper.Node.FireVMM.Provider do
       true -> {:error, {:unsupported_arch, sys}}
     end
   end
+
+  @doc "Verify the SHA-256 of `path` equals `expected` (lowercase hex)."
+  @spec verify_checksum(Path.t(), String.t()) ::
+          :ok | {:error, {:checksum_mismatch, String.t(), String.t()}}
+  def verify_checksum(path, expected) do
+    actual = sha256_file(path)
+
+    if actual == expected do
+      :ok
+    else
+      {:error, {:checksum_mismatch, expected, actual}}
+    end
+  end
+
+  @doc "Streaming SHA-256 of a file, returned as lowercase hex."
+  @spec sha256_file(Path.t()) :: String.t()
+  def sha256_file(path) do
+    path
+    |> File.open!([:read, :binary, :raw], fn io -> hash_io(io, :crypto.hash_init(:sha256)) end)
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
+  # Fold the file through the hash context in 2 MiB chunks.
+  defp hash_io(io, ctx) do
+    case :file.read(io, 2 * 1024 * 1024) do
+      {:ok, data} -> hash_io(io, :crypto.hash_update(ctx, data))
+      :eof -> ctx
+    end
+  end
 end
