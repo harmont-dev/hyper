@@ -51,6 +51,7 @@ defmodule Hyper.MixProject do
       {:opentelemetry_ecto, "~> 1.2"},
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
+      {:telemetry, "~> 1.3"},
       {:uuidv4, "~> 1.0"}
     ]
   end
@@ -106,6 +107,23 @@ defmodule Hyper.MixProject do
           Sys.Linux.Nss,
           Sys.Linux.Proc.Mounts,
           Sys.Linux.Subid
+        ],
+        Controls: [
+          Controls.Ewma,
+          Controls.Rate
+        ],
+        Monitoring: [
+          Sys.Mon,
+          Sys.Mon.Sampler,
+          Sys.Mon.Server,
+          Sys.Mon.Cpu,
+          Sys.Mon.Mem,
+          Sys.Mon.DiskBw,
+          Sys.Mon.NetBw,
+          Sys.Linux.Proc.Stat,
+          Sys.Linux.Proc.Meminfo,
+          Sys.Linux.Proc.Diskstats,
+          Sys.Linux.Proc.NetDev
         ],
         Units: [Unit.Time, Unit.Information, Unit.Bandwidth]
       ]

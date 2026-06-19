@@ -23,7 +23,10 @@ defmodule Hyper.Application do
       {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
       # This machine's participation in the cluster: owns the cluster-wide VM
       # registry and the local supervisor that runs this node's microVMs.
-      Hyper.Node
+      Hyper.Node,
+      # Per-node real-time soft-metric monitors (CPU/mem/disk/net), feeding the
+      # scheduler's β-budget decisions.
+      Sys.Mon
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
