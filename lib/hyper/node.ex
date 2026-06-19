@@ -43,7 +43,8 @@ defmodule Hyper.Node do
       {Horde.Repo, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.Users,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
-      Hyper.Node.Layer
+      Hyper.Node.Layer,
+      Hyper.Node.Img
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

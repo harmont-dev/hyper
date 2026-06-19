@@ -1,36 +1,95 @@
 defmodule Hyper.Node.Img do
-  @moduledoc "Operations on images used to seed firecracker devices."
+  @moduledoc """
+  Supervisor for this node's active images, and the entry point for image
+  operations. Owns a unique `Registry` (`img_id -> Img.Server`) and a
+  `DynamicSupervisor` that holds those servers.
 
-  alias Hyper.Img.Db.Lease
+  Two responsibilities sit on top of that tree:
 
-  @type t :: String.t()
+    * leasing an image for the lifetime of a VM (`with_image/3`), and
+    * asking which active images depend on a given layer (`images_using_layer/1`),
+      answered by walking the live image servers rather than the database.
+  """
+  use Supervisor
+
+  alias Hyper.Img.Db
+  alias Hyper.Node.Img.Server
+
+  @registry Hyper.Node.Img.Registry
+  @server_sup Hyper.Node.Img.Supervisor
+
+  def start_link(opts \\ []) do
+    Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @impl true
+  def init(_opts) do
+    children = [
+      {Registry, keys: :unique, name: @registry},
+      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  @doc false
+  def registry, do: @registry
+
+  @doc "Activate `img_id` on this node: start (or reuse) its image server."
+  @spec activate(Hyper.Img.id()) :: {:ok, pid()} | {:error, term()}
+  def activate(img_id) do
+    case DynamicSupervisor.start_child(@server_sup, {Server, %Server.Opts{img_id: img_id}}) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc "Every image id currently active on this node."
+  @spec active() :: [Hyper.Img.id()]
+  def active do
+    Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
+
+  @doc """
+  The active images on this node that depend on `layer_id`, found by asking each
+  live image server for its layer set.
+  """
+  @spec images_using_layer(Hyper.Layer.id()) :: [Hyper.Img.id()]
+  def images_using_layer(layer_id) do
+    for img_id <- active(),
+        [{pid, _}] <- [Registry.lookup(@registry, img_id)],
+        layer_id in Server.layers(pid),
+        do: img_id
+  end
 
   @doc """
   Serve `img` to `vm_id` for the duration of `callable`, holding a DB lease on the
   image (and transitively its whole blob chain) the whole time.
   """
-  @spec with_image(t(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()} when result: var
+  @spec with_image(Hyper.Img.id(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()}
+        when result: var
   def with_image(img, vm_id, callable) do
     with_image_lease(img, vm_id, callable)
   end
 
   # Take a lease on `img` for this node/`vm_id`, run `callable`, then release it —
-  # even if `callable` raises. A background task re-bumps the lease every half-TTL
-  # for the whole run, so a long-lived VM never lets its claim lapse. If the lease
-  # cannot be taken, returns the error and never runs `callable`.
-  @spec with_image_lease(t(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()}
+  # even if `callable` raises. A background task re-bumps the lease for the whole
+  # run, so a long-lived VM never lets its claim lapse. If the lease cannot be
+  # taken, returns the error and never runs `callable`.
+  @spec with_image_lease(Hyper.Img.id(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()}
         when result: var
   defp with_image_lease(img, vm_id, callable) do
-    ttl = Lease.default_ttl()
+    ttl = Db.Lease.default_ttl()
 
-    with {:ok, _lease} <- Lease.bump(img, vm_id, ttl) do
+    with {:ok, _lease} <- Db.Lease.bump(img, vm_id, ttl) do
       task = Task.async(fn -> heartbeat(img, vm_id, ttl) end)
 
       try do
         callable.()
       after
         _ = Task.shutdown(task, :brutal_kill)
-        :ok = Lease.release(vm_id)
+        :ok = Db.Lease.release(vm_id)
       end
     end
   end
@@ -38,12 +97,12 @@ defmodule Hyper.Node.Img do
   # Re-bump the lease forever at 1/3 of the TTL, until killed. Runs in a task for the
   # lifetime of `callable`; transient bump failures are swallowed so a DB hiccup
   # can't tear down the VM — the next tick retries.
-  @spec heartbeat(t(), Hyper.Vm.id(), Unit.Time.t()) :: no_return()
+  @spec heartbeat(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) :: no_return()
   defp heartbeat(img, vm_id, ttl) do
     Process.sleep(div(Unit.Time.as_ms(ttl), 3))
 
     try do
-      _ = Lease.bump(img, vm_id, ttl)
+      _ = Db.Lease.bump(img, vm_id, ttl)
     rescue
       _ -> :ok
     end
