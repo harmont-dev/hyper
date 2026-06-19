@@ -21,18 +21,18 @@ config :libcluster,
     ]
   ]
 
+config :hyper,
+  work_dir: "/srv/hyper",
+  cgroup_parent: "hyper",
+  uid_gid_range: {900_000, 999_999},
+  layer_dir: "/srv/hyper/layers"
+
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
   config :libcluster, topologies: []
   config :hyper, work_dir: Path.expand("../test/support/firecracker_work_dir", __DIR__)
 end
-
-config :hyper,
-  work_dir: "/srv/hyper",
-  cgroup_parent: "hyper",
-  uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers"
 
 config :hyper, Hyper.Img.Db.Repo,
   database: "hyper_dev",

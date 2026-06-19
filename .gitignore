@@ -35,3 +35,8 @@ hyper-*.tar
 /priv/plts/
 
 docs/superpowers/
+
+# Runtime dirs created under the test firecracker work dir
+/test/support/firecracker_work_dir/jails/
+/test/support/firecracker_work_dir/socks/
+/test/support/firecracker_work_dir/scratch/

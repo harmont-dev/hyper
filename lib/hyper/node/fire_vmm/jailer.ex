@@ -13,8 +13,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   socket it opens at `/api.socket` lives at `host_socket` on the host — that's the
   path the controller connects to.
 
-  Host config (`config :hyper, ...`): `:jailer_bin`, `:firecracker_bin`,
-  `:jailer_chroot_base`, `:cgroup_parent`, `:jailer_uid`, `:jailer_gid`.
+  Host config: paths are derived from `config :hyper, work_dir: ...`. The
+  firecracker + jailer binaries are installed under `<work_dir>/redist/firecracker`
+  by `Hyper.Node.FireVMM.Provider`; the chroot base is `<work_dir>/jails`.
   """
 
   use OpenTelemetryDecorator
