@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/res/banner.png" alt="Hyper" />
+  <img src="docs/res/Hyper-Banner.png" alt="Hyper" />
 </p>
 
 # Hyper
