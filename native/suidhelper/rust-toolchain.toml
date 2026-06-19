@@ -1,0 +1,8 @@
+[toolchain]
+# `SafeBin<"losetup">` uses `&'static str` const generics (adt_const_params /
+# unsized_const_params), which are nightly-only.
+channel = "nightly"
+# Static musl builds for both server arches. The aarch64 target links
+# self-contained via the bundled rust-lld, so no external cross toolchain is
+# needed (see .cargo/config.toml).
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]

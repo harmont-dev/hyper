@@ -42,6 +42,7 @@ defmodule Hyper.MixProject do
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
       {:horde, "~> 0.9"},
+      {:jason, "~> 1.4"},
       {:libcluster, "~> 3.3"},
       {:muontrap, "~> 1.5"},
       {:open_telemetry_decorator, "~> 1.5"},
@@ -95,7 +96,7 @@ defmodule Hyper.MixProject do
           Hyper.Layer
         ],
         System: [
-          Hyper.Sys.Cmd,
+          Hyper.SuidHelper,
           Hyper.Sys.Posix,
           Hyper.Sys.Linux.Cgroup,
           Hyper.Sys.Linux.Cgroup.V2,

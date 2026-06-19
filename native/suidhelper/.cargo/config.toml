@@ -1,0 +1,6 @@
+# aarch64 musl cross-links with the toolchain's bundled `rust-lld`, invoked
+# directly (it infers the AArch64 target from the object files), so building for
+# aarch64 needs no external cross toolchain. x86_64 musl links natively through
+# the host `cc`, so it's left at the default.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

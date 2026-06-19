@@ -7,10 +7,9 @@ defmodule Hyper.Node.Img.Server do
   block device by stacking dm-snapshot targets (base at the bottom, each delta's
   exception store layered on top). `blk_path/1` returns that composed device.
 
-  Reference-counted via process monitors, like `Layer.Server`: holders (the
-  per-VM `Img.Writable`s) `acquire/1` it; when the last leaves it idle-reaps,
-  removing its dm chain in `terminate/2` and releasing its layers (which then
-  unmount once nothing else holds them).
+  Reference-counted via process monitors, like `Layer.Server`: holders `acquire/1`
+  it; when the last leaves it idle-reaps, removing its dm chain in `terminate/2`
+  and releasing its layers (which then unmount once nothing else holds them).
   """
 
   use GenServer

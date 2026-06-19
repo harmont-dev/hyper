@@ -40,7 +40,7 @@ static PREINIT_DROP_PRIVILEGES: extern "C" fn() = drop_to_real;
 // bare syscalls (async-signal-safe) and valid here.
 extern "C" fn drop_to_real() {
     if seteuid(getuid()).is_err() {
-        const MSG: &[u8] = b"hyper-devhelper: failed to drop privileges at startup\n";
+        const MSG: &[u8] = b"hyper-suidhelper: failed to drop privileges at startup\n";
         // SAFETY: raw FFI to async-signal-safe libc calls; MSG is a static buffer.
         unsafe {
             let _ = nix::libc::write(2, MSG.as_ptr().cast(), MSG.len());
@@ -79,7 +79,7 @@ impl Privileged {
 impl Drop for Privileged {
     fn drop(&mut self) {
         if lower().is_err() {
-            eprintln!("hyper-devhelper: failed to drop privileges; aborting");
+            eprintln!("hyper-suidhelper: failed to drop privileges; aborting");
             std::process::abort();
         }
     }

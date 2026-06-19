@@ -194,10 +194,23 @@ $$
 $$
 
 The soft budget is more involved and requires real-time monitoring of the
-active load on any node.
+active load on any node. Unfortunately, it is impossible to predict what kind
+of soft load any particular VM will cause. We define two soft thresholds:
 
-<!-- TODO(markovejnovic): Describe this -->
+  - An instantaneous soft-threshold $\beta_m^i(N) = k_m \beta_m^{\text{cap}}$
+    with a tweakable $0 < k_m$ load coefficient. This expresses the idea of
+    _we shall avoid scheduling on machines which have more than 80% load_.
+  - A total maximal threshold which is capped at the same logic as $\alpha$,
+    except that it is allowed to overflow full load:
 
+$$
+\beta_m^{\text{max}}(N) = k^{\text{max}}_m \beta^{\text{total}}_m(N) - \sum_{\texttt{VM}} \beta_m(\text{spec}(\texttt{VM}))
+$$
+
+The $\beta_m^{\text{max}}(N)$ value should never be exceeded, just as the
+$\alpha_m(N)$ is never to be exceeded. On the other hand, the $\beta_m^i(N)$
+value, acts as a cap -- if a machine is above that threshold, then no further
+VMs can be scheduled. This acts as an instantaneous measurement.
 
 ## Scheduling
 
@@ -211,9 +224,32 @@ have the hard budget to run the given VM. Note we do not filter machines out of
 soft budget yet. The set of nodes with available hard budget is:
 
 $$
-\text{possible}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
+\text{havail}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
 N \in \mathbb{N} \text{ if }
 \bigwedge_{m \in \alpha} \left( \alpha_m(\texttt{VM}) < \alpha_m(N) \right)
+\right\rbrace
+$$
+
+### Soft Budgeting
+
+With the hard budget nodes filtered out, we then subsequently filter out nodes
+which have their theoretical soft budget exhausted.
+
+$$
+\text{savail}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
+N \in \text{havail}\left(\mathbb{N}, \texttt{VM}\right) \text{ if }
+\bigwedge_{m \in \beta} \left( \beta_m(\texttt{VM}) < \beta_m^{\text{max}}(N) \right)
+\right\rbrace
+$$
+
+This leaves us with nodes which could theoretically support more nodes, but it
+is important to note that some of these machines may already be overloaded, so
+we filter out according to the instantaneous load:
+
+$$
+\text{possible}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
+N \in \text{savail}\left(\mathbb{N}, \texttt{VM}\right) \text{ if }
+\bigwedge_{m \in \beta} \left( \beta_m(N) < k_m \beta_m^{\text{cap}}(N) \right)
 \right\rbrace
 $$
 
@@ -242,4 +278,35 @@ avoiding the relatively long and painful download of each layer.
 >
 > This is considered a future improvement.
 
+This effectively means sorting the list of possible nodes and picking the one
+with the highest number of bytes already mounted.
 
+Formally, let $\Lambda(\texttt{VM})$ be the set of layers in the image chain of
+the VM, $\text{mnt}(N)$ the set of layers currently mounted on node $N$, and
+$|L|$ the size of layer $L$ in bytes. The colocation score of a node is the
+number of required bytes already resident on it:
+
+$$
+\text{colo}(N, \texttt{VM}) = \sum_{L \in \Lambda(\texttt{VM}) \cap \text{mnt}(N)} |L|
+$$
+
+The scheduler then deploys onto the highest-scoring node among the viable
+candidates:
+
+$$
+\text{schedule}(\texttt{VM}) = \underset{N \in \text{possible}(\mathbb{N}, \texttt{VM})}{\operatorname{arg\,max}}\; \text{colo}(N, \texttt{VM})
+$$
+
+### Strategy
+
+In total, the scheduling strategy is naive:
+
+  1. Find all nodes for scheduling a new VM would not cause them to overfill
+     their hard caps.
+  2. Out of those nodes, find all nodes where scheduling a new VM would not
+     cause them to overflow the theoretical maximal soft budget.
+  3. Out of those nodes, find all nodes with their instantaneous soft loads
+     are under the instantaneous soft load.
+  4. Out of those nodes, sort them by the highest number of layer bytes that
+     are already loaded in.
+  5. Schedule on the first available machine.

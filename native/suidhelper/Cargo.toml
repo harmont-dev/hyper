@@ -1,11 +1,11 @@
 [package]
-name = "hyper-devhelper"
+name = "hyper-suidhelper"
 version = "0.1.0"
 edition = "2021"
 description = "Tiny setuid-root helper that runs a whitelisted set of device commands for the unprivileged Hyper node."
 
 [[bin]]
-name = "hyper-devhelper"
+name = "hyper-suidhelper"
 path = "src/main.rs"
 
 [dependencies]

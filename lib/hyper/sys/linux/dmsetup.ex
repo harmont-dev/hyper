@@ -1,17 +1,18 @@
 defmodule Hyper.Sys.Linux.Dmsetup do
-  @moduledoc "device-mapper (dmsetup) management utility."
+  @moduledoc "device-mapper (dmsetup) management utility (via the setuid helper)."
 
   use OpenTelemetryDecorator
 
-  alias Hyper.Sys.Cmd
+  alias Hyper.SuidHelper
 
   @typedoc "A device-mapper device name (becomes /dev/mapper/<name>)."
   @type name :: String.t()
 
-  @doc "Check that the device-mapper tooling required for image assembly is present."
+  @doc "Check that the setuid helper and the device-mapper tooling it execs are present."
   @spec test_system() :: :ok | {:error, term()}
   def test_system do
     cond do
+      System.find_executable(Hyper.Config.suid_helper()) == nil -> {:error, :suid_helper_not_found}
       System.find_executable(Hyper.Config.dmsetup_path()) == nil -> {:error, :dmsetup_not_found}
       System.find_executable(Hyper.Config.blockdev_path()) == nil -> {:error, :blockdev_not_found}
       true -> :ok
@@ -29,30 +30,25 @@ defmodule Hyper.Sys.Linux.Dmsetup do
   def create_snapshot(name, origin_dev, cow_dev, sectors) do
     table = "0 #{sectors} snapshot #{origin_dev} #{cow_dev} P #{Hyper.Config.chunk_sectors()}"
 
-    create(name, table, ["--readonly"])
-  end
-
-  @doc """
-  Create a writable, transient dm-snapshot device named `name`, layering the
-  writable `cow_dev` over the read-only `origin_dev`. Used for a VM's ephemeral
-  writable layer; exceptions are not persisted across a reboot.
-  """
-  @spec create_writable(name(), Path.t(), Path.t(), pos_integer()) ::
-          {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
-  @decorate with_span("Hyper.Sys.Linux.Dmsetup.create_writable", include: [:name])
-  def create_writable(name, origin_dev, cow_dev, sectors) do
-    table = "0 #{sectors} snapshot #{origin_dev} #{cow_dev} N #{Hyper.Config.chunk_sectors()}"
-
-    create(name, table, [])
+    case SuidHelper.run("dmsetup", Hyper.Config.dmsetup_path(), [
+           "create",
+           name,
+           "--readonly",
+           "--table",
+           table
+         ]) do
+      {:ok, %{"device" => dev}} -> {:ok, dev}
+      {:error, _} = err -> err
+    end
   end
 
   @doc "Remove the dm device `name`."
   @spec remove(name()) :: :ok | {:error, {non_neg_integer(), String.t()}}
   @decorate with_span("Hyper.Sys.Linux.Dmsetup.remove", include: [:name])
   def remove(name) do
-    case Cmd.run([Hyper.Config.dmsetup_path(), "remove", "--retry", name]) do
-      {_out, 0} -> :ok
-      {out, errc} -> {:error, {errc, out}}
+    case SuidHelper.run("dmsetup", Hyper.Config.dmsetup_path(), ["remove", "--retry", name]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
     end
   end
 
@@ -61,18 +57,9 @@ defmodule Hyper.Sys.Linux.Dmsetup do
           {:ok, pos_integer()} | {:error, {non_neg_integer(), String.t()}}
   @decorate with_span("Hyper.Sys.Linux.Dmsetup.device_sectors", include: [:path])
   def device_sectors(path) do
-    case Cmd.run([Hyper.Config.blockdev_path(), "--getsz", path]) do
-      {out, 0} -> {:ok, out |> String.trim() |> String.to_integer()}
-      {out, errc} -> {:error, {errc, out}}
-    end
-  end
-
-  @spec create(name(), String.t(), [String.t()]) ::
-          {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
-  defp create(name, table, flags) do
-    case Cmd.run([Hyper.Config.dmsetup_path(), "create", name] ++ flags ++ ["--table", table]) do
-      {_out, 0} -> {:ok, "/dev/mapper/#{name}"}
-      {out, errc} -> {:error, {errc, out}}
+    case SuidHelper.run("blockdev", Hyper.Config.blockdev_path(), ["--getsz", path]) do
+      {:ok, %{"sectors" => sectors}} -> {:ok, sectors}
+      {:error, _} = err -> err
     end
   end
 end

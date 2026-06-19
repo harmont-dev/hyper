@@ -20,8 +20,8 @@
 //! Build & install:
 //!   cargo build --release
 //!   sudo install -o root -g root -m 4755 \
-//!     target/release/hyper-devhelper /usr/local/bin/hyper-devhelper
-//! Then: config :hyper, device_helper: "/usr/local/bin/hyper-devhelper"
+//!     target/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
+//! Then: config :hyper, suid_helper: "/usr/local/bin/hyper-suidhelper"
 
 mod safe_bin;
 mod safe_dev;
@@ -34,7 +34,7 @@ use setuid_privileged::Privileged;
 use tools::Tool;
 
 #[derive(Parser)]
-#[command(name = "hyper-devhelper", about = "Privileged device helper for the Hyper node")]
+#[command(name = "hyper-suidhelper", about = "Privileged device helper for the Hyper node")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

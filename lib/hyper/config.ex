@@ -75,14 +75,14 @@ defmodule Hyper.Config do
   def blockdev_path, do: @blockdev_path
 
   @doc """
-  Path to the privileged device helper (setuid root), or `nil` to run device
-  commands directly (e.g. when the node itself runs as root in dev). When set,
-  `losetup`/`dmsetup`/`blockdev` are invoked through it.
+  Path to the setuid-root device helper (`hyper-suidhelper`). Required: the node
+  runs unprivileged and routes every `losetup`/`dmsetup`/`blockdev` operation
+  through it.
 
   Runtime config (host-specific), so it can be set per node without recompiling.
   """
-  @spec device_helper :: Path.t() | nil
-  def device_helper, do: Application.get_env(:hyper, :device_helper)
+  @spec suid_helper :: Path.t()
+  def suid_helper, do: Application.fetch_env!(:hyper, :suid_helper)
 
   @doc """
   Directory for per-VM scratch (writable-layer COW) files. Must be node-local and
