@@ -190,7 +190,13 @@ defmodule Hyper.Node.FireVMM.Client do
   @impl true
   def handle_call({:request, method, path, body}, _from, %State{req: req} = state) do
     opts = [method: method, url: path]
-    opts = if is_nil(body), do: opts, else: Keyword.put(opts, :json, Body.encode(body))
+
+    opts =
+      cond do
+        is_nil(body) -> opts
+        is_struct(body) -> Keyword.put(opts, :json, Body.encode(body))
+        true -> Keyword.put(opts, :json, body)
+      end
 
     {:reply, run(req, opts), state}
   end

@@ -64,6 +64,19 @@ defmodule Hyper.Node.FireVMM.ClientTest do
     assert :ok = Hyper.Node.FireVMM.Client.put_drive(pid, drive)
   end
 
+  test "put_mmds preserves nil values verbatim and uses PUT" do
+    pid =
+      client(fn conn ->
+        assert conn.method == "PUT"
+        assert conn.request_path == "/mmds"
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(raw) == %{"token" => nil, "ami-id" => "ami-1"}
+        Plug.Conn.send_resp(conn, 204, "")
+      end)
+
+    assert :ok = Hyper.Node.FireVMM.Client.put_mmds(pid, %{"token" => nil, "ami-id" => "ami-1"})
+  end
+
   test "put_mmds sends an arbitrary JSON map verbatim" do
     pid =
       client(fn conn ->
