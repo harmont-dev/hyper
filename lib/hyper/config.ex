@@ -20,17 +20,9 @@ defmodule Hyper.Config do
   @spec redist_dir :: Path.t()
   def redist_dir, do: Path.join(@work_dir, "redist")
 
-  @doc "Directory where `Hyper.Node.FireVMM.Provider` installs firecracker + jailer."
+  @doc "Directory where `Hyper.Node.FireVMM.Provider` installs the firecracker release."
   @spec firecracker_install_dir :: Path.t()
   def firecracker_install_dir, do: Path.join(redist_dir(), "firecracker")
-
-  @doc "jailer binary path, installed by the provider. Identical across nodes."
-  @spec jailer_bin :: Path.t()
-  def jailer_bin, do: Path.join(firecracker_install_dir(), "jailer")
-
-  @doc "firecracker binary path, installed by the provider. Identical across nodes."
-  @spec firecracker_bin :: Path.t()
-  def firecracker_bin, do: Path.join(firecracker_install_dir(), "firecracker")
 
   @doc """
   Path to the directory where all VM chroot's are created (`<work_dir>/jails`).

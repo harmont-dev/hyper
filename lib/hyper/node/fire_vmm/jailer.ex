@@ -21,6 +21,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   use OpenTelemetryDecorator
 
   alias Hyper.Node.FireVMM
+  alias Hyper.Node.FireVMM.Provider
   alias Hyper.Vm.Instance
 
   # firecracker's API socket path *inside* the chroot.
@@ -36,6 +37,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     """
 
     alias Hyper.Config
+    alias Hyper.Node.FireVMM.Provider
     alias Hyper.Sys
 
     @doc "Run every pre-requisite check, halting at the first failure."
@@ -61,13 +63,13 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     defp jailer_executable do
-      if Sys.Posix.executable?(Config.jailer_bin()),
+      if Sys.Posix.executable?(Provider.jailer_bin()),
         do: :ok,
         else: {:error, :jailer_unavailable}
     end
 
     defp firecracker_executable do
-      if Sys.Posix.executable?(Config.firecracker_bin()),
+      if Sys.Posix.executable?(Provider.firecracker_bin()),
         do: :ok,
         else: {:error, :firecracker_unavailable}
     end
@@ -112,7 +114,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         "--id",
         opts.vm_id,
         "--exec-file",
-        Hyper.Config.firecracker_bin(),
+        Provider.firecracker_bin(),
         "--uid",
         to_string(opts.uid),
         "--gid",
@@ -127,7 +129,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         cgroup_flags(opts.type) ++
         ["--", "--api-sock", "/" <> @jail_socket]
 
-    %{binary: Hyper.Config.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
+    %{binary: Provider.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
   end
 
   # Find the appropriate jailer cgroup flags for the given instance type.
@@ -154,5 +156,5 @@ defmodule Hyper.Node.FireVMM.Jailer do
     ])
   end
 
-  defp exec_name, do: Path.basename(Hyper.Config.firecracker_bin())
+  defp exec_name, do: Path.basename(Provider.firecracker_bin())
 end
