@@ -39,10 +39,3 @@ config :hyper, Hyper.Img.Db.Repo,
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
-
-# This node's total hard (alpha) budget - the memory and disk it contributes to
-# the cluster. The scheduler never places VMs whose summed alpha would exceed
-# these. Tune per machine; override in runtime.exs from real hardware if desired.
-config :hyper, Hyper.Node.Budget.Hard,
-  mem: Unit.Information.gib(8),
-  disk: Unit.Information.gib(128)
