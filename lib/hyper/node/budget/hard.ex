@@ -83,14 +83,13 @@ defmodule Hyper.Node.Budget.Hard do
   This node's declared total alpha capacity, from application config:
 
       config :hyper, #{inspect(__MODULE__)},
-        mem: <bytes>, disk: <bytes>
+        mem: Unit.Information.gib(8),
+        disk: Unit.Information.gib(128)
   """
   @spec total_from_config() :: Alpha.t()
   def total_from_config do
     cfg = Application.get_env(:hyper, __MODULE__, [])
-    mem = Keyword.fetch!(cfg, :mem)
-    disk = Keyword.fetch!(cfg, :disk)
-    %Alpha{mem: Unit.Information.bytes(mem), disk: Unit.Information.bytes(disk)}
+    %Alpha{mem: Keyword.fetch!(cfg, :mem), disk: Keyword.fetch!(cfg, :disk)}
   end
 
   @doc """

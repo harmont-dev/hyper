@@ -23,6 +23,8 @@ defmodule Hyper.Node.Budget do
   deliberately do **not** push alpha through Horde/`DeltaCrdt`.
   """
 
+  use Unit.Operators
+
   alias Hyper.Node.Budget.Hard
   alias Hyper.Vm.Instance.Spec
   alias Unit.Information
@@ -50,13 +52,13 @@ defmodule Hyper.Node.Budget do
   @doc "Dimension-wise sum of two alpha vectors."
   @spec add(Alpha.t(), Alpha.t()) :: Alpha.t()
   def add(%Alpha{} = a, %Alpha{} = b) do
-    %Alpha{mem: Information.add(a.mem, b.mem), disk: Information.add(a.disk, b.disk)}
+    %Alpha{mem: a.mem + b.mem, disk: a.disk + b.disk}
   end
 
   @doc "Dimension-wise difference `a - b`, clamped at zero per dimension."
   @spec sub(Alpha.t(), Alpha.t()) :: Alpha.t()
   def sub(%Alpha{} = a, %Alpha{} = b) do
-    %Alpha{mem: Information.sub(a.mem, b.mem), disk: Information.sub(a.disk, b.disk)}
+    %Alpha{mem: a.mem - b.mem, disk: a.disk - b.disk}
   end
 
   @doc """
@@ -64,8 +66,7 @@ defmodule Hyper.Node.Budget do
   """
   @spec fits?(Alpha.t(), Alpha.t()) :: boolean()
   def fits?(%Alpha{} = avail, %Alpha{} = need) do
-    Information.compare(need.mem, avail.mem) != :gt and
-      Information.compare(need.disk, avail.disk) != :gt
+    need.mem <= avail.mem and need.disk <= avail.disk
   end
 
   @default_timeout_ms 5_000

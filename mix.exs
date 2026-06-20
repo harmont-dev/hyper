@@ -108,7 +108,7 @@ defmodule Hyper.MixProject do
           Hyper.Sys.Linux.Proc.Mounts,
           Hyper.Sys.Linux.Subid
         ],
-        Units: [Unit.Time, Unit.Information, Unit.Bandwidth]
+        Units: [Unit.Time, Unit.Information, Unit.Bandwidth, Unit.Quantity, Unit.Operators]
       ]
     ]
   end
