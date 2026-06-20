@@ -145,7 +145,9 @@ defmodule Hyper.Node.Budget.Hard do
     case fits(state, spec) do
       :ok ->
         ref = Process.monitor(owner)
-        {:reply, :ok, state |> State.bump(spec) |> State.track(ref, spec)}
+        state = state |> State.bump(spec) |> State.track(ref, spec)
+        republish()
+        {:reply, :ok, state}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -167,8 +169,22 @@ defmodule Hyper.Node.Budget.Hard do
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
     case State.untrack(state, ref) do
-      {nil, state} -> {:noreply, state}
-      {spec, state} -> {:noreply, State.cut(state, spec)}
+      {nil, state} ->
+        {:noreply, state}
+
+      {spec, state} ->
+        republish()
+        {:noreply, State.cut(state, spec)}
+    end
+  end
+
+  # Re-publish this node's NodeState after any reservation change. Guarded so
+  # Hard runs standalone when no advertiser is present.
+  @spec republish() :: :ok
+  defp republish do
+    case Process.whereis(Hyper.Node.Budget.Advertiser) do
+      nil -> :ok
+      _pid -> Hyper.Node.Budget.Advertiser.publish()
     end
   end
 
