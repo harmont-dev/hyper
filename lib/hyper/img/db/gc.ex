@@ -19,7 +19,7 @@ defmodule Hyper.Img.Db.Gc do
   ## How it walks the database (low priority)
 
   It pages through `blobs` by keyset on the primary key
-  (`Hyper.Img.Db.Blob.scan_present_after/2`), never `SELECT *`, so a huge table
+  (`Hyper.Img.Db.Blob.present_after/2`), never `SELECT *`, so a huge table
   cannot blow up the node. To stay out of the way of real traffic it runs at low
   priority: small pages, a pause between them, and every DB statement runs inside a
   transaction that first sets a short `statement_timeout`, so a GC query can never
@@ -201,7 +201,7 @@ defmodule Hyper.Img.Db.Gc do
   @spec scan_one_batch(t()) :: t()
   defp scan_one_batch(%__MODULE__{sweep: sweep} = state) do
     limit = cfg(state, :batch_size)
-    batch = with_low_priority(state, fn -> Blob.scan_present_after(sweep.cursor, limit) end)
+    batch = with_low_priority(state, fn -> Blob.present_after(sweep.cursor, limit) end)
     {sweep, missing} = Sweep.absorb(sweep, batch, &presence/1)
 
     {pruned, pruned_bytes, dangling} = maybe_prune(state, missing)
@@ -347,7 +347,7 @@ defmodule Hyper.Img.Db.Gc do
   # never pruned), so a transient NFS hiccup can never drive a delete.
   @spec presence(String.t()) :: Sweep.presence()
   defp presence(id) do
-    case LayerRepo.probe(id) do
+    case LayerRepo.find_layer(id) do
       {:ok, _path} -> :present
       {:error, :enoent} -> :missing
       {:error, _posix} -> :unknown

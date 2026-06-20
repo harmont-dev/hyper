@@ -28,16 +28,3 @@ if config_env() != :test do
     otlp_endpoint: endpoint,
     otlp_headers: headers
 end
-
-# Layer GC: cluster-singleton that continuously walks the DB in batches and
-# prunes blob rows whose data is no longer on the shared medium. Runs at low
-# priority (small pages, paced, short per-statement timeout). The module ships
-# these same defaults; this block exists for visibility and operator overrides.
-config :hyper, Hyper.Img.Db.Gc,
-  batch_size: 200,
-  batch_pause_ms: 100,
-  sweep_interval_ms: 60_000,
-  acquire_interval_ms: 5_000,
-  retry_ms: 60_000,
-  statement_timeout_ms: 5_000,
-  grace_period_ms: 3_600_000

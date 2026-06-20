@@ -31,17 +31,9 @@ defmodule Hyper.Img.Db.Blob do
     |> unique_constraint(:id, name: :blobs_pkey)
   end
 
-  @doc """
-  Keyset page of `:present` blobs for the layer audit.
-
-  Walks the `blobs` table ordered by primary key. Pass `nil` to start, then pass
-  the last returned `id` to fetch the next page. Never loads the whole table, so a
-  huge `blobs` table cannot blow up the node. Returns `{id, size}` tuples; `size`
-  is the byte length recorded at publish time, used to assert the shared medium
-  holds the right bytes.
-  """
-  @spec scan_present_after(String.t() | nil, pos_integer()) :: [{String.t(), non_neg_integer()}]
-  def scan_present_after(after_id, limit) when is_integer(limit) and limit > 0 do
+  @doc "Keyset page of `{id, size}` for `:present` blobs after `after_id` (nil to start), ordered by id."
+  @spec present_after(String.t() | nil, pos_integer()) :: [{String.t(), non_neg_integer()}]
+  def present_after(after_id, limit) when is_integer(limit) and limit > 0 do
     base =
       from b in __MODULE__,
         where: b.state == :present,
