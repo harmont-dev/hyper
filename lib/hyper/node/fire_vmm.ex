@@ -70,15 +70,14 @@ defmodule Hyper.Node.FireVMM do
 
     children = [
       {DynamicSupervisor,
-       name: {:via, Horde.Registry, {Hyper.Vm.Registry, {opts.vm_id, :daemon_sup}}},
-       strategy: :one_for_one},
+       name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
       {State, vm_opts}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
-  defp via(vm_id), do: {:via, Horde.Registry, {Hyper.Vm.Registry, {vm_id, :supervisor}}}
+  defp via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :supervisor})
 
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}

@@ -9,6 +9,7 @@ defmodule Hyper.Img.Db.Image do
   import Ecto.Query
 
   alias Hyper.Img.Db.{Blob, ImageLayer, Lease, Repo}
+  alias Unit.Information
 
   @primary_key {:id, :string, autogenerate: false}
   schema "images" do
@@ -30,6 +31,14 @@ defmodule Hyper.Img.Db.Image do
     |> validate_required([:id])
     |> cast_assoc(:layers, with: &ImageLayer.changeset/2)
     |> unique_constraint(:id, name: :images_pkey)
+  end
+
+  @doc "The image's ordered layers as `{blob_id, size}`, base first."
+  @spec chain_sizes(String.t()) :: [{String.t(), Unit.Information.t()}]
+  def chain_sizes(image_id) do
+    image_id
+    |> resolve_chain()
+    |> Enum.map(fn blob -> {blob.id, Information.bytes(blob.size)} end)
   end
 
   @doc "Ordered blobs needed to assemble `image_id`, base (position 0) first."

@@ -16,14 +16,16 @@ defmodule Hyper.Img.Db.Blob do
   schema "blobs" do
     field :kind, Ecto.Enum, values: [:base, :delta]
     field :state, Ecto.Enum, values: [:present, :deleting], default: :present
+    field :size, :integer
 
     timestamps(updated_at: false, type: :utc_datetime_usec)
   end
 
   def changeset(blob, attrs) do
     blob
-    |> cast(attrs, [:id, :kind, :state])
-    |> validate_required([:id, :kind])
+    |> cast(attrs, [:id, :kind, :state, :size])
+    |> validate_required([:id, :kind, :size])
+    |> validate_number(:size, greater_than_or_equal_to: 0)
     |> unique_constraint(:id, name: :blobs_pkey)
   end
 end

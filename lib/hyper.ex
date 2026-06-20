@@ -37,10 +37,5 @@ defmodule Hyper do
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.t()) :: node() | nil
-  def whereis(vm_id) do
-    case Horde.Registry.lookup(Hyper.Vm.Registry, {vm_id, :supervisor}) do
-      [{pid, _}] -> node(pid)
-      [] -> nil
-    end
-  end
+  def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 end

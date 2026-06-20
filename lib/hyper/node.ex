@@ -5,11 +5,9 @@ defmodule Hyper.Node do
 
   Children:
 
-    * `Horde.Repo` (named `Hyper.Vm.Repo`) - a **cluster-wide** registry
-      member. Maps `{vm_id, component}` -> pid; `node(pid)` answers "which machine
-      owns this VM". Each node writes its own VMs; every node can read all of
-      them. `members: :auto` joins peers over Distributed Erlang (wire up
-      connectivity with libcluster).
+    * VM routing lives in `Hyper.Cluster.Routing` (a cluster-wide CRDT started by
+      `Hyper.Cluster`, above this supervisor), not here - this node only owns the
+      *local* processes that run its microVMs.
 
     * `Hyper.Node.ImageStore` - a node-local content-addressed blob cache. Started
       before the VM supervisor so VMs can pull base images on boot.
@@ -22,12 +20,17 @@ defmodule Hyper.Node do
 
     * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
       and group id.
+
+    * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
+      memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
+      real-time monitors backing the soft budget (`Hyper.Node.Budget.Soft`).
+      Lives here, not at the application root, because both are per-node and only
+      meaningful while this node hosts VMs.
   """
 
   use Supervisor
   use OpenTelemetryDecorator
 
-  @registry Hyper.Vm.Repo
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
@@ -40,8 +43,8 @@ defmodule Hyper.Node do
   @impl true
   def init(_opts) do
     children = [
-      {Horde.Repo, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.Users,
+      Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Layer,
       Hyper.Node.Img
@@ -57,12 +60,40 @@ defmodule Hyper.Node do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
   end
 
-  @doc false
-  def registry, do: @registry
+  @doc """
+  Start a VM here and confirm its budget.
+
+  `start_fun` boots the VM and returns `{:ok, vm_pid}`; the reservation is held
+  against `vm_pid` and released when it dies. If the reserve loses a race (the
+  node filled up since the scheduler's snapshot) the just-started VM is torn down
+  via `stop_fun` and `{:error, reason}` is returned.
+  """
+  @spec try_run(
+          Hyper.Vm.Instance.Spec.t(),
+          (-> {:ok, pid()} | {:error, term()}),
+          (pid() -> :ok)
+        ) :: {:ok, pid()} | {:error, term()}
+  def try_run(spec, start_fun, stop_fun) do
+    case start_fun.() do
+      {:ok, pid} ->
+        case Hyper.Node.Budget.admit(spec, pid) do
+          :ok ->
+            {:ok, pid}
+
+          {:error, reason} ->
+            :ok = stop_fun.(pid)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
+    with {:ok, _} <- Hyper.Node.Config.Budget.load(),
+         :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Sys.Linux.Dmsetup.test_system() do

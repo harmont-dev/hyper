@@ -1,0 +1,17 @@
+{
+  "enabledPlugins": {
+    "elixir-lsp@claude-code-elixir": true,
+    "mix-format@claude-code-elixir": true,
+    "mix-compile@claude-code-elixir": true,
+    "mix-credo@claude-code-elixir": true,
+    "elixir@claude-code-elixir": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-elixir": {
+      "source": {
+        "source": "github",
+        "repo": "georgeguimaraes/claude-code-elixir"
+      }
+    }
+  }
+}
