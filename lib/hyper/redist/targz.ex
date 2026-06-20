@@ -7,13 +7,8 @@ defmodule Hyper.Redist.Targz do
   @doc """
   Download `url`, verify its SHA-256 equals `sha256` (lowercase hex), and extract
   the archive into `dest_dir`.
-
-  Options:
-
-    * `:fetch` - a `(url, dest_path -> :ok | {:error, term})` downloader,
-      overridable for tests (default: `Req`).
   """
-  @spec install(String.t(), String.t(), Path.t(), keyword()) ::
+  @spec install(String.t(), String.t(), Path.t()) ::
           :ok
           | {:error,
              {:download_failed, non_neg_integer()}
@@ -21,21 +16,16 @@ defmodule Hyper.Redist.Targz do
              | {:checksum_mismatch, String.t(), String.t()}
              | {:unsafe_tar_entry, String.t()}
              | {:extract_failed, term()}}
-  def install(url, sha256, dest_dir, opts \\ []) do
-    fetch = Keyword.get(opts, :fetch, &default_fetch/2)
-    tmp = make_tmp_dir!()
-
-    try do
+  def install(url, sha256, dest_dir) do
+    Hyper.Sys.Tmp.with_tempdir("hyper-redist", fn tmp ->
       tar = Path.join(tmp, "download.tar.gz")
 
-      with :ok <- fetch.(url, tar),
+      with :ok <- fetch(url, tar),
            :ok <- verify_checksum(tar, sha256),
            :ok <- extract(tar, dest_dir) do
         :ok
       end
-    after
-      File.rm_rf!(tmp)
-    end
+    end)
   end
 
   defp verify_checksum(path, expected) do
@@ -95,13 +85,7 @@ defmodule Hyper.Redist.Targz do
     end)
   end
 
-  defp make_tmp_dir! do
-    dir = Path.join(System.tmp_dir!(), "hyper-redist-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-    dir
-  end
-
-  defp default_fetch(url, dest_path) do
+  defp fetch(url, dest_path) do
     case Req.get(url, into: File.stream!(dest_path), redirect: true, max_redirects: 5) do
       {:ok, %Req.Response{status: 200}} -> :ok
       {:ok, %Req.Response{status: status}} -> {:error, {:download_failed, status}}

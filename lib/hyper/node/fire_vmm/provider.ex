@@ -51,8 +51,6 @@ defmodule Hyper.Node.FireVMM.Provider do
     * `:arch` - target architecture atom (default: `Hyper.Sys.Arch.current/0`)
     * `:install_dir` - install location (default: `Hyper.Config.firecracker_install_dir/0`)
     * `:checksums` - `%{arch => sha256_hex}` (default: pinned `@checksums`)
-    * `:fetch` - a `(url, dest_path -> :ok | {:error, term})` downloader passed
-      through to `Hyper.Redist.Targz` (default: `Req`)
   """
   @spec ensure_installed(keyword()) :: :ok | {:error, term()}
   def ensure_installed(opts \\ []) do
@@ -82,18 +80,13 @@ defmodule Hyper.Node.FireVMM.Provider do
 
   defp do_install(arch, install_dir, opts) do
     checksums = Keyword.get(opts, :checksums, @checksums)
-    targz_opts = Keyword.take(opts, [:fetch])
 
     with {:ok, sha} <- fetch_checksum(checksums, arch) do
-      scratch = make_tmp_dir!()
-
-      try do
-        with :ok <- Targz.install(tarball_url(arch), sha, scratch, targz_opts) do
+      Hyper.Sys.Tmp.with_tempdir("hyper-firecracker", fn scratch ->
+        with :ok <- Targz.install(tarball_url(arch), sha, scratch) do
           install_binaries(scratch, arch, install_dir)
         end
-      after
-        File.rm_rf!(scratch)
-      end
+      end)
     end
   end
 
@@ -128,11 +121,5 @@ defmodule Hyper.Node.FireVMM.Provider do
   defp install_one(src, dest) do
     File.cp!(src, dest)
     File.chmod!(dest, 0o755)
-  end
-
-  defp make_tmp_dir! do
-    dir = Path.join(System.tmp_dir!(), "hyper-firecracker-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-    dir
   end
 end
