@@ -42,6 +42,7 @@ defmodule Hyper.Node do
     children = [
       {Horde.Repo, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.Users,
+      Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Layer,
       Hyper.Node.Img
@@ -62,7 +63,8 @@ defmodule Hyper.Node do
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
+    with {:ok, _} <- Hyper.Node.Config.Budget.load(),
+         :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.Sys.Linux.Dmsetup.test_system() do
