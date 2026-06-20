@@ -52,37 +52,14 @@ defmodule Hyper.Redist.Targz do
   defp extract(tar_path, dest_dir) do
     File.mkdir_p!(dest_dir)
 
-    case :erl_tar.table(String.to_charlist(tar_path), [:compressed]) do
-      {:ok, entries} ->
-        case find_unsafe_entry(entries) do
-          {:unsafe, name} ->
-            {:error, {:unsafe_tar_entry, name}}
-
-          :safe ->
-            case :erl_tar.extract(
-                   String.to_charlist(tar_path),
-                   [:compressed, :keep_old_files, {:cwd, String.to_charlist(dest_dir)}]
-                 ) do
-              :ok -> :ok
-              {:error, reason} -> {:error, {:extract_failed, reason}}
-            end
-        end
-
-      {:error, reason} ->
-        {:error, {:extract_failed, reason}}
+    case :erl_tar.extract(
+           String.to_charlist(tar_path),
+           [:compressed, :keep_old_files, {:cwd, String.to_charlist(dest_dir)}]
+         ) do
+      :ok -> :ok
+      {:error, {name, :unsafe_path}} -> {:error, {:unsafe_tar_entry, to_string(name)}}
+      {:error, reason} -> {:error, {:extract_failed, reason}}
     end
-  end
-
-  defp find_unsafe_entry(entries) do
-    Enum.reduce_while(entries, :safe, fn entry, _acc ->
-      name = to_string(entry)
-
-      if String.starts_with?(name, "/") or ".." in Path.split(name) do
-        {:halt, {:unsafe, name}}
-      else
-        {:cont, :safe}
-      end
-    end)
   end
 
   defp fetch(url, dest_path) do
