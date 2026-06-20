@@ -178,6 +178,9 @@ defmodule Hyper.Node.Budget.Hard do
     end
   end
 
+  @impl true
+  def handle_info(_msg, state), do: {:noreply, state}
+
   # Re-publish this node's NodeState after any reservation change. Guarded so
   # Hard runs standalone when no advertiser is present.
   @spec republish() :: :ok
