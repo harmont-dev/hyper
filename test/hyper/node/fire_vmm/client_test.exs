@@ -122,8 +122,12 @@ defmodule Hyper.Node.FireVMM.ClientTest do
     assert {:ok, %{"state" => "Not started"}} =
              Enum.reduce_while(1..50, {:error, :pending}, fn _i, _acc ->
                case Hyper.Node.FireVMM.Client.instance_info(pid) do
-                 {:ok, _} = ok -> {:halt, ok}
-                 _ -> Process.sleep(20) && {:cont, {:error, :pending}}
+                 {:ok, _} = ok ->
+                   {:halt, ok}
+
+                 _ ->
+                   Process.sleep(20)
+                   {:cont, {:error, :pending}}
                end
              end)
   end

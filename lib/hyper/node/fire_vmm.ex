@@ -73,6 +73,8 @@ defmodule Hyper.Node.FireVMM do
       {DynamicSupervisor,
        name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
       {State, vm_opts},
+      # Client must stay LAST: under :rest_for_one a controller (State) restart
+      # cycles the Client (cheap — it only rebuilds a Req struct) but never the daemon.
       {Client,
        %Client.Opts{
          vm_id: opts.vm_id,
