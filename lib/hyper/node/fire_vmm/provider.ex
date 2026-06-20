@@ -10,13 +10,6 @@ defmodule Hyper.Node.FireVMM.Provider do
   extracted as-is — the binaries live under `release-v<ver>-<arch>/` exactly as
   firecracker ships them, and `firecracker_bin/0` / `jailer_bin/0` resolve those
   paths.
-
-  Everything version- and architecture-specific lives in the `@downloads` table:
-  the tarball URL, its pinned SHA-256, and the binary paths inside the archive.
-  The SHA-256 digests are pinned here on purpose — downloading the
-  `*.sha256.txt` from the same host would be trust-on-first-use and provide no
-  real integrity guarantee. To bump firecracker, replace a whole `@downloads`
-  entry.
   """
 
   alias Hyper.Redist.Targz
@@ -61,13 +54,10 @@ defmodule Hyper.Node.FireVMM.Provider do
     end
   end
 
-  # The download spec for this machine's architecture, or an error if unsupported.
   defp download do
-    with {:ok, arch} <- Hyper.Sys.Arch.current() do
-      case Map.fetch(@downloads, arch) do
-        {:ok, dl} -> {:ok, dl}
-        :error -> {:error, {:unsupported_arch, arch}}
-      end
+    case Hyper.Sys.Arch.current() do
+      {:ok, arch} -> {:ok, Map.fetch!(@downloads, arch)}
+      {:error, _} = err -> err
     end
   end
 
@@ -78,14 +68,8 @@ defmodule Hyper.Node.FireVMM.Provider do
   end
 
   defp bin_path(key) do
-    Path.join(install_dir(), Map.fetch!(download!(), key))
-  end
-
-  defp download! do
-    case download() do
-      {:ok, dl} -> dl
-      {:error, reason} -> raise ArgumentError, "no firecracker download for this host: #{inspect(reason)}"
-    end
+    {:ok, dl} = download()
+    Path.join(install_dir(), Map.fetch!(dl, key))
   end
 
   defp install_dir, do: Hyper.Config.firecracker_install_dir()
