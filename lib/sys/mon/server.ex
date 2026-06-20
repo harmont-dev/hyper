@@ -2,7 +2,7 @@ defmodule Sys.Mon.Server do
   @moduledoc """
   Generic monitor process: drives a `Sys.Mon.Sampler` on a fixed period, folds
   each reading through a `Controls.Ewma` low-pass filter, emits a `:telemetry`
-  event, and answers `value/0`.
+  event, and answers `value/1`.
 
   Ticks self-schedule with `Process.send_after` *after* each sample completes, so
   a slow sample cannot let ticks pile up. `Δt` for the filter is measured with

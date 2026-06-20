@@ -35,7 +35,6 @@ defmodule Hyper.Node.FireVMM.Jailer do
     """
 
     alias Hyper.Config
-    alias Sys
 
     @doc "Run every pre-requisite check, halting at the first failure."
     @spec run() :: :ok | {:error, term()}
