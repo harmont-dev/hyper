@@ -120,8 +120,9 @@ defmodule Hyper.Cluster.LayerAuditor do
     end
   end
 
-  # Stale timers delivered after losing/never-having the active role: ignore.
-  def handle_info(msg, state) when msg in [:sweep, :scan], do: {:noreply, state}
+  # Ignore any unexpected message (stale :sweep/:scan timers from a previous
+  # role, monitor noise, etc.) rather than crashing an in-flight sweep.
+  def handle_info(_msg, state), do: {:noreply, state}
 
   ## Internals
 

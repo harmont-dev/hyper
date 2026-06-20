@@ -8,7 +8,6 @@ defmodule Hyper.Cluster.LayerAuditor.Sweep do
   GenServer drives it batch by batch and acts on the returned outcomes.
   """
 
-  @enforce_keys []
   defstruct cursor: nil, scanned: 0, present: 0, missing: 0, mismatch: 0
 
   @type t :: %__MODULE__{
