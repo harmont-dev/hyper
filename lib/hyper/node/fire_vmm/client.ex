@@ -116,6 +116,40 @@ defmodule Hyper.Node.FireVMM.Client do
   @spec version(server()) :: result()
   def version(server), do: call(server, :get, "/version")
 
+  @doc "GET /balloon."
+  @spec get_balloon(server()) :: result()
+  def get_balloon(server), do: call(server, :get, "/balloon")
+
+  @doc "PUT /balloon (pre-boot)."
+  @spec put_balloon(server(), Schema.Balloon.t()) :: result()
+  def put_balloon(server, %Schema.Balloon{} = b), do: call(server, :put, "/balloon", b)
+
+  @doc "PATCH /balloon — update target size (post-boot)."
+  @spec patch_balloon(server(), Schema.BalloonUpdate.t()) :: result()
+  def patch_balloon(server, %Schema.BalloonUpdate{} = b), do: call(server, :patch, "/balloon", b)
+
+  @doc "GET /balloon/statistics."
+  @spec get_balloon_stats(server()) :: result()
+  def get_balloon_stats(server), do: call(server, :get, "/balloon/statistics")
+
+  @doc "PATCH /balloon/statistics — update polling interval."
+  @spec patch_balloon_stats(server(), Schema.BalloonStatsUpdate.t()) :: result()
+  def patch_balloon_stats(server, %Schema.BalloonStatsUpdate{} = b),
+    do: call(server, :patch, "/balloon/statistics", b)
+
+  @doc "PATCH /balloon/hinting/start."
+  @spec start_balloon_hinting(server(), Schema.BalloonStartCmd.t()) :: result()
+  def start_balloon_hinting(server, %Schema.BalloonStartCmd{} = b),
+    do: call(server, :patch, "/balloon/hinting/start", b)
+
+  @doc "GET /balloon/hinting/status."
+  @spec get_balloon_hinting_status(server()) :: result()
+  def get_balloon_hinting_status(server), do: call(server, :get, "/balloon/hinting/status")
+
+  @doc "PATCH /balloon/hinting/stop (no body)."
+  @spec stop_balloon_hinting(server()) :: result()
+  def stop_balloon_hinting(server), do: call(server, :patch, "/balloon/hinting/stop")
+
   ## Transport
 
   @spec call(server(), :get | :put | :patch, String.t()) :: result()
