@@ -4,9 +4,10 @@ defprotocol Unit.Quantity do
   (bytes, nanoseconds, bytes/sec, ...). Implementing this is all a unit type
   needs to get `+`, `-`, and the ordering operators from `Unit.Operators`.
 
-  Implementations go through the type's own public constructor/accessor so the
-  opaque struct stays opaque, and so per-type invariants (e.g. a byte count can
-  never go negative) are enforced in one place: `with_value/2`.
+  Implementations go through the type's own public constructor/accessor, so the
+  opaque struct is read and rebuilt without ever being poked from the outside.
+  Quantities are signed: subtraction may legitimately yield a negative value (a
+  deficit), and nothing clamps it.
   """
 
   @doc "The canonical scalar (e.g. bytes) backing the quantity."
@@ -14,8 +15,12 @@ defprotocol Unit.Quantity do
   def value(quantity)
 
   @doc """
-  A quantity of the same dimension carrying scalar `n`, with the type's
-  invariants applied (clamping, etc.).
+  A quantity of the same dimension as `quantity`, carrying scalar `n`.
+
+  `Unit.Operators` calls this to rebuild a result through the type's own public
+  constructor, so the opaque struct is never poked from the outside. `quantity`
+  only selects the implementation (the protocol dispatches on it); its scalar is
+  unused.
   """
   @spec with_value(t(), integer()) :: t()
   def with_value(quantity, n)

@@ -9,35 +9,35 @@ defmodule Unit.Information do
   @enforce_keys [:bytes]
   defstruct [:bytes]
 
-  @opaque t :: %__MODULE__{bytes: non_neg_integer()}
+  @opaque t :: %__MODULE__{bytes: integer()}
 
   @kib 1024
   @mib 1024 * @kib
   @gib 1024 * @mib
   @tib 1024 * @gib
 
-  @spec bytes(non_neg_integer()) :: t()
+  @spec bytes(integer()) :: t()
   def bytes(v), do: %__MODULE__{bytes: v}
 
-  @spec kib(non_neg_integer()) :: t()
+  @spec kib(integer()) :: t()
   def kib(v), do: %__MODULE__{bytes: v * @kib}
 
-  @spec mib(non_neg_integer()) :: t()
+  @spec mib(integer()) :: t()
   def mib(v), do: %__MODULE__{bytes: v * @mib}
 
-  @spec gib(non_neg_integer()) :: t()
+  @spec gib(integer()) :: t()
   def gib(v), do: %__MODULE__{bytes: v * @gib}
 
-  @spec tib(non_neg_integer()) :: t()
+  @spec tib(integer()) :: t()
   def tib(v), do: %__MODULE__{bytes: v * @tib}
 
-  @spec as_bytes(t()) :: non_neg_integer()
+  @spec as_bytes(t()) :: integer()
   def as_bytes(%__MODULE__{bytes: b}), do: b
 
-  @spec as_mib(t()) :: non_neg_integer()
+  @spec as_mib(t()) :: integer()
   def as_mib(%__MODULE__{bytes: b}), do: div(b, @mib)
 
-  @spec as_gib(t()) :: non_neg_integer()
+  @spec as_gib(t()) :: integer()
   def as_gib(%__MODULE__{bytes: b}), do: div(b, @gib)
 
   @doc "The zero quantity (additive identity)."
@@ -46,7 +46,6 @@ defmodule Unit.Information do
 end
 
 defimpl Unit.Quantity, for: Unit.Information do
-  # Bytes never go negative, so subtraction past zero clamps (see Unit.Operators).
   def value(q), do: Unit.Information.as_bytes(q)
-  def with_value(_q, n), do: Unit.Information.bytes(max(0, n))
+  def with_value(_q, n), do: Unit.Information.bytes(n)
 end

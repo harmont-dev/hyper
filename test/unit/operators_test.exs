@@ -12,10 +12,10 @@ defmodule Unit.OperatorsTest do
     assert Information.gib(1) + Information.gib(1) == Information.gib(2)
   end
 
-  test "Time may go negative; non-negative units clamp at zero" do
+  test "subtraction may go negative in every dimension" do
     assert Time.ms(1) - Time.ms(3) == Time.ns(-2_000_000)
-    assert Information.mib(1) - Information.mib(3) == Information.zero()
-    assert Bandwidth.mibps(1) - Bandwidth.mibps(3) == Bandwidth.bps(0)
+    assert Information.mib(1) - Information.mib(3) == Information.mib(-2)
+    assert Bandwidth.mibps(1) - Bandwidth.mibps(3) == Bandwidth.mibps(-2)
   end
 
   test "ordering operators compare within a dimension" do

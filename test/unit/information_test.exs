@@ -8,9 +8,9 @@ defmodule Unit.InformationTest do
     assert Information.mib(1) + Information.mib(2) == Information.mib(3)
   end
 
-  test "- subtracts and clamps at zero (bytes are non-negative)" do
+  test "- subtracts, and may go negative" do
     assert Information.mib(3) - Information.mib(1) == Information.mib(2)
-    assert Information.mib(1) - Information.mib(3) == Information.zero()
+    assert Information.mib(1) - Information.mib(3) == Information.mib(-2)
   end
 
   test "ordering operators compare quantities" do

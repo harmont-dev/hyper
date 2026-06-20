@@ -23,8 +23,8 @@ defmodule Hyper.Node.BudgetTest do
 
     assert Budget.add(a, b) == %Alpha{mem: Information.mib(130), disk: Information.gib(14)}
     assert Budget.sub(a, b) == %Alpha{mem: Information.mib(70), disk: Information.gib(6)}
-    # sub clamps per dimension: subtracting more than is present yields zero.
-    assert Budget.sub(b, a) == Budget.zero()
+    # sub may go negative per dimension (a deficit is a meaningful value).
+    assert Budget.sub(b, a) == %Alpha{mem: Information.mib(-70), disk: Information.gib(-6)}
   end
 
   test "fits? requires every dimension to have at least the requirement" do

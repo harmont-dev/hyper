@@ -55,7 +55,7 @@ defmodule Hyper.Node.Budget do
     %Alpha{mem: a.mem + b.mem, disk: a.disk + b.disk}
   end
 
-  @doc "Dimension-wise difference `a - b`, clamped at zero per dimension."
+  @doc "Dimension-wise difference `a - b`; a dimension may be negative (a deficit)."
   @spec sub(Alpha.t(), Alpha.t()) :: Alpha.t()
   def sub(%Alpha{} = a, %Alpha{} = b) do
     %Alpha{mem: a.mem - b.mem, disk: a.disk - b.disk}

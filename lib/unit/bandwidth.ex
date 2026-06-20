@@ -9,29 +9,29 @@ defmodule Unit.Bandwidth do
   @enforce_keys [:bytes_per_sec]
   defstruct [:bytes_per_sec]
 
-  @opaque t :: %__MODULE__{bytes_per_sec: non_neg_integer()}
+  @opaque t :: %__MODULE__{bytes_per_sec: integer()}
 
   @kib 1024
   @mib 1024 * @kib
   @gib 1024 * @mib
   @tib 1024 * @gib
 
-  @spec bps(non_neg_integer()) :: t()
+  @spec bps(integer()) :: t()
   def bps(v), do: %__MODULE__{bytes_per_sec: v}
 
-  @spec kibps(non_neg_integer()) :: t()
+  @spec kibps(integer()) :: t()
   def kibps(v), do: %__MODULE__{bytes_per_sec: v * @kib}
 
-  @spec mibps(non_neg_integer()) :: t()
+  @spec mibps(integer()) :: t()
   def mibps(v), do: %__MODULE__{bytes_per_sec: v * @mib}
 
-  @spec gibps(non_neg_integer()) :: t()
+  @spec gibps(integer()) :: t()
   def gibps(v), do: %__MODULE__{bytes_per_sec: v * @gib}
 
-  @spec tibps(non_neg_integer()) :: t()
+  @spec tibps(integer()) :: t()
   def tibps(v), do: %__MODULE__{bytes_per_sec: v * @tib}
 
-  @spec as_bytes_per_sec(t()) :: non_neg_integer()
+  @spec as_bytes_per_sec(t()) :: integer()
   def as_bytes_per_sec(%__MODULE__{bytes_per_sec: bps}), do: bps
 
   @doc "The zero throughput (additive identity)."
@@ -40,7 +40,6 @@ defmodule Unit.Bandwidth do
 end
 
 defimpl Unit.Quantity, for: Unit.Bandwidth do
-  # Throughput never goes negative, so subtraction past zero clamps.
   def value(q), do: Unit.Bandwidth.as_bytes_per_sec(q)
-  def with_value(_q, n), do: Unit.Bandwidth.bps(max(0, n))
+  def with_value(_q, n), do: Unit.Bandwidth.bps(n)
 end
