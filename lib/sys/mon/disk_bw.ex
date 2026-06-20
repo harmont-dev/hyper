@@ -42,18 +42,37 @@ defmodule Sys.Mon.DiskBw do
   @impl true
   def init, do: {:ok, nil}
 
+  # Virtual layers (loop/dm/nbd/...) and partitions are excluded: they aren't real
+  # device bandwidth, and a whole-disk counter already includes its partitions'
+  # I/O, so counting both would double-count. Best-effort by name - a node with
+  # unusual device naming may want this made configurable.
+  @virtual ~r/^(loop|ram|zram|sr|fd|md|dm-|nbd)/
+  @partition ~r/^(nvme\d+n\d+|mmcblk\d+)p\d+$|^(sd|vd|hd|xvd)[a-z]+\d+$/
+
   @impl true
   def sample(rate_state) do
-    case Diskstats.read_total_physical() do
-      {:ok, bytes} ->
+    case Diskstats.read() do
+      {:ok, devices} ->
         rate_state
-        |> Rate.compute(bytes, System.monotonic_time(:millisecond))
+        |> Rate.compute(physical_bytes(devices), System.monotonic_time(:millisecond))
         |> as_bandwidth()
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  # Sum read+write bytes across whole physical disks only.
+  @spec physical_bytes([Diskstats.Device.t()]) :: non_neg_integer()
+  defp physical_bytes(devices) do
+    devices
+    |> Enum.filter(&physical?(&1.name))
+    |> Enum.reduce(0, fn d, acc -> acc + d.read_bytes + d.write_bytes end)
+  end
+
+  @spec physical?(String.t()) :: boolean()
+  defp physical?(name),
+    do: not Regex.match?(@virtual, name) and not Regex.match?(@partition, name)
 
   # Project the raw bytes/sec rate into a `Unit.Bandwidth` reading.
   @spec as_bandwidth({:ok, float(), Rate.state()} | {:skip, Rate.state()}) ::

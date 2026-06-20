@@ -1,40 +1,43 @@
 defmodule Sys.Linux.Proc.Diskstats do
   @moduledoc """
-  Reads cumulative block-device I/O from `/proc/diskstats`.
+  Parses `/proc/diskstats` into per-device I/O counters.
 
-  Per line the fields after `major minor name` are `reads_completed reads_merged
-  sectors_read ... writes_completed writes_merged sectors_written ...`. A sector is
-  512 bytes. Whole-disk counters already include their partitions' I/O, so
-  `total_physical/1` counts whole physical disks only - summing partitions too
-  would double-count, and virtual devices (`loop`, `dm-`, `ram`, `md`, ...) are not
-  real node bandwidth.
+  Each line is `major minor name <stats...>`. This reads the cumulative sector
+  counts (`sectors_read`, column 6; `sectors_written`, column 10) and converts them
+  to bytes - a sector is 512 bytes by kernel convention, independent of the disk's
+  physical sector size.
+
+  Every device line is returned as-is: whole disks, partitions, and loop/dm/nbd
+  virtual devices alike. Which devices count toward a metric (and how to avoid
+  double-counting a disk and its partitions) is the caller's policy, not this
+  parser's concern.
   """
 
   @path "/proc/diskstats"
   @sector_bytes 512
 
-  # sectors_read and sectors_written, 0-based among whitespace-split tokens.
+  # 0-based offsets among the whitespace-split tokens of a line.
   @sectors_read_idx 5
   @sectors_written_idx 9
 
-  @virtual_prefix ~r/^(loop|ram|zram|sr|fd|md|dm-)/
-  @nvme_mmc_partition ~r/^(nvme\d+n\d+|mmcblk\d+)p\d+$/
-  @scsi_partition ~r/^(sd|vd|hd|xvd)[a-z]+\d+$/
-
   defmodule Device do
-    @moduledoc "One `/proc/diskstats` row: a block device and its cumulative (read + written) bytes."
-    @type t :: %__MODULE__{name: String.t(), bytes: non_neg_integer()}
-    @enforce_keys [:name, :bytes]
-    defstruct [:name, :bytes]
+    @moduledoc "One `/proc/diskstats` row: a block device and its cumulative read/written bytes."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            read_bytes: non_neg_integer(),
+            write_bytes: non_neg_integer()
+          }
+    @enforce_keys [:name, :read_bytes, :write_bytes]
+    defstruct [:name, :read_bytes, :write_bytes]
   end
 
-  @doc "Read `/proc/diskstats` and total the bytes across whole physical disks."
-  @spec read_total_physical() :: {:ok, non_neg_integer()} | {:error, File.posix()}
-  def read_total_physical do
-    with {:ok, content} <- File.read(@path), do: {:ok, total_physical(content)}
+  @doc "Read and parse `/proc/diskstats`."
+  @spec read() :: {:ok, [Device.t()]} | {:error, File.posix()}
+  def read do
+    with {:ok, content} <- File.read(@path), do: {:ok, parse(content)}
   end
 
-  @doc "Parse each `/proc/diskstats` row into a `Device` with its cumulative (read + written) bytes."
+  @doc "Parse a `/proc/diskstats` payload into one `Device` per device line."
   @spec parse(String.t()) :: [Device.t()]
   def parse(content) do
     content
@@ -42,9 +45,13 @@ defmodule Sys.Linux.Proc.Diskstats do
     |> Enum.flat_map(fn line ->
       case String.split(line) do
         [_major, _minor, name | _rest] = fields when length(fields) > @sectors_written_idx ->
-          read = String.to_integer(Enum.at(fields, @sectors_read_idx))
-          written = String.to_integer(Enum.at(fields, @sectors_written_idx))
-          [%Device{name: name, bytes: (read + written) * @sector_bytes}]
+          [
+            %Device{
+              name: name,
+              read_bytes: column(fields, @sectors_read_idx) * @sector_bytes,
+              write_bytes: column(fields, @sectors_written_idx) * @sector_bytes
+            }
+          ]
 
         _ ->
           []
@@ -52,21 +59,6 @@ defmodule Sys.Linux.Proc.Diskstats do
     end)
   end
 
-  @doc "Whether `name` is a whole physical disk (not a partition or virtual device)."
-  @spec physical_device?(String.t()) :: boolean()
-  def physical_device?(name) do
-    not Regex.match?(@virtual_prefix, name) and
-      not Regex.match?(@nvme_mmc_partition, name) and
-      not Regex.match?(@scsi_partition, name)
-  end
-
-  @doc "Total cumulative bytes across whole physical disks."
-  @spec total_physical(String.t()) :: non_neg_integer()
-  def total_physical(content) do
-    content
-    |> parse()
-    |> Enum.filter(fn %Device{name: name} -> physical_device?(name) end)
-    |> Enum.map(fn %Device{bytes: bytes} -> bytes end)
-    |> Enum.sum()
-  end
+  @spec column([String.t()], non_neg_integer()) :: non_neg_integer()
+  defp column(fields, idx), do: fields |> Enum.at(idx) |> String.to_integer()
 end
