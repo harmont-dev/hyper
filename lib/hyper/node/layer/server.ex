@@ -13,7 +13,7 @@ defmodule Hyper.Node.Layer.Server do
 
   alias Hyper.Node.Layer
   alias Hyper.Node.Layer.Repo
-  alias Hyper.Sys.Linux.Losetup
+  alias Sys.Linux.Losetup
 
   # Grace period after the last holder leaves before the layer is unmounted. Keeps
   # bursty acquire/release cycles from thrashing the mount.

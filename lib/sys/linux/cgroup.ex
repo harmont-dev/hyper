@@ -1,7 +1,7 @@
-defmodule Hyper.Sys.Linux.Cgroup do
+defmodule Sys.Linux.Cgroup do
   @moduledoc "cgroup introspection."
 
-  alias Hyper.Sys.Linux.Proc.Mounts
+  alias Sys.Linux.Proc.Mounts
 
   @doc """
   Detect which cgroup versions are mounted on this system, from `/proc/mounts`.

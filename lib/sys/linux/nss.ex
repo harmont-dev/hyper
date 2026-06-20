@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Linux.Nss do
+defmodule Sys.Linux.Nss do
   @moduledoc "NSS (Name Service Switch) utilities - queries users and groups via `getent`."
 
   defmodule Passwd do
@@ -26,7 +26,7 @@ defmodule Hyper.Sys.Linux.Nss do
             | {:error,
                {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
-      with {:ok, output} <- Hyper.Sys.Linux.Nss.getent(@getent_db) do
+      with {:ok, output} <- Sys.Linux.Nss.getent(@getent_db) do
         output
         |> String.split("\n", trim: true)
         |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
@@ -82,7 +82,7 @@ defmodule Hyper.Sys.Linux.Nss do
             | {:error,
                {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
-      with {:ok, output} <- Hyper.Sys.Linux.Nss.getent(@getent_db) do
+      with {:ok, output} <- Sys.Linux.Nss.getent(@getent_db) do
         output
         |> String.split("\n", trim: true)
         |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
