@@ -4,9 +4,9 @@ defmodule Hyper.Node.FireVMM.State do
   lifecycle: launches it into the per-VM `DynamicSupervisor`, monitors it, and
   decides what happens when it dies.
 
-      :booting ──▶ :running ⇄ :paused ──▶ :stopping
-          ▲            │
-          └─ :crashed ◀┘   (daemon died unexpectedly; cold-boot or restore)
+      :booting --> :running <-> :paused --> :stopping
+          ^            |
+          +- :crashed <+   (daemon died unexpectedly; cold-boot or restore)
 
   This module's struct is the gen_statem *data*; the gen_statem *state* is the
   lifecycle atom above.

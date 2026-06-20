@@ -4,7 +4,7 @@
 //! A `.preinit_array` entry ([`drop_to_real`]) immediately drops the effective uid
 //! to the caller while keeping the saved-uid (root) so we can re-raise. From then
 //! on the process is unprivileged, and **the only way back to root is a
-//! [`Privileged`] guard** — raising to root lives nowhere else. The guard lowers
+//! [`Privileged`] guard** - raising to root lives nowhere else. The guard lowers
 //! privileges again when it goes out of scope, so the root window is exactly the
 //! guard's lifetime.
 //!
@@ -26,7 +26,7 @@ pub enum Error {
 }
 
 /// `.preinit_array` runs before `.init_array` and before any shared-library
-/// initializer, so this is the first userspace code the process executes — earlier
+/// initializer, so this is the first userspace code the process executes - earlier
 /// than a normal constructor. It drops effective privileges to the real uid, so
 /// root is never held outside a `Privileged` scope.
 #[cfg(target_os = "linux")]
@@ -35,7 +35,7 @@ pub enum Error {
 static PREINIT_DROP_PRIVILEGES: extern "C" fn() = drop_to_real;
 
 // Runs before the Rust runtime is initialized, so it must avoid std entirely: no
-// allocation, no std I/O, and no `std::process::abort` — those assume runtime
+// allocation, no std I/O, and no `std::process::abort` - those assume runtime
 // state that doesn't exist this early. `seteuid`/`getuid`/`write`/`_exit` are
 // bare syscalls (async-signal-safe) and valid here.
 extern "C" fn drop_to_real() {

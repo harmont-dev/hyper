@@ -3,7 +3,7 @@ defmodule Hyper.Sys.Tmp do
 
   @doc """
   Create a fresh temporary directory, pass its path to `fun`, and remove it
-  (recursively) afterward — even if `fun` raises. Returns whatever `fun` returns.
+  (recursively) afterward - even if `fun` raises. Returns whatever `fun` returns.
 
   `prefix` is used to name the directory, which helps identify leaked temp dirs.
   """

@@ -10,7 +10,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   process, the jailer owns isolation.
 
   Because firecracker is chrooted to `<chroot_base>/<exec>/<id>/root`, the API
-  socket it opens at `/api.socket` lives at `host_socket` on the host — that's the
+  socket it opens at `/api.socket` lives at `host_socket` on the host - that's the
   path the controller connects to.
 
   Host config: paths are derived from `config :hyper, work_dir: ...`. The

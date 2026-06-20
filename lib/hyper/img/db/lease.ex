@@ -8,7 +8,7 @@ defmodule Hyper.Img.Db.Lease do
     * heartbeat     -> bump expires_at      (keeps a live VM's claim fresh)
 
   Because the claim is owned and expiring, a node that dies mid-VM does not leak a
-  reference — its lease simply lapses, and the blob becomes deletable again without
+  reference - its lease simply lapses, and the blob becomes deletable again without
   anyone running the missing decrement.
   """
   use Ecto.Schema
@@ -44,7 +44,7 @@ defmodule Hyper.Img.Db.Lease do
   @doc """
   Take a lease on the given image, bumping its expiry if one already exists.
 
-  Upserts on `(node_id, vm_id)` — the same call both takes a fresh lease and
+  Upserts on `(node_id, vm_id)` - the same call both takes a fresh lease and
   heartbeats a live one.
   """
   @spec bump(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::

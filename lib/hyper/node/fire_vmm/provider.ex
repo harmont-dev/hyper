@@ -7,7 +7,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   executable it returns `:ok` without touching the network. Otherwise it fetches
   the official firecracker release tarball for the detected architecture via
   `Hyper.Redist.Targz` (download, SHA-256 verify, extract). The archive is
-  extracted as-is — the binaries live under `release-v<ver>-<arch>/` exactly as
+  extracted as-is - the binaries live under `release-v<ver>-<arch>/` exactly as
   firecracker ships them, and `firecracker_bin/0` / `jailer_bin/0` resolve those
   paths.
   """
@@ -55,7 +55,7 @@ defmodule Hyper.Node.FireVMM.Provider do
 
   # `:ok` if `dl`'s version-specific binaries are present and executable;
   # `{:error, :not_installed}` if the install dir is empty/absent; otherwise
-  # `{:error, :bad_install}` — something is there but it's the wrong version,
+  # `{:error, :bad_install}` - something is there but it's the wrong version,
   # partial, or corrupt, which we cannot fix in place because `Targz` keeps
   # existing files. The remedy is to wipe and reinstall.
   @spec check_install(map()) :: :ok | {:error, :not_installed | :bad_install}

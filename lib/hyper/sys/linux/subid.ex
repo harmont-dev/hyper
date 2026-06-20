@@ -2,7 +2,7 @@ defmodule Hyper.Sys.Linux.Subid do
   @moduledoc "Subuid and Subgid utilities"
 
   defmodule Spec do
-    @moduledoc "A subordinate id range — one `/etc/subuid` or `/etc/subgid` entry."
+    @moduledoc "A subordinate id range - one `/etc/subuid` or `/etc/subgid` entry."
 
     @type t :: %__MODULE__{
             name: String.t(),

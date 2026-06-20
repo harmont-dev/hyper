@@ -18,7 +18,7 @@ defmodule Hyper.Node do
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
       this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
-      VMs on a surviving node — cold-booting a ghost).
+      VMs on a surviving node - cold-booting a ghost).
 
     * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
       and group id.
