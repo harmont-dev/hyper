@@ -59,11 +59,12 @@ defmodule Sys.Mon.Cpu do
   end
 
   # Busy fraction (`0.0..1.0`) between an earlier and a later `/proc/stat`
-  # snapshot. A non-positive interval (no elapsed jiffies) yields `0.0`.
+  # snapshot, computed from the aggregate CPU times. A non-positive interval (no
+  # elapsed jiffies) yields `0.0`.
   @spec utilization(Stat.Snapshot.t(), Stat.Snapshot.t()) :: float()
-  defp utilization(%Stat.Snapshot{idle: i0, total: t0}, %Stat.Snapshot{idle: i1, total: t1}) do
-    dt = t1 - t0
-    di = i1 - i0
+  defp utilization(%Stat.Snapshot{cpu: earlier}, %Stat.Snapshot{cpu: later}) do
+    dt = Stat.CpuTimes.total(later) - Stat.CpuTimes.total(earlier)
+    di = Stat.CpuTimes.idle(later) - Stat.CpuTimes.idle(earlier)
 
     if dt <= 0 do
       0.0
