@@ -73,11 +73,11 @@ defmodule Sys.Linux.Proc.MeminfoTest do
       snap = Meminfo.parse(@real_meminfo)
 
       assert %Snapshot{} = snap
-      assert bytes(snap.total) == 16_370_012 * 1024
-      assert bytes(snap.available) == 5_220_048 * 1024
-      assert bytes(snap.free) == 1_643_856 * 1024
-      assert bytes(snap.buffers) == 716_556 * 1024
-      assert bytes(snap.cached) == 1_331_380 * 1024
+      assert snap.total == Information.kib(16_370_012)
+      assert snap.available == Information.kib(5_220_048)
+      assert snap.free == Information.kib(1_643_856)
+      assert snap.buffers == Information.kib(716_556)
+      assert snap.cached == Information.kib(1_331_380)
     end
 
     test "ignores no-kB lines (HugePages_*) and tolerates very large values" do
@@ -85,7 +85,7 @@ defmodule Sys.Linux.Proc.MeminfoTest do
       # 14-digit VmallocTotal; neither must break parsing of the real fields.
       snap = Meminfo.parse(@real_meminfo)
 
-      assert bytes(snap.total) == 16_370_012 * 1024
+      assert snap.total == Information.kib(16_370_012)
     end
 
     test "parses a minimal payload carrying only the required keys" do
@@ -99,11 +99,11 @@ defmodule Sys.Linux.Proc.MeminfoTest do
 
       snap = Meminfo.parse(payload)
 
-      assert bytes(snap.total) == 16_384 * 1024
-      assert bytes(snap.available) == 8_192 * 1024
-      assert bytes(snap.free) == 1_024 * 1024
-      assert bytes(snap.buffers) == 256 * 1024
-      assert bytes(snap.cached) == 2_048 * 1024
+      assert snap.total == Information.kib(16_384)
+      assert snap.available == Information.kib(8_192)
+      assert snap.free == Information.kib(1_024)
+      assert snap.buffers == Information.kib(256)
+      assert snap.cached == Information.kib(2_048)
     end
 
     test "raises when a required field is absent" do
