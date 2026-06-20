@@ -1,12 +1,7 @@
 defmodule Sys.Mon do
   @moduledoc """
-  Supervises this node's real-time soft-metric monitors and exposes their current
+  Supervises this node's real-time resource monitors and exposes their current
   readings to the scheduler.
-
-  Each child is an independent `Sys.Mon.Server` sampling one metric on its own
-  prime-second period (`Cpu` 2 s, `Mem` 5 s, `DiskBw` 7 s, `NetBw` 11 s - pairwise
-  coprime, so their tick phases rarely align) and low-pass-filtering the result.
-  `one_for_one`: a crash in one monitor never disturbs the others.
 
   Telemetry events emitted by the children:
 
@@ -22,6 +17,18 @@ defmodule Sys.Mon do
 
   alias Sys.Mon.{Cpu, DiskBw, Mem, NetBw}
 
+  defmodule Readings do
+    @moduledoc "A snapshot of every monitored soft metric at one instant."
+    @type t :: %__MODULE__{
+            cpu: Sys.Mon.Server.Reading.t(),
+            mem: Mem.Reading.t(),
+            disk_bw: DiskBw.Reading.t(),
+            net_bw: NetBw.Reading.t()
+          }
+    @enforce_keys [:cpu, :mem, :disk_bw, :net_bw]
+    defstruct [:cpu, :mem, :disk_bw, :net_bw]
+  end
+
   @doc "Start the monitor supervisor."
   @spec start_link(term()) :: Supervisor.on_start()
   def start_link(_arg), do: Supervisor.start_link(__MODULE__, nil, name: __MODULE__)
@@ -31,17 +38,9 @@ defmodule Sys.Mon do
     Supervisor.init([Cpu, Mem, DiskBw, NetBw], strategy: :one_for_one)
   end
 
-  @typedoc "A snapshot of every monitored soft metric."
-  @type readings :: %{
-          cpu: Sys.Mon.Server.Reading.t(),
-          mem: Mem.Reading.t(),
-          disk_bw: DiskBw.Reading.t(),
-          net_bw: NetBw.Reading.t()
-        }
-
   @doc "The current instantaneous + filtered reading for every monitored metric."
-  @spec readings() :: readings()
+  @spec readings() :: Readings.t()
   def readings do
-    %{cpu: Cpu.value(), mem: Mem.value(), disk_bw: DiskBw.value(), net_bw: NetBw.value()}
+    %Readings{cpu: Cpu.value(), mem: Mem.value(), disk_bw: DiskBw.value(), net_bw: NetBw.value()}
   end
 end
