@@ -13,13 +13,15 @@ defmodule Hyper.Node.FireVMM.Jailer do
   socket it opens at `/api.socket` lives at `host_socket` on the host — that's the
   path the controller connects to.
 
-  Host config (`config :hyper, ...`): `:jailer_bin`, `:firecracker_bin`,
-  `:jailer_chroot_base`, `:cgroup_parent`, `:jailer_uid`, `:jailer_gid`.
+  Host config: paths are derived from `config :hyper, work_dir: ...`. The
+  firecracker + jailer binaries are installed under `<work_dir>/redist/firecracker`
+  by `Hyper.Node.FireVMM.Provider`; the chroot base is `<work_dir>/jails`.
   """
 
   use OpenTelemetryDecorator
 
   alias Hyper.Node.FireVMM
+  alias Hyper.Node.FireVMM.Provider
   alias Hyper.Vm.Instance
 
   # firecracker's API socket path *inside* the chroot.
@@ -50,25 +52,11 @@ defmodule Hyper.Node.FireVMM.Jailer do
 
     defp all do
       [
-        &jailer_executable/0,
-        &firecracker_executable/0,
         &kvm_present/0,
         &cgroup_v2_available/0,
         &parent_cgroup_present/0,
         &chroot_writable/0
       ]
-    end
-
-    defp jailer_executable do
-      if Sys.Posix.executable?(Config.jailer_bin()),
-        do: :ok,
-        else: {:error, :jailer_unavailable}
-    end
-
-    defp firecracker_executable do
-      if Sys.Posix.executable?(Config.firecracker_bin()),
-        do: :ok,
-        else: {:error, :firecracker_unavailable}
     end
 
     defp kvm_present do
@@ -111,7 +99,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         "--id",
         opts.vm_id,
         "--exec-file",
-        Hyper.Config.firecracker_bin(),
+        Provider.firecracker_bin(),
         "--uid",
         to_string(opts.uid),
         "--gid",
@@ -126,7 +114,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         cgroup_flags(opts.type) ++
         ["--", "--api-sock", "/" <> @jail_socket]
 
-    %{binary: Hyper.Config.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
+    %{binary: Provider.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
   end
 
   # Find the appropriate jailer cgroup flags for the given instance type.
@@ -153,5 +141,5 @@ defmodule Hyper.Node.FireVMM.Jailer do
     ])
   end
 
-  defp exec_name, do: Path.basename(Hyper.Config.firecracker_bin())
+  defp exec_name, do: Path.basename(Provider.firecracker_bin())
 end
