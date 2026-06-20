@@ -42,33 +42,57 @@ defmodule Hyper.Node.FireVMM.Provider do
   @doc """
   Ensure the firecracker release is installed for this node.
 
-  Idempotent: returns `:ok` immediately if the binaries are already installed,
-  otherwise fetches and installs them. Quits early with
+  Idempotent: returns `:ok` if the correct binaries are already installed and
+  executable. A clean machine is installed fresh; an install that is broken,
+  partial, or a different version is wiped and reinstalled. Quits early with
   `{:error, {:unsupported_arch, _}}` if this machine's architecture is not
   supported.
   """
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
-    with {:ok, dl} <- download() do
-      if installed?(dl), do: :ok, else: Targz.install(dl.url, dl.sha256, install_dir())
+    with {:ok, arch} <- Hyper.Sys.Arch.current() do
+      dl = Map.fetch!(@downloads, arch)
+
+      case check_install(dl) do
+        :ok -> :ok
+        {:error, :not_installed} -> install(dl)
+        {:error, :bad_install} -> reinstall(dl)
+      end
     end
   end
 
-  defp download do
-    case Hyper.Sys.Arch.current() do
-      {:ok, arch} -> {:ok, Map.fetch!(@downloads, arch)}
-      {:error, _} = err -> err
+  # `:ok` if `dl`'s version-specific binaries are present and executable;
+  # `{:error, :not_installed}` if the install dir is empty/absent; otherwise
+  # `{:error, :bad_install}` — something is there but it's the wrong version,
+  # partial, or corrupt, which we cannot fix in place because `Targz` keeps
+  # existing files. The remedy is to wipe and reinstall.
+  @spec check_install(map()) :: :ok | {:error, :not_installed | :bad_install}
+  defp check_install(dl) do
+    fc = Path.join(install_dir(), dl.firecracker)
+    jail = Path.join(install_dir(), dl.jailer)
+
+    cond do
+      Hyper.Sys.Posix.executable?(fc) and Hyper.Sys.Posix.executable?(jail) ->
+        :ok
+
+      File.dir?(install_dir()) and File.ls!(install_dir()) != [] ->
+        {:error, :bad_install}
+
+      true ->
+        {:error, :not_installed}
     end
   end
 
-  # Whether `dl`'s (version-specific) binaries are installed and executable.
-  defp installed?(dl) do
-    Hyper.Sys.Posix.executable?(Path.join(install_dir(), dl.firecracker)) and
-      Hyper.Sys.Posix.executable?(Path.join(install_dir(), dl.jailer))
+  defp install(dl), do: Targz.install(dl.url, dl.sha256, install_dir())
+
+  defp reinstall(dl) do
+    File.rm_rf!(install_dir())
+    install(dl)
   end
 
   defp bin_path(key) do
-    {:ok, dl} = download()
+    {:ok, arch} = Hyper.Sys.Arch.current()
+    dl = Map.fetch!(@downloads, arch)
     Path.join(install_dir(), Map.fetch!(dl, key))
   end
 
