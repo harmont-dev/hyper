@@ -23,12 +23,11 @@ defmodule Hyper.Node do
     * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
       and group id.
 
-    * `Hyper.Node.Budget.Supervisor` - the node's hard resource accounting
-      (`Hyper.Node.Budget.Hard`), tracking memory/disk reserved by running VMs.
-
-    * `Sys.Mon` - per-node real-time monitors (CPU/disk/net) backing the soft
-      budget (`Hyper.Node.Budget.Soft`). Lives here, not at the application root,
-      because the readings are per-node and only meaningful while this node hosts VMs.
+    * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
+      memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
+      real-time monitors backing the soft budget (`Hyper.Node.Budget.Soft`).
+      Lives here, not at the application root, because both are per-node and only
+      meaningful while this node hosts VMs.
   """
 
   use Supervisor
@@ -50,10 +49,6 @@ defmodule Hyper.Node do
       {Horde.Repo, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.Users,
       Hyper.Node.Budget.Supervisor,
-      # Per-node real-time soft-metric monitors (CPU/mem/disk/net) feeding the
-      # soft budget (`Hyper.Node.Budget.Soft`). Per-node, so supervised here
-      # rather than at the application root.
-      Sys.Mon,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Layer,
       Hyper.Node.Img
