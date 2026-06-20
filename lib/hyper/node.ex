@@ -5,11 +5,9 @@ defmodule Hyper.Node do
 
   Children:
 
-    * `Horde.Repo` (named `Hyper.Vm.Repo`) - a **cluster-wide** registry
-      member. Maps `{vm_id, component}` -> pid; `node(pid)` answers "which machine
-      owns this VM". Each node writes its own VMs; every node can read all of
-      them. `members: :auto` joins peers over Distributed Erlang (wire up
-      connectivity with libcluster).
+    * VM routing lives in `Hyper.Cluster.Routing` (a cluster-wide CRDT started by
+      `Hyper.Cluster`, above this supervisor), not here - this node only owns the
+      *local* processes that run its microVMs.
 
     * `Hyper.Node.ImageStore` - a node-local content-addressed blob cache. Started
       before the VM supervisor so VMs can pull base images on boot.
@@ -33,7 +31,6 @@ defmodule Hyper.Node do
   use Supervisor
   use OpenTelemetryDecorator
 
-  @registry Hyper.Vm.Repo
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
@@ -46,7 +43,6 @@ defmodule Hyper.Node do
   @impl true
   def init(_opts) do
     children = [
-      {Horde.Repo, name: @registry, keys: :unique, members: :auto},
       Hyper.Node.Users,
       Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
@@ -63,9 +59,6 @@ defmodule Hyper.Node do
   def start_vm(%{id: _} = opts) do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
   end
-
-  @doc false
-  def registry, do: @registry
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do

@@ -21,9 +21,10 @@ defmodule Hyper.Application do
       # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
       # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
       {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
-      # This machine's participation in the cluster: owns the cluster-wide VM
-      # registry, the local supervisor that runs this node's microVMs, and the
-      # per-node budget/monitoring that decides what this machine can host.
+      # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
+      # Hyper.Node so VM registrations and budget advertisements have their
+      # registries on boot.
+      Hyper.Cluster,
       Hyper.Node
     ]
 
