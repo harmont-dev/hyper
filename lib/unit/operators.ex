@@ -1,7 +1,6 @@
 defmodule Unit.Operators do
   @moduledoc """
-  Operator overloading for `Unit.Quantity` types (`Unit.Information`,
-  `Unit.Time`, `Unit.Bandwidth`).
+  Operator overloading for `Unit.Quantity` types.
 
   `use Unit.Operators` in a module to get unit-aware `+`, `-`, `<`, `>`, `<=`,
   and `>=`. Operands that are not unit quantities fall straight through to
@@ -12,7 +11,7 @@ defmodule Unit.Operators do
       defmodule Scheduler do
         use Unit.Operators
 
-        def headroom(total, used), do: total - used        # Information - Information
+        def headroom(total, used), do: total - used         # Information - Information
         def fits?(avail, need), do: need <= avail           # Information <= Information
         def retries(n), do: n + 1                           # plain integers, via Kernel
       end
