@@ -44,16 +44,31 @@ defmodule Sys.Mon.NetBw do
 
   @impl true
   def sample(rate_state) do
-    case NetDev.read_total() do
-      {:ok, bytes} ->
+    case NetDev.read() do
+      {:ok, interfaces} ->
         rate_state
-        |> Rate.compute(bytes, System.monotonic_time(:millisecond))
+        |> Rate.compute(physical_bytes(interfaces), System.monotonic_time(:millisecond))
         |> as_bandwidth()
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  # Sum rx+tx across physical interfaces only. A physical NIC exposes a backing
+  # device at /sys/class/net/<if>/device; loopback, bridges, docker/veth, and
+  # tunnels do not - this is the kernel's own distinction, so it needs no fragile
+  # interface-name patterns. Counting bridges/tunnels would also double-count
+  # traffic that still traverses the physical NIC.
+  @spec physical_bytes([NetDev.Interface.t()]) :: non_neg_integer()
+  defp physical_bytes(interfaces) do
+    interfaces
+    |> Enum.filter(&physical?(&1.name))
+    |> Enum.reduce(0, fn i, acc -> acc + i.rx_bytes + i.tx_bytes end)
+  end
+
+  @spec physical?(String.t()) :: boolean()
+  defp physical?(name), do: File.exists?("/sys/class/net/#{name}/device")
 
   # Project the raw bytes/sec rate into a `Unit.Bandwidth` reading.
   @spec as_bandwidth({:ok, float(), Rate.state()} | {:skip, Rate.state()}) ::

@@ -1,57 +1,80 @@
 defmodule Sys.Linux.Proc.NetDev do
   @moduledoc """
-  Reads cumulative per-interface traffic from `/proc/net/dev`.
+  Parses `/proc/net/dev` into per-interface byte counters.
 
-  Each data line is `iface: <rx fields...> <tx fields...>` where the first receive
-  field is `bytes` and the ninth field overall (the first transmit field) is also
-  `bytes`. `total/1` sums rx+tx across every interface except loopback (`lo`),
-  which is not real node bandwidth.
+  The file opens with two header lines and then one line per interface:
+
+      Inter-|   Receive  ...                  |  Transmit ...
+       face |bytes  packets ...               |bytes  packets ...
+      enp1s0: 187188513509 68447977 0 ...      112751842436 64224487 0 ...
+
+  Each data line is `<ifname>: <8 receive counters> <8 transmit counters>`, where
+  receive `bytes` is the 1st counter and transmit `bytes` is the 9th. Rather than
+  trust the header or assume a fixed column count, a line is taken only if it
+  matches `name: <digits...>`: the two header rows do not (no `name:` followed by a
+  number), and an interface name may itself contain a `:` (an IP alias such as
+  `eth0:0`), which a naive split on the first colon would mangle.
+
+  Every interface is returned as-is - loopback, bridges, docker/veth, and tunnels
+  included. Which interfaces count toward a metric is the caller's policy.
   """
 
   @path "/proc/net/dev"
 
-  # Within the post-colon fields (0-based): rx bytes, then 8 rx fields, then tx bytes.
+  # 0-based offsets within the 16 numeric counters: receive bytes first, then the
+  # other 7 receive counters, then transmit bytes.
   @rx_bytes_idx 0
   @tx_bytes_idx 8
 
-  @doc "Read `/proc/net/dev` and total non-loopback bytes."
-  @spec read_total() :: {:ok, non_neg_integer()} | {:error, File.posix()}
-  def read_total do
-    with {:ok, content} <- File.read(@path), do: {:ok, total(content)}
+  # Leading space, the interface name up to its trailing colon (greedy, so an alias
+  # like `eth0:0` is kept whole), then the counters, which must start with a digit.
+  @line_re ~r/^\s*(?<iface>\S+):\s+(?<counters>\d.*)$/
+
+  defmodule Interface do
+    @moduledoc "One `/proc/net/dev` row: an interface and its cumulative rx/tx bytes."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            rx_bytes: non_neg_integer(),
+            tx_bytes: non_neg_integer()
+          }
+    @enforce_keys [:name, :rx_bytes, :tx_bytes]
+    defstruct [:name, :rx_bytes, :tx_bytes]
   end
 
-  @doc "Map each interface to its cumulative (rx + tx) bytes."
-  @spec parse(String.t()) :: %{String.t() => non_neg_integer()}
+  @doc "Read and parse `/proc/net/dev`."
+  @spec read() :: {:ok, [Interface.t()]} | {:error, File.posix()}
+  def read do
+    with {:ok, content} <- File.read(@path), do: {:ok, parse(content)}
+  end
+
+  @doc "Parse a `/proc/net/dev` payload into one `Interface` per interface line."
+  @spec parse(String.t()) :: [Interface.t()]
   def parse(content) do
     content
     |> String.split("\n", trim: true)
-    |> Enum.flat_map(fn line ->
-      case String.split(line, ":", parts: 2) do
-        [left, right] ->
-          fields = String.split(right)
-
-          if length(fields) > @tx_bytes_idx do
-            rx = String.to_integer(Enum.at(fields, @rx_bytes_idx))
-            tx = String.to_integer(Enum.at(fields, @tx_bytes_idx))
-            [{String.trim(left), rx + tx}]
-          else
-            []
-          end
-
-        _ ->
-          []
-      end
-    end)
-    |> Map.new()
+    |> Enum.flat_map(&parse_line/1)
   end
 
-  @doc "Total cumulative bytes across all interfaces except loopback."
-  @spec total(String.t()) :: non_neg_integer()
-  def total(content) do
-    content
-    |> parse()
-    |> Enum.reject(fn {iface, _bytes} -> iface == "lo" end)
-    |> Enum.map(fn {_iface, bytes} -> bytes end)
-    |> Enum.sum()
+  @spec parse_line(String.t()) :: [Interface.t()]
+  defp parse_line(line) do
+    case Regex.named_captures(@line_re, line) do
+      %{"iface" => iface, "counters" => counters} ->
+        cols = counters |> String.split() |> Enum.map(&String.to_integer/1)
+
+        if length(cols) > @tx_bytes_idx do
+          [
+            %Interface{
+              name: iface,
+              rx_bytes: Enum.at(cols, @rx_bytes_idx),
+              tx_bytes: Enum.at(cols, @tx_bytes_idx)
+            }
+          ]
+        else
+          []
+        end
+
+      nil ->
+        []
+    end
   end
 end
