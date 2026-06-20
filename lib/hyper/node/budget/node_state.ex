@@ -12,9 +12,11 @@ defmodule Hyper.Node.Budget.NodeState do
 
   alias Hyper.Node.Budget.Hard
   alias Hyper.Node.Config.Budget, as: Config
+  alias Hyper.Vm.Instance.Spec
   alias Sys.Mon
   alias Sys.Mon.Server.Reading
   alias Unit.Bandwidth
+  alias Unit.Information
 
   @type t :: %__MODULE__{
           node: node(),
@@ -65,6 +67,36 @@ defmodule Hyper.Node.Budget.NodeState do
       net_bw_ceiling: ceiling(config.net_bw_cap, config.net_bw_max_load),
       layers: Hyper.Node.Layer.active()
     }
+  end
+
+  @doc """
+  Whether this snapshot's node can hold `spec`: hard memory/disk headroom plus the
+  soft cpu/disk-bw/net-bw load ceilings. A pure predicate over the published
+  snapshot; the authoritative check is still the owning node's
+  `Hyper.Node.Budget.admit/2`.
+  """
+  @spec fits?(t(), Spec.t()) :: boolean()
+  def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
+
+  @spec hard_fits?(t(), Spec.t()) :: boolean()
+  defp hard_fits?(state, spec) do
+    Information.as_bytes(spec.mem) <= Information.as_bytes(state.mem_free) and
+      Information.as_bytes(spec.disk) <= Information.as_bytes(state.disk_free)
+  end
+
+  @spec soft_fits?(t(), Spec.t()) :: boolean()
+  defp soft_fits?(state, spec) do
+    cpu_ok = state.cpu_load + spec.vcpus / state.cpu_capacity <= state.cpu_max_load
+
+    disk_ok =
+      Bandwidth.as_bytes_per_sec(state.disk_bw_load) + Bandwidth.as_bytes_per_sec(spec.disk_bw) <=
+        Bandwidth.as_bytes_per_sec(state.disk_bw_ceiling)
+
+    net_ok =
+      Bandwidth.as_bytes_per_sec(state.net_bw_load) + Bandwidth.as_bytes_per_sec(spec.net_bw) <=
+        Bandwidth.as_bytes_per_sec(state.net_bw_ceiling)
+
+    cpu_ok and disk_ok and net_ok
   end
 
   # Instantaneous ceiling for a bandwidth metric: fraction `k` of capacity (same

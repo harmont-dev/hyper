@@ -14,7 +14,6 @@ defmodule Hyper.Cluster.Scheduler do
   alias Hyper.Cluster.Budget
   alias Hyper.Node.Budget.NodeState
   alias Hyper.Vm.Instance.Spec
-  alias Unit.Bandwidth
   alias Unit.Information
 
   @type layer_sizes :: [{Hyper.Layer.id(), Unit.Information.t()}]
@@ -23,7 +22,7 @@ defmodule Hyper.Cluster.Scheduler do
   @spec candidates(Spec.t(), layer_sizes()) :: [node()]
   def candidates(spec, layers \\ []) do
     Budget.all_states()
-    |> Enum.filter(&fits?(&1, spec))
+    |> Enum.filter(&NodeState.fits?(&1, spec))
     |> Enum.sort_by(&colocation_score(&1, layers), :desc)
     |> Enum.map(& &1.node)
   end
@@ -69,10 +68,6 @@ defmodule Hyper.Cluster.Scheduler do
     place(spec, layers, attempt)
   end
 
-  @doc "Whether `state`'s node can hold `spec` (hard headroom + soft ceilings)."
-  @spec fits?(NodeState.t(), Spec.t()) :: boolean()
-  def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
-
   @doc "Bytes of `layers` already mounted on `state`'s node."
   @spec colocation_score(NodeState.t(), layer_sizes()) :: non_neg_integer()
   def colocation_score(state, layers) do
@@ -81,26 +76,5 @@ defmodule Hyper.Cluster.Scheduler do
     Enum.reduce(layers, 0, fn {id, size}, acc ->
       if MapSet.member?(mounted, id), do: acc + Information.as_bytes(size), else: acc
     end)
-  end
-
-  @spec hard_fits?(NodeState.t(), Spec.t()) :: boolean()
-  defp hard_fits?(state, spec) do
-    Information.as_bytes(spec.mem) <= Information.as_bytes(state.mem_free) and
-      Information.as_bytes(spec.disk) <= Information.as_bytes(state.disk_free)
-  end
-
-  @spec soft_fits?(NodeState.t(), Spec.t()) :: boolean()
-  defp soft_fits?(state, spec) do
-    cpu_ok = state.cpu_load + spec.vcpus / state.cpu_capacity <= state.cpu_max_load
-
-    disk_ok =
-      Bandwidth.as_bytes_per_sec(state.disk_bw_load) + Bandwidth.as_bytes_per_sec(spec.disk_bw) <=
-        Bandwidth.as_bytes_per_sec(state.disk_bw_ceiling)
-
-    net_ok =
-      Bandwidth.as_bytes_per_sec(state.net_bw_load) + Bandwidth.as_bytes_per_sec(spec.net_bw) <=
-        Bandwidth.as_bytes_per_sec(state.net_bw_ceiling)
-
-    cpu_ok and disk_ok and net_ok
   end
 end
