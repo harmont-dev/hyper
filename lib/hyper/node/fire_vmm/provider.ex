@@ -32,38 +32,24 @@ defmodule Hyper.Node.FireVMM.Provider do
 
   @doc "Absolute path to the installed firecracker binary."
   @spec firecracker_bin() :: Path.t()
-  def firecracker_bin, do: release_bin("firecracker")
+  def firecracker_bin, do: release_bin("firecracker", arch!())
 
   @doc "Absolute path to the installed jailer binary."
   @spec jailer_bin() :: Path.t()
-  def jailer_bin, do: release_bin("jailer")
-
-  @doc "Whether the pinned-version binaries are already installed and executable."
-  @spec installed?() :: boolean()
-  def installed? do
-    case Hyper.Sys.Arch.current() do
-      {:ok, _arch} ->
-        marker = Path.join(Hyper.Config.firecracker_install_dir(), ".fc-version")
-
-        Hyper.Sys.Posix.executable?(firecracker_bin()) and
-          Hyper.Sys.Posix.executable?(jailer_bin()) and
-          File.read(marker) == {:ok, @version}
-
-      {:error, _} ->
-        false
-    end
-  end
+  def jailer_bin, do: release_bin("jailer", arch!())
 
   @doc """
   Ensure the firecracker release is installed for this node.
 
   Idempotent: returns `:ok` immediately if the pinned version is already
-  installed, otherwise fetches and installs it.
+  installed, otherwise fetches and installs it. Quits early with
+  `{:error, {:unsupported_arch, _}}` if this machine's architecture is not
+  supported.
   """
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
     with {:ok, arch} <- Hyper.Sys.Arch.current() do
-      if installed?(), do: :ok, else: do_install(arch)
+      if installed?(arch), do: :ok, else: do_install(arch)
     end
   end
 
@@ -71,6 +57,15 @@ defmodule Hyper.Node.FireVMM.Provider do
   @spec tarball_url(Hyper.Sys.Arch.t()) :: String.t()
   def tarball_url(arch) do
     "#{@github_base}/v#{@version}/firecracker-v#{@version}-#{arch}.tgz"
+  end
+
+  # Whether the pinned-version binaries for `arch` are installed and executable.
+  defp installed?(arch) do
+    marker = Path.join(Hyper.Config.firecracker_install_dir(), ".fc-version")
+
+    Hyper.Sys.Posix.executable?(release_bin("firecracker", arch)) and
+      Hyper.Sys.Posix.executable?(release_bin("jailer", arch)) and
+      File.read(marker) == {:ok, @version}
   end
 
   defp do_install(arch) do
@@ -91,9 +86,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   end
 
   # Path of a named binary inside the extracted release tree.
-  defp release_bin(name) do
-    arch = arch!()
-
+  defp release_bin(name, arch) do
     Path.join([
       Hyper.Config.firecracker_install_dir(),
       "release-v#{@version}-#{arch}",
