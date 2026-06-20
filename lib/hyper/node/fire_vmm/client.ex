@@ -150,6 +150,23 @@ defmodule Hyper.Node.FireVMM.Client do
   @spec stop_balloon_hinting(server()) :: result()
   def stop_balloon_hinting(server), do: call(server, :patch, "/balloon/hinting/stop")
 
+  @doc "PUT /mmds — replace MMDS contents (arbitrary JSON map)."
+  @spec put_mmds(server(), map()) :: result()
+  def put_mmds(server, contents) when is_map(contents), do: call(server, :put, "/mmds", contents)
+
+  @doc "PATCH /mmds — merge into MMDS contents (arbitrary JSON map)."
+  @spec patch_mmds(server(), map()) :: result()
+  def patch_mmds(server, contents) when is_map(contents),
+    do: call(server, :patch, "/mmds", contents)
+
+  @doc "GET /mmds — current MMDS contents."
+  @spec get_mmds(server()) :: result()
+  def get_mmds(server), do: call(server, :get, "/mmds")
+
+  @doc "PUT /mmds/config."
+  @spec put_mmds_config(server(), Schema.MmdsConfig.t()) :: result()
+  def put_mmds_config(server, %Schema.MmdsConfig{} = c), do: call(server, :put, "/mmds/config", c)
+
   ## Transport
 
   @spec call(server(), :get | :put | :patch, String.t()) :: result()

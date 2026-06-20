@@ -63,4 +63,19 @@ defmodule Hyper.Node.FireVMM.ClientTest do
     drive = %Hyper.Node.FireVMM.Client.Schema.Drive{drive_id: "rootfs", is_root_device: true}
     assert :ok = Hyper.Node.FireVMM.Client.put_drive(pid, drive)
   end
+
+  test "put_mmds sends an arbitrary JSON map verbatim" do
+    pid =
+      client(fn conn ->
+        assert conn.request_path == "/mmds"
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(raw) == %{"latest" => %{"meta-data" => %{"ami-id" => "ami-1"}}}
+        Plug.Conn.send_resp(conn, 204, "")
+      end)
+
+    assert :ok =
+             Hyper.Node.FireVMM.Client.put_mmds(pid, %{
+               "latest" => %{"meta-data" => %{"ami-id" => "ami-1"}}
+             })
+  end
 end
