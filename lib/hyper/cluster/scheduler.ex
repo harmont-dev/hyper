@@ -1,4 +1,4 @@
-defmodule Hyper.Scheduler do
+defmodule Hyper.Cluster.Scheduler do
   @moduledoc """
   Picks the node to run a VM on. The first pass reads the gossip-replicated
   `Hyper.Node.Budget.NodeState`s (`Hyper.Cluster.Budget.all_states/0`), drops

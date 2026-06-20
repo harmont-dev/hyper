@@ -1,7 +1,7 @@
 defmodule Hyper.Node.Budget.NodeState do
   @moduledoc """
   The per-node resource snapshot published into `Hyper.Cluster.Budget` and read by
-  `Hyper.Scheduler` as the first pass of placement.
+  `Hyper.Cluster.Scheduler` as the first pass of placement.
 
   Approximate by design: hard headroom is exact at publish time but soft load is
   an EWMA that drifts and the record gossips with lag. The authoritative decision
