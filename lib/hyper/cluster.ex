@@ -6,7 +6,9 @@ defmodule Hyper.Cluster do
   independent DeltaCRDTs.
 
   Started once per BEAM node, before `Hyper.Node`, so VM registrations and budget
-  advertisements have their registries available on boot.
+  advertisements have their registries available on boot. Also starts
+  `Hyper.Cluster.LayerAuditor`, the cluster-singleton that asserts the shared
+  medium holds every known layer.
   """
 
   use Supervisor
@@ -18,7 +20,7 @@ defmodule Hyper.Cluster do
 
   @impl true
   def init(_opts) do
-    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget]
+    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget, Hyper.Cluster.LayerAuditor]
     Supervisor.init(children, strategy: :one_for_one)
   end
 end

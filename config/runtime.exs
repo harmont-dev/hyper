@@ -28,3 +28,13 @@ if config_env() != :test do
     otlp_endpoint: endpoint,
     otlp_headers: headers
 end
+
+# Layer auditor: cluster-singleton that walks the DB in batches and asserts
+# every known layer blob is present in the shared medium. The module ships
+# these same defaults; this block exists for visibility and operator overrides.
+config :hyper, Hyper.Cluster.LayerAuditor,
+  batch_size: 500,
+  batch_pause_ms: 0,
+  sweep_interval_ms: 3_600_000,
+  acquire_interval_ms: 5_000,
+  medium_retry_ms: 60_000
