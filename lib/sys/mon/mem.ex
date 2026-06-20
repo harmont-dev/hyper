@@ -8,7 +8,6 @@ defmodule Sys.Mon.Mem do
 
   @period_ms 29
   @tau_s 30
-  @event [:sys, :mon, :mem]
 
   @moduledoc """
   Monitors instantaneous memory pressure.
@@ -17,8 +16,6 @@ defmodule Sys.Mon.Mem do
   `MemTotal - MemAvailable`, smoothed with a #{@tau_s}-second time constant. Although
   memory is an alpha (hard) budget tracked from VM specs, the live figure is useful
   for detecting actual pressure. Readings are `Unit.Information`.
-
-  Telemetry: `#{inspect(@event)}` with measurements `%{instant: float, smoothed: float}` (bytes).
   """
 
   @impl true
@@ -26,9 +23,6 @@ defmodule Sys.Mon.Mem do
 
   @impl true
   def tau, do: Time.s(@tau_s)
-
-  @impl true
-  def telemetry_event, do: @event
 
   @doc "The latest instantaneous + filtered used memory (`Unit.Information` readings)."
   @spec value() :: Server.Reading.t()

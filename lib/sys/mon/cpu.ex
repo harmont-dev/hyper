@@ -7,7 +7,6 @@ defmodule Sys.Mon.Cpu do
 
   @period_ms 23
   @tau_s 30
-  @event [:sys, :mon, :cpu]
 
   @moduledoc """
   Monitors instantaneous CPU utilization (the soft beta_vcpus signal).
@@ -17,8 +16,6 @@ defmodule Sys.Mon.Cpu do
   load average, which has different semantics. The first read only establishes a
   baseline (`:skip`). Readings are smoothed with a #{@tau_s}-second time constant
   (sampling fast only de-noises the filter; the smoothing window is set by `tau`).
-
-  Telemetry: `#{inspect(@event)}` with measurements `%{instant: float, smoothed: float}`.
   """
 
   @impl true
@@ -26,9 +23,6 @@ defmodule Sys.Mon.Cpu do
 
   @impl true
   def tau, do: Time.s(@tau_s)
-
-  @impl true
-  def telemetry_event, do: @event
 
   @doc "The latest instantaneous + filtered CPU utilization (fractions `0.0..1.0`)."
   @spec value() :: Server.Reading.t()

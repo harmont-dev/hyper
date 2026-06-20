@@ -1,8 +1,7 @@
 defmodule Sys.Mon.Server do
   @moduledoc """
   Generic monitor process: drives a `Sys.Mon.Sampler` on a fixed period, folds
-  each reading through a `Controls.Ewma` low-pass filter, emits a `:telemetry`
-  event, and answers `value/1`.
+  each reading through a `Controls.Ewma` low-pass filter, and answers `value/1`.
 
   Ticks self-schedule with `Process.send_after` *after* each sample completes, so
   a slow sample cannot let ticks pile up. `dt` for the filter is measured with
@@ -31,26 +30,17 @@ defmodule Sys.Mon.Server do
             period_ms: pos_integer(),
             ewma: Ewma.t(),
             last_mono: integer() | nil,
-            instant: Ewma.sample() | nil,
-            telemetry_event: [atom()]
+            instant: Ewma.sample() | nil
           }
-    @enforce_keys [:sampler, :sampler_state, :period_ms, :ewma, :telemetry_event]
-    defstruct [
-      :sampler,
-      :sampler_state,
-      :period_ms,
-      :ewma,
-      :last_mono,
-      :instant,
-      :telemetry_event
-    ]
+    @enforce_keys [:sampler, :sampler_state, :period_ms, :ewma]
+    defstruct [:sampler, :sampler_state, :period_ms, :ewma, :last_mono, :instant]
   end
 
   @doc """
   Start the monitor for `sampler`, registered under the sampler's own module name.
 
   The sampler module fully describes the monitor: `Sys.Mon.Server` reads its
-  schedule and identity from `period/0`, `tau/0`, and `telemetry_event/0`.
+  schedule from `period/0` and `tau/0`.
   """
   @spec start_link(module()) :: GenServer.on_start()
   def start_link(sampler) do
@@ -79,8 +69,7 @@ defmodule Sys.Mon.Server do
            period_ms: period_ms,
            ewma: Ewma.new(Unit.Time.as_ms(sampler.tau())),
            last_mono: nil,
-           instant: nil,
-           telemetry_event: sampler.telemetry_event()
+           instant: nil
          }}
 
       {:error, reason} ->
@@ -113,8 +102,6 @@ defmodule Sys.Mon.Server do
       {:ok, x, sampler_state} ->
         dt = if state.last_mono, do: max(now - state.last_mono, 1), else: state.period_ms
         ewma = Ewma.update(state.ewma, x, dt)
-        measurements = %{instant: to_number(x), smoothed: to_number(Ewma.value(ewma))}
-        :telemetry.execute(state.telemetry_event, measurements, %{})
         %{state | sampler_state: sampler_state, ewma: ewma, instant: x, last_mono: now}
 
       {:skip, sampler_state} ->
@@ -130,9 +117,4 @@ defmodule Sys.Mon.Server do
   defp reading(state) do
     %Reading{instant: state.instant, smoothed: Ewma.value(state.ewma)}
   end
-
-  # Project a reading to its scalar magnitude for numeric telemetry measurements.
-  @spec to_number(Ewma.sample()) :: number()
-  defp to_number(x) when is_number(x), do: x
-  defp to_number(x), do: Unit.Quantity.value(x)
 end

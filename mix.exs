@@ -52,7 +52,6 @@ defmodule Hyper.MixProject do
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
-      {:telemetry, "~> 1.3"},
       {:uuidv4, "~> 1.0"}
     ]
   end

@@ -9,17 +9,14 @@ defmodule Sys.Mon.NetBw do
 
   @period_ms 37
   @tau_s 20
-  @event [:sys, :mon, :net_bw]
 
   @moduledoc """
   Monitors instantaneous network bandwidth (the soft beta_net_bw signal).
 
-  Samples cumulative rx+tx bytes across non-loopback interfaces from
-  `/proc/net/dev` every #{@period_ms} ms and differentiates them into bytes/sec via
-  `Controls.Rate` (the first read only establishes a baseline). The rate series is
-  smoothed with a #{@tau_s}-second time constant. Readings are `Unit.Bandwidth`.
-
-  Telemetry: `#{inspect(@event)}` with measurements `%{instant: float, smoothed: float}` (bytes/sec).
+  Samples cumulative rx+tx bytes across physical interfaces from `/proc/net/dev`
+  every #{@period_ms} ms and differentiates them into bytes/sec via `Controls.Rate`
+  (the first read only establishes a baseline). The rate series is smoothed with a
+  #{@tau_s}-second time constant. Readings are `Unit.Bandwidth`.
   """
 
   @impl true
@@ -27,9 +24,6 @@ defmodule Sys.Mon.NetBw do
 
   @impl true
   def tau, do: Time.s(@tau_s)
-
-  @impl true
-  def telemetry_event, do: @event
 
   @doc "The latest instantaneous + filtered network bandwidth (`Unit.Bandwidth` readings)."
   @spec value() :: Server.Reading.t()

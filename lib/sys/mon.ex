@@ -1,16 +1,7 @@
 defmodule Sys.Mon do
   @moduledoc """
   Supervises this node's real-time resource monitors and exposes their current
-  readings to the scheduler.
-
-  Telemetry events emitted by the children:
-
-    * `[:sys, :mon, :cpu]`     - CPU utilization fraction
-    * `[:sys, :mon, :mem]`     - used memory (bytes)
-    * `[:sys, :mon, :disk_bw]` - disk bandwidth (bytes/sec)
-    * `[:sys, :mon, :net_bw]`  - net bandwidth (bytes/sec)
-
-  Each carries measurements `%{instant: float, smoothed: float}`.
+  readings to the scheduler via `readings/0`.
   """
 
   use Supervisor
