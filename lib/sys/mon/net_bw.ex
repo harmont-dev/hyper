@@ -1,6 +1,6 @@
 defmodule Sys.Mon.NetBw do
   @moduledoc """
-  Monitors instantaneous network bandwidth (the soft β_net_bw signal).
+  Monitors instantaneous network bandwidth (the soft beta_net_bw signal).
 
   Samples cumulative rx+tx bytes across non-loopback interfaces from
   `/proc/net/dev` every 11 seconds and differentiates them into bytes/sec via

@@ -3,10 +3,10 @@ defmodule Sys.Linux.Proc.Diskstats do
   Reads cumulative block-device I/O from `/proc/diskstats`.
 
   Per line the fields after `major minor name` are `reads_completed reads_merged
-  sectors_read … writes_completed writes_merged sectors_written …`. A sector is
+  sectors_read ... writes_completed writes_merged sectors_written ...`. A sector is
   512 bytes. Whole-disk counters already include their partitions' I/O, so
-  `total_physical/1` counts whole physical disks only — summing partitions too
-  would double-count, and virtual devices (`loop`, `dm-`, `ram`, `md`, …) are not
+  `total_physical/1` counts whole physical disks only - summing partitions too
+  would double-count, and virtual devices (`loop`, `dm-`, `ram`, `md`, ...) are not
   real node bandwidth.
   """
 

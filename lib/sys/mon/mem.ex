@@ -3,8 +3,8 @@ defmodule Sys.Mon.Mem do
   Monitors instantaneous memory pressure.
 
   Samples `/proc/meminfo` every 5 seconds and reports *used* memory as
-  `MemTotal − MemAvailable`, smoothed with a 30-second time constant. Although
-  memory is an α (hard) budget tracked from VM specs, the live figure is useful
+  `MemTotal - MemAvailable`, smoothed with a 30-second time constant. Although
+  memory is an alpha (hard) budget tracked from VM specs, the live figure is useful
   for detecting actual pressure. Readings are `Unit.Information`.
 
   Telemetry: `[:sys, :mon, :mem]` with measurements `%{instant: float, smoothed: float}` (bytes).

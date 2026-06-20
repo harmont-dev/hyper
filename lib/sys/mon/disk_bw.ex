@@ -1,6 +1,6 @@
 defmodule Sys.Mon.DiskBw do
   @moduledoc """
-  Monitors instantaneous disk bandwidth (the soft β_disk_bw signal).
+  Monitors instantaneous disk bandwidth (the soft beta_disk_bw signal).
 
   Samples cumulative read+write bytes across whole physical disks from
   `/proc/diskstats` every 7 seconds and differentiates them into bytes/sec via

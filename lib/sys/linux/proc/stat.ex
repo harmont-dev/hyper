@@ -2,9 +2,9 @@ defmodule Sys.Linux.Proc.Stat do
   @moduledoc """
   Reads aggregate CPU time counters from `/proc/stat`.
 
-  The first line (`cpu  …`) holds cumulative jiffies since boot across all cores:
+  The first line (`cpu  ...`) holds cumulative jiffies since boot across all cores:
   `user nice system idle iowait irq softirq steal guest guest_nice`. A single read
-  is meaningless on its own — CPU *utilization* is the busy fraction between two
+  is meaningless on its own - CPU *utilization* is the busy fraction between two
   snapshots (see `utilization/2`). `idle` here folds in `iowait`, the conventional
   "not doing work" bucket.
   """

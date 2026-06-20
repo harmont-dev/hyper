@@ -1,18 +1,18 @@
 defmodule Controls.Ewma do
   @moduledoc """
-  First-order exponential moving average — a discrete low-pass filter (LPF) with
+  First-order exponential moving average - a discrete low-pass filter (LPF) with
   an irregular-sampling-correct gain.
 
-  The continuous first-order LPF `τ·ẏ + y = x` has the exact discrete solution,
-  for a step-held input over an interval `Δt`:
+  The continuous first-order LPF `tau*y' + y = x` has the exact discrete solution,
+  for a step-held input over an interval `dt`:
 
-      α  = 1 − exp(−Δt/τ)
-      yₙ = α·xₙ + (1−α)·yₙ₋₁
+      alpha  = 1 - exp(-dt/tau)
+      y_n = alpha*x_n + (1-alpha)*y_{n-1}
 
-  Deriving `α` from the *measured* `Δt` (never a hardcoded constant) pins the
-  filter's cutoff at `1/(2πτ)` regardless of scheduler jitter or differing
-  per-monitor sample periods. `τ` (`tau_ms`) is the time constant: the output
-  reaches ~63 % of a step after one `τ` and ~95 % after `3τ`. The first sample
+  Deriving `alpha` from the *measured* `dt` (never a hardcoded constant) pins the
+  filter's cutoff at `1/(2*pi*tau)` regardless of scheduler jitter or differing
+  per-monitor sample periods. `tau` (`tau_ms`) is the time constant: the output
+  reaches ~63 % of a step after one `tau` and ~95 % after `3tau`. The first sample
   seeds the filter directly, avoiding a warm-up ramp from zero.
   """
 

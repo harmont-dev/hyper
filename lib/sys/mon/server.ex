@@ -5,7 +5,7 @@ defmodule Sys.Mon.Server do
   event, and answers `value/1`.
 
   Ticks self-schedule with `Process.send_after` *after* each sample completes, so
-  a slow sample cannot let ticks pile up. `Δt` for the filter is measured with
+  a slow sample cannot let ticks pile up. `dt` for the filter is measured with
   `System.monotonic_time/1`, so the EWMA gain stays correct under jitter.
   """
 

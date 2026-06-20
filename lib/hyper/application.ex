@@ -25,7 +25,7 @@ defmodule Hyper.Application do
       # registry and the local supervisor that runs this node's microVMs.
       Hyper.Node,
       # Per-node real-time soft-metric monitors (CPU/mem/disk/net), feeding the
-      # scheduler's β-budget decisions.
+      # scheduler's beta-budget decisions.
       Sys.Mon
     ]
 

@@ -1,9 +1,9 @@
 defmodule Sys.Mon.Cpu do
   @moduledoc """
-  Monitors instantaneous CPU utilization (the soft β_vcpus signal).
+  Monitors instantaneous CPU utilization (the soft beta_vcpus signal).
 
   Samples `/proc/stat` every #{2} seconds and reports the busy fraction
-  (`0.0..1.0`, normalized across all cores) between consecutive reads — never the
+  (`0.0..1.0`, normalized across all cores) between consecutive reads - never the
   load average, which has different semantics. The first read only establishes a
   baseline (`:skip`). Readings are smoothed with a 30-second time constant.
 

@@ -4,16 +4,16 @@ defmodule Sys.Mon do
   readings to the scheduler.
 
   Each child is an independent `Sys.Mon.Server` sampling one metric on its own
-  prime-second period (`Cpu` 2 s, `Mem` 5 s, `DiskBw` 7 s, `NetBw` 11 s — pairwise
+  prime-second period (`Cpu` 2 s, `Mem` 5 s, `DiskBw` 7 s, `NetBw` 11 s - pairwise
   coprime, so their tick phases rarely align) and low-pass-filtering the result.
   `one_for_one`: a crash in one monitor never disturbs the others.
 
   Telemetry events emitted by the children:
 
-    * `[:sys, :mon, :cpu]`     — CPU utilization fraction
-    * `[:sys, :mon, :mem]`     — used memory (bytes)
-    * `[:sys, :mon, :disk_bw]` — disk bandwidth (bytes/sec)
-    * `[:sys, :mon, :net_bw]`  — net bandwidth (bytes/sec)
+    * `[:sys, :mon, :cpu]`     - CPU utilization fraction
+    * `[:sys, :mon, :mem]`     - used memory (bytes)
+    * `[:sys, :mon, :disk_bw]` - disk bandwidth (bytes/sec)
+    * `[:sys, :mon, :net_bw]`  - net bandwidth (bytes/sec)
 
   Each carries measurements `%{instant: float, smoothed: float}`.
   """

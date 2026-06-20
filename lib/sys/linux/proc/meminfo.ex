@@ -3,7 +3,7 @@ defmodule Sys.Linux.Proc.Meminfo do
   Reads memory totals from `/proc/meminfo`.
 
   `MemAvailable` is the kernel's own estimate of memory obtainable for a new
-  workload without swapping — the right figure for "how loaded is this node",
+  workload without swapping - the right figure for "how loaded is this node",
   preferable to `MemFree` (which ignores reclaimable cache). Values in the file
   are kibibytes; they are returned as `Unit.Information`.
   """

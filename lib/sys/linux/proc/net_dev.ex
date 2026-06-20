@@ -2,7 +2,7 @@ defmodule Sys.Linux.Proc.NetDev do
   @moduledoc """
   Reads cumulative per-interface traffic from `/proc/net/dev`.
 
-  Each data line is `iface: <rx fields…> <tx fields…>` where the first receive
+  Each data line is `iface: <rx fields...> <tx fields...>` where the first receive
   field is `bytes` and the ninth field overall (the first transmit field) is also
   `bytes`. `total/1` sums rx+tx across every interface except loopback (`lo`),
   which is not real node bandwidth.
