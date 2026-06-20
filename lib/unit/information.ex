@@ -38,4 +38,23 @@ defmodule Unit.Information do
 
   @spec as_gib(t()) :: non_neg_integer()
   def as_gib(%__MODULE__{bytes: b}), do: div(b, @gib)
+
+  @spec zero() :: t()
+  def zero, do: %__MODULE__{bytes: 0}
+
+  @spec add(t(), t()) :: t()
+  def add(%__MODULE__{bytes: a}, %__MODULE__{bytes: b}), do: %__MODULE__{bytes: a + b}
+
+  @doc "Subtract `b` from `a`, clamping at zero so the byte count stays non-negative."
+  @spec sub(t(), t()) :: t()
+  def sub(%__MODULE__{bytes: a}, %__MODULE__{bytes: b}), do: %__MODULE__{bytes: max(0, a - b)}
+
+  @spec compare(t(), t()) :: :lt | :eq | :gt
+  def compare(%__MODULE__{bytes: a}, %__MODULE__{bytes: b}) do
+    cond do
+      a < b -> :lt
+      a > b -> :gt
+      true -> :eq
+    end
+  end
 end

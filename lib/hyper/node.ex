@@ -11,6 +11,10 @@ defmodule Hyper.Node do
       them. `members: :auto` joins peers over Distributed Erlang (wire up
       connectivity with libcluster).
 
+    * `Hyper.Node.Budget.Hard` - this node's authoritative hard (alpha) budget ledger.
+      Reserves memory/disk per running VM, monitor-refcounted, and answers the
+      cluster-wide scheduler query in `Hyper.Node.Budget`.
+
     * `Hyper.Node.ImageStore` - a node-local content-addressed blob cache. Started
       before the VM supervisor so VMs can pull base images on boot.
 
@@ -18,7 +22,7 @@ defmodule Hyper.Node do
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
       this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
-      VMs on a surviving node — cold-booting a ghost).
+      VMs on a surviving node - cold-booting a ghost).
 
     * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
       and group id.
@@ -41,6 +45,7 @@ defmodule Hyper.Node do
   def init(_opts) do
     children = [
       {Horde.Repo, name: @registry, keys: :unique, members: :auto},
+      Hyper.Node.Budget.Hard,
       Hyper.Node.Users,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Layer,
@@ -62,7 +67,8 @@ defmodule Hyper.Node do
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with :ok <- Hyper.Node.Users.test_system(),
+    with :ok <- Hyper.Node.Budget.Hard.test_system(),
+         :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.Sys.Linux.Dmsetup.test_system() do
       Hyper.Node.FireVMM.test_system()
