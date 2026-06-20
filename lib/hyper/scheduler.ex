@@ -48,6 +48,27 @@ defmodule Hyper.Scheduler do
     end)
   end
 
+  @doc """
+  Place and boot `spec` somewhere in the cluster.
+
+  Confirms each candidate by RPC-ing `Hyper.Node.try_run/3` on it; the first node
+  to boot the VM and reserve its budget wins. `start_fun`/`stop_fun` describe how
+  to boot/tear down the VM on the target node.
+  """
+  @spec run(
+          Spec.t(),
+          layer_sizes(),
+          (-> {:ok, pid()} | {:error, term()}),
+          (pid() -> :ok)
+        ) :: {:ok, {node(), pid()}} | {:error, :no_capacity}
+  def run(spec, layers, start_fun, stop_fun) do
+    attempt = fn target ->
+      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+    end
+
+    place(spec, layers, attempt)
+  end
+
   @doc "Whether `state`'s node can hold `spec` (hard headroom + soft ceilings)."
   @spec fits?(NodeState.t(), Spec.t()) :: boolean()
   def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
