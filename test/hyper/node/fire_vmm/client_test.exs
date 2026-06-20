@@ -1,0 +1,54 @@
+defmodule Hyper.Node.FireVMM.ClientTest do
+  use ExUnit.Case, async: true
+
+  alias Hyper.Node.FireVMM.Client
+  alias Hyper.Node.FireVMM.Client.Schema.{BootSource, InstanceActionInfo}
+
+  defp client(plug) do
+    {:ok, pid} =
+      Client.start_link(%Client.Opts{
+        vm_id: nil,
+        socket_path: "/unused",
+        name: nil,
+        req_options: [plug: plug]
+      })
+
+    pid
+  end
+
+  test "instance_info issues GET / and decodes 200 JSON" do
+    pid =
+      client(fn conn ->
+        assert conn.method == "GET"
+        assert conn.request_path == "/"
+        Req.Test.json(conn, %{"state" => "Running", "id" => "vm1"})
+      end)
+
+    assert {:ok, %{"state" => "Running", "id" => "vm1"}} = Client.instance_info(pid)
+  end
+
+  test "put_boot_source issues PUT /boot-source with compacted body and maps 204 to :ok" do
+    pid =
+      client(fn conn ->
+        assert conn.method == "PUT"
+        assert conn.request_path == "/boot-source"
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(raw) == %{"kernel_image_path" => "/vmlinux"}
+        Plug.Conn.send_resp(conn, 204, "")
+      end)
+
+    assert :ok = Client.put_boot_source(pid, %BootSource{kernel_image_path: "/vmlinux"})
+  end
+
+  test "action maps a 4xx Error body to {:error, {:api, status, fault}}" do
+    pid =
+      client(fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(400, Jason.encode!(%{"fault_message" => "nope"}))
+      end)
+
+    assert {:error, {:api, 400, "nope"}} =
+             Client.action(pid, %InstanceActionInfo{action_type: "InstanceStart"})
+  end
+end
