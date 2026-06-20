@@ -42,7 +42,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   @doc "Ensure the firecracker release is installed for this node."
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
-    with {:ok, arch} <- Hyper.Sys.Arch.current() do
+    with {:ok, arch} <- Sys.Arch.current() do
       dl = Map.fetch!(@downloads, arch)
 
       case check_install(dl) do
@@ -64,7 +64,7 @@ defmodule Hyper.Node.FireVMM.Provider do
     jail = Path.join(install_dir(), dl.jailer)
 
     cond do
-      Hyper.Sys.Posix.executable?(fc) and Hyper.Sys.Posix.executable?(jail) ->
+      Sys.Posix.executable?(fc) and Sys.Posix.executable?(jail) ->
         :ok
 
       File.dir?(install_dir()) and File.ls!(install_dir()) != [] ->
@@ -83,7 +83,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   end
 
   defp bin_path(key) do
-    {:ok, arch} = Hyper.Sys.Arch.current()
+    {:ok, arch} = Sys.Arch.current()
     dl = Map.fetch!(@downloads, arch)
     Path.join(install_dir(), Map.fetch!(dl, key))
   end

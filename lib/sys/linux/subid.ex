@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Linux.Subid do
+defmodule Sys.Linux.Subid do
   @moduledoc "Subuid and Subgid utilities"
 
   defmodule Spec do

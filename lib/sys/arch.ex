@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Arch do
+defmodule Sys.Arch do
   @moduledoc "CPU architecture detection for the current machine."
 
   @typedoc "A CPU architecture Hyper supports."

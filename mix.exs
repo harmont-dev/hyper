@@ -72,42 +72,18 @@ defmodule Hyper.MixProject do
       groups_for_extras: [
         Cookbook: ~r/docs\/cookbook\/.*/
       ],
-      # Group modules in the sidebar so the API reference is navigable.
+      # Group modules in the sidebar by namespace. Each value is a regex matched
+      # against the module name, so new modules join their group automatically —
+      # no per-module edits here. The patterns are mutually exclusive, so the
+      # listing order is purely cosmetic. (`Sys.Mon.*` -> Monitoring; every other
+      # `Sys.Posix`/`Sys.Linux.*`, including the /proc parsers, -> System.)
       groups_for_modules: [
-        VM: [Hyper.VM, Hyper.VM.Instance, Hyper.VM.Instance.Spec],
-        Node: [
-          Hyper.Node,
-          Hyper.Node.FireVMM,
-          Hyper.Node.FireVMM.Jailer,
-          Hyper.Node.FireVMM.State,
-          Hyper.Node.Img,
-          Hyper.Node.Img.Server,
-          Hyper.Node.Layer,
-          Hyper.Node.Layer.Repo,
-          Hyper.Node.Layer.Server,
-          Hyper.Node.Users
-        ],
-        Images: [
-          Hyper.Img,
-          Hyper.Img.DB.Blob,
-          Hyper.Img.DB.Image,
-          Hyper.Img.DB.ImageLayer,
-          Hyper.Img.DB.Lease,
-          Hyper.Img.DB.Repo,
-          Hyper.Layer
-        ],
-        System: [
-          Hyper.SuidHelper,
-          Hyper.Sys.Posix,
-          Hyper.Sys.Linux.Cgroup,
-          Hyper.Sys.Linux.Cgroup.V2,
-          Hyper.Sys.Linux.Dmsetup,
-          Hyper.Sys.Linux.Fstab,
-          Hyper.Sys.Linux.Losetup,
-          Hyper.Sys.Linux.Nss,
-          Hyper.Sys.Linux.Proc.Mounts,
-          Hyper.Sys.Linux.Subid
-        ],
+        VM: ~r/^Hyper\.Vm(\.|$)/,
+        Node: ~r/^Hyper\.Node(\.|$)/,
+        Images: ~r/^Hyper\.(Img|Layer)(\.|$)/,
+        Controls: ~r/^Controls\./,
+        Monitoring: ~r/^Sys\.Mon(\.|$)/,
+        System: ~r/^(Sys\.|Hyper\.SuidHelper$)/,
         Units: ~r/^Unit\./
       ]
     ]

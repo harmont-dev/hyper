@@ -17,7 +17,7 @@ defmodule Hyper.Node.Img.Server do
 
   alias Hyper.Img.Db
   alias Hyper.Node.Layer
-  alias Hyper.Sys.Linux.Dmsetup
+  alias Sys.Linux.Dmsetup
 
   # Grace period after the last holder leaves before the image is torn down.
   @idle_timeout_ms :timer.seconds(30)

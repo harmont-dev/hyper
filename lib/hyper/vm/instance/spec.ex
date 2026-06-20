@@ -11,9 +11,9 @@ defmodule Hyper.Vm.Instance.Spec do
 
   defstruct [:vcpus, :mem, :disk, :disk_bw, :net_bw]
 
-  @spec cgroup_v2(t()) :: Hyper.Sys.Linux.Cgroup.V2.Config.t()
+  @spec cgroup_v2(t()) :: Sys.Linux.Cgroup.V2.Config.t()
   def cgroup_v2(spec) do
-    alias Hyper.Sys.Linux.Cgroup.V2.Config
+    alias Sys.Linux.Cgroup.V2.Config
     alias Unit.Time
 
     period_us = Time.as_us(Hyper.Node.FireVMM.cpu_period())

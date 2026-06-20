@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Linux.Cgroup.V2 do
+defmodule Sys.Linux.Cgroup.V2 do
   @moduledoc "cgroup v2 (unified hierarchy) helpers."
 
   @doc "Check whether the given named cgroup exists or not."

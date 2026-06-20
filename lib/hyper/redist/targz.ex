@@ -17,7 +17,7 @@ defmodule Hyper.Redist.Targz do
              | {:unsafe_tar_entry, String.t()}
              | {:extract_failed, term()}}
   def install(url, sha256, dest_dir) do
-    Hyper.Sys.Tmp.with_tempdir("hyper-redist", fn tmp ->
+    Sys.Tmp.with_tempdir("hyper-redist", fn tmp ->
       tar = Path.join(tmp, "download.tar.gz")
 
       with :ok <- fetch(url, tar),

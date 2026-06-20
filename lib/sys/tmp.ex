@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Tmp do
+defmodule Sys.Tmp do
   @moduledoc "Temporary directory helpers."
 
   @doc """

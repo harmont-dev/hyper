@@ -1,4 +1,4 @@
-defmodule Hyper.Sys.Posix do
+defmodule Sys.Posix do
   @moduledoc "POSIX filesystem helpers."
 
   @doc "Check whether a file exists and is executable."
