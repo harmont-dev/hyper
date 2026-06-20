@@ -7,8 +7,8 @@ defmodule Hyper.Cluster do
 
   Started once per BEAM node, before `Hyper.Node`, so VM registrations and budget
   advertisements have their registries available on boot. Also starts
-  `Hyper.Cluster.LayerAuditor`, the cluster-singleton that asserts the shared
-  medium holds every known layer.
+  `Hyper.Img.Db.Gc`, the cluster-singleton that continuously prunes blob rows
+  whose data is no longer on the shared medium.
   """
 
   use Supervisor
@@ -20,7 +20,7 @@ defmodule Hyper.Cluster do
 
   @impl true
   def init(_opts) do
-    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget, Hyper.Cluster.LayerAuditor]
+    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget, Hyper.Img.Db.Gc]
     Supervisor.init(children, strategy: :one_for_one)
   end
 end
