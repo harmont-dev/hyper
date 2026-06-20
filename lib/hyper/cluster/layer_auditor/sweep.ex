@@ -22,7 +22,7 @@ defmodule Hyper.Cluster.LayerAuditor.Sweep do
   @typedoc "Per-blob audit result. Mismatch carries expected then actual size."
   @type outcome ::
           :present
-          | {:missing, String.t()}
+          | {:missing, String.t(), non_neg_integer()}
           | {:mismatch, String.t(), non_neg_integer(), non_neg_integer()}
 
   @typedoc "Injected shared-medium probe: returns the on-medium size, or not_found."
@@ -38,7 +38,7 @@ defmodule Hyper.Cluster.LayerAuditor.Sweep do
     case check_fun.(id) do
       {:ok, ^expected} -> :present
       {:ok, actual} -> {:mismatch, id, expected, actual}
-      {:error, :not_found} -> {:missing, id}
+      {:error, :not_found} -> {:missing, id, expected}
     end
   end
 
@@ -72,7 +72,7 @@ defmodule Hyper.Cluster.LayerAuditor.Sweep do
 
     case outcome do
       :present -> %{sweep | present: sweep.present + 1}
-      {:missing, _} -> %{sweep | missing: sweep.missing + 1}
+      {:missing, _, _} -> %{sweep | missing: sweep.missing + 1}
       {:mismatch, _, _, _} -> %{sweep | mismatch: sweep.mismatch + 1}
     end
   end

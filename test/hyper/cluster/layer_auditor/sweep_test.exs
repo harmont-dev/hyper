@@ -21,7 +21,7 @@ defmodule Hyper.Cluster.LayerAuditor.SweepTest do
 
     test "missing when the medium has no file" do
       check = checker(%{})
-      assert Sweep.classify({"a", 100}, check) == {:missing, "a"}
+      assert Sweep.classify({"a", 100}, check) == {:missing, "a", 100}
     end
 
     test "mismatch when the medium file size differs from the DB" do
@@ -42,7 +42,7 @@ defmodule Hyper.Cluster.LayerAuditor.SweepTest do
       assert sweep.missing == 1
       assert sweep.mismatch == 1
       assert sweep.cursor == "c"
-      assert outcomes == [:present, {:missing, "b"}, {:mismatch, "c", 1000, 999}]
+      assert outcomes == [:present, {:missing, "b", 2}, {:mismatch, "c", 1000, 999}]
     end
 
     test "accumulates across successive batches" do

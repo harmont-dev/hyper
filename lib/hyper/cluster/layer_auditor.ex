@@ -98,11 +98,15 @@ defmodule Hyper.Cluster.LayerAuditor do
   # A late acquire tick after we already won: ignore.
   def handle_info(:acquire, state), do: {:noreply, state}
 
-  def handle_info(:sweep, %__MODULE__{role: :active} = state) do
+  def handle_info(:sweep, %__MODULE__{role: :active, sweep: nil} = state) do
     emit([:sweep, :start], %{}, %{node: node()})
     send(self(), :scan)
     {:noreply, %{state | sweep: Sweep.new()}}
   end
+
+  # A sweep is already running; drop this duplicate :sweep (e.g. a stale
+  # medium-retry timer that overlapped the active sweep).
+  def handle_info(:sweep, %__MODULE__{role: :active} = state), do: {:noreply, state}
 
   def handle_info(:scan, %__MODULE__{role: :active} = state) do
     case LayerRepo.test_system() do
@@ -183,9 +187,12 @@ defmodule Hyper.Cluster.LayerAuditor do
   @spec report(Sweep.outcome()) :: :ok
   defp report(:present), do: :ok
 
-  defp report({:missing, id}) do
-    Logger.warning("layer audit: blob #{id} missing from shared medium")
-    emit([:discrepancy], %{expected: 0, actual: 0}, %{blob_id: id, kind: :missing})
+  defp report({:missing, id, expected}) do
+    Logger.warning(
+      "layer audit: blob #{id} missing from shared medium (expected size: #{expected})"
+    )
+
+    emit([:discrepancy], %{expected: expected, actual: 0}, %{blob_id: id, kind: :missing})
   end
 
   defp report({:mismatch, id, expected, actual}) do
