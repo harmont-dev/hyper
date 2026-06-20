@@ -21,25 +21,11 @@ defmodule Hyper.Node.FireVMM.Provider do
   # SHA-256 of the official release tarballs, pinned per architecture. Contents
   # of firecracker-v<ver>-<arch>.tgz.sha256.txt from the GitHub release.
   @checksums %{
-    "x86_64" => "bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6",
-    "aarch64" => "531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7"
+    x86_64: "bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6",
+    aarch64: "531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7"
   }
 
   @github_base "https://github.com/firecracker-microvm/firecracker/releases/download"
-
-  @doc "Detect the firecracker arch string for the current machine."
-  @spec target_arch() :: {:ok, String.t()} | {:error, {:unsupported_arch, String.t()}}
-  def target_arch do
-    sys = to_string(:erlang.system_info(:system_architecture))
-
-    cond do
-      String.contains?(sys, "x86_64") -> {:ok, "x86_64"}
-      String.contains?(sys, "amd64") -> {:ok, "x86_64"}
-      String.contains?(sys, "aarch64") -> {:ok, "aarch64"}
-      String.contains?(sys, "arm64") -> {:ok, "aarch64"}
-      true -> {:error, {:unsupported_arch, sys}}
-    end
-  end
 
   @doc "Verify the SHA-256 of `path` equals `expected` (lowercase hex)."
   @spec verify_checksum(Path.t(), String.t()) ::
@@ -75,7 +61,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   Extract `tar_path` into a sibling `extract/` dir and copy the firecracker +
   jailer binaries into `install_dir`, writing the version marker on success.
   """
-  @spec extract_and_install(Path.t(), String.t(), Path.t()) ::
+  @spec extract_and_install(Path.t(), Hyper.Sys.Arch.t(), Path.t()) ::
           :ok
           | {:error,
              {:extract_failed, term()}
@@ -161,7 +147,7 @@ defmodule Hyper.Node.FireVMM.Provider do
 
   Options (default to production values; overridden in tests):
 
-    * `:arch` - target architecture string (default: `target_arch/0`)
+    * `:arch` - target architecture atom (default: `Hyper.Sys.Arch.current/0`)
     * `:install_dir` - install location (default: `Hyper.Config.firecracker_install_dir/0`)
     * `:checksums` - `%{arch => sha256_hex}` (default: pinned `@checksums`)
     * `:fetch` - `(url, dest_path -> :ok | {:error, term})` (default: `Req`)
@@ -180,7 +166,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   end
 
   @doc false
-  @spec tarball_url(String.t()) :: String.t()
+  @spec tarball_url(Hyper.Sys.Arch.t()) :: String.t()
   def tarball_url(arch) do
     "#{@github_base}/v#{@version}/firecracker-v#{@version}-#{arch}.tgz"
   end
@@ -188,7 +174,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   defp resolve_arch(opts) do
     case Keyword.fetch(opts, :arch) do
       {:ok, arch} -> {:ok, arch}
-      :error -> target_arch()
+      :error -> Hyper.Sys.Arch.current()
     end
   end
 
