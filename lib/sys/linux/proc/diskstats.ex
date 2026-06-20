@@ -21,14 +21,21 @@ defmodule Sys.Linux.Proc.Diskstats do
   @nvme_mmc_partition ~r/^(nvme\d+n\d+|mmcblk\d+)p\d+$/
   @scsi_partition ~r/^(sd|vd|hd|xvd)[a-z]+\d+$/
 
+  defmodule Device do
+    @moduledoc "One `/proc/diskstats` row: a block device and its cumulative (read + written) bytes."
+    @type t :: %__MODULE__{name: String.t(), bytes: non_neg_integer()}
+    @enforce_keys [:name, :bytes]
+    defstruct [:name, :bytes]
+  end
+
   @doc "Read `/proc/diskstats` and total the bytes across whole physical disks."
   @spec read_total_physical() :: {:ok, non_neg_integer()} | {:error, File.posix()}
   def read_total_physical do
     with {:ok, content} <- File.read(@path), do: {:ok, total_physical(content)}
   end
 
-  @doc "Map each device name to its cumulative (read + written) bytes."
-  @spec parse(String.t()) :: %{String.t() => non_neg_integer()}
+  @doc "Parse each `/proc/diskstats` row into a `Device` with its cumulative (read + written) bytes."
+  @spec parse(String.t()) :: [Device.t()]
   def parse(content) do
     content
     |> String.split("\n", trim: true)
@@ -37,13 +44,12 @@ defmodule Sys.Linux.Proc.Diskstats do
         [_major, _minor, name | _rest] = fields when length(fields) > @sectors_written_idx ->
           read = String.to_integer(Enum.at(fields, @sectors_read_idx))
           written = String.to_integer(Enum.at(fields, @sectors_written_idx))
-          [{name, (read + written) * @sector_bytes}]
+          [%Device{name: name, bytes: (read + written) * @sector_bytes}]
 
         _ ->
           []
       end
     end)
-    |> Map.new()
   end
 
   @doc "Whether `name` is a whole physical disk (not a partition or virtual device)."
@@ -59,8 +65,8 @@ defmodule Sys.Linux.Proc.Diskstats do
   def total_physical(content) do
     content
     |> parse()
-    |> Enum.filter(fn {name, _bytes} -> physical_device?(name) end)
-    |> Enum.map(fn {_name, bytes} -> bytes end)
+    |> Enum.filter(fn %Device{name: name} -> physical_device?(name) end)
+    |> Enum.map(fn %Device{bytes: bytes} -> bytes end)
     |> Enum.sum()
   end
 end
