@@ -60,6 +60,36 @@ defmodule Hyper.Node do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
   end
 
+  @doc """
+  Start a VM here and confirm its budget.
+
+  `start_fun` boots the VM and returns `{:ok, vm_pid}`; the reservation is held
+  against `vm_pid` and released when it dies. If the reserve loses a race (the
+  node filled up since the scheduler's snapshot) the just-started VM is torn down
+  via `stop_fun` and `{:error, reason}` is returned.
+  """
+  @spec try_run(
+          Hyper.Vm.Instance.Spec.t(),
+          (-> {:ok, pid()} | {:error, term()}),
+          (pid() -> :ok)
+        ) :: {:ok, pid()} | {:error, term()}
+  def try_run(spec, start_fun, stop_fun) do
+    case start_fun.() do
+      {:ok, pid} ->
+        case Hyper.Node.Budget.admit(spec, pid) do
+          :ok ->
+            {:ok, pid}
+
+          {:error, reason} ->
+            :ok = stop_fun.(pid)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @spec test_system :: :ok | {:error, term()}
   def test_system do
     with {:ok, _} <- Hyper.Node.Config.Budget.load(),
