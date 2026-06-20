@@ -1,6 +1,6 @@
 defmodule Hyper.Vm.Instance do
   @moduledoc """
-  Named instance types — fixed (vCPU, memory) sizes, like cloud instance classes.
+  Named instance types - fixed (vCPU, memory) sizes, like cloud instance classes.
 
   The caller picks a `type` instead of juggling raw numbers; this module turns it
   into host-side resource caps expressed as **firecracker jailer flags**.

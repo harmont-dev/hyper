@@ -1,6 +1,6 @@
 defmodule Hyper.Img.Db.Blob do
   @moduledoc """
-  An immutable, content-addressed leaf object stored on NFS — a base (`P.img`) or
+  An immutable, content-addressed leaf object stored on NFS - a base (`P.img`) or
   a delta (`L.img`). The `id` is both primary key and identity, so inserts are
   conflict-free: two nodes publishing the same bytes write the same row.
 

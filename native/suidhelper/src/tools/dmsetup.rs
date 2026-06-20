@@ -22,8 +22,8 @@ pub enum Error {
 }
 
 /// A dm-snapshot table line: `0 <sectors> snapshot <origin> <cow> P|N <chunk>`.
-/// Only this target is accepted — other dm targets (linear, crypt, …) could map
-/// arbitrary devices — and origin/cow are anchored to loop / hyper-* devices by
+/// Only this target is accepted - other dm targets (linear, crypt, ...) could map
+/// arbitrary devices - and origin/cow are anchored to loop / hyper-* devices by
 /// their types. Parsed from the caller's string, then rendered back via
 /// `Display` so dmsetup only ever sees a table we reconstructed ourselves.
 #[derive(Clone)]

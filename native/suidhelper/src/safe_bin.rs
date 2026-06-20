@@ -4,7 +4,7 @@
 //! binary only root could have produced. [`SafeBin`] is a newtype whose only
 //! constructor runs those checks, so holding one is proof the path was
 //! validated. The const string parameter `NAME` is the basename it was validated
-//! against — a `SafeBin<"losetup">` can never be passed where a
+//! against - a `SafeBin<"losetup">` can never be passed where a
 //! `SafeBin<"dmsetup">` is wanted. Combined with the [`FromStr`] impl (see
 //! `tools`), clap validates the path at argument-parse time with no per-tool
 //! boilerplate.

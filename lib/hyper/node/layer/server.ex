@@ -118,7 +118,7 @@ defmodule Hyper.Node.Layer.Server do
 
   @impl true
   def handle_info(:idle_timeout, state) do
-    # Stale timer (a holder arrived after it was armed) — ignore.
+    # Stale timer (a holder arrived after it was armed) - ignore.
     {:noreply, state}
   end
 

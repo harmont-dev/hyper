@@ -19,7 +19,7 @@ defmodule Hyper.Application do
       # query images/leases on boot.
       Hyper.Img.Db.Repo,
       # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
-      # can discover peer nodes. Gossip strategy in dev — see config/config.exs.
+      # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
       {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
       # This machine's participation in the cluster: owns the cluster-wide VM
       # registry and the local supervisor that runs this node's microVMs.

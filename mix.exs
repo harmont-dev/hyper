@@ -55,7 +55,7 @@ defmodule Hyper.MixProject do
     ]
   end
 
-  # ExDoc config — drives `mix docs` and what HexDocs renders.
+  # ExDoc config - drives `mix docs` and what HexDocs renders.
   defp docs do
     [
       # Landing page of the docs site.
@@ -157,7 +157,7 @@ defmodule Hyper.MixProject do
     ]
   end
 
-  # `mix check` — the strict gate. Runs fast checks first, slow ones (dialyzer) last.
+  # `mix check` - the strict gate. Runs fast checks first, slow ones (dialyzer) last.
   defp aliases do
     [
       check: [

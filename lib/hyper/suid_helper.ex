@@ -4,7 +4,7 @@ defmodule Hyper.SuidHelper do
 
   The node runs unprivileged; this helper is the only path to the privileged
   `losetup`/`dmsetup`/`blockdev` operations. Each call shells the configured
-  helper for one operation — `<helper> <tool> --bin <tool_bin> <args...>` — and
+  helper for one operation - `<helper> <tool> --bin <tool_bin> <args...>` - and
   decodes the JSON object it prints on success. The helper validates every
   argument before it briefly escalates to root (see `native/suidhelper`).
   """

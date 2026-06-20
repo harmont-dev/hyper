@@ -60,7 +60,7 @@ defmodule Hyper.Node.Img do
     with_image_lease(img, vm_id, callable)
   end
 
-  # Take a lease on `img` for this node/`vm_id`, run `callable`, then release it —
+  # Take a lease on `img` for this node/`vm_id`, run `callable`, then release it -
   # even if `callable` raises. A background task re-bumps the lease for the whole
   # run, so a long-lived VM never lets its claim lapse. If the lease cannot be
   # taken, returns the error and never runs `callable`.
@@ -83,7 +83,7 @@ defmodule Hyper.Node.Img do
 
   # Re-bump the lease forever at 1/3 of the TTL, until killed. Runs in a task for the
   # lifetime of `callable`; transient bump failures are swallowed so a DB hiccup
-  # can't tear down the VM — the next tick retries.
+  # can't tear down the VM - the next tick retries.
   @spec heartbeat(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) :: no_return()
   defp heartbeat(img, vm_id, ttl) do
     Process.sleep(div(Unit.Time.as_ms(ttl), 3))

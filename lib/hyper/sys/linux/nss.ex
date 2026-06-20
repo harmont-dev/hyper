@@ -1,5 +1,5 @@
 defmodule Hyper.Sys.Linux.Nss do
-  @moduledoc "NSS (Name Service Switch) utilities — queries users and groups via `getent`."
+  @moduledoc "NSS (Name Service Switch) utilities - queries users and groups via `getent`."
 
   defmodule Passwd do
     @moduledoc "The passwd database (`getent passwd`)."
