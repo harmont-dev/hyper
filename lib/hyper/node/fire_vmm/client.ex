@@ -46,7 +46,12 @@ defmodule Hyper.Node.FireVMM.Client do
 
   @spec start_link(Opts.t()) :: GenServer.on_start()
   def start_link(%Opts{} = opts) do
-    name = if Map.has_key?(opts, :name), do: opts.name, else: via(opts.vm_id)
+    name =
+      case opts.name do
+        nil when not is_nil(opts.vm_id) -> via(opts.vm_id)
+        other -> other
+      end
+
     GenServer.start_link(__MODULE__, opts, gen_opts(name))
   end
 
