@@ -1,0 +1,85 @@
+defmodule Hyper.Scheduler do
+  @moduledoc """
+  Picks the node to run a VM on. The first pass reads the gossip-replicated
+  `Hyper.Node.Budget.NodeState`s (`Hyper.Cluster.Budget.all_states/0`), drops
+  nodes that cannot fit the spec, and ranks survivors by how many bytes of the
+  VM's image layers they already have mounted (`colo(N, VM) = sum of |L|` over
+  shared mounted layers). The result is an ordered candidate list; the chosen
+  node confirms authoritatively via `Hyper.Node.Budget.admit/2` (see `place/3`).
+
+  All filtering is best-effort on a possibly-stale snapshot: a node that no
+  longer fits simply refuses at confirmation time.
+  """
+
+  alias Hyper.Cluster.Budget
+  alias Hyper.Node.Budget.NodeState
+  alias Hyper.Vm.Instance.Spec
+  alias Unit.Bandwidth
+  alias Unit.Information
+
+  @type layer_sizes :: [{Hyper.Layer.id(), Unit.Information.t()}]
+
+  @doc "Fitting nodes for `spec`, most colocated bytes first."
+  @spec candidates(Spec.t(), layer_sizes()) :: [node()]
+  def candidates(spec, layers \\ []) do
+    Budget.all_states()
+    |> Enum.filter(&fits?(&1, spec))
+    |> Enum.sort_by(&colocation_score(&1, layers), :desc)
+    |> Enum.map(& &1.node)
+  end
+
+  @doc """
+  Place `spec` on the best confirming node.
+
+  Walks `candidates/2` in rank order, calling `attempt` on each until one returns
+  `{:ok, result}` (the authoritative confirmation, typically a node running
+  `Hyper.Node.try_run/3` over `:erpc`). `{:error, :no_capacity}` if all refuse.
+  """
+  @spec place(Spec.t(), layer_sizes(), (node() -> {:ok, term()} | {:error, term()})) ::
+          {:ok, {node(), term()}} | {:error, :no_capacity}
+  def place(spec, layers, attempt) do
+    spec
+    |> candidates(layers)
+    |> Enum.reduce_while({:error, :no_capacity}, fn node, acc ->
+      case attempt.(node) do
+        {:ok, result} -> {:halt, {:ok, {node, result}}}
+        {:error, _reason} -> {:cont, acc}
+      end
+    end)
+  end
+
+  @doc "Whether `state`'s node can hold `spec` (hard headroom + soft ceilings)."
+  @spec fits?(NodeState.t(), Spec.t()) :: boolean()
+  def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
+
+  @doc "Bytes of `layers` already mounted on `state`'s node."
+  @spec colocation_score(NodeState.t(), layer_sizes()) :: non_neg_integer()
+  def colocation_score(state, layers) do
+    mounted = MapSet.new(state.layers)
+
+    Enum.reduce(layers, 0, fn {id, size}, acc ->
+      if MapSet.member?(mounted, id), do: acc + Information.as_bytes(size), else: acc
+    end)
+  end
+
+  @spec hard_fits?(NodeState.t(), Spec.t()) :: boolean()
+  defp hard_fits?(state, spec) do
+    Information.as_bytes(spec.mem) <= Information.as_bytes(state.mem_free) and
+      Information.as_bytes(spec.disk) <= Information.as_bytes(state.disk_free)
+  end
+
+  @spec soft_fits?(NodeState.t(), Spec.t()) :: boolean()
+  defp soft_fits?(state, spec) do
+    cpu_ok = state.cpu_load + spec.vcpus / state.cpu_capacity <= state.cpu_max_load
+
+    disk_ok =
+      Bandwidth.as_bytes_per_sec(state.disk_bw_load) + Bandwidth.as_bytes_per_sec(spec.disk_bw) <=
+        Bandwidth.as_bytes_per_sec(state.disk_bw_ceiling)
+
+    net_ok =
+      Bandwidth.as_bytes_per_sec(state.net_bw_load) + Bandwidth.as_bytes_per_sec(spec.net_bw) <=
+        Bandwidth.as_bytes_per_sec(state.net_bw_ceiling)
+
+    cpu_ok and disk_ok and net_ok
+  end
+end
