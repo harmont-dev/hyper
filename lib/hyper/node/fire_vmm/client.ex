@@ -167,6 +167,63 @@ defmodule Hyper.Node.FireVMM.Client do
   @spec put_mmds_config(server(), Schema.MmdsConfig.t()) :: result()
   def put_mmds_config(server, %Schema.MmdsConfig{} = c), do: call(server, :put, "/mmds/config", c)
 
+  @doc "PUT /snapshot/create."
+  @spec create_snapshot(server(), Schema.SnapshotCreateParams.t()) :: result()
+  def create_snapshot(server, %Schema.SnapshotCreateParams{} = s),
+    do: call(server, :put, "/snapshot/create", s)
+
+  @doc "PUT /snapshot/load."
+  @spec load_snapshot(server(), Schema.SnapshotLoadParams.t()) :: result()
+  def load_snapshot(server, %Schema.SnapshotLoadParams{} = s),
+    do: call(server, :put, "/snapshot/load", s)
+
+  @doc "PUT /cpu-config (pre-boot)."
+  @spec put_cpu_config(server(), Schema.CpuConfig.t()) :: result()
+  def put_cpu_config(server, %Schema.CpuConfig{} = c), do: call(server, :put, "/cpu-config", c)
+
+  @doc "PUT /logger."
+  @spec put_logger(server(), Schema.Logger.t()) :: result()
+  def put_logger(server, %Schema.Logger{} = l), do: call(server, :put, "/logger", l)
+
+  @doc "PUT /metrics."
+  @spec put_metrics(server(), Schema.Metrics.t()) :: result()
+  def put_metrics(server, %Schema.Metrics{} = m), do: call(server, :put, "/metrics", m)
+
+  @doc "PUT /entropy (pre-boot)."
+  @spec put_entropy(server(), Schema.EntropyDevice.t()) :: result()
+  def put_entropy(server, %Schema.EntropyDevice{} = e), do: call(server, :put, "/entropy", e)
+
+  @doc "PUT /serial (pre-boot)."
+  @spec put_serial(server(), Schema.SerialDevice.t()) :: result()
+  def put_serial(server, %Schema.SerialDevice{} = s), do: call(server, :put, "/serial", s)
+
+  @doc "PUT /vsock (pre-boot)."
+  @spec put_vsock(server(), Schema.Vsock.t()) :: result()
+  def put_vsock(server, %Schema.Vsock{} = v), do: call(server, :put, "/vsock", v)
+
+  @doc "PUT /pmem/{id} (pre-boot)."
+  @spec put_pmem(server(), Schema.Pmem.t()) :: result()
+  def put_pmem(server, %Schema.Pmem{id: id} = p), do: call(server, :put, "/pmem/" <> id, p)
+
+  @doc "PATCH /pmem/{id} (post-boot rate limiter)."
+  @spec patch_pmem(server(), Schema.PartialPmem.t()) :: result()
+  def patch_pmem(server, %Schema.PartialPmem{id: id} = p),
+    do: call(server, :patch, "/pmem/" <> id, p)
+
+  @doc "PUT /hotplug/memory (pre-boot)."
+  @spec put_memory_hotplug(server(), Schema.MemoryHotplugConfig.t()) :: result()
+  def put_memory_hotplug(server, %Schema.MemoryHotplugConfig{} = m),
+    do: call(server, :put, "/hotplug/memory", m)
+
+  @doc "PATCH /hotplug/memory — resize (post-boot)."
+  @spec patch_memory_hotplug(server(), Schema.MemoryHotplugSizeUpdate.t()) :: result()
+  def patch_memory_hotplug(server, %Schema.MemoryHotplugSizeUpdate{} = m),
+    do: call(server, :patch, "/hotplug/memory", m)
+
+  @doc "GET /hotplug/memory — current status."
+  @spec get_memory_hotplug(server()) :: result()
+  def get_memory_hotplug(server), do: call(server, :get, "/hotplug/memory")
+
   ## Transport
 
   @spec call(server(), :get | :put | :patch, String.t()) :: result()
