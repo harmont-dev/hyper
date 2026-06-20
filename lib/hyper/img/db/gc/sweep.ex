@@ -15,6 +15,7 @@ defmodule Hyper.Img.Db.Gc.Sweep do
             scanned: 0,
             present: 0,
             missing: 0,
+            unknown: 0,
             pruned: 0,
             pruned_bytes: 0,
             dangling: 0
@@ -24,6 +25,7 @@ defmodule Hyper.Img.Db.Gc.Sweep do
           scanned: non_neg_integer(),
           present: non_neg_integer(),
           missing: non_neg_integer(),
+          unknown: non_neg_integer(),
           pruned: non_neg_integer(),
           pruned_bytes: non_neg_integer(),
           dangling: non_neg_integer()
@@ -32,8 +34,13 @@ defmodule Hyper.Img.Db.Gc.Sweep do
   @typedoc "A blob page row: content-addressed id and its DB-recorded byte size."
   @type blob :: {String.t(), non_neg_integer()}
 
-  @typedoc "Injected shared-medium probe: true if the blob's file is present."
-  @type check_fun :: (String.t() -> boolean())
+  @typedoc """
+  Injected shared-medium probe. `:present` = file is there; `:missing` = file is
+  genuinely gone (safe to prune); `:unknown` = could not determine (I/O error),
+  so the blob is counted but never pruned.
+  """
+  @type presence :: :present | :missing | :unknown
+  @type check_fun :: (String.t() -> presence())
 
   @doc "A fresh sweep: nil cursor (start of table), zeroed counters."
   @spec new() :: t()
@@ -41,8 +48,10 @@ defmodule Hyper.Img.Db.Gc.Sweep do
 
   @doc """
   Fold one keyset page into the sweep. Advances `cursor` to the last blob's id
-  (so the next page starts after it), counts present vs missing, and returns the
-  missing blobs (file absent on the medium) as `{id, size}` for the GC to prune.
+  (so the next page starts after it), counts present / missing / unknown, and
+  returns only the genuinely-missing blobs (file confirmed absent) as `{id, size}`
+  for the GC to prune. `:unknown` rows (probe I/O error) are counted but never
+  returned, so an unreachable medium can never drive a delete.
   """
   @spec absorb(t(), [blob()], check_fun()) :: {t(), [blob()]}
   def absorb(%__MODULE__{} = sweep, batch, check_fun) do
@@ -50,10 +59,10 @@ defmodule Hyper.Img.Db.Gc.Sweep do
       Enum.reduce(batch, {sweep, []}, fn {id, _size} = blob, {acc, missing} ->
         acc = %{acc | scanned: acc.scanned + 1, cursor: id}
 
-        if check_fun.(id) do
-          {%{acc | present: acc.present + 1}, missing}
-        else
-          {%{acc | missing: acc.missing + 1}, [blob | missing]}
+        case check_fun.(id) do
+          :present -> {%{acc | present: acc.present + 1}, missing}
+          :missing -> {%{acc | missing: acc.missing + 1}, [blob | missing]}
+          :unknown -> {%{acc | unknown: acc.unknown + 1}, missing}
         end
       end)
 

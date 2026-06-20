@@ -34,6 +34,26 @@ defmodule Hyper.Node.Layer.Repo do
     end
   end
 
+  @doc """
+  Probe a layer's presence, distinguishing a real absence from an I/O error.
+
+  Unlike `find_layer/1` (built on `File.exists?/1`, which reports `false` for any
+  failure), this returns `{:error, :enoent}` ONLY when the file is genuinely
+  absent. A transient backend error (NFS `ESTALE`/`EIO`, permissions, the mount
+  being gone) returns `{:error, posix}` so callers that act on absence - e.g. the
+  layer GC, which deletes rows - never mistake "I couldn't tell" for "it's gone".
+  """
+  @spec probe(Hyper.Layer.id()) :: {:ok, Path.t()} | {:error, :enoent} | {:error, File.posix()}
+  @decorate with_span("Hyper.Node.Layer.Repo.probe")
+  def probe(id) do
+    path = Path.join([Hyper.Config.layer_dir(), layer_basename(id)])
+
+    case File.stat(path) do
+      {:ok, _stat} -> {:ok, path}
+      {:error, posix} -> {:error, posix}
+    end
+  end
+
   # Return the basename of the given layer.
   @spec layer_basename(Hyper.Layer.id()) :: String.t()
   defp layer_basename(id), do: "layer_#{id}.img"

@@ -39,4 +39,5 @@ config :hyper, Hyper.Img.Db.Gc,
   sweep_interval_ms: 60_000,
   acquire_interval_ms: 5_000,
   retry_ms: 60_000,
-  statement_timeout_ms: 5_000
+  statement_timeout_ms: 5_000,
+  grace_period_ms: 3_600_000

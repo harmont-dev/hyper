@@ -3,15 +3,14 @@ defmodule Hyper.Img.Db.Gc.SweepTest do
 
   alias Hyper.Img.Db.Gc.Sweep
 
-  # check_fun stub: ids in the set have their file present on the medium.
-  defp present_set(ids) do
-    set = MapSet.new(ids)
-    fn id -> MapSet.member?(set, id) end
+  # check_fun stub: classify ids by an explicit map; default :present.
+  defp probe(map) do
+    fn id -> Map.get(map, id, :present) end
   end
 
   describe "absorb/3" do
     test "splits present vs missing, advances cursor, returns missing {id, size}" do
-      check = present_set(["a", "c"])
+      check = probe(%{"b" => :missing})
       batch = [{"a", 1}, {"b", 2}, {"c", 3}]
 
       {sweep, missing} = Sweep.absorb(Sweep.new(), batch, check)
@@ -23,8 +22,20 @@ defmodule Hyper.Img.Db.Gc.SweepTest do
       assert missing == [{"b", 2}]
     end
 
+    test "unknown rows are counted but never returned for pruning" do
+      check = probe(%{"a" => :unknown, "b" => :missing})
+      batch = [{"a", 1}, {"b", 2}, {"c", 3}]
+
+      {sweep, missing} = Sweep.absorb(Sweep.new(), batch, check)
+
+      assert sweep.present == 1
+      assert sweep.missing == 1
+      assert sweep.unknown == 1
+      assert missing == [{"b", 2}]
+    end
+
     test "accumulates across successive pages" do
-      check = present_set([])
+      check = probe(%{"a" => :missing, "b" => :missing})
       {s1, m1} = Sweep.absorb(Sweep.new(), [{"a", 1}], check)
       {s2, m2} = Sweep.absorb(s1, [{"b", 2}], check)
 
@@ -36,7 +47,7 @@ defmodule Hyper.Img.Db.Gc.SweepTest do
     end
 
     test "an empty page leaves the cursor untouched and returns no missing" do
-      check = present_set([])
+      check = probe(%{"a" => :missing})
       {s1, _} = Sweep.absorb(Sweep.new(), [{"a", 1}], check)
       {s2, missing} = Sweep.absorb(s1, [], check)
 

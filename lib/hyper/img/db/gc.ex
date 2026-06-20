@@ -40,17 +40,35 @@ defmodule Hyper.Img.Db.Gc do
   GC cannot fix by deleting (the FK would block it, and the image is already
   broken). Those are left in place and reported loudly.
 
+  ## Not deleting live data (the safety model)
+
+  Deleting rows is irreversible, so three guards must all agree a blob is really
+  gone before it is pruned:
+
+    1. **Errno discrimination.** The probe (`Hyper.Node.Layer.Repo.probe/1`)
+       treats only `:enoent` as absent; any other I/O error (NFS `ESTALE`/`EIO`,
+       a vanished mount) is `:unknown` and is never pruned.
+    2. **Mount re-check.** `test_system/0` is re-run right before a page's
+       deletions; if the mount dropped mid-page, the page's deletions are skipped.
+    3. **Grace period.** Rows younger than `grace_period_ms` are never deleted, so
+       a blob mid-publish (row present, file not finished) is safe.
+
+  **Publish contract:** publishers must write a layer's file to the medium
+  *before* inserting its `blobs` row (ideally write-temp then atomic rename), so a
+  `:present` row implies the bytes exist. The grace period is insurance for slow
+  or out-of-order publishes; it is not a substitute for that ordering.
+
   ## Telemetry
 
     * `[:hyper, :img, :db, :gc, :sweep, :start]` - measurements `%{}`,
       metadata `%{node: node()}`
     * `[:hyper, :img, :db, :gc, :sweep, :stop]` - measurements
-      `%{scanned, present, missing, pruned, pruned_bytes, dangling}`,
+      `%{scanned, present, missing, unknown, pruned, pruned_bytes, dangling}`,
       metadata `%{node: node()}`
-    * `[:hyper, :img, :db, :gc, :pruned]` - per page; measurements
-      `%{count, bytes}`, metadata `%{node: node()}`
-    * `[:hyper, :img, :db, :gc, :dangling]` - per dangling blob; measurements
-      `%{size}`, metadata `%{blob_id}`
+    * `[:hyper, :img, :db, :gc, :pruned]` - per page (when any deleted);
+      measurements `%{count, bytes}`, metadata `%{node: node()}`
+    * `[:hyper, :img, :db, :gc, :dangling]` - per page (when any found);
+      measurements `%{count, bytes}`, metadata `%{node: node(), sample}`
   """
 
   use GenServer
@@ -75,7 +93,11 @@ defmodule Hyper.Img.Db.Gc do
     # Backoff before retrying after the medium or the database is unavailable.
     retry_ms: 60_000,
     # Cap on each GC DB statement so it can never pin a backend.
-    statement_timeout_ms: 5_000
+    statement_timeout_ms: 5_000,
+    # Never prune a blob younger than this. A row whose file is not yet on the
+    # medium because it is still being published must not be deleted; the grace
+    # window keeps the GC off freshly-inserted rows regardless of publish timing.
+    grace_period_ms: 3_600_000
   ]
 
   defstruct [:cfg, role: :standby, sweep: nil, last_sweep: nil]
@@ -138,9 +160,11 @@ defmodule Hyper.Img.Db.Gc do
         try do
           {:noreply, scan_one_batch(state)}
         rescue
-          e ->
+          # Only swallow database unavailability (incl. statement_timeout aborts)
+          # and retry; let any other exception crash so a real bug surfaces.
+          e in [Postgrex.Error, DBConnection.ConnectionError] ->
             Logger.warning(
-              "layer gc: database error during sweep (#{Exception.message(e)}); retrying"
+              "layer gc: database unavailable during sweep (#{Exception.message(e)}); retrying"
             )
 
             Process.send_after(self(), :sweep, cfg(state, :retry_ms))
@@ -178,9 +202,9 @@ defmodule Hyper.Img.Db.Gc do
   defp scan_one_batch(%__MODULE__{sweep: sweep} = state) do
     limit = cfg(state, :batch_size)
     batch = with_low_priority(state, fn -> Blob.scan_present_after(sweep.cursor, limit) end)
-    {sweep, missing} = Sweep.absorb(sweep, batch, &present?/1)
+    {sweep, missing} = Sweep.absorb(sweep, batch, &presence/1)
 
-    {pruned, pruned_bytes, dangling} = prune_missing(state, missing)
+    {pruned, pruned_bytes, dangling} = maybe_prune(state, missing)
     sweep = Sweep.record_prune(sweep, pruned, pruned_bytes, dangling)
 
     if Sweep.continue?(batch, limit) do
@@ -189,14 +213,22 @@ defmodule Hyper.Img.Db.Gc do
     else
       emit(
         [:sweep, :stop],
-        Map.take(sweep, [:scanned, :present, :missing, :pruned, :pruned_bytes, :dangling]),
+        Map.take(sweep, [
+          :scanned,
+          :present,
+          :missing,
+          :unknown,
+          :pruned,
+          :pruned_bytes,
+          :dangling
+        ]),
         %{node: node()}
       )
 
       Logger.info(
         "layer gc sweep complete: scanned=#{sweep.scanned} present=#{sweep.present} " <>
-          "missing=#{sweep.missing} pruned=#{sweep.pruned} (#{sweep.pruned_bytes} bytes) " <>
-          "dangling=#{sweep.dangling}"
+          "missing=#{sweep.missing} unknown=#{sweep.unknown} pruned=#{sweep.pruned} " <>
+          "(#{sweep.pruned_bytes} bytes) dangling=#{sweep.dangling}"
       )
 
       Process.send_after(self(), :sweep, cfg(state, :sweep_interval_ms))
@@ -204,11 +236,31 @@ defmodule Hyper.Img.Db.Gc do
     end
   end
 
+  # Re-check the medium is still mounted before acting on a page's "missing"
+  # set. If the whole mount vanished mid-page, every probe read as gone - skip
+  # the deletions rather than wipe a page of live rows.
+  @spec maybe_prune(t(), [Sweep.blob()]) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp maybe_prune(_state, []), do: {0, 0, 0}
+
+  defp maybe_prune(state, missing) do
+    case LayerRepo.test_system() do
+      :ok ->
+        prune_missing(state, missing)
+
+      {:error, reason} ->
+        Logger.warning(
+          "layer gc: medium became unavailable before pruning (#{inspect(reason)}); " <>
+            "skipping #{length(missing)} deletion(s) this page"
+        )
+
+        {0, 0, 0}
+    end
+  end
+
   # Prune the missing blobs that no image references; report the rest as dangling.
   @spec prune_missing(t(), [Sweep.blob()]) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp prune_missing(_state, []), do: {0, 0, 0}
-
   defp prune_missing(state, missing) do
     ids = Enum.map(missing, fn {id, _size} -> id end)
     referenced = referenced_ids(state, ids)
@@ -216,38 +268,53 @@ defmodule Hyper.Img.Db.Gc do
     {dangling, prunable} =
       Enum.split_with(missing, fn {id, _size} -> MapSet.member?(referenced, id) end)
 
-    Enum.each(dangling, fn {id, size} ->
-      Logger.error(
-        "layer gc: blob #{id} missing from medium but still referenced by an image " <>
-          "(#{size} bytes); leaving in place"
-      )
+    report_dangling(dangling)
 
-      emit([:dangling], %{size: size}, %{blob_id: id})
-    end)
-
-    pruned_bytes = prunable |> Enum.map(fn {_id, size} -> size end) |> Enum.sum()
+    cutoff = DateTime.add(DateTime.utc_now(), -cfg(state, :grace_period_ms), :millisecond)
     prunable_ids = Enum.map(prunable, fn {id, _size} -> id end)
-    pruned = prune_rows(state, prunable_ids, pruned_bytes)
+    {pruned, pruned_bytes} = prune_rows(state, prunable_ids, cutoff)
 
     {pruned, pruned_bytes, length(dangling)}
   end
 
-  @spec prune_rows(t(), [String.t()], non_neg_integer()) :: non_neg_integer()
-  defp prune_rows(_state, [], _bytes), do: 0
+  @spec prune_rows(t(), [String.t()], DateTime.t()) :: {non_neg_integer(), non_neg_integer()}
+  defp prune_rows(_state, [], _cutoff), do: {0, 0}
 
-  defp prune_rows(state, ids, bytes) do
-    # NOT EXISTS double-guards the FK: even if a reference appeared since we
-    # snapshotted `referenced`, the row is simply skipped rather than raising.
+  defp prune_rows(state, ids, cutoff) do
+    # `RETURNING size` gives the exact deleted set's count and bytes. The grace
+    # cutoff protects freshly-published rows. NOT EXISTS double-guards the FK:
+    # even if a reference appeared since we snapshotted `referenced`, that row is
+    # skipped rather than raising.
     query =
       from b in Blob,
         as: :b,
         where:
-          b.id in ^ids and b.state == :present and
-            not exists(from il in ImageLayer, where: il.blob_id == parent_as(:b).id)
+          b.id in ^ids and b.state == :present and b.inserted_at < ^cutoff and
+            not exists(from il in ImageLayer, where: il.blob_id == parent_as(:b).id),
+        select: b.size
 
-    {count, _} = with_low_priority(state, fn -> Repo.delete_all(query) end)
-    emit([:pruned], %{count: count, bytes: bytes}, %{node: node()})
-    count
+    {count, sizes} = with_low_priority(state, fn -> Repo.delete_all(query) end)
+    bytes = Enum.sum(sizes)
+    if count > 0, do: emit([:pruned], %{count: count, bytes: bytes}, %{node: node()})
+    {count, bytes}
+  end
+
+  # Report dangling blobs (file gone, still referenced = data loss) once per page,
+  # aggregated, so a broken mount cannot flood the logs one line per blob.
+  @spec report_dangling([Sweep.blob()]) :: :ok
+  defp report_dangling([]), do: :ok
+
+  defp report_dangling(dangling) do
+    count = length(dangling)
+    bytes = dangling |> Enum.map(fn {_id, size} -> size end) |> Enum.sum()
+    sample = dangling |> Enum.take(10) |> Enum.map(fn {id, _size} -> id end)
+
+    Logger.error(
+      "layer gc: #{count} blob(s) missing from medium but still referenced by an image " <>
+        "(#{bytes} bytes total); leaving in place. sample=#{inspect(sample)}"
+    )
+
+    emit([:dangling], %{count: count, bytes: bytes}, %{node: node(), sample: sample})
   end
 
   @spec referenced_ids(t(), [String.t()]) :: MapSet.t(String.t())
@@ -275,9 +342,17 @@ defmodule Hyper.Img.Db.Gc do
     result
   end
 
-  # Shared-medium presence probe injected into the pure Sweep core.
-  @spec present?(String.t()) :: boolean()
-  defp present?(id), do: match?({:ok, _path}, LayerRepo.find_layer(id))
+  # Shared-medium presence probe injected into the pure Sweep core. Distinguishes
+  # a genuine absence (`:enoent` -> prunable) from an I/O error (`:unknown` ->
+  # never pruned), so a transient NFS hiccup can never drive a delete.
+  @spec presence(String.t()) :: Sweep.presence()
+  defp presence(id) do
+    case LayerRepo.probe(id) do
+      {:ok, _path} -> :present
+      {:error, :enoent} -> :missing
+      {:error, _posix} -> :unknown
+    end
+  end
 
   @spec emit([atom()], map(), map()) :: :ok
   defp emit(suffix, measurements, metadata) do
