@@ -24,19 +24,6 @@ defmodule Sys.Mon.Server do
     defstruct [:instant, :smoothed]
   end
 
-  defmodule Opts do
-    @moduledoc "Start options for a `Sys.Mon.Server`."
-    @type t :: %__MODULE__{
-            sampler: module(),
-            period: Unit.Time.t(),
-            tau: Unit.Time.t(),
-            name: GenServer.name(),
-            telemetry_event: [atom()]
-          }
-    @enforce_keys [:sampler, :period, :tau, :name, :telemetry_event]
-    defstruct [:sampler, :period, :tau, :name, :telemetry_event]
-  end
-
   defmodule State do
     @moduledoc false
     @type t :: %__MODULE__{
@@ -60,10 +47,15 @@ defmodule Sys.Mon.Server do
     ]
   end
 
-  @doc "Start a monitor for the sampler described by `opts`."
-  @spec start_link(Opts.t()) :: GenServer.on_start()
-  def start_link(%Opts{name: name} = opts) do
-    GenServer.start_link(__MODULE__, opts, name: name)
+  @doc """
+  Start the monitor for `sampler`, registered under the sampler's own module name.
+
+  The sampler module fully describes the monitor: `Sys.Mon.Server` reads its
+  schedule and identity from `period/0`, `tau/0`, and `telemetry_event/0`.
+  """
+  @spec start_link(module()) :: GenServer.on_start()
+  def start_link(sampler) do
+    GenServer.start_link(__MODULE__, sampler, name: sampler)
   end
 
   @doc "The latest instantaneous + filtered reading."
@@ -75,21 +67,21 @@ defmodule Sys.Mon.Server do
   def sample_now(server), do: GenServer.call(server, :sample_now)
 
   @impl true
-  def init(%Opts{} = opts) do
-    case opts.sampler.init() do
+  def init(sampler) do
+    case sampler.init() do
       {:ok, sampler_state} ->
-        period_ms = Unit.Time.as_ms(opts.period)
+        period_ms = Unit.Time.as_ms(sampler.period())
         _ = Process.send_after(self(), :tick, period_ms)
 
         {:ok,
          %State{
-           sampler: opts.sampler,
+           sampler: sampler,
            sampler_state: sampler_state,
            period_ms: period_ms,
-           ewma: Ewma.new(Unit.Time.as_ms(opts.tau)),
+           ewma: Ewma.new(Unit.Time.as_ms(sampler.tau())),
            last_mono: nil,
            instant: nil,
-           telemetry_event: opts.telemetry_event
+           telemetry_event: sampler.telemetry_event()
          }}
 
       {:error, reason} ->

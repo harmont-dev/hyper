@@ -6,6 +6,11 @@ defmodule Sys.Mon.Sampler do
   `Sys.Mon.Server`. It may carry private state between samples (e.g. the previous
   `/proc/stat` snapshot needed to turn cumulative counters into a rate).
 
+  The sampler module *fully describes* its monitor: alongside the readings it
+  declares its own schedule and telemetry identity (`period/0`, `tau/0`,
+  `telemetry_event/0`), so `Sys.Mon.Server.start_link(SamplerModule)` needs nothing
+  else.
+
   A reading is whatever domain value the sampler chooses, as long as it implements
   `Controls.Linear` so `Sys.Mon.Server` can low-pass-filter it: a `Unit.Information`
   for memory, a `Unit.Bandwidth` for throughput, a bare `Float` fraction for CPU.
@@ -18,6 +23,15 @@ defmodule Sys.Mon.Sampler do
 
   @typedoc "An instantaneous reading; any `Controls.Linear` value."
   @type reading :: Controls.Linear.t()
+
+  @doc "How often to sample."
+  @callback period() :: Unit.Time.t()
+
+  @doc "The low-pass filter time constant (the smoothing window, independent of `period/0`)."
+  @callback tau() :: Unit.Time.t()
+
+  @doc "The `:telemetry` event emitted on each successful sample."
+  @callback telemetry_event() :: [atom()]
 
   @doc "Initialize sampler-private state."
   @callback init() :: {:ok, private()} | {:error, term()}

@@ -1,15 +1,4 @@
 defmodule Sys.Mon.NetBw do
-  @moduledoc """
-  Monitors instantaneous network bandwidth (the soft beta_net_bw signal).
-
-  Samples cumulative rx+tx bytes across non-loopback interfaces from
-  `/proc/net/dev` every 11 seconds and differentiates them into bytes/sec via
-  `Controls.Rate` (the first read only establishes a baseline). The rate series is
-  smoothed with a 20-second time constant. Readings are `Unit.Bandwidth`.
-
-  Telemetry: `[:sys, :mon, :net_bw]` with measurements `%{instant: float, smoothed: float}` (bytes/sec).
-  """
-
   @behaviour Sys.Mon.Sampler
 
   alias Controls.Rate
@@ -18,9 +7,29 @@ defmodule Sys.Mon.NetBw do
   alias Unit.Bandwidth
   alias Unit.Time
 
-  @period Time.s(11)
-  @tau Time.s(20)
+  @period_ms 37
+  @tau_s 20
   @event [:sys, :mon, :net_bw]
+
+  @moduledoc """
+  Monitors instantaneous network bandwidth (the soft beta_net_bw signal).
+
+  Samples cumulative rx+tx bytes across non-loopback interfaces from
+  `/proc/net/dev` every #{@period_ms} ms and differentiates them into bytes/sec via
+  `Controls.Rate` (the first read only establishes a baseline). The rate series is
+  smoothed with a #{@tau_s}-second time constant. Readings are `Unit.Bandwidth`.
+
+  Telemetry: `#{inspect(@event)}` with measurements `%{instant: float, smoothed: float}` (bytes/sec).
+  """
+
+  @impl true
+  def period, do: Time.ms(@period_ms)
+
+  @impl true
+  def tau, do: Time.s(@tau_s)
+
+  @impl true
+  def telemetry_event, do: @event
 
   @doc "The latest instantaneous + filtered network bandwidth (`Unit.Bandwidth` readings)."
   @spec value() :: Server.Reading.t()
@@ -28,17 +37,7 @@ defmodule Sys.Mon.NetBw do
 
   @doc false
   @spec child_spec(term()) :: Supervisor.child_spec()
-  def child_spec(_arg) do
-    opts = %Server.Opts{
-      sampler: __MODULE__,
-      period: @period,
-      tau: @tau,
-      name: __MODULE__,
-      telemetry_event: @event
-    }
-
-    %{id: __MODULE__, start: {Server, :start_link, [opts]}}
-  end
+  def child_spec(_arg), do: %{id: __MODULE__, start: {Server, :start_link, [__MODULE__]}}
 
   @impl true
   def init, do: {:ok, nil}

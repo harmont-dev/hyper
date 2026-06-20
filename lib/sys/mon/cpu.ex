@@ -5,23 +5,30 @@ defmodule Sys.Mon.Cpu do
   alias Sys.Mon.Server
   alias Unit.Time
 
-  @period_s 2
+  @period_ms 23
   @tau_s 30
+  @event [:sys, :mon, :cpu]
 
   @moduledoc """
   Monitors instantaneous CPU utilization (the soft beta_vcpus signal).
 
-  Samples `/proc/stat` every #{@period_s} seconds and reports the busy fraction
+  Samples `/proc/stat` every #{@period_ms} ms and reports the busy fraction
   (`0.0..1.0`, normalized across all cores) between consecutive reads - never the
   load average, which has different semantics. The first read only establishes a
-  baseline (`:skip`). Readings are smoothed with a #{@tau_s}-second time constant.
+  baseline (`:skip`). Readings are smoothed with a #{@tau_s}-second time constant
+  (sampling fast only de-noises the filter; the smoothing window is set by `tau`).
 
-  Telemetry: `[:sys, :mon, :cpu]` with measurements `%{instant: float, smoothed: float}`.
+  Telemetry: `#{inspect(@event)}` with measurements `%{instant: float, smoothed: float}`.
   """
 
-  @period Time.s(@period_s)
-  @tau Time.s(@tau_s)
-  @event [:sys, :mon, :cpu]
+  @impl true
+  def period, do: Time.ms(@period_ms)
+
+  @impl true
+  def tau, do: Time.s(@tau_s)
+
+  @impl true
+  def telemetry_event, do: @event
 
   @doc "The latest instantaneous + filtered CPU utilization (fractions `0.0..1.0`)."
   @spec value() :: Server.Reading.t()
@@ -29,17 +36,7 @@ defmodule Sys.Mon.Cpu do
 
   @doc false
   @spec child_spec(term()) :: Supervisor.child_spec()
-  def child_spec(_arg) do
-    opts = %Server.Opts{
-      sampler: __MODULE__,
-      period: @period,
-      tau: @tau,
-      name: __MODULE__,
-      telemetry_event: @event
-    }
-
-    %{id: __MODULE__, start: {Server, :start_link, [opts]}}
-  end
+  def child_spec(_arg), do: %{id: __MODULE__, start: {Server, :start_link, [__MODULE__]}}
 
   @impl true
   def init, do: {:ok, nil}
