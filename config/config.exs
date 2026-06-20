@@ -21,21 +21,17 @@ config :libcluster,
     ]
   ]
 
+config :hyper,
+  work_dir: "/srv/hyper",
+  cgroup_parent: "hyper",
+  uid_gid_range: {900_000, 999_999},
+  layer_dir: "/srv/hyper/layers"
+
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
   config :libcluster, topologies: []
 end
-
-config :hyper,
-  jailer_bin: "/opt/firecracker/jailer-v1.16.0-x86_64",
-  firecracker_bin: "/opt/firecracker/firecracker-v1.16.0-x86_64",
-  cgroup_parent: "hyper",
-  jailer_chroot_base: "/srv/hyper/jails",
-  socket_dir: "/srv/hyper/socks",
-  scratch_dir: "/srv/hyper/scratch",
-  uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers"
 
 config :hyper, Hyper.Img.Db.Repo,
   database: "hyper_dev",
