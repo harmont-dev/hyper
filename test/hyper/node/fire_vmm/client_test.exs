@@ -51,4 +51,16 @@ defmodule Hyper.Node.FireVMM.ClientTest do
     assert {:error, {:api, 400, "nope"}} =
              Client.action(pid, %InstanceActionInfo{action_type: "InstanceStart"})
   end
+
+  test "put_drive builds the path from drive_id" do
+    pid =
+      client(fn conn ->
+        assert conn.method == "PUT"
+        assert conn.request_path == "/drives/rootfs"
+        Plug.Conn.send_resp(conn, 204, "")
+      end)
+
+    drive = %Hyper.Node.FireVMM.Client.Schema.Drive{drive_id: "rootfs", is_root_device: true}
+    assert :ok = Hyper.Node.FireVMM.Client.put_drive(pid, drive)
+  end
 end

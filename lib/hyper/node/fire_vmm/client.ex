@@ -70,6 +70,52 @@ defmodule Hyper.Node.FireVMM.Client do
   @spec put_boot_source(server(), Schema.BootSource.t()) :: result()
   def put_boot_source(server, %Schema.BootSource{} = b), do: call(server, :put, "/boot-source", b)
 
+  @doc "GET /machine-config."
+  @spec get_machine_config(server()) :: result()
+  def get_machine_config(server), do: call(server, :get, "/machine-config")
+
+  @doc "PUT /machine-config (pre-boot)."
+  @spec put_machine_config(server(), Schema.MachineConfiguration.t()) :: result()
+  def put_machine_config(server, %Schema.MachineConfiguration{} = m),
+    do: call(server, :put, "/machine-config", m)
+
+  @doc "PATCH /machine-config (partial update, pre-boot)."
+  @spec patch_machine_config(server(), Schema.MachineConfiguration.t()) :: result()
+  def patch_machine_config(server, %Schema.MachineConfiguration{} = m),
+    do: call(server, :patch, "/machine-config", m)
+
+  @doc "PUT /drives/{drive_id}."
+  @spec put_drive(server(), Schema.Drive.t()) :: result()
+  def put_drive(server, %Schema.Drive{drive_id: id} = d),
+    do: call(server, :put, "/drives/" <> id, d)
+
+  @doc "PATCH /drives/{drive_id} (post-boot)."
+  @spec patch_drive(server(), Schema.PartialDrive.t()) :: result()
+  def patch_drive(server, %Schema.PartialDrive{drive_id: id} = d),
+    do: call(server, :patch, "/drives/" <> id, d)
+
+  @doc "PUT /network-interfaces/{iface_id}."
+  @spec put_network_interface(server(), Schema.NetworkInterface.t()) :: result()
+  def put_network_interface(server, %Schema.NetworkInterface{iface_id: id} = n),
+    do: call(server, :put, "/network-interfaces/" <> id, n)
+
+  @doc "PATCH /network-interfaces/{iface_id} (post-boot rate limiters)."
+  @spec patch_network_interface(server(), Schema.PartialNetworkInterface.t()) :: result()
+  def patch_network_interface(server, %Schema.PartialNetworkInterface{iface_id: id} = n),
+    do: call(server, :patch, "/network-interfaces/" <> id, n)
+
+  @doc "PATCH /vm — set running state (Paused | Resumed)."
+  @spec patch_vm(server(), Schema.Vm.t()) :: result()
+  def patch_vm(server, %Schema.Vm{} = v), do: call(server, :patch, "/vm", v)
+
+  @doc "GET /vm/config — full VM configuration (raw map; keys are hyphenated)."
+  @spec vm_config(server()) :: result()
+  def vm_config(server), do: call(server, :get, "/vm/config")
+
+  @doc "GET /version — Firecracker build version."
+  @spec version(server()) :: result()
+  def version(server), do: call(server, :get, "/version")
+
   ## Transport
 
   @spec call(server(), :get | :put | :patch, String.t()) :: result()
