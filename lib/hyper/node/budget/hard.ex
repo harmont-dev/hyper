@@ -22,10 +22,11 @@ defmodule Hyper.Node.Budget.Hard do
 
     @type t :: %__MODULE__{
             mem_allocated: Unit.Information.t(),
-            disk_allocated: Unit.Information.t()
+            disk_allocated: Unit.Information.t(),
+            reservations: %{reference() => Hyper.Vm.Instance.Spec.t()}
           }
 
-    defstruct [:mem_allocated, :disk_allocated]
+    defstruct [:mem_allocated, :disk_allocated, reservations: %{}]
 
     use Unit.Operators
 
@@ -40,19 +41,32 @@ defmodule Hyper.Node.Budget.Hard do
     @doc "Add `spec`'s reservation to the running total."
     @spec bump(t(), Instance.Spec.t()) :: t()
     def bump(s, spec) do
-      %__MODULE__{
-        mem_allocated: s.mem_allocated + spec.mem,
-        disk_allocated: s.disk_allocated + spec.disk
+      %{
+        s
+        | mem_allocated: s.mem_allocated + spec.mem,
+          disk_allocated: s.disk_allocated + spec.disk
       }
     end
 
     @doc "Release `spec`'s reservation from the running total."
     @spec cut(t(), Instance.Spec.t()) :: t()
     def cut(s, spec) do
-      %__MODULE__{
-        mem_allocated: s.mem_allocated - spec.mem,
-        disk_allocated: s.disk_allocated - spec.disk
+      %{
+        s
+        | mem_allocated: s.mem_allocated - spec.mem,
+          disk_allocated: s.disk_allocated - spec.disk
       }
+    end
+
+    @doc "Record that monitor `ref` owns `spec`'s reservation."
+    @spec track(t(), reference(), Hyper.Vm.Instance.Spec.t()) :: t()
+    def track(s, ref, spec), do: %{s | reservations: Map.put(s.reservations, ref, spec)}
+
+    @doc "Drop monitor `ref`, returning the spec it owned (or nil) and the new state."
+    @spec untrack(t(), reference()) :: {Hyper.Vm.Instance.Spec.t() | nil, t()}
+    def untrack(s, ref) do
+      {spec, rest} = Map.pop(s.reservations, ref)
+      {spec, %{s | reservations: rest}}
     end
   end
 
@@ -88,6 +102,19 @@ defmodule Hyper.Node.Budget.Hard do
     end
   end
 
+  @doc """
+  Reserve `spec`'s budget for the lifetime of `owner`.
+
+  Atomic: refuses (`{:error, reason}`) if `spec` does not fit remaining headroom.
+  On success the reservation releases automatically when `owner` dies.
+  """
+  @spec reserve(Instance.Spec.t(), pid()) :: :ok | {:error, term()}
+  def reserve(spec, owner), do: GenServer.call(__MODULE__, {:reserve, spec, owner})
+
+  @doc "Configured caps minus what is currently reserved."
+  @spec headroom() :: %{mem: Unit.Information.t(), disk: Unit.Information.t()}
+  def headroom, do: GenServer.call(__MODULE__, :headroom)
+
   # Server callbacks
 
   @impl true
@@ -111,6 +138,38 @@ defmodule Hyper.Node.Budget.Hard do
   @impl true
   def handle_call({:egress, spec}, _from, state) do
     {:reply, :ok, State.cut(state, spec)}
+  end
+
+  @impl true
+  def handle_call({:reserve, spec, owner}, _from, state) do
+    case fits(state, spec) do
+      :ok ->
+        ref = Process.monitor(owner)
+        {:reply, :ok, state |> State.bump(spec) |> State.track(ref, spec)}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:headroom, _from, state) do
+    config = Config.get()
+
+    headroom = %{
+      mem: config.mem_max - state.mem_allocated,
+      disk: config.disk_max - state.disk_allocated
+    }
+
+    {:reply, headroom, state}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case State.untrack(state, ref) do
+      {nil, state} -> {:noreply, state}
+      {spec, state} -> {:noreply, State.cut(state, spec)}
+    end
   end
 
   # Whether reserving `spec` keeps both totals within the node's configured caps.
