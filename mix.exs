@@ -67,8 +67,7 @@ defmodule Hyper.MixProject do
       extras: [
         "README.md",
         "docs/cookbook/intro.md",
-        "docs/cookbook/architecture.md",
-        "docs/cookbook/monitoring.md"
+        "docs/cookbook/architecture.md"
       ],
       groups_for_extras: [
         Cookbook: ~r/docs\/cookbook\/.*/
