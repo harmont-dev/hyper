@@ -28,7 +28,7 @@ defmodule Controls.EwmaTest do
     end
   end
 
-  describe "with a non-float Controls.Linear type (Unit.Information)" do
+  describe "with a non-float Unit.Quantity type (Unit.Information)" do
     test "seeds with the first Information sample, unchanged" do
       e = Ewma.new(1000) |> Ewma.update(Information.kib(100), 200)
       assert Ewma.value(e) == Information.kib(100)

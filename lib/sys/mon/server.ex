@@ -13,14 +13,13 @@ defmodule Sys.Mon.Server do
   require Logger
 
   alias Controls.Ewma
-  alias Controls.Linear
 
   defmodule Reading do
     @moduledoc """
     A monitor reading: the latest instantaneous and filtered values, each in the
-    sampler's domain type (any `Controls.Linear`).
+    sampler's domain type (a number or any `Unit.Quantity`).
     """
-    @type t :: %__MODULE__{instant: Linear.t() | nil, smoothed: Linear.t() | nil}
+    @type t :: %__MODULE__{instant: Ewma.sample() | nil, smoothed: Ewma.sample() | nil}
     defstruct [:instant, :smoothed]
   end
 
@@ -32,7 +31,7 @@ defmodule Sys.Mon.Server do
             period_ms: pos_integer(),
             ewma: Ewma.t(),
             last_mono: integer() | nil,
-            instant: Linear.t() | nil,
+            instant: Ewma.sample() | nil,
             telemetry_event: [atom()]
           }
     @enforce_keys [:sampler, :sampler_state, :period_ms, :ewma, :telemetry_event]
@@ -114,7 +113,7 @@ defmodule Sys.Mon.Server do
       {:ok, x, sampler_state} ->
         dt = if state.last_mono, do: max(now - state.last_mono, 1), else: state.period_ms
         ewma = Ewma.update(state.ewma, x, dt)
-        measurements = %{instant: Linear.to_float(x), smoothed: Linear.to_float(Ewma.value(ewma))}
+        measurements = %{instant: to_number(x), smoothed: to_number(Ewma.value(ewma))}
         :telemetry.execute(state.telemetry_event, measurements, %{})
         %{state | sampler_state: sampler_state, ewma: ewma, instant: x, last_mono: now}
 
@@ -131,4 +130,9 @@ defmodule Sys.Mon.Server do
   defp reading(state) do
     %Reading{instant: state.instant, smoothed: Ewma.value(state.ewma)}
   end
+
+  # Project a reading to its scalar magnitude for numeric telemetry measurements.
+  @spec to_number(Ewma.sample()) :: number()
+  defp to_number(x) when is_number(x), do: x
+  defp to_number(x), do: Unit.Quantity.value(x)
 end

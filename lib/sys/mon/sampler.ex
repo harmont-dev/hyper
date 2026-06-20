@@ -11,18 +11,18 @@ defmodule Sys.Mon.Sampler do
   `telemetry_event/0`), so `Sys.Mon.Server.start_link(SamplerModule)` needs nothing
   else.
 
-  A reading is whatever domain value the sampler chooses, as long as it implements
-  `Controls.Linear` so `Sys.Mon.Server` can low-pass-filter it: a `Unit.Information`
-  for memory, a `Unit.Bandwidth` for throughput, a bare `Float` fraction for CPU.
-  The value flows through the filter and out of the monitor unchanged - no
-  float-only bottleneck.
+  A reading is whatever domain value the sampler chooses - a number or any
+  `Unit.Quantity` (a `Unit.Information` for memory, a `Unit.Bandwidth` for
+  throughput, a bare `Float` fraction for CPU) - so `Sys.Mon.Server` can
+  low-pass-filter it and it flows out of the monitor unchanged, with no float-only
+  bottleneck.
   """
 
   @typedoc "Sampler-private carry-over state."
   @type private :: term()
 
-  @typedoc "An instantaneous reading; any `Controls.Linear` value."
-  @type reading :: Controls.Linear.t()
+  @typedoc "An instantaneous reading: a number or any `Unit.Quantity`."
+  @type reading :: number() | Unit.Quantity.t()
 
   @doc "How often to sample."
   @callback period() :: Unit.Time.t()
