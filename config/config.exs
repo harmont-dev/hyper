@@ -31,6 +31,9 @@ if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
   config :libcluster, topologies: []
+  # Skip the per-machine node tree: its system checks need virtualization
+  # binaries (dmsetup, firecracker, the suid helper) absent on a test host.
+  config :hyper, start_node: false
 end
 
 config :hyper, Hyper.Img.Db.Repo,

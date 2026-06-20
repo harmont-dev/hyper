@@ -14,19 +14,27 @@ defmodule Hyper.Application do
 
     topologies = Application.get_env(:libcluster, :topologies, [])
 
-    children = [
-      # The image-lineage database. Started first so the rest of the node can
-      # query images/leases on boot.
-      Hyper.Img.Db.Repo,
-      # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
-      # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
-      {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
-      # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
-      # Hyper.Node so VM registrations and budget advertisements have their
-      # registries on boot.
-      Hyper.Cluster,
-      Hyper.Node
-    ]
+    # Hyper.Node runs the per-machine system checks (dmsetup, firecracker, the
+    # suid helper) that only pass on a real virtualization host. Test runs (and
+    # any host without the stack) set `start_node: false` so the rest of the
+    # tree - Repo, cluster CRDTs, the layer auditor - still boots. Read from app
+    # env, never Mix.env(), so this is correct in compiled releases too.
+    node_children =
+      if Application.get_env(:hyper, :start_node, true), do: [Hyper.Node], else: []
+
+    children =
+      [
+        # The image-lineage database. Started first so the rest of the node can
+        # query images/leases on boot.
+        Hyper.Img.Db.Repo,
+        # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
+        # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
+        {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
+        # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
+        # Hyper.Node so VM registrations and budget advertisements have their
+        # registries on boot.
+        Hyper.Cluster
+      ] ++ node_children
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
   end
