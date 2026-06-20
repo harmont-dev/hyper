@@ -22,11 +22,9 @@ defmodule Hyper.Application do
       # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
       {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
       # This machine's participation in the cluster: owns the cluster-wide VM
-      # registry and the local supervisor that runs this node's microVMs.
-      Hyper.Node,
-      # Per-node real-time soft-metric monitors (CPU/mem/disk/net), feeding the
-      # scheduler's beta-budget decisions.
-      Sys.Mon
+      # registry, the local supervisor that runs this node's microVMs, and the
+      # per-node budget/monitoring that decides what this machine can host.
+      Hyper.Node
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
