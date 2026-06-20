@@ -2,7 +2,8 @@
   <img src="docs/res/Hyper-Banner.png" alt="Hyper" />
 </p>
 
-# Hyper
+_This project is primarily developed by [harmont.dev](https://harmont.dev)
+which uses it as the core VM orchestrator._
 
 Hyper is a distributed orchestrator for [Firecracker](https://firecracker-microvm.github.io/)
 microVMs. It schedules virtual machines across a cluster of nodes and boots
