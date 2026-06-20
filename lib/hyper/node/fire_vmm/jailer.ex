@@ -37,7 +37,6 @@ defmodule Hyper.Node.FireVMM.Jailer do
     """
 
     alias Hyper.Config
-    alias Hyper.Node.FireVMM.Provider
     alias Hyper.Sys
 
     @doc "Run every pre-requisite check, halting at the first failure."
@@ -53,25 +52,11 @@ defmodule Hyper.Node.FireVMM.Jailer do
 
     defp all do
       [
-        &jailer_executable/0,
-        &firecracker_executable/0,
         &kvm_present/0,
         &cgroup_v2_available/0,
         &parent_cgroup_present/0,
         &chroot_writable/0
       ]
-    end
-
-    defp jailer_executable do
-      if Sys.Posix.executable?(Provider.jailer_bin()),
-        do: :ok,
-        else: {:error, :jailer_unavailable}
-    end
-
-    defp firecracker_executable do
-      if Sys.Posix.executable?(Provider.firecracker_bin()),
-        do: :ok,
-        else: {:error, :firecracker_unavailable}
     end
 
     defp kvm_present do
