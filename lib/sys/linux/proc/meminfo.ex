@@ -13,10 +13,20 @@ defmodule Sys.Linux.Proc.Meminfo do
   @path "/proc/meminfo"
 
   defmodule Snapshot do
-    @moduledoc "Total and kernel-available memory at one instant."
-    @type t :: %__MODULE__{total: Information.t(), available: Information.t()}
-    @enforce_keys [:total, :available]
-    defstruct [:total, :available]
+    @moduledoc """
+    A point-in-time `/proc/meminfo` reading. Every field maps to a line present
+    on all Linux kernels (`MemTotal`/`MemFree`/`Buffers`/`Cached` since 2.4,
+    `MemAvailable` since 3.14).
+    """
+    @type t :: %__MODULE__{
+            total: Information.t(),
+            available: Information.t(),
+            free: Information.t(),
+            buffers: Information.t(),
+            cached: Information.t()
+          }
+    @enforce_keys [:total, :available, :free, :buffers, :cached]
+    defstruct [:total, :available, :free, :buffers, :cached]
   end
 
   @doc "Read and parse `/proc/meminfo`."
@@ -31,10 +41,17 @@ defmodule Sys.Linux.Proc.Meminfo do
     kib = field_map(content)
 
     %Snapshot{
-      total: Information.kib(Map.fetch!(kib, "MemTotal")),
-      available: Information.kib(Map.fetch!(kib, "MemAvailable"))
+      total: fetch_kib(kib, "MemTotal"),
+      available: fetch_kib(kib, "MemAvailable"),
+      free: fetch_kib(kib, "MemFree"),
+      buffers: fetch_kib(kib, "Buffers"),
+      cached: fetch_kib(kib, "Cached")
     }
   end
+
+  # Look up a `/proc/meminfo` key (kibibytes) and wrap it as `Unit.Information`.
+  @spec fetch_kib(%{String.t() => non_neg_integer()}, String.t()) :: Information.t()
+  defp fetch_kib(map, key), do: Information.kib(Map.fetch!(map, key))
 
   # Build %{"MemTotal" => 16384, ...} from "Key: <n> kB" lines.
   @spec field_map(String.t()) :: %{String.t() => non_neg_integer()}
