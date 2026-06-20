@@ -64,7 +64,7 @@ impl AsRef<Path> for LoopDev {
     }
 }
 
-/// A block-device operand: a loop device or one of our own dm devices — never
+/// A block-device operand: a loop device or one of our own dm devices - never
 /// arbitrary system storage.
 #[derive(Debug, Clone)]
 pub struct BlockDev(PathBuf);

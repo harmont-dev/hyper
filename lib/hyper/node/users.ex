@@ -17,9 +17,9 @@ defmodule Hyper.Node.Users do
     @moduledoc """
     Bump-pointer + freed-stack id pool. Only ids currently in flight are stored:
 
-      * `next` — the next never-allocated id (bump pointer), advanced up to `max`
-      * `max`  — top of the configured range (inclusive)
-      * `freed` — stack of returned ids available for reuse
+      * `next` - the next never-allocated id (bump pointer), advanced up to `max`
+      * `max`  - top of the configured range (inclusive)
+      * `freed` - stack of returned ids available for reuse
 
     The untouched tail of the range (`next..max`) is never materialised, so memory
     is O(ids handed out and returned), not O(range size).
@@ -55,7 +55,7 @@ defmodule Hyper.Node.Users do
   Verify the configured uid/gid range is free, raising if anything occupies it.
 
   Run at node startup so we fail closed: handing out a uid that collides with an
-  existing user would let a VM run as that user — a security hazard. Checks NSS
+  existing user would let a VM run as that user - a security hazard. Checks NSS
   users and groups (via `getent`) and the subordinate-id ranges in `/etc/subuid`
   and `/etc/subgid` for overlap with the configured range.
   """
@@ -138,7 +138,7 @@ defmodule Hyper.Node.Users do
       {:error, :enoent} ->
         []
 
-      # Any other failure means we couldn't verify — fail closed.
+      # Any other failure means we couldn't verify - fail closed.
       {:error, reason} ->
         raise "cannot read #{label} to verify uid/gid range: #{inspect(reason)}"
     end

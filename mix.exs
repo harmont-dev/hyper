@@ -51,12 +51,13 @@ defmodule Hyper.MixProject do
       {:opentelemetry_ecto, "~> 1.2"},
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
+      {:req, "~> 0.5"},
       {:telemetry, "~> 1.3"},
       {:uuidv4, "~> 1.0"}
     ]
   end
 
-  # ExDoc config — drives `mix docs` and what HexDocs renders.
+  # ExDoc config - drives `mix docs` and what HexDocs renders.
   defp docs do
     [
       # Landing page of the docs site.
@@ -81,9 +82,9 @@ defmodule Hyper.MixProject do
         VM: ~r/^Hyper\.Vm(\.|$)/,
         Node: ~r/^Hyper\.Node(\.|$)/,
         Images: ~r/^Hyper\.(Img|Layer)(\.|$)/,
-        System: ~r/^(Sys\.(Posix|Linux)|Hyper\.SuidHelper$)/,
         Controls: ~r/^Controls\./,
         Monitoring: ~r/^Sys\.Mon(\.|$)/,
+        System: ~r/^(Sys\.|Hyper\.SuidHelper$)/,
         Units: ~r/^Unit\./
       ]
     ]
@@ -134,7 +135,7 @@ defmodule Hyper.MixProject do
     ]
   end
 
-  # `mix check` — the strict gate. Runs fast checks first, slow ones (dialyzer) last.
+  # `mix check` - the strict gate. Runs fast checks first, slow ones (dialyzer) last.
   defp aliases do
     [
       check: [

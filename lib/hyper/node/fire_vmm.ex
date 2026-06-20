@@ -2,19 +2,19 @@ defmodule Hyper.Node.FireVMM do
   @moduledoc """
   Supervises a single Firecracker microVM as `[daemon container, controller]`.
 
-    1. `DynamicSupervisor` (`{id, :daemon_sup}`) — starts **empty**. The holding
+    1. `DynamicSupervisor` (`{id, :daemon_sup}`) - starts **empty**. The holding
        pen for the OS process (the `jailer`, which exec's firecracker). Launches
        nothing on its own, so no microVM exists until the controller commands it.
-    2. `Hyper.Node.FireVMM.State` — the `:gen_statem` controller. It starts the
+    2. `Hyper.Node.FireVMM.State` - the `:gen_statem` controller. It starts the
        jailer *into* the supervisor above (as a `:temporary` child) and monitors
        it. The state machine, not the supervisor, owns the daemon's lifecycle.
 
   `:rest_for_one`, container first:
 
-    * controller crashes  → only it restarts; the daemon survives and the
+    * controller crashes  -> only it restarts; the daemon survives and the
       controller re-adopts it (`State.ensure_daemon/1`). A controller bug does
       not kill a live, stateful VM.
-    * container crashes    → controller restarts too → cold boot.
+    * container crashes    -> controller restarts too -> cold boot.
   """
 
   use Supervisor

@@ -42,13 +42,13 @@ pub enum ToolOutput {
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
 /// to run it. `run` performs the operation (invoking the real binary) and returns
-/// a serializable result — no argv is exposed to the caller.
+/// a serializable result - no argv is exposed to the caller.
 pub trait IsTool {
     type Args: clap::Args;
     type Output: Serialize;
     type RunT;
 
-    /// Execute the privileged part of the tool — normally invoking `Command`.
+    /// Execute the privileged part of the tool - normally invoking `Command`.
     /// This is the only code that runs as root (see `run`).
     fn run_privileged(&self) -> Self::RunT;
 

@@ -1,34 +1,36 @@
 defmodule Hyper.Config do
   @moduledoc "Compile-time host configuration, read from `config :hyper, ...` (see `config/config.exs`)."
 
-  @jailer_bin Application.compile_env!(:hyper, :jailer_bin)
-  @firecracker_bin Application.compile_env!(:hyper, :firecracker_bin)
-  @chroot_base Application.compile_env!(:hyper, :jailer_chroot_base)
+  @work_dir Application.compile_env!(:hyper, :work_dir)
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
-  @socket_dir Application.compile_env!(:hyper, :socket_dir)
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
   @layer_dir Application.compile_env!(:hyper, :layer_dir)
   @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
   @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
-  @scratch_dir Application.compile_env!(:hyper, :scratch_dir)
   # dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
   # Standardised repo-wide; deltas must be created with this chunk size.
   @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
 
-  @doc "jailer binary path installed on each node. The path must be identical across nodes."
-  def jailer_bin, do: @jailer_bin
+  @doc "Root work directory for this node. All firecracker paths derive from it."
+  @spec work_dir :: Path.t()
+  def work_dir, do: @work_dir
 
-  @doc "firecracker binary path installed on each node. must be identical across nodes"
-  def firecracker_bin, do: @firecracker_bin
+  @doc "Directory holding redistributable binaries downloaded by the node."
+  @spec redist_dir :: Path.t()
+  def redist_dir, do: Path.join(@work_dir, "redist")
+
+  @doc "Directory where `Hyper.Node.FireVMM.Provider` installs the firecracker release."
+  @spec firecracker_install_dir :: Path.t()
+  def firecracker_install_dir, do: Path.join(redist_dir(), "firecracker")
 
   @doc """
-  Path to the directory where all VM chroot's are created.
+  Path to the directory where all VM chroot's are created (`<work_dir>/jails`).
 
-  Must be stable across all nodes, and must be a directory. If it does not exist, `Hyper.Node`
-  will attempt to create one.
+  If it does not exist, `Hyper.Node` will attempt to create one.
   """
-  def chroot_base, do: @chroot_base
+  @spec chroot_base :: Path.t()
+  def chroot_base, do: Path.join(@work_dir, "jails")
 
   @doc """
   A name for the parent cgroup which is used as a supervision cgroup for all VMs.
@@ -42,7 +44,7 @@ defmodule Hyper.Config do
   will attempt to create one.
   """
   @spec socket_dir :: Path.t()
-  def socket_dir, do: @socket_dir
+  def socket_dir, do: Path.join(@work_dir, "socks")
 
   @doc """
   Range in which `Hyper` will attempt to allocate uid/gids. Whenever a VM is allocated, it will
@@ -89,7 +91,7 @@ defmodule Hyper.Config do
   writable. If it does not exist, `Hyper.Node` will attempt to create one.
   """
   @spec scratch_dir :: Path.t()
-  def scratch_dir, do: @scratch_dir
+  def scratch_dir, do: Path.join(@work_dir, "scratch")
 
   @doc "dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB)."
   @spec chunk_sectors :: pos_integer()

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/res/Hyper-Banner.png" alt="Hyper" />
+</p>
+
 # Hyper
 
 Hyper is a distributed orchestrator for [Firecracker](https://firecracker-microvm.github.io/)

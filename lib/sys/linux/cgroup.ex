@@ -6,7 +6,7 @@ defmodule Sys.Linux.Cgroup do
   @doc """
   Detect which cgroup versions are mounted on this system, from `/proc/mounts`.
 
-  Returns a set of the mounted versions — `:cgroup` (v1) and/or `:cgroup2` (v2).
+  Returns a set of the mounted versions - `:cgroup` (v1) and/or `:cgroup2` (v2).
   An empty set means none are mounted; a set with both means a hybrid hierarchy.
   """
   @spec versions :: {:ok, MapSet.t(:cgroup | :cgroup2)} | {:error, atom()}
