@@ -19,6 +19,7 @@ defmodule Hyper.Node.FireVMM do
 
   use Supervisor
 
+  alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.State
 
   @doc "The scheduler period of each VM."
@@ -71,7 +72,12 @@ defmodule Hyper.Node.FireVMM do
     children = [
       {DynamicSupervisor,
        name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
-      {State, vm_opts}
+      {State, vm_opts},
+      {Client,
+       %Client.Opts{
+         vm_id: opts.vm_id,
+         socket_path: vm_opts.socket_path
+       }}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

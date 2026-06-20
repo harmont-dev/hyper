@@ -91,4 +91,40 @@ defmodule Hyper.Node.FireVMM.ClientTest do
                "latest" => %{"meta-data" => %{"ami-id" => "ami-1"}}
              })
   end
+
+  @tag :integration
+  test "live: boots a real firecracker daemon and reads instance info" do
+    # Requires: a firecracker binary installed (Hyper.Node.FireVMM.Provider.ensure_installed/0)
+    # and /dev/kvm. Skipped unless run with: mix test --include integration
+    :ok = Hyper.Node.FireVMM.Provider.ensure_installed()
+    bin = Hyper.Node.FireVMM.Provider.firecracker_bin()
+
+    socket = Path.join(System.tmp_dir!(), "fc-int-#{System.unique_integer([:positive])}.sock")
+    on_exit(fn -> File.rm(socket) end)
+
+    port =
+      Port.open({:spawn_executable, bin}, [
+        :binary,
+        args: ["--api-sock", socket],
+        line: 1024
+      ])
+
+    on_exit(fn -> if Port.info(port), do: Port.close(port) end)
+
+    {:ok, pid} =
+      Hyper.Node.FireVMM.Client.start_link(%Hyper.Node.FireVMM.Client.Opts{
+        vm_id: nil,
+        socket_path: socket,
+        name: nil
+      })
+
+    # Poll until the socket is accepting requests (daemon startup is async).
+    assert {:ok, %{"state" => "Not started"}} =
+             Enum.reduce_while(1..50, {:error, :pending}, fn _i, _acc ->
+               case Hyper.Node.FireVMM.Client.instance_info(pid) do
+                 {:ok, _} = ok -> {:halt, ok}
+                 _ -> Process.sleep(20) && {:cont, {:error, :pending}}
+               end
+             end)
+  end
 end
