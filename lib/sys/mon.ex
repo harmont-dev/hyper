@@ -18,12 +18,17 @@ defmodule Sys.Mon do
   alias Sys.Mon.{Cpu, DiskBw, Mem, NetBw}
 
   defmodule Readings do
-    @moduledoc "A snapshot of every monitored soft metric at one instant."
+    @moduledoc """
+    A snapshot of every monitored soft metric at one instant. Each field is a
+    `Sys.Mon.Server.Reading` whose `instant`/`smoothed` carry that metric's domain
+    type - `cpu` a `Float` fraction, `mem` a `Unit.Information`, `disk_bw`/`net_bw`
+    a `Unit.Bandwidth`.
+    """
     @type t :: %__MODULE__{
             cpu: Sys.Mon.Server.Reading.t(),
-            mem: Mem.Reading.t(),
-            disk_bw: DiskBw.Reading.t(),
-            net_bw: NetBw.Reading.t()
+            mem: Sys.Mon.Server.Reading.t(),
+            disk_bw: Sys.Mon.Server.Reading.t(),
+            net_bw: Sys.Mon.Server.Reading.t()
           }
     @enforce_keys [:cpu, :mem, :disk_bw, :net_bw]
     defstruct [:cpu, :mem, :disk_bw, :net_bw]

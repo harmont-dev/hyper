@@ -22,18 +22,9 @@ defmodule Sys.Mon.NetBw do
   @tau Time.s(20)
   @event [:sys, :mon, :net_bw]
 
-  defmodule Reading do
-    @moduledoc "Instantaneous and filtered net-bandwidth readings."
-    @type t :: %__MODULE__{instant: Bandwidth.t() | nil, smoothed: Bandwidth.t() | nil}
-    defstruct [:instant, :smoothed]
-  end
-
-  @doc "The latest instantaneous + filtered network bandwidth."
-  @spec value() :: Reading.t()
-  def value do
-    %Server.Reading{instant: instant, smoothed: smoothed} = Server.value(__MODULE__)
-    %Reading{instant: to_bw(instant), smoothed: to_bw(smoothed)}
-  end
+  @doc "The latest instantaneous + filtered network bandwidth (`Unit.Bandwidth` readings)."
+  @spec value() :: Server.Reading.t()
+  def value, do: Server.value(__MODULE__)
 
   @doc false
   @spec child_spec(term()) :: Supervisor.child_spec()
@@ -56,14 +47,20 @@ defmodule Sys.Mon.NetBw do
   def sample(rate_state) do
     case NetDev.read_total() do
       {:ok, bytes} ->
-        Rate.compute(rate_state, bytes, System.monotonic_time(:millisecond))
+        rate_state
+        |> Rate.compute(bytes, System.monotonic_time(:millisecond))
+        |> as_bandwidth()
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  @spec to_bw(float() | nil) :: Bandwidth.t() | nil
-  defp to_bw(nil), do: nil
-  defp to_bw(bytes_per_sec), do: Bandwidth.bps(round(bytes_per_sec))
+  # Project the raw bytes/sec rate into a `Unit.Bandwidth` reading.
+  @spec as_bandwidth({:ok, float(), Rate.state()} | {:skip, Rate.state()}) ::
+          {:ok, Bandwidth.t(), Rate.state()} | {:skip, Rate.state()}
+  defp as_bandwidth({:ok, bytes_per_sec, state}),
+    do: {:ok, Bandwidth.bps(round(bytes_per_sec)), state}
+
+  defp as_bandwidth({:skip, state}), do: {:skip, state}
 end

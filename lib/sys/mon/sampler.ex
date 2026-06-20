@@ -4,17 +4,20 @@ defmodule Sys.Mon.Sampler do
 
   A sampler is the I/O-bearing source of instantaneous readings driven by
   `Sys.Mon.Server`. It may carry private state between samples (e.g. the previous
-  `/proc/stat` snapshot needed to turn cumulative counters into a rate). All
-  readings are plain floats in the sampler's natural unit (a fraction for CPU,
-  bytes for memory, bytes/sec for bandwidth); the owning monitor re-applies a
-  domain `Unit.*` at its public boundary.
+  `/proc/stat` snapshot needed to turn cumulative counters into a rate).
+
+  A reading is whatever domain value the sampler chooses, as long as it implements
+  `Controls.Linear` so `Sys.Mon.Server` can low-pass-filter it: a `Unit.Information`
+  for memory, a `Unit.Bandwidth` for throughput, a bare `Float` fraction for CPU.
+  The value flows through the filter and out of the monitor unchanged - no
+  float-only bottleneck.
   """
 
   @typedoc "Sampler-private carry-over state."
   @type private :: term()
 
-  @typedoc "An instantaneous reading in the sampler's natural unit."
-  @type reading :: float()
+  @typedoc "An instantaneous reading; any `Controls.Linear` value."
+  @type reading :: Controls.Linear.t()
 
   @doc "Initialize sampler-private state."
   @callback init() :: {:ok, private()} | {:error, term()}

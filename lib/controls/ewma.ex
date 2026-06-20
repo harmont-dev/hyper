@@ -14,12 +14,18 @@ defmodule Controls.Ewma do
   per-monitor sample periods. `tau` (`tau_ms`) is the time constant: the output
   reaches ~63 % of a step after one `tau` and ~95 % after `3tau`. The first sample
   seeds the filter directly, avoiding a warm-up ramp from zero.
+
+  The sample type is anything implementing `Controls.Linear` (the `scale/2` and
+  `add/2` the convex combination needs) - a `Float`, a `Unit.Information`, a
+  `Unit.Bandwidth`, etc. - so the filter is not tied to `float()`.
   """
+
+  alias Controls.Linear
 
   @enforce_keys [:tau_ms]
   defstruct [:tau_ms, value: nil]
 
-  @type t :: %__MODULE__{tau_ms: pos_integer(), value: float() | nil}
+  @type t :: %__MODULE__{tau_ms: pos_integer(), value: Linear.t() | nil}
 
   @doc "Build a filter with time constant `tau_ms` (milliseconds)."
   @spec new(pos_integer()) :: t()
@@ -32,18 +38,18 @@ defmodule Controls.Ewma do
 
   The first sample seeds the average (its `dt_ms` is ignored).
   """
-  @spec update(t(), number(), pos_integer()) :: t()
+  @spec update(t(), Linear.t(), pos_integer()) :: t()
   def update(%__MODULE__{value: nil} = e, sample, _dt_ms) do
-    %{e | value: sample * 1.0}
+    %{e | value: sample}
   end
 
   def update(%__MODULE__{tau_ms: tau, value: prev} = e, sample, dt_ms)
       when is_integer(dt_ms) and dt_ms > 0 do
     alpha = 1.0 - :math.exp(-dt_ms / tau)
-    %{e | value: alpha * sample + (1.0 - alpha) * prev}
+    %{e | value: Linear.add(Linear.scale(sample, alpha), Linear.scale(prev, 1.0 - alpha))}
   end
 
   @doc "The current filtered value, or `nil` before the first sample."
-  @spec value(t()) :: float() | nil
+  @spec value(t()) :: Linear.t() | nil
   def value(%__MODULE__{value: v}), do: v
 end

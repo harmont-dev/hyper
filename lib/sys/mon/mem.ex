@@ -21,18 +21,9 @@ defmodule Sys.Mon.Mem do
   @tau Time.s(30)
   @event [:sys, :mon, :mem]
 
-  defmodule Reading do
-    @moduledoc "Instantaneous and filtered used-memory readings."
-    @type t :: %__MODULE__{instant: Information.t() | nil, smoothed: Information.t() | nil}
-    defstruct [:instant, :smoothed]
-  end
-
-  @doc "The latest instantaneous + filtered used memory."
-  @spec value() :: Reading.t()
-  def value do
-    %Server.Reading{instant: instant, smoothed: smoothed} = Server.value(__MODULE__)
-    %Reading{instant: to_info(instant), smoothed: to_info(smoothed)}
-  end
+  @doc "The latest instantaneous + filtered used memory (`Unit.Information` readings)."
+  @spec value() :: Server.Reading.t()
+  def value, do: Server.value(__MODULE__)
 
   @doc false
   @spec child_spec(term()) :: Supervisor.child_spec()
@@ -56,14 +47,10 @@ defmodule Sys.Mon.Mem do
     case Meminfo.read() do
       {:ok, %Meminfo.Snapshot{total: total, available: available}} ->
         used = Information.as_bytes(total) - Information.as_bytes(available)
-        {:ok, used * 1.0, nil}
+        {:ok, Information.bytes(used), nil}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
-
-  @spec to_info(float() | nil) :: Information.t() | nil
-  defp to_info(nil), do: nil
-  defp to_info(bytes), do: Information.bytes(round(bytes))
 end
