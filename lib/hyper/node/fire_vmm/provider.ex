@@ -39,15 +39,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   @spec jailer_bin() :: Path.t()
   def jailer_bin, do: bin_path(:jailer)
 
-  @doc """
-  Ensure the firecracker release is installed for this node.
-
-  Idempotent: returns `:ok` if the correct binaries are already installed and
-  executable. A clean machine is installed fresh; an install that is broken,
-  partial, or a different version is wiped and reinstalled. Quits early with
-  `{:error, {:unsupported_arch, _}}` if this machine's architecture is not
-  supported.
-  """
+  @doc "Ensure the firecracker release is installed for this node."
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
     with {:ok, arch} <- Hyper.Sys.Arch.current() do
