@@ -27,10 +27,6 @@ config :hyper,
   uid_gid_range: {900_000, 999_999},
   layer_dir: "/srv/hyper/layers"
 
-config :hyper, Hyper.Node.Config.Budget,
-  mem_max: Unit.Information.gib(4),
-  disk_max: Unit.Information.gib(4)
-
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
