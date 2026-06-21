@@ -16,7 +16,6 @@ defmodule Hyper.Node.FireVMM.BootSpec do
 
   alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration, SnapshotLoadParams}
   alias Hyper.Vm.Instance
-  alias Unit.Information
 
   # Standard Firecracker serial-console kernel cmdline.
   @default_boot_args "console=ttyS0 reboot=k panic=1 pci=off"
@@ -41,7 +40,8 @@ defmodule Hyper.Node.FireVMM.BootSpec do
     @type t :: %__MODULE__{params: SnapshotLoadParams.t()}
   end
 
-  @spec resolve(Hyper.vm_source(), Instance.t()) :: {:ok, Cold.t() | Restore.t()} | {:error, term()}
+  @spec resolve(Hyper.vm_source(), Instance.t()) ::
+          {:ok, Cold.t() | Restore.t()} | {:error, term()}
   def resolve({:cold, cold}, type) when is_map(cold) do
     {:ok,
      %Cold{
@@ -74,15 +74,16 @@ defmodule Hyper.Node.FireVMM.BootSpec do
 
   def resolve({:vm, _vm}, _type), do: {:error, {:unsupported_source, :vm}}
 
-  # Instance vCPU caps are fractional (cgroup quota); Firecracker needs a positive
-  # integer vCPU count, so ceil and floor at 1.
+  # The vCPU/mem derivations (fractional cgroup quota -> guest-visible integer
+  # count; mem -> MiB) are instance-domain rules and live on Instance.Spec; here
+  # we only assemble them into firecracker's machine-config struct.
   @spec machine_config(Instance.t()) :: MachineConfiguration.t()
   defp machine_config(type) do
     spec = Instance.spec(type)
 
     %MachineConfiguration{
-      vcpu_count: max(1, ceil(spec.vcpus)),
-      mem_size_mib: Information.as_mib(spec.mem)
+      vcpu_count: Instance.Spec.vcpu_count(spec),
+      mem_size_mib: Instance.Spec.mem_mib(spec)
     }
   end
 end
