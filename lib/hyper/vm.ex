@@ -20,7 +20,7 @@ defmodule Hyper.Vm do
   """
   @spec fast_fork(t()) :: {:ok, t()} | {:error, term()}
   @decorate with_span("Hyper.Vm.fast_fork", include: [:vm])
-  def fast_fork(vm) do
+  def fast_fork(_vm) do
   end
 
   @doc """
@@ -30,6 +30,6 @@ defmodule Hyper.Vm do
   """
   @spec fork(t()) :: t()
   @decorate with_span("Hyper.Vm.fork", include: [:vm])
-  def fork(vm) do
+  def fork(_vm) do
   end
 end
