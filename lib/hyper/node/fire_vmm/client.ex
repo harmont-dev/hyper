@@ -2,9 +2,14 @@ defmodule Hyper.Node.FireVMM.Client do
   @moduledoc """
   Per-microVM facade over the generated Firecracker API
   (`Hyper.Firecracker.Api.Operations`). One GenServer per VM, registered
-  cluster-wide via `Hyper.Cluster.Routing.via({vm_id, :client})`. It holds the
-  VM's API socket path and serializes every request through `handle_call`
-  (Firecracker's API server is single-threaded).
+  cluster-wide via `Hyper.Cluster.Routing.via({vm_id, :client})`. It serializes
+  every request through `handle_call` (Firecracker's API server is
+  single-threaded).
+
+  The VM's API socket is derived from `vm_id` alone via
+  `Hyper.Node.FireVMM.Jailer.host_socket/1` (the same function the controller
+  uses), so the client needs no socket threaded in and the two cannot disagree.
+  A `:socket_path` override is accepted for tests/stand-ins.
 
   Call any generated operation through `run/2`, passing a 1-arity closure that
   receives the per-call opts (carrying `:socket_path`) to forward as the
@@ -26,16 +31,21 @@ defmodule Hyper.Node.FireVMM.Client do
 
   use GenServer
 
+  alias Hyper.Node.FireVMM.Jailer
+
   @call_timeout 35_000
 
   defmodule Opts do
-    @moduledoc "Start options for `Hyper.Node.FireVMM.Client`."
-    @enforce_keys [:vm_id, :socket_path]
+    @moduledoc """
+    Start options for `Hyper.Node.FireVMM.Client`. Only `:vm_id` is required;
+    the socket path is derived from it unless `:socket_path` is given.
+    """
+    @enforce_keys [:vm_id]
     defstruct [:vm_id, :socket_path, :name]
 
     @type t :: %__MODULE__{
             vm_id: integer() | nil,
-            socket_path: Path.t(),
+            socket_path: Path.t() | nil,
             name: GenServer.name() | nil
           }
   end
@@ -69,7 +79,10 @@ defmodule Hyper.Node.FireVMM.Client do
 
   @impl true
   @spec init(Opts.t()) :: {:ok, State.t()}
-  def init(%Opts{socket_path: socket_path}), do: {:ok, %State{socket_path: socket_path}}
+  def init(%Opts{} = opts) do
+    socket_path = opts.socket_path || Jailer.host_socket(opts.vm_id)
+    {:ok, %State{socket_path: socket_path}}
+  end
 
   @impl true
   def handle_call({:run, op_fun}, _from, %State{socket_path: socket_path} = state) do

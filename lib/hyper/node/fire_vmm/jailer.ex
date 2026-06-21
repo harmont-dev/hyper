@@ -126,15 +126,19 @@ defmodule Hyper.Node.FireVMM.Jailer do
     |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 
-  # Host-side path of the API socket firecracker opens inside the jail.
-  # Note that we do not have control over where the jailer will place the socket so we need to
-  # reconstruct the path here.
-  @spec host_socket(String.t()) :: Path.t()
-  defp host_socket(id) do
+  @doc """
+  Host-side path of the API socket firecracker opens inside the jail.
+
+  Deterministic in `id` alone, so the controller and the API client can each
+  derive it independently and are guaranteed to agree. We do not control where
+  the jailer places the socket, so the path is reconstructed here.
+  """
+  @spec host_socket(String.t() | integer()) :: Path.t()
+  def host_socket(id) do
     Path.join([
       Hyper.Config.chroot_base(),
       exec_name(),
-      id,
+      to_string(id),
       "root",
       @jail_socket
     ])
