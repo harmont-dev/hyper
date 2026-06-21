@@ -15,6 +15,8 @@ defmodule Hyper.Node.FireVMM.State do
   @behaviour :gen_statem
 
   alias Hyper.Node.FireVMM.State
+  alias Hyper.Node.FireVMM.Boot
+  alias Hyper.Node.FireVMM.Client
 
   @enforce_keys [:id, :socket_path, :source, :binary, :args]
   defstruct [:id, :socket_path, :source, :type, :binary, :args, :daemon, :daemon_ref, :run]
@@ -64,15 +66,26 @@ defmodule Hyper.Node.FireVMM.State do
     {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
   end
 
-  def booting(:state_timeout, :launch, data) do
+  def booting(:state_timeout, :launch, %State{source: source, type: type} = data) do
     data = ensure_daemon(data)
-    # poll socket -> PUT boot-source/drives/network -> InstanceStart (or restore)
-    {:next_state, :running, data}
+
+    case Boot.boot(runner(data), source, type) do
+      :ok ->
+        {:next_state, :running, data}
+
+      {:error, reason} ->
+        # The daemon is up but unconfigured; tear the whole VM down and let the
+        # supervisor's restart intensity backstop a persistently-bad spec.
+        {:stop, {:shutdown, {:boot_failed, reason}}, data}
+    end
   end
 
-  def running({:call, from}, :pause, data),
-    # PATCH /vm {"state": "Paused"}
-    do: {:next_state, :paused, data, [{:reply, from, :ok}]}
+  def running({:call, from}, :pause, data) do
+    case Boot.pause(runner(data)) do
+      :ok -> {:next_state, :paused, data, [{:reply, from, :ok}]}
+      {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
+    end
+  end
 
   def running({:call, from}, :stop, data),
     do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
@@ -80,9 +93,12 @@ defmodule Hyper.Node.FireVMM.State do
   def running(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
     do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
 
-  def paused({:call, from}, :resume, data),
-    # PATCH /vm {"state": "Resumed"}
-    do: {:next_state, :running, data, [{:reply, from, :ok}]}
+  def paused({:call, from}, :resume, data) do
+    case Boot.resume(runner(data)) do
+      :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
+      {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
+    end
+  end
 
   def paused(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
     do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
@@ -133,6 +149,11 @@ defmodule Hyper.Node.FireVMM.State do
   defp clear_daemon(data), do: %{data | daemon: nil, daemon_ref: nil}
 
   defp recover_after, do: 1_000
+
+  # The API `run` closure for this VM: injected one (tests) or the real
+  # Client-backed one, serialized through the per-VM Client GenServer.
+  defp runner(%State{run: run}) when is_function(run, 1), do: run
+  defp runner(%State{id: id}), do: &Client.run(Client.via(id), &1)
 
   defp daemon_sup(id), do: Hyper.Cluster.Routing.via({id, :daemon_sup})
   defp via(id), do: Hyper.Cluster.Routing.via({id, :state})
