@@ -3,8 +3,20 @@ defmodule Hyper do
   `Hyper` is a distrubuted elixir virtual machine orchestrator.
   """
 
+  @typedoc """
+  A cold-boot source: explicit, already-jail-visible artifact paths. `boot_args`
+  defaults to a standard serial console cmdline when omitted.
+  """
+  @type cold_source :: %{
+          required(:kernel_image_path) => Path.t(),
+          required(:root_drive_path) => Path.t(),
+          optional(:boot_args) => String.t(),
+          optional(:read_only) => boolean()
+        }
+
   @type vm_source ::
-          {:snapshot, Path.t()}
+          {:cold, cold_source()}
+          | {:snapshot, Path.t()}
           | {:vm, Hyper.Vm.t()}
 
   @typedoc """
