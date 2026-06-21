@@ -114,6 +114,14 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
+  # A caller may stop (or try to pause/resume) before the launch timeout fires;
+  # handle it here so an early call can't crash the controller.
+  def booting({:call, from}, :stop, data),
+    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+
+  def booting({:call, from}, event, _data) when event in [:pause, :resume],
+    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+
   # Poll the daemon's API until it answers. A re-adopted daemon (controller
   # restarted, daemon survived) may already be running its guest; re-issuing
   # pre-boot config would 400 and the stop-on-failure path would kill it, so an
@@ -187,6 +195,13 @@ defmodule Hyper.Node.FireVMM.State do
 
   def crashed(:state_timeout, :recover, data),
     do: {:next_state, :booting, data, [{:state_timeout, 0, :launch}]}
+
+  # Same as :booting: a call can arrive before the recover timeout fires.
+  def crashed({:call, from}, :stop, data),
+    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+
+  def crashed({:call, from}, event, _data) when event in [:pause, :resume],
+    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
 
   def stopping({:call, from}, _event, _data),
     do: {:keep_state_and_data, [{:reply, from, {:error, :stopping}}]}

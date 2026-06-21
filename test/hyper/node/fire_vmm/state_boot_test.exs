@@ -164,12 +164,28 @@ defmodule Hyper.Node.FireVMM.StateBootTest do
   end
 
   describe "stop during boot" do
+    test "booting accepts a stop call and moves to :stopping" do
+      d = data(respond: fn _ -> :ok end)
+      from = {self(), make_ref()}
+
+      assert {:next_state, :stopping, ^d, [{:reply, ^from, :ok}]} =
+               State.booting({:call, from}, :stop, d)
+    end
+
     test "awaiting_api accepts a stop call and moves to :stopping" do
       d = data(respond: fn _ -> :ok end)
       from = {self(), make_ref()}
 
       assert {:next_state, :stopping, ^d, [{:reply, ^from, :ok}]} =
                State.awaiting_api({:call, from}, :stop, d)
+    end
+
+    test "configuring accepts a stop call and moves to :stopping" do
+      d = data(respond: fn _ -> :ok end)
+      from = {self(), make_ref()}
+
+      assert {:next_state, :stopping, ^d, [{:reply, ^from, :ok}]} =
+               State.configuring({:call, from}, :stop, d)
     end
   end
 end
