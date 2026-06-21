@@ -29,6 +29,8 @@ defmodule Hyper.Firecracker.Api.Decoder do
 
   def decode(data, _primitive), do: data
 
+  # Union selection is type-based, not value-based: pick the first non-:null
+  # member. Safe because Firecracker's spec has only `T | null` unions.
   @spec pick([term()], term()) :: term()
   defp pick(types, _data), do: Enum.find(types, hd(types), &(&1 != :null))
 end
