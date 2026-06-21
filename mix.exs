@@ -53,8 +53,32 @@ defmodule Hyper.MixProject do
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
       {:uuidv4, "~> 1.0"},
-      {:oapi_generator, "~> 0.4.0", only: :dev, runtime: false}
+      # Not `only: :dev`: the generated Firecracker bindings are gitignored and
+      # (re)generated before `compile` in every env (see `gen_firecracker/1`),
+      # so the generator must be available wherever the app compiles.
+      # `runtime: false` still keeps it out of releases.
+      {:oapi_generator, "~> 0.4.0", runtime: false}
     ]
+  end
+
+  # Firecracker API bindings are generated from the committed OpenAPI spec and
+  # are NOT checked in. `gen_firecracker/1` runs before `compile` (see aliases)
+  # and (re)generates them whenever the spec is newer than the last output.
+  @firecracker_spec "priv/firecracker/firecracker-v1.16.0.openapi.json"
+  @firecracker_out "lib/hyper/firecracker/api/operations/operations.ex"
+
+  defp gen_firecracker(_args) do
+    if firecracker_stale?() do
+      Mix.Task.run("loadpaths")
+      OpenAPI.run("default", [@firecracker_spec])
+    end
+
+    :ok
+  end
+
+  defp firecracker_stale? do
+    not File.exists?(@firecracker_out) or
+      File.stat!(@firecracker_spec).mtime > File.stat!(@firecracker_out).mtime
   end
 
   # ExDoc config - drives `mix docs` and what HexDocs renders.
@@ -145,7 +169,11 @@ defmodule Hyper.MixProject do
         "test --warnings-as-errors",
         "dialyzer"
       ],
-      "firecracker.gen": ["api.gen default priv/firecracker/firecracker-v1.16.0.openapi.json"]
+      # Generate the (gitignored) Firecracker bindings before every compile.
+      # Re-entrant: the trailing "compile" runs the real compiler task.
+      compile: [&gen_firecracker/1, "compile"],
+      # Manual/forced regeneration: `mix firecracker.gen`.
+      "firecracker.gen": [&gen_firecracker/1]
     ]
   end
 end

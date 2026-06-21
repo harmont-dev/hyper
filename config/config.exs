@@ -40,23 +40,24 @@ config :hyper, Hyper.Img.Db.Repo,
   hostname: "localhost",
   pool_size: 10
 
-if config_env() == :dev do
-  config :oapi_generator,
-    default: [
-      output: [
-        base_module: Hyper.Firecracker.Api,
-        location: "lib/hyper/firecracker/api",
-        default_client: Hyper.Firecracker.Api.Transport,
-        operation_subdirectory: "operations",
-        schema_subdirectory: "schemas",
-        schema_use: Hyper.Firecracker.Api.Encoder,
-        extra_fields: [__info__: :map],
-        field_casing: :snake,
-        types: [specs: :spec]
-      ],
-      naming: [
-        default_operation_module: Operations,
-        operation_use_tags: false
-      ]
+# Drives `mix firecracker.gen` / the pre-compile generation hook. The generated
+# bindings are gitignored and produced in every env, so this config is not
+# env-gated (and `:oapi_generator` is a build dep in all envs, so no warning).
+config :oapi_generator,
+  default: [
+    output: [
+      base_module: Hyper.Firecracker.Api,
+      location: "lib/hyper/firecracker/api",
+      default_client: Hyper.Firecracker.Api.Transport,
+      operation_subdirectory: "operations",
+      schema_subdirectory: "schemas",
+      schema_use: Hyper.Firecracker.Api.Encoder,
+      extra_fields: [__info__: :map],
+      field_casing: :snake,
+      types: [specs: :spec]
+    ],
+    naming: [
+      default_operation_module: Operations,
+      operation_use_tags: false
     ]
-end
+  ]
