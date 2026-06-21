@@ -52,7 +52,8 @@ defmodule Hyper.MixProject do
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
-      {:uuidv4, "~> 1.0"}
+      {:uuidv4, "~> 1.0"},
+      {:oapi_generator, "~> 0.4.0", only: :dev, runtime: false}
     ]
   end
 
@@ -143,7 +144,8 @@ defmodule Hyper.MixProject do
         "credo --strict",
         "test --warnings-as-errors",
         "dialyzer"
-      ]
+      ],
+      "firecracker.gen": ["api.gen default priv/firecracker/firecracker-v1.16.0.openapi.json"]
     ]
   end
 end
