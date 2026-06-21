@@ -53,10 +53,12 @@ defmodule Hyper.MixProject do
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
       {:uuidv4, "~> 1.0"},
-      # Not `only: :dev`: the generated Firecracker bindings are gitignored and
-      # (re)generated before `compile` in every env (see `gen_firecracker/1`),
-      # so the generator must be available wherever the app compiles.
-      # `runtime: false` still keeps it out of releases.
+      # Not `only: :dev`: the generated Firecracker bindings are gitignored, and
+      # the pre-`compile` hook (see `gen_firecracker/1`) regenerates them whenever
+      # the output is missing or stale -- which a clean build in ANY env always is
+      # (CI `mix test` in :test, `mix release` in :prod). Such a build invokes the
+      # generator, so it must be available wherever the app compiles, not just dev.
+      # `runtime: false` keeps it compile-only and out of releases.
       {:oapi_generator, "~> 0.4.0", runtime: false}
     ]
   end
