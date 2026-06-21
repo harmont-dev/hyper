@@ -4,26 +4,10 @@ defmodule Hyper do
   """
 
   @typedoc """
-  What a VM boots from: explicit, already-jail-visible artifact paths for a cold
-  boot (kernel + root drive). `boot_args` defaults to a standard serial-console
-  cmdline when omitted.
-
-  VMs cold-boot from a disk image; there is no snapshot/restore path. (Firecracker
-  snapshots capture guest RAM + CPU state, not disk, and would be a separate axis
-  layered on top of this if reintroduced.)
-  """
-  @type vm_source :: %{
-          required(:kernel_image_path) => Path.t(),
-          required(:root_drive_path) => Path.t(),
-          optional(:boot_args) => String.t(),
-          optional(:read_only) => boolean()
-        }
-
-  @typedoc """
   The specification for creating a new VM.
   """
   @type vm_spec :: %{
-          required(:source) => vm_source()
+          required(:source) => Hyper.Vm.source()
         }
 
   defmodule Layer do

@@ -18,7 +18,9 @@ defmodule Hyper.Node.FireVMM.State do
   `Hyper.Node.FireVMM.BootSpec`; every call goes through `runner/1` - the
   injected test closure or the per-VM `Client`.
 
-  This module's struct is the gen_statem *data*; the gen_statem *state* is the
+  The gen_statem *data* (this module's struct) holds the immutable start config
+  in `:opts` and the runtime fields (the daemon and its monitor, the resolved
+  boot spec, the readiness deadline) alongside it; the gen_statem *state* is the
   lifecycle atom above.
   """
 
@@ -34,10 +36,10 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule Opts do
     @moduledoc """
-    Start options for `Hyper.Node.FireVMM.State`. `:id`, `:socket_path`, and
-    `:source` are required; `:binary`/`:args` default to a safe jailer command
-    in `init/1`, and `:run` is a test seam (nil -> the real Client-backed
-    closure is built at boot time).
+    Immutable start config for `Hyper.Node.FireVMM.State`. `:id`, `:socket_path`,
+    and `:source` are required; `:binary`/`:args` default to a safe jailer command
+    in `init/1`, and `:run` is a test seam (nil -> the real Client-backed closure
+    is built at boot time). Carried verbatim as the controller's `:opts`.
     """
     @enforce_keys [:id, :socket_path, :source]
     defstruct [:id, :socket_path, :source, :type, :binary, :args, :run]
@@ -45,7 +47,7 @@ defmodule Hyper.Node.FireVMM.State do
     @type t :: %__MODULE__{
             id: Hyper.Vm.id(),
             socket_path: Path.t(),
-            source: Hyper.vm_source(),
+            source: Hyper.Vm.source(),
             type: Hyper.Vm.Instance.t() | nil,
             binary: String.t() | nil,
             args: [String.t()] | nil,
@@ -53,31 +55,13 @@ defmodule Hyper.Node.FireVMM.State do
           }
   end
 
-  @enforce_keys [:id, :socket_path, :source, :binary, :args]
-  defstruct [
-    :id,
-    :socket_path,
-    :source,
-    :type,
-    :binary,
-    :args,
-    :daemon,
-    :daemon_ref,
-    :run,
-    :spec,
-    :boot_deadline
-  ]
+  @enforce_keys [:opts]
+  defstruct [:opts, :daemon, :daemon_ref, :spec, :boot_deadline]
 
   @type t :: %State{
-          id: String.t(),
-          socket_path: Path.t(),
-          source: Hyper.vm_source(),
-          type: Hyper.Vm.Instance.t() | nil,
-          binary: String.t(),
-          args: [String.t()],
+          opts: Opts.t(),
           daemon: pid() | nil,
           daemon_ref: reference() | nil,
-          run: run() | nil,
           spec: BootSpec.Cold.t() | nil,
           boot_deadline: integer() | nil
         }
@@ -104,23 +88,15 @@ defmodule Hyper.Node.FireVMM.State do
 
   @impl :gen_statem
   def init(%Opts{} = opts) do
-    data = %State{
-      id: opts.id,
-      socket_path: opts.socket_path,
-      source: opts.source,
-      type: opts.type,
-      # FireVMM resolves these from the jailer command; defaults are a safety net.
-      binary: opts.binary || "jailer",
-      args: opts.args || [],
-      run: opts.run
-    }
-
-    {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
+    # FireVMM resolves binary/args from the jailer command; the defaults are a
+    # safety net for direct callers.
+    opts = %{opts | binary: opts.binary || "jailer", args: opts.args || []}
+    {:ok, :booting, %State{opts: opts}, [{:state_timeout, 0, :launch}]}
   end
 
   # Resolve the boot spec, then launch (or re-adopt) the daemon and start waiting
   # for its API.
-  def booting(:state_timeout, :launch, %State{source: source, type: type} = data) do
+  def booting(:state_timeout, :launch, %State{opts: %Opts{source: source, type: type}} = data) do
     data = ensure_daemon(%{data | spec: BootSpec.resolve(source, type)})
     deadline = now() + @ready_timeout_ms
     {:next_state, :awaiting_api, %{data | boot_deadline: deadline}, [{:state_timeout, 0, :probe}]}
@@ -270,20 +246,20 @@ defmodule Hyper.Node.FireVMM.State do
 
   # The API `run` closure for this VM: injected one (tests) or the real
   # Client-backed one, serialized through the per-VM Client GenServer.
-  defp runner(%State{run: run}) when is_function(run, 1), do: run
-  defp runner(%State{id: id}), do: &Client.run(Client.via(id), &1)
+  defp runner(%State{opts: %Opts{run: run}}) when is_function(run, 1), do: run
+  defp runner(%State{opts: %Opts{id: id}}), do: &Client.run(Client.via(id), &1)
 
   # --- daemon lifecycle ----------------------------------------------------
 
   # Re-adopt a surviving daemon after a controller restart, else launch fresh.
-  defp ensure_daemon(%State{id: id} = data) do
+  defp ensure_daemon(%State{opts: %Opts{id: id}} = data) do
     case DynamicSupervisor.which_children(daemon_sup(id)) do
       [{_, pid, _, _}] when is_pid(pid) -> monitor(data, pid)
       _ -> start_daemon(data)
     end
   end
 
-  defp start_daemon(%State{id: id, binary: bin, args: args} = data) do
+  defp start_daemon(%State{opts: %Opts{id: id, binary: bin, args: args}} = data) do
     # The jailer creates the chroot (and thus the socket's parent dir) itself, so
     # there's nothing to mkdir here. MuonTrap just supervises the OS process.
     spec =
@@ -300,7 +276,7 @@ defmodule Hyper.Node.FireVMM.State do
 
   defp stop_daemon(%State{daemon: nil}), do: :ok
 
-  defp stop_daemon(%State{id: id, daemon: pid}),
+  defp stop_daemon(%State{opts: %Opts{id: id}, daemon: pid}),
     do: DynamicSupervisor.terminate_child(daemon_sup(id), pid)
 
   defp monitor(data, pid), do: %{data | daemon: pid, daemon_ref: Process.monitor(pid)}

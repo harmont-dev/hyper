@@ -4,7 +4,6 @@ defmodule Hyper.MixProject do
   def project do
     [
       app: :hyper,
-      elixirc_paths: elixirc_paths(Mix.env()),
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
@@ -149,9 +148,6 @@ defmodule Hyper.MixProject do
       links: %{"GitHub" => "https://github.com/harmont-dev/hyper"}
     ]
   end
-
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
 
   # `mix check` - the strict gate. Runs fast checks first, slow ones (dialyzer) last.
   defp aliases do

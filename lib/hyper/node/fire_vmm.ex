@@ -33,7 +33,7 @@ defmodule Hyper.Node.FireVMM do
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
             type: Hyper.Vm.Instance.t(),
-            source: Hyper.vm_source()
+            source: Hyper.Vm.source()
           }
   end
 

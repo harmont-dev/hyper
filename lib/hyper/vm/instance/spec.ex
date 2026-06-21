@@ -25,15 +25,16 @@ defmodule Hyper.Vm.Instance.Spec do
   end
 
   @doc """
-  Guest-visible vCPU count for firecracker's machine-config. `vcpus` is a
-  fractional cgroup quota (see `cgroup_v2/1`); the guest needs a positive
-  integer, so round up and floor at 1 - a 0.25-vCPU `:micro` still presents one
-  vCPU to the guest.
+  Firecracker machine-config for this spec, the guest-facing analog of
+  `cgroup_v2/1`. `vcpus` is a fractional cgroup quota; the guest needs a positive
+  integer count, so it's rounded up and floored at 1 (a 0.25-vCPU `:micro` still
+  presents one vCPU). Memory is the spec's `mem` in MiB.
   """
-  @spec vcpu_count(t()) :: pos_integer()
-  def vcpu_count(spec), do: max(1, ceil(spec.vcpus))
-
-  @doc "Guest memory size, in MiB, for firecracker's machine-config."
-  @spec mem_mib(t()) :: non_neg_integer()
-  def mem_mib(spec), do: Unit.Information.as_mib(spec.mem)
+  @spec machine_config(t()) :: Hyper.Firecracker.Api.MachineConfiguration.t()
+  def machine_config(spec) do
+    %Hyper.Firecracker.Api.MachineConfiguration{
+      vcpu_count: max(1, ceil(spec.vcpus)),
+      mem_size_mib: Unit.Information.as_mib(spec.mem)
+    }
+  end
 end

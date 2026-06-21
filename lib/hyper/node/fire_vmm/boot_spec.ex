@@ -1,12 +1,8 @@
 defmodule Hyper.Node.FireVMM.BootSpec do
   @moduledoc """
-  Resolves a `Hyper.vm_source()` + instance `type` into a concrete, API-shaped
+  Resolves a `Hyper.Vm.source()` + instance `type` into a concrete, API-shaped
   cold-boot spec the `:configuring` state issues: machine config (from the
   instance type), a kernel boot source, and a root drive.
-
-  Flow-only: the artifact paths it copies into the schemas must already be
-  visible inside the VM's jail. This module does no host staging, image
-  activation, or networking.
   """
 
   alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration}
@@ -28,10 +24,10 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           }
   end
 
-  @spec resolve(Hyper.vm_source(), Instance.t()) :: Cold.t()
+  @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
     %Cold{
-      machine_config: machine_config(type),
+      machine_config: Instance.Spec.machine_config(Instance.spec(type)),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
         boot_args: Map.get(source, :boot_args, @default_boot_args)
@@ -40,23 +36,10 @@ defmodule Hyper.Node.FireVMM.BootSpec do
         %Drive{
           drive_id: "rootfs",
           is_root_device: true,
-          is_read_only: Map.get(source, :read_only, false),
+          is_read_only: false,
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
       ]
-    }
-  end
-
-  # The vCPU/mem derivations (fractional cgroup quota -> guest-visible integer
-  # count; mem -> MiB) are instance-domain rules and live on Instance.Spec; here
-  # we only assemble them into firecracker's machine-config struct.
-  @spec machine_config(Instance.t()) :: MachineConfiguration.t()
-  defp machine_config(type) do
-    spec = Instance.spec(type)
-
-    %MachineConfiguration{
-      vcpu_count: Instance.Spec.vcpu_count(spec),
-      mem_size_mib: Instance.Spec.mem_mib(spec)
     }
   end
 end
