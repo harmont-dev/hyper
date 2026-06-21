@@ -1,74 +1,49 @@
 defmodule Hyper.Img.Db.Gc do
   @moduledoc """
   Cluster-singleton garbage collector that reconciles the `blobs` table against
-  the shared medium: a blob marked `:present` whose backing file is gone from the
-  medium is a stale row, so the GC prunes it. It runs continuously - sweep after
-  sweep - so the database keeps reflecting what the medium actually holds.
+  the shared medium: a `:present` blob whose backing file is gone is a stale row
+  and is pruned. Runs continuously, one keyset page at a time.
 
-  ## Why a singleton, and how it restarts cleanly
+  ## Walking the DB at low priority
 
-  Every node runs this process, but only one is *active* at a time: each contends
-  for the `{:singleton, :layer_gc}` key in the `Hyper.Cluster.Routing` Horde
-  registry. The winner collects; the rest stand by and re-contend every
-  `acquire_interval_ms`. When the active node (or process) dies its registration
-  drops out of the DeltaCRDT, and the next standby retry takes over - so GC
-  resumes within one acquire interval without a Horde.DynamicSupervisor (which the
-  cluster deliberately avoids to prevent ghost restarts). Running once cluster-wide
-  also keeps two nodes from racing to delete the same rows.
+  Pages through `blobs` by keyset on the primary key (`Blob.present_after/2`) in
+  small, paced batches, never `SELECT *`. Each DB statement runs in a transaction
+  with a short `statement_timeout` and the connection is released between pages, so
+  the GC can't pin a backend; the slow per-row medium check runs outside any
+  transaction. If `Hyper.Node.Layer.Repo.test_system/0` reports the medium isn't
+  mounted, the page is skipped and retried later (so a node with no shared medium
+  just idles). Database errors are caught and retried rather than crash-looping the
+  supervisor.
 
-  ## How it walks the database (low priority)
+  ## Not deleting live data
 
-  It pages through `blobs` by keyset on the primary key
-  (`Hyper.Img.Db.Blob.present_after/2`), never `SELECT *`, so a huge table
-  cannot blow up the node. To stay out of the way of real traffic it runs at low
-  priority: small pages, a pause between them, and every DB statement runs inside a
-  transaction that first sets a short `statement_timeout`, so a GC query can never
-  pin a backend. The DB connection is released between pages while the slow
-  per-row medium check (NFS) happens outside any transaction.
+  Deletes are irreversible, so a blob is pruned only when all of these agree it is
+  really gone:
 
-  Before every page it guards on `Hyper.Node.Layer.Repo.test_system/0`: if the
-  medium is not mounted it reschedules without querying, so a node with no shared
-  medium (dev, test) stays completely inert. Database errors during a sweep are
-  caught and retried rather than crash-looping the supervisor.
-
-  ## What it prunes, and what it refuses to
-
-  A `:present` blob whose file is absent from the medium and which **no image
-  references** is deleted (`DELETE` guarded by a `NOT EXISTS` against
-  `image_layers`, so it can never violate the FK). A missing-file blob that is
-  still referenced by an image is a *dangling reference* - genuine data loss the
-  GC cannot fix by deleting (the FK would block it, and the image is already
-  broken). Those are left in place and reported loudly.
-
-  ## Not deleting live data (the safety model)
-
-  Deleting rows is irreversible, so three guards must all agree a blob is really
-  gone before it is pruned:
-
-    1. **Errno discrimination.** The probe (`Hyper.Node.Layer.Repo.probe/1`)
-       treats only `:enoent` as absent; any other I/O error (NFS `ESTALE`/`EIO`,
-       a vanished mount) is `:unknown` and is never pruned.
-    2. **Mount re-check.** `test_system/0` is re-run right before a page's
-       deletions; if the mount dropped mid-page, the page's deletions are skipped.
-    3. **Grace period.** Rows younger than `grace_period_ms` are never deleted, so
+    1. **Errno discrimination** - `Hyper.Node.Layer.Repo.find_layer/1` reports
+       `:enoent` only for a true absence; any other I/O error (NFS `ESTALE`/`EIO`,
+       a vanished mount) is treated as `:unknown` and never pruned.
+    2. **Mount re-check** - `test_system/0` is re-checked after a page's probes and
+       before its deletes, so a mount that drops mid-page can't trigger a mass
+       delete.
+    3. **Grace period** - rows younger than `grace_period_ms` are never deleted, so
        a blob mid-publish (row present, file not finished) is safe.
 
-  **Publish contract:** publishers must write a layer's file to the medium
-  *before* inserting its `blobs` row (ideally write-temp then atomic rename), so a
-  `:present` row implies the bytes exist. The grace period is insurance for slow
-  or out-of-order publishes; it is not a substitute for that ordering.
+  The `DELETE` is also guarded by `NOT EXISTS` against `image_layers`, so it can
+  never violate the FK. A missing-file blob still referenced by an image is a
+  *dangling reference* (data loss the GC can't fix) - left in place and reported,
+  never deleted.
+
+  **Publish contract:** write a layer's file to the medium before inserting its
+  `blobs` row (ideally write-temp then atomic rename); the grace period is
+  insurance, not a substitute.
 
   ## Telemetry
 
-    * `[:hyper, :img, :db, :gc, :sweep, :start]` - measurements `%{}`,
-      metadata `%{node: node()}`
-    * `[:hyper, :img, :db, :gc, :sweep, :stop]` - measurements
-      `%{scanned, present, missing, unknown, pruned, pruned_bytes, dangling}`,
-      metadata `%{node: node()}`
-    * `[:hyper, :img, :db, :gc, :pruned]` - per page (when any deleted);
-      measurements `%{count, bytes}`, metadata `%{node: node()}`
-    * `[:hyper, :img, :db, :gc, :dangling]` - per page (when any found);
-      measurements `%{count, bytes}`, metadata `%{node: node(), sample}`
+    * `[:hyper, :img, :db, :gc, :sweep, :start | :stop]` - stop carries
+      `%{scanned, present, missing, unknown, pruned, pruned_bytes, dangling}`
+    * `[:hyper, :img, :db, :gc, :pruned]` - per page, `%{count, bytes}`
+    * `[:hyper, :img, :db, :gc, :dangling]` - per page, `%{count, bytes}` + `sample`
   """
 
   use GenServer
