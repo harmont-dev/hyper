@@ -2,11 +2,21 @@ defmodule Hyper.Node.FireVMM.State do
   @moduledoc """
   `:gen_statem` controller for one microVM. Owns the firecracker daemon's
   lifecycle: launches it into the per-VM `DynamicSupervisor`, monitors it, and
-  decides what happens when it dies.
+  decides what happens when it dies. The boot protocol (waiting for the API,
+  then configuring + starting the guest) is modelled as states rather than a
+  blocking call, so the controller stays responsive to daemon death and `stop`
+  while a VM is coming up.
 
-      :booting --> :running <-> :paused --> :stopping
-          ^            |
-          +- :crashed <+   (daemon died unexpectedly; cold-boot or restore)
+      :booting --> :awaiting_api --> :configuring --> :running <-> :paused --> :stopping
+          ^             |                  |
+          +- :crashed <-+------------------+   (daemon died / never came up; recover)
+
+  Each boot step does one short thing and returns control to the gen_statem
+  loop: `:awaiting_api` polls `describe_instance` on a `:state_timeout` cadence
+  until the daemon answers (or a deadline lapses); `:configuring` issues the
+  pre-boot config + `InstanceStart` (cold) or `load_snapshot` (restore). The
+  firecracker API structs are built by `Hyper.Node.FireVMM.BootSpec`; every call
+  goes through `runner/1` - the injected test closure or the per-VM `Client`.
 
   This module's struct is the gen_statem *data*; the gen_statem *state* is the
   lifecycle atom above.
@@ -14,12 +24,28 @@ defmodule Hyper.Node.FireVMM.State do
 
   @behaviour :gen_statem
 
-  alias Hyper.Node.FireVMM.State
-  alias Hyper.Node.FireVMM.Boot
+  alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations, Vm}
+  alias Hyper.Node.FireVMM.BootSpec
   alias Hyper.Node.FireVMM.Client
+  alias Hyper.Node.FireVMM.State
+
+  @typedoc "A closure that runs one generated API operation, returning its result."
+  @type run :: ((keyword() -> term()) -> term())
 
   @enforce_keys [:id, :socket_path, :source, :binary, :args]
-  defstruct [:id, :socket_path, :source, :type, :binary, :args, :daemon, :daemon_ref, :run]
+  defstruct [
+    :id,
+    :socket_path,
+    :source,
+    :type,
+    :binary,
+    :args,
+    :daemon,
+    :daemon_ref,
+    :run,
+    :spec,
+    :boot_deadline
+  ]
 
   @type t :: %State{
           id: String.t(),
@@ -30,8 +56,14 @@ defmodule Hyper.Node.FireVMM.State do
           args: [String.t()],
           daemon: pid() | nil,
           daemon_ref: reference() | nil,
-          run: Hyper.Node.FireVMM.Boot.run() | nil
+          run: run() | nil,
+          spec: BootSpec.Cold.t() | BootSpec.Restore.t() | nil,
+          boot_deadline: integer() | nil
         }
+
+  # How long to wait for the daemon's API to come up, and how often to probe it.
+  @ready_timeout_ms 10_000
+  @probe_interval_ms 50
 
   def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
 
@@ -66,22 +98,72 @@ defmodule Hyper.Node.FireVMM.State do
     {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
   end
 
+  # Resolve the boot spec first (a bad source must not leave a daemon running),
+  # then launch (or re-adopt) the daemon and start waiting for its API.
   def booting(:state_timeout, :launch, %State{source: source, type: type} = data) do
-    data = ensure_daemon(data)
+    case BootSpec.resolve(source, type) do
+      {:ok, spec} ->
+        data = ensure_daemon(%{data | spec: spec})
+        deadline = now() + @ready_timeout_ms
 
-    case Boot.boot(runner(data), source, type) do
-      :ok ->
-        {:next_state, :running, data}
+        {:next_state, :awaiting_api, %{data | boot_deadline: deadline},
+         [{:state_timeout, 0, :probe}]}
 
       {:error, reason} ->
-        # The daemon is up but unconfigured; tear the whole VM down and let the
-        # supervisor's restart intensity backstop a persistently-bad spec.
         {:stop, {:shutdown, {:boot_failed, reason}}, data}
     end
   end
 
+  # Poll the daemon's API until it answers. A re-adopted daemon (controller
+  # restarted, daemon survived) may already be running its guest; re-issuing
+  # pre-boot config would 400 and the stop-on-failure path would kill it, so an
+  # already-started guest skips straight to :running. A freshly-launched daemon
+  # reports "Not started" -> configure it.
+  def awaiting_api(:state_timeout, :probe, data) do
+    case runner(data).(&Operations.describe_instance/1) do
+      {:ok, info} ->
+        if instance_started?(info),
+          do: {:next_state, :running, data},
+          else: {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+
+      {:error, _reason} ->
+        if now() >= data.boot_deadline do
+          {:stop, {:shutdown, {:boot_failed, :daemon_unready}}, data}
+        else
+          {:keep_state_and_data, [{:state_timeout, @probe_interval_ms, :probe}]}
+        end
+    end
+  end
+
+  def awaiting_api(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
+    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+
+  def awaiting_api({:call, from}, :stop, data),
+    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+
+  def awaiting_api({:call, from}, event, _data) when event in [:pause, :resume],
+    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+
+  # Issue the pre-boot config + start (cold) or restore (snapshot). One short
+  # blocking step of a few fast calls; aborts and tears down on the first error.
+  def configuring(:state_timeout, :configure, %State{spec: spec} = data) do
+    case apply_spec(runner(data), spec) do
+      :ok -> {:next_state, :running, data}
+      {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
+    end
+  end
+
+  def configuring(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
+    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+
+  def configuring({:call, from}, :stop, data),
+    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+
+  def configuring({:call, from}, event, _data) when event in [:pause, :resume],
+    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+
   def running({:call, from}, :pause, data) do
-    case Boot.pause(runner(data)) do
+    case set_vm_state(runner(data), "Paused") do
       :ok -> {:next_state, :paused, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
@@ -94,7 +176,7 @@ defmodule Hyper.Node.FireVMM.State do
     do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
 
   def paused({:call, from}, :resume, data) do
-    case Boot.resume(runner(data)) do
+    case set_vm_state(runner(data), "Resumed") do
       :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
@@ -116,6 +198,60 @@ defmodule Hyper.Node.FireVMM.State do
     if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason), do: stop_daemon(data)
     :ok
   end
+
+  # --- boot protocol -------------------------------------------------------
+
+  # Cold boot: machine-config -> boot-source -> drives -> NICs -> InstanceStart.
+  # Restore: load the snapshot (resume). Aborts at the first error, returned
+  # verbatim.
+  @spec apply_spec(run(), BootSpec.Cold.t() | BootSpec.Restore.t()) :: :ok | {:error, term()}
+  defp apply_spec(run, %BootSpec.Cold{} = cold) do
+    with :ok <-
+           run.(fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end),
+         :ok <- run.(fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end),
+         :ok <- put_each(run, cold.drives, &drive_put/2),
+         :ok <- put_each(run, cold.network_interfaces, &nic_put/2) do
+      run.(fn opts ->
+        Operations.create_sync_action(%InstanceActionInfo{action_type: "InstanceStart"}, opts)
+      end)
+    end
+  end
+
+  defp apply_spec(run, %BootSpec.Restore{params: params}) do
+    run.(fn opts -> Operations.load_snapshot(params, opts) end)
+  end
+
+  @spec instance_started?(map()) :: boolean()
+  defp instance_started?(%{state: state}) when state in ["Running", "Paused"], do: true
+  defp instance_started?(_), do: false
+
+  # Issue `put_fun` for each item, halting at the first error.
+  @spec put_each(run(), [item], (run(), item -> :ok | {:error, term()})) :: :ok | {:error, term()}
+        when item: var
+  defp put_each(run, items, put_fun) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case put_fun.(run, item) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp drive_put(run, drive),
+    do: run.(fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
+
+  defp nic_put(run, nic),
+    do: run.(fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end)
+
+  defp set_vm_state(run, state),
+    do: run.(fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
+
+  # The API `run` closure for this VM: injected one (tests) or the real
+  # Client-backed one, serialized through the per-VM Client GenServer.
+  defp runner(%State{run: run}) when is_function(run, 1), do: run
+  defp runner(%State{id: id}), do: &Client.run(Client.via(id), &1)
+
+  # --- daemon lifecycle ----------------------------------------------------
 
   # Re-adopt a surviving daemon after a controller restart, else launch fresh.
   defp ensure_daemon(%State{id: id} = data) do
@@ -149,11 +285,7 @@ defmodule Hyper.Node.FireVMM.State do
   defp clear_daemon(data), do: %{data | daemon: nil, daemon_ref: nil}
 
   defp recover_after, do: 1_000
-
-  # The API `run` closure for this VM: injected one (tests) or the real
-  # Client-backed one, serialized through the per-VM Client GenServer.
-  defp runner(%State{run: run}) when is_function(run, 1), do: run
-  defp runner(%State{id: id}), do: &Client.run(Client.via(id), &1)
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp daemon_sup(id), do: Hyper.Cluster.Routing.via({id, :daemon_sup})
   defp via(id), do: Hyper.Cluster.Routing.via({id, :state})
