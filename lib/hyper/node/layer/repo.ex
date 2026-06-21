@@ -21,16 +21,15 @@ defmodule Hyper.Node.Layer.Repo do
     end
   end
 
-  @doc "Find a path to the given layer, checking if it exists."
-  @spec find_layer(Hyper.Layer.id()) :: {:ok, Path.t()} | {:error, term()}
+  @doc "Resolve a layer's path. `{:error, :enoent}` if absent, `{:error, posix}` on I/O error."
+  @spec find_layer(Hyper.Layer.id()) :: {:ok, Path.t()} | {:error, File.posix()}
   @decorate with_span("Hyper.Node.Layer.Repo.find_layer")
   def find_layer(id) do
     path = Path.join([Hyper.Config.layer_dir(), layer_basename(id)])
 
-    if File.exists?(path) do
-      {:ok, path}
-    else
-      {:error, :not_found}
+    case File.stat(path) do
+      {:ok, _stat} -> {:ok, path}
+      {:error, posix} -> {:error, posix}
     end
   end
 

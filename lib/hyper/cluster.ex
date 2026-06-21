@@ -6,7 +6,9 @@ defmodule Hyper.Cluster do
   independent DeltaCRDTs.
 
   Started once per BEAM node, before `Hyper.Node`, so VM registrations and budget
-  advertisements have their registries available on boot.
+  advertisements have their registries available on boot. Also starts
+  `Hyper.Img.Db.Gc`, the cluster-singleton that continuously prunes blob rows
+  whose data is no longer on the shared medium.
   """
 
   use Supervisor
@@ -18,7 +20,7 @@ defmodule Hyper.Cluster do
 
   @impl true
   def init(_opts) do
-    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget]
+    children = [Hyper.Cluster.Routing, Hyper.Cluster.Budget, Hyper.Img.Db.Gc]
     Supervisor.init(children, strategy: :one_for_one)
   end
 end
