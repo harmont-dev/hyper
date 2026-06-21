@@ -39,3 +39,22 @@ config :hyper, Hyper.Img.Db.Repo,
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
+
+config :oapi_generator,
+  default: [
+    output: [
+      base_module: Hyper.Firecracker.Api,
+      location: "lib/hyper/firecracker/api",
+      default_client: Hyper.Firecracker.Api.Transport,
+      operation_subdirectory: "operations",
+      schema_subdirectory: "schemas",
+      schema_use: Hyper.Firecracker.Api.Encoder,
+      extra_fields: [__info__: :map],
+      field_casing: :snake,
+      types: [specs: :spec]
+    ],
+    naming: [
+      default_operation_module: Operations,
+      operation_use_tags: false
+    ]
+  ]
