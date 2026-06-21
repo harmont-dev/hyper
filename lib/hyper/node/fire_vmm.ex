@@ -1,25 +1,23 @@
 defmodule Hyper.Node.FireVMM do
   @moduledoc """
-  Supervises a single Firecracker microVM as `[daemon container, controller]`.
+  Supervises a single Firecracker microVM, split into two independent subtrees so
+  no lifecycle invariant rides on the ordering of a flat child list:
 
-    1. `DynamicSupervisor` (`{id, :daemon_sup}`) - starts **empty**. The holding
-       pen for the OS process (the `jailer`, which exec's firecracker). Launches
-       nothing on its own, so no microVM exists until the controller commands it.
-    2. `Hyper.Node.FireVMM.State` - the `:gen_statem` controller. It starts the
-       jailer *into* the supervisor above (as a `:temporary` child) and monitors
-       it. The state machine, not the supervisor, owns the daemon's lifecycle.
+    1. `Hyper.Node.FireVMM.Core` - the daemon container + `:gen_statem`
+       controller, coupled under `:rest_for_one` (the daemon survives a
+       controller restart). All order-sensitivity is contained there.
+    2. `Hyper.Node.FireVMM.Client` - the API client. It depends only on `vm_id`
+       (it derives the socket itself) and on nothing else in the tree, so it is
+       an independent peer: its crashes don't disturb the core, and a core
+       restart doesn't cycle it.
 
-  `:rest_for_one`, container first:
-
-    * controller crashes  -> only it restarts; the daemon survives and the
-      controller re-adopts it (`State.ensure_daemon/1`). A controller bug does
-      not kill a live, stateful VM.
-    * container crashes    -> controller restarts too -> cold boot.
+  Strategy is `:one_for_one`: the two subtrees are restarted independently.
   """
 
   use Supervisor
 
-  alias Hyper.Node.FireVMM.State
+  alias Hyper.Node.FireVMM.Client
+  alias Hyper.Node.FireVMM.Core
 
   @doc "The scheduler period of each VM."
   @spec cpu_period() :: Unit.Time.t()
@@ -56,25 +54,12 @@ defmodule Hyper.Node.FireVMM do
 
   @impl true
   def init(opts) do
-    # Resolve the jailer command (binary + args + the host-side socket the
-    # controller will talk to) here, so neither the caller nor the controller
-    # has to know host conventions. `Map.put_new` lets tests inject a stand-in
-    # daemon (e.g. a sleeping shell) and an accessible socket path.
-    cmd = Hyper.Node.FireVMM.Jailer.command(opts)
-
-    vm_opts =
-      opts
-      |> Map.put_new(:binary, cmd.binary)
-      |> Map.put_new(:args, cmd.args)
-      |> Map.put_new(:socket_path, cmd.host_socket)
-
     children = [
-      {DynamicSupervisor,
-       name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
-      {State, vm_opts}
+      {Core, opts},
+      {Client, %Client.Opts{vm_id: opts.vm_id}}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :one_for_one)
   end
 
   defp via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :supervisor})

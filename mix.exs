@@ -9,6 +9,11 @@ defmodule Hyper.MixProject do
       start_permanent: Mix.env() == :prod,
       name: "Hyper",
       source_url: "https://github.com/harmont-dev/hyper",
+      # Generate the (gitignored) Firecracker bindings before the Elixir compiler.
+      # A Mix compiler (not a `compile` alias) is used because Mix honors a
+      # dependency's `:compilers` but NOT its aliases or `config/` -- so this is
+      # the only hook that also fires when hyper is compiled AS A DEPENDENCY.
+      compilers: [:firecracker_gen | Mix.compilers()],
       deps: deps(),
       docs: docs(),
       package: package(),
@@ -52,7 +57,14 @@ defmodule Hyper.MixProject do
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
-      {:uuidv4, "~> 1.0"}
+      {:uuidv4, "~> 1.0"},
+      # Not `only: :dev`: the generated Firecracker bindings are gitignored and
+      # produced by the `:firecracker_gen` Mix compiler, which runs wherever hyper
+      # is compiled -- including as a dependency of another app, where Mix won't
+      # load hyper's `config/` or aliases. So the generator must be available in
+      # every env that compiles hyper (deps included). `runtime: false` keeps it
+      # compile-only and out of releases.
+      {:oapi_generator, "~> 0.4.0", runtime: false}
     ]
   end
 
@@ -73,7 +85,7 @@ defmodule Hyper.MixProject do
         Cookbook: ~r/docs\/cookbook\/.*/
       ],
       # Group modules in the sidebar by namespace. Each value is a regex matched
-      # against the module name, so new modules join their group automatically —
+      # against the module name, so new modules join their group automatically --
       # no per-module edits here. The patterns are mutually exclusive, so the
       # listing order is purely cosmetic. (`Sys.Mon.*` -> Monitoring; every other
       # `Sys.Posix`/`Sys.Linux.*`, including the /proc parsers, -> System.)
@@ -129,7 +141,10 @@ defmodule Hyper.MixProject do
   defp package do
     [
       licenses: ["AGPL-3.0-or-later"],
-      files: ~w(lib config mix.exs README.md LICENSE NOTICE CLA.md),
+      # priv/firecracker ships the OpenAPI spec so the `:firecracker_gen` compiler
+      # can regenerate the bindings in a consumer's build (they are gitignored, so
+      # not in `lib`).
+      files: ~w(lib priv/firecracker config mix.exs README.md LICENSE NOTICE CLA.md),
       links: %{"GitHub" => "https://github.com/harmont-dev/hyper"}
     ]
   end
@@ -143,7 +158,70 @@ defmodule Hyper.MixProject do
         "credo --strict",
         "test --warnings-as-errors",
         "dialyzer"
-      ]
+      ],
+      # Force a regeneration of the Firecracker bindings (ignores staleness).
+      "firecracker.gen": ["compile.firecracker_gen --force"]
     ]
+  end
+end
+
+defmodule Mix.Tasks.Compile.FirecrackerGen do
+  @moduledoc """
+  Mix compiler that generates the Firecracker API bindings into
+  `lib/hyper/firecracker/api/{operations,schemas}` from the committed OpenAPI
+  spec, just before the Elixir compiler.
+
+  Defined in `mix.exs` (not under `lib/`) so it is loaded before any compilation
+  and is available even when hyper is built as a dependency -- Mix honors a
+  dependency's `:compilers` but neither its `config/` nor its aliases, so the
+  generator config is supplied here via `Application.put_env/3` rather than
+  `config/config.exs`.
+
+  The committed spec is OpenAPI 3, converted from Firecracker's upstream Swagger
+  2.0 (not vendored). To bump the version, fetch the new tag's spec and convert,
+  then point `@spec_path` at it and run `mix firecracker.gen`:
+
+      curl -fsSL https://raw.githubusercontent.com/firecracker-microvm/firecracker/vX.Y.Z/src/firecracker/swagger/firecracker.yaml \\
+      | curl -fsS -X POST https://converter.swagger.io/api/convert \\
+          -H 'Content-Type: application/yaml' -H 'Accept: application/json' --data-binary @- \\
+          -o priv/firecracker/firecracker-vX.Y.Z.openapi.json
+  """
+
+  use Mix.Task.Compiler
+
+  @spec_path "priv/firecracker/firecracker-v1.16.0.openapi.json"
+  @out "lib/hyper/firecracker/api/operations/operations.ex"
+
+  @config [
+    output: [
+      base_module: Hyper.Firecracker.Api,
+      location: "lib/hyper/firecracker/api",
+      default_client: Hyper.Firecracker.Api.Transport,
+      operation_subdirectory: "operations",
+      schema_subdirectory: "schemas",
+      schema_use: Hyper.Firecracker.Api.Codec,
+      extra_fields: [__info__: :map],
+      field_casing: :snake,
+      types: [specs: :spec]
+    ],
+    naming: [
+      default_operation_module: Operations,
+      operation_use_tags: false
+    ]
+  ]
+
+  @impl Mix.Task.Compiler
+  def run(argv) do
+    if "--force" in argv or stale?() do
+      Mix.Task.run("loadpaths")
+      Application.put_env(:oapi_generator, :default, @config)
+      OpenAPI.run("default", [@spec_path])
+    end
+
+    {:ok, []}
+  end
+
+  defp stale? do
+    not File.exists?(@out) or File.stat!(@spec_path).mtime > File.stat!(@out).mtime
   end
 end
