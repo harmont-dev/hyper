@@ -39,7 +39,3 @@ config :hyper, Hyper.Img.Db.Repo,
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
-
-# NOTE: oapi_generator is configured programmatically by the `:firecracker_gen`
-# Mix compiler (in mix.exs), not here -- `config/` is not loaded when hyper is a
-# dependency, so the generator config must travel with the compiler.
