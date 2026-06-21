@@ -37,13 +37,6 @@ defmodule Hyper.Img.Db.Gc do
   **Publish contract:** write a layer's file to the medium before inserting its
   `blobs` row (ideally write-temp then atomic rename); the grace period is
   insurance, not a substitute.
-
-  ## Telemetry
-
-    * `[:hyper, :img, :db, :gc, :sweep, :start | :stop]` - stop carries
-      `%{scanned, present, missing, unknown, pruned, pruned_bytes, dangling}`
-    * `[:hyper, :img, :db, :gc, :pruned]` - per page, `%{count, bytes}`
-    * `[:hyper, :img, :db, :gc, :dangling]` - per page, `%{count, bytes}` + `sample`
   """
 
   use GenServer
@@ -120,7 +113,6 @@ defmodule Hyper.Img.Db.Gc do
   def handle_info(:acquire, state), do: {:noreply, state}
 
   def handle_info(:sweep, %__MODULE__{role: :active, sweep: nil} = state) do
-    emit([:sweep, :start], %{}, %{node: node()})
     send(self(), :scan)
     {:noreply, %{state | sweep: Sweep.new()}}
   end
@@ -186,20 +178,6 @@ defmodule Hyper.Img.Db.Gc do
       Process.send_after(self(), :scan, cfg(state, :batch_pause_ms))
       %{state | sweep: sweep}
     else
-      emit(
-        [:sweep, :stop],
-        Map.take(sweep, [
-          :scanned,
-          :present,
-          :missing,
-          :unknown,
-          :pruned,
-          :pruned_bytes,
-          :dangling
-        ]),
-        %{node: node()}
-      )
-
       Logger.info(
         "layer gc sweep complete: scanned=#{sweep.scanned} present=#{sweep.present} " <>
           "missing=#{sweep.missing} unknown=#{sweep.unknown} pruned=#{sweep.pruned} " <>
@@ -269,9 +247,7 @@ defmodule Hyper.Img.Db.Gc do
         select: b.size
 
     {count, sizes} = with_low_priority(state, fn -> Repo.delete_all(query) end)
-    bytes = Enum.sum(sizes)
-    if count > 0, do: emit([:pruned], %{count: count, bytes: bytes}, %{node: node()})
-    {count, bytes}
+    {count, Enum.sum(sizes)}
   end
 
   # Report dangling blobs (file gone, still referenced = data loss) once per page,
@@ -288,8 +264,6 @@ defmodule Hyper.Img.Db.Gc do
       "layer gc: #{count} blob(s) missing from medium but still referenced by an image " <>
         "(#{bytes} bytes total); leaving in place. sample=#{inspect(sample)}"
     )
-
-    emit([:dangling], %{count: count, bytes: bytes}, %{node: node(), sample: sample})
   end
 
   @spec referenced_ids(t(), [String.t()]) :: MapSet.t(String.t())
@@ -327,11 +301,6 @@ defmodule Hyper.Img.Db.Gc do
       {:error, :enoent} -> :missing
       {:error, _posix} -> :unknown
     end
-  end
-
-  @spec emit([atom()], map(), map()) :: :ok
-  defp emit(suffix, measurements, metadata) do
-    :telemetry.execute([:hyper, :img, :db, :gc | suffix], measurements, metadata)
   end
 
   @spec cfg(t(), atom()) :: term()
