@@ -32,23 +32,23 @@ defmodule Hyper.Node.FireVMM.Core do
   @impl true
   def init(opts) do
     # Resolve the jailer command (binary + args + host-side socket the controller
-    # talks to) here, where the daemon lives. `Map.put_new` lets tests inject a
-    # stand-in daemon (e.g. a sleeping shell) and an accessible socket path.
+    # talks to) here, where the daemon lives, and hand the controller a fully
+    # populated start struct.
     cmd = FireVMM.Jailer.command(opts)
 
-    vm_opts =
-      opts
-      |> Map.put_new(:id, opts.vm_id)
-      |> Map.put_new(:type, opts.type)
-      |> Map.put_new(:source, opts.source)
-      |> Map.put_new(:binary, cmd.binary)
-      |> Map.put_new(:args, cmd.args)
-      |> Map.put_new(:socket_path, cmd.host_socket)
+    state_opts = %State.Opts{
+      id: opts.vm_id,
+      type: opts.type,
+      source: opts.source,
+      binary: cmd.binary,
+      args: cmd.args,
+      socket_path: cmd.host_socket
+    }
 
     children = [
       {DynamicSupervisor,
        name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
-      {State, vm_opts}
+      {State, state_opts}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

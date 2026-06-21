@@ -32,6 +32,27 @@ defmodule Hyper.Node.FireVMM.State do
   @typedoc "A closure that runs one generated API operation, returning its result."
   @type run :: ((keyword() -> term()) -> term())
 
+  defmodule Opts do
+    @moduledoc """
+    Start options for `Hyper.Node.FireVMM.State`. `:id`, `:socket_path`, and
+    `:source` are required; `:binary`/`:args` default to a safe jailer command
+    in `init/1`, and `:run` is a test seam (nil -> the real Client-backed
+    closure is built at boot time).
+    """
+    @enforce_keys [:id, :socket_path, :source]
+    defstruct [:id, :socket_path, :source, :type, :binary, :args, :run]
+
+    @type t :: %__MODULE__{
+            id: Hyper.Vm.id(),
+            socket_path: Path.t(),
+            source: Hyper.vm_source(),
+            type: Hyper.Vm.Instance.t() | nil,
+            binary: String.t() | nil,
+            args: [String.t()] | nil,
+            run: Hyper.Node.FireVMM.State.run() | nil
+          }
+  end
+
   @enforce_keys [:id, :socket_path, :source, :binary, :args]
   defstruct [
     :id,
@@ -67,7 +88,7 @@ defmodule Hyper.Node.FireVMM.State do
 
   def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
 
-  def start_link(%{id: id} = opts), do: :gen_statem.start_link(via(id), __MODULE__, opts, [])
+  def start_link(%Opts{id: id} = opts), do: :gen_statem.start_link(via(id), __MODULE__, opts, [])
 
   @spec pause(String.t()) :: :ok
   def pause(id), do: :gen_statem.call(via(id), :pause)
@@ -82,17 +103,16 @@ defmodule Hyper.Node.FireVMM.State do
   def callback_mode, do: :state_functions
 
   @impl :gen_statem
-  def init(%{id: id, socket_path: socket, source: source} = opts) do
+  def init(%Opts{} = opts) do
     data = %State{
-      id: id,
-      socket_path: socket,
-      source: source,
-      type: Map.get(opts, :type),
+      id: opts.id,
+      socket_path: opts.socket_path,
+      source: opts.source,
+      type: opts.type,
       # FireVMM resolves these from the jailer command; defaults are a safety net.
-      binary: Map.get(opts, :binary, "jailer"),
-      args: Map.get(opts, :args, []),
-      # Test seam: nil -> the real Client-backed closure is built at boot time.
-      run: Map.get(opts, :run)
+      binary: opts.binary || "jailer",
+      args: opts.args || [],
+      run: opts.run
     }
 
     {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
