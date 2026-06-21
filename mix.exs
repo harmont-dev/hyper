@@ -67,8 +67,8 @@ defmodule Hyper.MixProject do
   @firecracker_spec "priv/firecracker/firecracker-v1.16.0.openapi.json"
   @firecracker_out "lib/hyper/firecracker/api/operations/operations.ex"
 
-  defp gen_firecracker(_args) do
-    if firecracker_stale?() do
+  defp gen_firecracker(args) do
+    if "--force" in args or firecracker_stale?() do
       Mix.Task.run("loadpaths")
       OpenAPI.run("default", [@firecracker_spec])
     end
@@ -172,8 +172,8 @@ defmodule Hyper.MixProject do
       # Generate the (gitignored) Firecracker bindings before every compile.
       # Re-entrant: the trailing "compile" runs the real compiler task.
       compile: [&gen_firecracker/1, "compile"],
-      # Manual/forced regeneration: `mix firecracker.gen`.
-      "firecracker.gen": [&gen_firecracker/1]
+      # Manual regeneration (forced, ignores the staleness check): `mix firecracker.gen`.
+      "firecracker.gen": [fn _args -> gen_firecracker(["--force"]) end]
     ]
   end
 end

@@ -51,7 +51,7 @@ config :oapi_generator,
       default_client: Hyper.Firecracker.Api.Transport,
       operation_subdirectory: "operations",
       schema_subdirectory: "schemas",
-      schema_use: Hyper.Firecracker.Api.Encoder,
+      schema_use: Hyper.Firecracker.Api.Codec,
       extra_fields: [__info__: :map],
       field_casing: :snake,
       types: [specs: :spec]

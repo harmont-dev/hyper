@@ -7,15 +7,14 @@ defmodule Hyper.Firecracker.Api.Transport do
 
   The per-VM socket path arrives as `opts[:socket_path]` (injected by
   `Hyper.Node.FireVMM.Client`). Request bodies are generated structs encoded by
-  `Hyper.Firecracker.Api.Encoder` (nil-stripped) or, for free-form bodies like
-  MMDS, plain maps sent verbatim.
+  `Hyper.Firecracker.Api.Codec` (nil-stripped) or, for free-form bodies like
+  MMDS, plain maps sent verbatim. Typed responses are decoded by the schema's
+  own generated `decode/1` (also from `Hyper.Firecracker.Api.Codec`).
 
   Returns: `:ok` (204 / empty), `{:ok, decoded}` (2xx with a typed body),
   `{:error, {:api, status, fault_message}}` (non-2xx), or
   `{:error, {:transport, reason}}` (socket/connection failure).
   """
-
-  alias Hyper.Firecracker.Api.Decoder
 
   @type result ::
           :ok
@@ -54,8 +53,8 @@ defmodule Hyper.Firecracker.Api.Transport do
   defp handle(status, body, responses) when status in 200..299 do
     case List.keyfind(responses, status, 0) do
       {^status, :null} -> :ok
-      {^status, type} -> {:ok, Decoder.decode(body, type)}
-      nil -> if body in [nil, ""], do: :ok, else: {:ok, body}
+      {^status, {module, :t}} -> {:ok, module.decode(body)}
+      _other -> if body in [nil, ""], do: :ok, else: {:ok, body}
     end
   end
 
