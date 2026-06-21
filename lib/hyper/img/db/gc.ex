@@ -4,19 +4,6 @@ defmodule Hyper.Img.Db.Gc do
   the shared medium: a `:present` blob whose backing file is gone is a stale row
   and is pruned. Runs continuously, one keyset page at a time.
 
-  ## Walking the DB at low priority
-
-  Pages through `blobs` by keyset on the primary key (`Blob.present_after/2`) in
-  small, paced batches, never `SELECT *`. Each DB statement runs in a transaction
-  with a short `statement_timeout` and the connection is released between pages, so
-  the GC can't pin a backend; the slow per-row medium check runs outside any
-  transaction. If `Hyper.Node.Layer.Repo.test_system/0` reports the medium isn't
-  mounted, the page is skipped and retried later (so a node with no shared medium
-  just idles). Database errors are caught and retried rather than crash-looping the
-  supervisor.
-
-  ## Not deleting live data
-
   Deletes are irreversible, so a blob is pruned only when all of these agree it is
   really gone:
 
@@ -26,7 +13,7 @@ defmodule Hyper.Img.Db.Gc do
     2. **Mount re-check** - `test_system/0` is re-checked after a page's probes and
        before its deletes, so a mount that drops mid-page can't trigger a mass
        delete.
-    3. **Grace period** - rows younger than `grace_period_ms` are never deleted, so
+    3. **Grace period** - rows younger than `grace_period` are never deleted, so
        a blob mid-publish (row present, file not finished) is safe.
 
   The `DELETE` is also guarded by `NOT EXISTS` against `image_layers`, so it can
@@ -45,33 +32,15 @@ defmodule Hyper.Img.Db.Gc do
 
   alias Hyper.Cluster.Routing
   alias Hyper.Img.Db.{Blob, ImageLayer, Repo}
-  alias Hyper.Img.Db.Gc.Sweep
+  alias Hyper.Img.Db.Gc.{Config, Sweep}
   alias Hyper.Node.Layer.Repo, as: LayerRepo
 
   @singleton_key {:singleton, :layer_gc}
 
-  @defaults [
-    # Low priority: small pages and a pause between them.
-    batch_size: 200,
-    batch_pause_ms: 100,
-    # Continuous: short rest between completed sweeps, not a long idle.
-    sweep_interval_ms: 60_000,
-    # How often a standby retries to become active.
-    acquire_interval_ms: 5_000,
-    # Backoff before retrying after the medium or the database is unavailable.
-    retry_ms: 60_000,
-    # Cap on each GC DB statement so it can never pin a backend.
-    statement_timeout_ms: 5_000,
-    # Never prune a blob younger than this. A row whose file is not yet on the
-    # medium because it is still being published must not be deleted; the grace
-    # window keeps the GC off freshly-inserted rows regardless of publish timing.
-    grace_period_ms: 3_600_000
-  ]
-
-  defstruct [:cfg, role: :standby, sweep: nil, last_sweep: nil]
+  defstruct [:config, role: :standby, sweep: nil, last_sweep: nil]
 
   @type t :: %__MODULE__{
-          cfg: keyword(),
+          config: Config.t(),
           role: :active | :standby,
           sweep: Sweep.t() | nil,
           last_sweep: Sweep.t() | nil
@@ -88,12 +57,14 @@ defmodule Hyper.Img.Db.Gc do
 
   @impl true
   def init(opts) do
-    cfg =
-      @defaults
-      |> Keyword.merge(Application.get_env(:hyper, __MODULE__, []))
-      |> Keyword.merge(opts)
+    config = Keyword.get(opts, :config) || Config.load()
 
-    {:ok, %__MODULE__{cfg: cfg}, {:continue, :acquire}}
+    if config.enabled do
+      {:ok, %__MODULE__{config: config}, {:continue, :acquire}}
+    else
+      Logger.info("layer gc: disabled by config; not starting")
+      :ignore
+    end
   end
 
   @impl true
@@ -134,13 +105,13 @@ defmodule Hyper.Img.Db.Gc do
               "layer gc: database unavailable during sweep (#{Exception.message(e)}); retrying"
             )
 
-            Process.send_after(self(), :sweep, cfg(state, :retry_ms))
+            Process.send_after(self(), :sweep, Unit.Time.as_ms(state.config.retry))
             {:noreply, %{state | sweep: nil}}
         end
 
       {:error, reason} ->
         Logger.warning("layer gc: shared medium unavailable (#{inspect(reason)}); retrying")
-        Process.send_after(self(), :sweep, cfg(state, :retry_ms))
+        Process.send_after(self(), :sweep, Unit.Time.as_ms(state.config.retry))
         {:noreply, %{state | sweep: nil}}
     end
   end
@@ -160,14 +131,14 @@ defmodule Hyper.Img.Db.Gc do
         %{state | role: :active}
 
       {:error, {:already_registered, _pid}} ->
-        Process.send_after(self(), :acquire, cfg(state, :acquire_interval_ms))
+        Process.send_after(self(), :acquire, Unit.Time.as_ms(state.config.acquire_interval))
         %{state | role: :standby}
     end
   end
 
   @spec scan_one_batch(t()) :: t()
   defp scan_one_batch(%__MODULE__{sweep: sweep} = state) do
-    limit = cfg(state, :batch_size)
+    limit = state.config.batch_size
     batch = with_low_priority(state, fn -> Blob.present_after(sweep.cursor, limit) end)
     {sweep, missing} = Sweep.absorb(sweep, batch, &presence/1)
 
@@ -175,7 +146,7 @@ defmodule Hyper.Img.Db.Gc do
     sweep = Sweep.record_prune(sweep, pruned, pruned_bytes, dangling)
 
     if Sweep.continue?(batch, limit) do
-      Process.send_after(self(), :scan, cfg(state, :batch_pause_ms))
+      Process.send_after(self(), :scan, Unit.Time.as_ms(state.config.batch_pause))
       %{state | sweep: sweep}
     else
       Logger.info(
@@ -184,7 +155,7 @@ defmodule Hyper.Img.Db.Gc do
           "(#{sweep.pruned_bytes} bytes) dangling=#{sweep.dangling}"
       )
 
-      Process.send_after(self(), :sweep, cfg(state, :sweep_interval_ms))
+      Process.send_after(self(), :sweep, Unit.Time.as_ms(state.config.sweep_interval))
       %{state | sweep: nil, last_sweep: sweep}
     end
   end
@@ -223,7 +194,9 @@ defmodule Hyper.Img.Db.Gc do
 
     report_dangling(dangling)
 
-    cutoff = DateTime.add(DateTime.utc_now(), -cfg(state, :grace_period_ms), :millisecond)
+    cutoff =
+      DateTime.add(DateTime.utc_now(), -Unit.Time.as_ms(state.config.grace_period), :millisecond)
+
     prunable_ids = Enum.map(prunable, fn {id, _size} -> id end)
     {pruned, pruned_bytes} = prune_rows(state, prunable_ids, cutoff)
 
@@ -276,7 +249,7 @@ defmodule Hyper.Img.Db.Gc do
   # is capped, so it can never pin a backend and yields under contention.
   @spec with_low_priority(t(), (-> result)) :: result when result: var
   defp with_low_priority(state, fun) do
-    timeout = cfg(state, :statement_timeout_ms)
+    timeout = Unit.Time.as_ms(state.config.statement_timeout)
 
     {:ok, result} =
       Repo.transaction(fn ->
@@ -302,7 +275,4 @@ defmodule Hyper.Img.Db.Gc do
       {:error, _posix} -> :unknown
     end
   end
-
-  @spec cfg(t(), atom()) :: term()
-  defp cfg(%__MODULE__{cfg: cfg}, key), do: Keyword.fetch!(cfg, key)
 end
