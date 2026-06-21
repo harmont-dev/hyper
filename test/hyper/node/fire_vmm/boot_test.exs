@@ -108,6 +108,33 @@ defmodule Hyper.Node.FireVMM.BootTest do
     end
   end
 
+  describe "boot/4 re-adoption" do
+    test "skips configuration when the adopted daemon already runs a guest" do
+      respond = fn
+        %{url: "/"} -> {:ok, %Hyper.Firecracker.Api.InstanceInfo{state: "Running"}}
+        _ -> :ok
+      end
+
+      src = {:cold, %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"}}
+      assert :ok = Boot.boot(run_with(respond), src, :centi, ready_interval_ms: 0)
+
+      # Only the readiness/state probe was issued; no config PUTs, no InstanceStart.
+      urls = collect_calls() |> Enum.map(fn {_m, u, _b} -> u end)
+      assert urls == ["/"]
+    end
+
+    test "also skips for an already-paused adopted guest" do
+      respond = fn
+        %{url: "/"} -> {:ok, %Hyper.Firecracker.Api.InstanceInfo{state: "Paused"}}
+        _ -> :ok
+      end
+
+      src = {:snapshot, "/snaps/v1"}
+      assert :ok = Boot.boot(run_with(respond), src, :centi, ready_interval_ms: 0)
+      assert ["/"] = collect_calls() |> Enum.map(fn {_m, u, _b} -> u end)
+    end
+  end
+
   describe "pause/1 and resume/1" do
     test "PATCH /vm with the right state" do
       assert :ok = Boot.pause(run_with(&ready/1))

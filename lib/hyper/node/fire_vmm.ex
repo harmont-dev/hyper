@@ -56,8 +56,11 @@ defmodule Hyper.Node.FireVMM do
   @impl true
   def init(opts) do
     children = [
-      {Core, opts},
-      {Client, %Client.Opts{vm_id: opts.vm_id}}
+      # Client must be registered before Core: Core starts the State machine,
+      # whose booting/2 calls Client.run as soon as it launches. Client depends
+      # only on vm_id (an independent peer), so it has no reverse dependency.
+      {Client, %Client.Opts{vm_id: opts.vm_id}},
+      {Core, opts}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

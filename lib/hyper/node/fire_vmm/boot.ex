@@ -24,9 +24,12 @@ defmodule Hyper.Node.FireVMM.Boot do
   @spec boot(run(), Hyper.vm_source(), Hyper.Vm.Instance.t(), keyword()) :: :ok | {:error, term()}
   def boot(run, source, type, opts \\ []) when is_function(run, 1) do
     with {:ok, spec} <- BootSpec.resolve(source, type),
-         :ok <- await_ready(run, opts),
-         :ok <- apply_spec(run, spec) do
-      :ok
+         {:ok, info} <- await_ready(run, opts) do
+      # A re-adopted daemon (controller restarted, daemon survived) may already
+      # be running; re-issuing pre-boot config would 400 and get the live guest
+      # killed by the controller's stop-on-failure. A freshly-launched daemon
+      # reports "Not started", so only then do we configure + start.
+      if instance_started?(info), do: :ok, else: apply_spec(run, spec)
     end
   end
 
@@ -54,6 +57,10 @@ defmodule Hyper.Node.FireVMM.Boot do
     run.(fn opts -> Operations.load_snapshot(params, opts) end)
   end
 
+  @spec instance_started?(map()) :: boolean()
+  defp instance_started?(%{state: state}) when state in ["Running", "Paused"], do: true
+  defp instance_started?(_), do: false
+
   # Issue `put_fun` for each item, halting at the first error.
   @spec put_each(run(), [item], (run(), item -> :ok | {:error, term()})) :: :ok | {:error, term()}
         when item: var
@@ -78,7 +85,7 @@ defmodule Hyper.Node.FireVMM.Boot do
   # Poll describe_instance until the daemon's API answers, or the deadline lapses.
   # A `{:ok, _}` means the socket is up and serving; transport errors mean "not
   # yet". `ready_timeout_ms`/`ready_interval_ms` are overridable (tests use 0).
-  @spec await_ready(run(), keyword()) :: :ok | {:error, :daemon_unready}
+  @spec await_ready(run(), keyword()) :: {:ok, map()} | {:error, :daemon_unready}
   defp await_ready(run, opts) do
     timeout = Keyword.get(opts, :ready_timeout_ms, @default_ready_timeout_ms)
     interval = Keyword.get(opts, :ready_interval_ms, @default_ready_interval_ms)
@@ -86,11 +93,11 @@ defmodule Hyper.Node.FireVMM.Boot do
     poll_ready(run, deadline, interval)
   end
 
-  @spec poll_ready(run(), integer(), non_neg_integer()) :: :ok | {:error, :daemon_unready}
+  @spec poll_ready(run(), integer(), non_neg_integer()) :: {:ok, map()} | {:error, :daemon_unready}
   defp poll_ready(run, deadline, interval) do
     case run.(&Operations.describe_instance/1) do
-      {:ok, _info} ->
-        :ok
+      {:ok, info} ->
+        {:ok, info}
 
       {:error, _reason} ->
         if System.monotonic_time(:millisecond) >= deadline do

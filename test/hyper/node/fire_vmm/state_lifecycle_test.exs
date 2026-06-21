@@ -46,4 +46,12 @@ defmodule Hyper.Node.FireVMM.StateLifecycleTest do
 
     assert_received {:fc_call, :patch, "/vm", %Hyper.Firecracker.Api.Vm{state: "Resumed"}}
   end
+
+  test "resume failure keeps state and replies the error" do
+    data = data_with(fn _ -> {:error, {:api, 400, "no"}} end)
+    from = {self(), make_ref()}
+
+    assert {:keep_state_and_data, [{:reply, ^from, {:error, {:api, 400, "no"}}}]} =
+             State.paused({:call, from}, :resume, data)
+  end
 end
