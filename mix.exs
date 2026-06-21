@@ -64,6 +64,15 @@ defmodule Hyper.MixProject do
   # Firecracker API bindings are generated from the committed OpenAPI spec and
   # are NOT checked in. `gen_firecracker/1` runs before `compile` (see aliases)
   # and (re)generates them whenever the spec is newer than the last output.
+  #
+  # The committed spec is OpenAPI 3, converted from Firecracker's upstream
+  # Swagger 2.0 (which is NOT vendored). To bump the version, fetch the new tag's
+  # spec and re-convert, then point @firecracker_spec at it and `mix firecracker.gen`:
+  #
+  #   curl -fsSL https://raw.githubusercontent.com/firecracker-microvm/firecracker/vX.Y.Z/src/firecracker/swagger/firecracker.yaml \
+  #   | curl -fsS -X POST https://converter.swagger.io/api/convert \
+  #       -H 'Content-Type: application/yaml' -H 'Accept: application/json' --data-binary @- \
+  #       -o priv/firecracker/firecracker-vX.Y.Z.openapi.json
   @firecracker_spec "priv/firecracker/firecracker-v1.16.0.openapi.json"
   @firecracker_out "lib/hyper/firecracker/api/operations/operations.ex"
 
