@@ -4,20 +4,20 @@ defmodule Hyper do
   """
 
   @typedoc """
-  A cold-boot source: explicit, already-jail-visible artifact paths. `boot_args`
-  defaults to a standard serial console cmdline when omitted.
+  What a VM boots from: explicit, already-jail-visible artifact paths for a cold
+  boot (kernel + root drive). `boot_args` defaults to a standard serial-console
+  cmdline when omitted.
+
+  VMs cold-boot from a disk image; there is no snapshot/restore path. (Firecracker
+  snapshots capture guest RAM + CPU state, not disk, and would be a separate axis
+  layered on top of this if reintroduced.)
   """
-  @type cold_source :: %{
+  @type vm_source :: %{
           required(:kernel_image_path) => Path.t(),
           required(:root_drive_path) => Path.t(),
           optional(:boot_args) => String.t(),
           optional(:read_only) => boolean()
         }
-
-  @type vm_source ::
-          {:cold, cold_source()}
-          | {:snapshot, Path.t()}
-          | {:vm, Hyper.Vm.t()}
 
   @typedoc """
   The specification for creating a new VM.
@@ -39,10 +39,8 @@ defmodule Hyper do
   @doc """
   Create a new virtual machine from the given source.
 
-  Placement: a `{:vm, _}` source is co-located on the same `Hyper.Node` as the
-  parent VM for the fastest boot; if that node is overloaded the VM is snapshotted
-  and placed on the most available node. A `{:snapshot, _}` source is placed on the
-  most available node.
+  Placement: scheduled onto the most available node, preferring nodes that
+  already have the VM's image layers resident (colocation).
   """
   @spec create_vm(vm_spec()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%{source: _source}), do: raise("not implemented")

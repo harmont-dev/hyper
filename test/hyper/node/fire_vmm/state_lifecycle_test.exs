@@ -11,7 +11,7 @@ defmodule Hyper.Node.FireVMM.StateLifecycleTest do
     %State{
       id: 1,
       socket_path: "/tmp/x.socket",
-      source: {:snapshot, "/snaps/v1"},
+      source: %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"},
       type: :centi,
       binary: "jailer",
       args: [],

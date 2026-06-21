@@ -6,11 +6,11 @@ defmodule Hyper.Node.FireVMM.StateBootTest do
   # `booting` happy path (which calls ensure_daemon -> the tree) is covered by
   # these state tests plus StateInitTest, not unit-tested here.
 
-  alias Hyper.Firecracker.Api.{InstanceInfo, SnapshotLoadParams}
+  alias Hyper.Firecracker.Api.InstanceInfo
   alias Hyper.Node.FireVMM.{BootSpec, State}
   alias Hyper.Test.FirecrackerRecordingClient, as: Rec
 
-  @cold {:cold, %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"}}
+  @source %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"}
 
   defp run_with(respond) do
     me = self()
@@ -28,13 +28,7 @@ defmodule Hyper.Node.FireVMM.StateBootTest do
   defp urls, do: collect_calls() |> Enum.map(fn {_m, u, _b} -> u end)
 
   defp data(opts) do
-    source = Keyword.get(opts, :source, @cold)
-    # booting/3 re-resolves from source; spec is nil for sources that can't resolve.
-    spec =
-      case BootSpec.resolve(source, :centi) do
-        {:ok, s} -> s
-        {:error, _} -> nil
-      end
+    source = Keyword.get(opts, :source, @source)
 
     %State{
       id: 1,
@@ -44,19 +38,10 @@ defmodule Hyper.Node.FireVMM.StateBootTest do
       binary: "jailer",
       args: [],
       run: run_with(Keyword.fetch!(opts, :respond)),
-      spec: spec,
+      spec: BootSpec.resolve(source, :centi),
       boot_deadline:
         Keyword.get(opts, :boot_deadline, System.monotonic_time(:millisecond) + 10_000)
     }
-  end
-
-  describe "booting/3" do
-    test "an unresolvable source stops without launching a daemon" do
-      d = data(source: {:vm, "vm-1"}, respond: fn _ -> :ok end)
-
-      assert {:stop, {:shutdown, {:boot_failed, {:unsupported_source, :vm}}}, _} =
-               State.booting(:state_timeout, :launch, d)
-    end
   end
 
   describe "awaiting_api/3" do
@@ -111,13 +96,6 @@ defmodule Hyper.Node.FireVMM.StateBootTest do
 
       assert {:next_state, :running, ^d} = State.configuring(:state_timeout, :configure, d)
       assert urls() == ["/machine-config", "/boot-source", "/drives/rootfs", "/actions"]
-    end
-
-    test "restore issues load_snapshot (resume) then :running" do
-      d = data(source: {:snapshot, "/snaps/v1"}, respond: fn _ -> :ok end)
-
-      assert {:next_state, :running, ^d} = State.configuring(:state_timeout, :configure, d)
-      assert [{:put, "/snapshot/load", %SnapshotLoadParams{resume_vm: true}}] = collect_calls()
     end
 
     test "a failing step aborts the sequence and stops the VM" do

@@ -14,9 +14,9 @@ defmodule Hyper.Node.FireVMM.State do
   Each boot step does one short thing and returns control to the gen_statem
   loop: `:awaiting_api` polls `describe_instance` on a `:state_timeout` cadence
   until the daemon answers (or a deadline lapses); `:configuring` issues the
-  pre-boot config + `InstanceStart` (cold) or `load_snapshot` (restore). The
-  firecracker API structs are built by `Hyper.Node.FireVMM.BootSpec`; every call
-  goes through `runner/1` - the injected test closure or the per-VM `Client`.
+  pre-boot config + `InstanceStart`. The firecracker API structs are built by
+  `Hyper.Node.FireVMM.BootSpec`; every call goes through `runner/1` - the
+  injected test closure or the per-VM `Client`.
 
   This module's struct is the gen_statem *data*; the gen_statem *state* is the
   lifecycle atom above.
@@ -78,7 +78,7 @@ defmodule Hyper.Node.FireVMM.State do
           daemon: pid() | nil,
           daemon_ref: reference() | nil,
           run: run() | nil,
-          spec: BootSpec.Cold.t() | BootSpec.Restore.t() | nil,
+          spec: BootSpec.Cold.t() | nil,
           boot_deadline: integer() | nil
         }
 
@@ -118,20 +118,12 @@ defmodule Hyper.Node.FireVMM.State do
     {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
   end
 
-  # Resolve the boot spec first (a bad source must not leave a daemon running),
-  # then launch (or re-adopt) the daemon and start waiting for its API.
+  # Resolve the boot spec, then launch (or re-adopt) the daemon and start waiting
+  # for its API.
   def booting(:state_timeout, :launch, %State{source: source, type: type} = data) do
-    case BootSpec.resolve(source, type) do
-      {:ok, spec} ->
-        data = ensure_daemon(%{data | spec: spec})
-        deadline = now() + @ready_timeout_ms
-
-        {:next_state, :awaiting_api, %{data | boot_deadline: deadline},
-         [{:state_timeout, 0, :probe}]}
-
-      {:error, reason} ->
-        {:stop, {:shutdown, {:boot_failed, reason}}, data}
-    end
+    data = ensure_daemon(%{data | spec: BootSpec.resolve(source, type)})
+    deadline = now() + @ready_timeout_ms
+    {:next_state, :awaiting_api, %{data | boot_deadline: deadline}, [{:state_timeout, 0, :probe}]}
   end
 
   # A caller may stop (or try to pause/resume) before the launch timeout fires;
@@ -172,8 +164,8 @@ defmodule Hyper.Node.FireVMM.State do
   def awaiting_api({:call, from}, event, _data) when event in [:pause, :resume],
     do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
 
-  # Issue the pre-boot config + start (cold) or restore (snapshot). One short
-  # blocking step of a few fast calls; aborts and tears down on the first error.
+  # Issue the pre-boot config and start the guest. One short blocking step of a
+  # few fast calls; aborts and tears down on the first error.
   def configuring(:state_timeout, :configure, %State{spec: spec} = data) do
     case apply_spec(runner(data), spec) do
       :ok -> {:next_state, :running, data}
@@ -237,9 +229,8 @@ defmodule Hyper.Node.FireVMM.State do
   # --- boot protocol -------------------------------------------------------
 
   # Cold boot: machine-config -> boot-source -> drives -> NICs -> InstanceStart.
-  # Restore: load the snapshot (resume). Aborts at the first error, returned
-  # verbatim.
-  @spec apply_spec(run(), BootSpec.Cold.t() | BootSpec.Restore.t()) :: :ok | {:error, term()}
+  # Aborts at the first error, returned verbatim.
+  @spec apply_spec(run(), BootSpec.Cold.t()) :: :ok | {:error, term()}
   defp apply_spec(run, %BootSpec.Cold{} = cold) do
     with :ok <-
            run.(fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end),
@@ -250,10 +241,6 @@ defmodule Hyper.Node.FireVMM.State do
         Operations.create_sync_action(%InstanceActionInfo{action_type: "InstanceStart"}, opts)
       end)
     end
-  end
-
-  defp apply_spec(run, %BootSpec.Restore{params: params}) do
-    run.(fn opts -> Operations.load_snapshot(params, opts) end)
   end
 
   @spec instance_started?(map()) :: boolean()

@@ -4,7 +4,7 @@ defmodule Hyper.Node.FireVMM.StateInitTest do
   alias Hyper.Node.FireVMM.State
 
   test "init/1 carries id, source, type, and starts in :booting with a launch timeout" do
-    source = {:cold, %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"}}
+    source = %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs.ext4"}
 
     opts = %State.Opts{
       id: 42,
