@@ -2,7 +2,7 @@ defmodule Hyper.Firecracker.Api.Encoder do
   @moduledoc """
   Injected into every generated schema via the generator's `schema_use` option.
   Implements `Jason.Encoder` so request bodies omit `nil` (unset optional) fields
-  and the internal `:__info__` bookkeeping field — Firecracker rejects some
+  and the internal `:__info__` bookkeeping field -- Firecracker rejects some
   explicit `null`s, so absent options must not be serialized.
   """
 

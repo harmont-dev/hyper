@@ -1,6 +1,6 @@
 defmodule Hyper.Firecracker.Api.Decoder do
   @moduledoc """
-  Generic JSON→struct decoder driven by generated schemas' `__fields__/1` type
+  Generic JSON-to-struct decoder driven by generated schemas' `__fields__/1` type
   metadata. Given a decoded-JSON value and an `oapi_generator` type spec, returns
   the typed value: builds `{module, type}` into the struct, recurses through
   `{:array, t}` and `{:union, types}`, and passes primitives through. Spec-driven,

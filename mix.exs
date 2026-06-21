@@ -98,7 +98,7 @@ defmodule Hyper.MixProject do
         Cookbook: ~r/docs\/cookbook\/.*/
       ],
       # Group modules in the sidebar by namespace. Each value is a regex matched
-      # against the module name, so new modules join their group automatically —
+      # against the module name, so new modules join their group automatically --
       # no per-module edits here. The patterns are mutually exclusive, so the
       # listing order is purely cosmetic. (`Sys.Mon.*` -> Monitoring; every other
       # `Sys.Posix`/`Sys.Linux.*`, including the /proc parsers, -> System.)

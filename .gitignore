@@ -37,6 +37,6 @@ hyper-*.tar
 docs/superpowers/
 
 # Firecracker API bindings are generated from the committed OpenAPI spec
-# (priv/firecracker/*.openapi.json) before compile — see mix.exs gen_firecracker/1.
+# (priv/firecracker/*.openapi.json) before compile -- see mix.exs gen_firecracker/1.
 /lib/hyper/firecracker/api/operations/
 /lib/hyper/firecracker/api/schemas/
