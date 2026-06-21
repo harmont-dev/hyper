@@ -1,1 +1,1 @@
-ExUnit.start(exclude: [:integration])
+ExUnit.start()
