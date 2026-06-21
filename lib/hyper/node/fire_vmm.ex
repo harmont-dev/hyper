@@ -26,13 +26,14 @@ defmodule Hyper.Node.FireVMM do
   defmodule Opts do
     @moduledoc "Options to pass into the jailer command."
 
-    defstruct [:vm_id, :uid, :gid, :type]
+    defstruct [:vm_id, :uid, :gid, :type, :source]
 
     @type t :: %__MODULE__{
             vm_id: integer(),
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
-            type: Hyper.Vm.Instance.t()
+            type: Hyper.Vm.Instance.t(),
+            source: Hyper.vm_source()
           }
   end
 

@@ -38,6 +38,9 @@ defmodule Hyper.Node.FireVMM.Core do
 
     vm_opts =
       opts
+      |> Map.put_new(:id, opts.vm_id)
+      |> Map.put_new(:type, opts.type)
+      |> Map.put_new(:source, opts.source)
       |> Map.put_new(:binary, cmd.binary)
       |> Map.put_new(:args, cmd.args)
       |> Map.put_new(:socket_path, cmd.host_socket)

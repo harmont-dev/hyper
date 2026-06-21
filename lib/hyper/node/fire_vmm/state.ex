@@ -17,16 +17,18 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.State
 
   @enforce_keys [:id, :socket_path, :source, :binary, :args]
-  defstruct [:id, :socket_path, :source, :binary, :args, :daemon, :daemon_ref]
+  defstruct [:id, :socket_path, :source, :type, :binary, :args, :daemon, :daemon_ref, :run]
 
   @type t :: %State{
           id: String.t(),
           socket_path: Path.t(),
           source: Hyper.vm_source(),
+          type: Hyper.Vm.Instance.t() | nil,
           binary: String.t(),
           args: [String.t()],
           daemon: pid() | nil,
-          daemon_ref: reference() | nil
+          daemon_ref: reference() | nil,
+          run: Hyper.Node.FireVMM.Boot.run() | nil
         }
 
   def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
@@ -51,9 +53,12 @@ defmodule Hyper.Node.FireVMM.State do
       id: id,
       socket_path: socket,
       source: source,
+      type: Map.get(opts, :type),
       # FireVMM resolves these from the jailer command; defaults are a safety net.
       binary: Map.get(opts, :binary, "jailer"),
-      args: Map.get(opts, :args, [])
+      args: Map.get(opts, :args, []),
+      # Test seam: nil -> the real Client-backed closure is built at boot time.
+      run: Map.get(opts, :run)
     }
 
     {:ok, :booting, data, [{:state_timeout, 0, :launch}]}
