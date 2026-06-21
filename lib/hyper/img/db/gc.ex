@@ -42,8 +42,8 @@ defmodule Hyper.Img.Db.Gc do
   @type t :: %__MODULE__{
           config: Config.t(),
           role: :active | :standby,
-          sweep: Sweep.t() | nil,
-          last_sweep: Sweep.t() | nil
+          sweep: Sweep.State.t() | nil,
+          last_sweep: Sweep.State.t() | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -52,7 +52,7 @@ defmodule Hyper.Img.Db.Gc do
   end
 
   @doc "Local role + last completed sweep, for introspection on this node."
-  @spec status() :: %{role: :active | :standby, last_sweep: Sweep.t() | nil}
+  @spec status() :: %{role: :active | :standby, last_sweep: Sweep.State.t() | nil}
   def status, do: GenServer.call(__MODULE__, :status)
 
   @impl true
