@@ -9,9 +9,9 @@
 //! alias that fills in the markers it cares about.
 //!
 //! Six axes are pure type-level markers. The seventh, confinement
-//! ([`LivesUnder`]), carries a runtime base value, so it is supplied to the
-//! constructor ([`SafePath::under`]) rather than chosen purely by type - a
-//! `&Path` cannot be a type parameter.
+//! ([`LivesUnder`]), carries a runtime base value (an owned `PathBuf`), so it is
+//! supplied to the constructor ([`SafePath::under`]) rather than chosen purely by
+//! type - a path cannot be a type parameter.
 //!
 //! Mechanism (option B): one trait per axis, implemented by the markers valid
 //! for that axis (plus `Any`). The position of each parameter therefore enforces
@@ -76,11 +76,10 @@ pub struct RootOwner;
 pub struct OnlyRootWritable;
 
 /// Confinement axis: require the path to live under `base`. Unlike the other
-/// markers this one carries a *value* (the base), because the base is runtime
-/// data - a `&Path` cannot be a type-level parameter, only its lifetime can. So
-/// it is supplied to the constructor (see [`SafePath::under`]) rather than picked
-/// purely by type.
-pub struct LivesUnder<'a>(pub &'a Path);
+/// markers this one carries a *value* (the owned base), because the base is
+/// runtime data - a path cannot be a type-level parameter. It is supplied to the
+/// constructor (see [`SafePath::under`]) rather than picked purely by type.
+pub struct LivesUnder(pub PathBuf);
 
 /// Absoluteness axis.
 pub trait Absoluteness {
@@ -226,12 +225,12 @@ impl Writability for OnlyRootWritable {
     }
 }
 
-impl Confinement for LivesUnder<'_> {
+impl Confinement for LivesUnder {
     // Lexical prefix only. For a may-not-exist leaf this is the cheap first gate;
     // the race-proof boundary is the O_NOFOLLOW parent walk (a method), and for a
     // must-exist path, combine with canonicalisation before trusting the prefix.
     fn check(&self, path: &Path) -> Result<(), ValidationError> {
-        if path.starts_with(self.0) {
+        if path.starts_with(&self.0) {
             Ok(())
         } else {
             Err(ValidationError::OutsideBase)
@@ -283,7 +282,7 @@ where
 }
 
 /// Confined constructor: validate `path` under `base` (the `LivesUnder` axis).
-impl<'a, A, S, M, I, R, O> SafePath<A, S, M, I, R, O, LivesUnder<'a>>
+impl<A, S, M, I, R, O> SafePath<A, S, M, I, R, O, LivesUnder>
 where
     A: Absoluteness,
     S: Components,
@@ -292,7 +291,7 @@ where
     R: Ownership,
     O: Writability,
 {
-    pub fn under(path: PathBuf, base: &'a Path) -> Result<Self, ValidationError> {
+    pub fn under(path: PathBuf, base: PathBuf) -> Result<Self, ValidationError> {
         Self::validate(path, LivesUnder(base))
     }
 }
