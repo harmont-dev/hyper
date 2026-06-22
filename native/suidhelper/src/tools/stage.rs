@@ -29,7 +29,7 @@ use nix::sys::stat::Mode;
 use nix::unistd::{close, fchownat, linkat, Gid, Uid};
 use std::io;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -38,8 +38,8 @@ pub enum Error {
     Path(#[from] safe_dev::Error),
     #[error("source {path}: {source}")]
     Source { path: PathBuf, #[source] source: io::Error },
-    #[error("source must be under {base}: {path}")]
-    OutsideBase { base: &'static str, path: PathBuf },
+    #[error("source must be under {}: {path}", .base.display())]
+    OutsideBase { base: &'static Path, path: PathBuf },
     #[error("open source {path}: {source}")]
     OpenSrc { path: PathBuf, #[source] source: nix::Error },
     #[error("staging {src} -> {dest}: {source}")]

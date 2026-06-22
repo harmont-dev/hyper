@@ -1,19 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Runtime host configuration, read from a single root-owned TOML file.
-//!
-//! `HYPER_BASE`/`JAIL_BASE` used to be compile-time constants kept in lockstep
-//! with the Elixir node's `config :hyper, work_dir`. Both sides now read the same
-//! file (`/etc/hyper/config.toml`), so the data root has one source of truth.
-//!
-//! Security: this is a confinement boundary in a setuid-root binary - the value
-//! decides which files the helper will chown/mknod/stage. So the file must be
-//! trustworthy: it is opened with `O_NOFOLLOW` (its final component cannot be a
-//! symlink) and rejected unless it is owned by `root:root` and not writable by
-//! group or other - i.e. only root could have written it, exactly like the old
-//! compile-time constant. The path is fixed (never taken from argv or the
-//! environment, both caller-controlled), and must be world-readable (`0644
-//! root:root`) so the unprivileged helper can read it. On any failure the helper
-//! exits rather than guessing a default.
 
 use serde::Deserialize;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -87,18 +73,24 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| {
 });
 
 /// `<work_dir>/jails`, computed once from the loaded config.
-static JAIL_BASE: LazyLock<String> =
-    LazyLock::new(|| format!("{}/jails", hyper_base().trim_end_matches('/')));
+static JAIL_BASE: LazyLock<PathBuf> = LazyLock::new(|| CONFIG.work_dir.join("jails"));
 
-/// Hyper's data root (formerly the `HYPER_BASE` constant).
-pub fn hyper_base() -> &'static str {
-    CONFIG
-        .work_dir
-        .to_str()
-        .expect("work_dir must be valid UTF-8")
+/// Force the config to load now. Call this once at the very start of `main`,
+/// after privileges have already been dropped (the `.preinit_array` entry in
+/// `setuid_privileged` runs before `main`), so the file is never first read
+/// lazily from inside a `Privileged` scope - i.e. it is guaranteed to be read as
+/// the real uid, not as root.
+pub fn init() {
+    LazyLock::force(&CONFIG);
+    LazyLock::force(&JAIL_BASE);
 }
 
-/// Hyper's jail root, `<work_dir>/jails` (formerly the `JAIL_BASE` constant).
-pub fn jail_base() -> &'static str {
-    JAIL_BASE.as_str()
+/// Hyper's data root.
+pub fn hyper_base() -> &'static Path {
+    CONFIG.work_dir.as_path()
+}
+
+/// Hyper's jail root, `<work_dir>/jails`.
+pub fn jail_base() -> &'static Path {
+    JAIL_BASE.as_path()
 }

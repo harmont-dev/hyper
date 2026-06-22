@@ -14,8 +14,8 @@ use thiserror::Error as ThisError;
 pub enum Error {
     #[error("backing file {path}: {source}")]
     Canonicalize { path: PathBuf, #[source] source: io::Error },
-    #[error("backing file must be under {base}: {path}")]
-    OutsideBase { base: &'static str, path: PathBuf },
+    #[error("backing file must be under {}: {path}", .base.display())]
+    OutsideBase { base: &'static Path, path: PathBuf },
     #[error("opening backing file {path}: {errno}")]
     OpenBacking { path: PathBuf, errno: Errno },
     #[error("{0} is not a regular file")]

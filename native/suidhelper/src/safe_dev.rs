@@ -220,7 +220,7 @@ pub fn open_parent_nofollow(path: &JailPath) -> Result<(RawFd, String), Error> {
     // JAIL_BASE itself is also caught because we request O_DIRECTORY).
     let jail_base = crate::config::jail_base();
     let mut dirfd = openat(None::<RawFd>, jail_base, base_flags, Mode::empty())
-        .map_err(|e| Error::SymlinkComponent(format!("{jail_base}: {e}")))?;
+        .map_err(|e| Error::SymlinkComponent(format!("{}: {e}", jail_base.display())))?;
 
     // Walk each parent component relative to the previous dirfd.
     for component in &parents {

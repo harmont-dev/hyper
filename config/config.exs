@@ -21,8 +21,6 @@ config :libcluster,
     ]
   ]
 
-# `work_dir` is NOT set here: it is the one value shared with the setuid helper
-# and is loaded at runtime from /etc/hyper/config.toml (see config/runtime.exs).
 config :hyper,
   cgroup_parent: "hyper",
   uid_gid_range: {900_000, 999_999},

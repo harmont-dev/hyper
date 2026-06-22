@@ -63,19 +63,26 @@ enum Output {
 #[derive(Serialize)]
 struct SysTest {
     sys_test: &'static str,
-    hyper_base: &'static str,
+    hyper_base: String,
 }
 
 impl SysTest {
     fn perform() -> Result<Self, setuid_privileged::Error> {
         Privileged::smoke_test()?;
-        Ok(Self { sys_test: "ok", hyper_base: crate::config::hyper_base() })
+        Ok(Self {
+            sys_test: "ok",
+            hyper_base: crate::config::hyper_base().to_string_lossy().into_owned(),
+        })
     }
 }
 
 fn main() {
     // Privileges are already dropped to the real uid by a pre-main constructor
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
+    // Load the config now - we are post-drop (real uid) and before any
+    // `Privileged` scope, so the file is read unprivileged, never as root.
+    config::init();
+
     // Each command yields a serializable value (errors stringified to unify); we
     // render the final JSON line here.
     let output = match Cli::parse().command {

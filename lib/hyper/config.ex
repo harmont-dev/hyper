@@ -3,10 +3,15 @@ defmodule Hyper.Config do
   Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
 
   `work_dir` is the one value shared with the setuid helper
-  (`native/suidhelper`); both sides read it from `/etc/hyper/config.toml` at
-  runtime (loaded into the app env by `config/runtime.exs`) so the data root has
-  a single source of truth. Everything else is compile-time.
+  (`native/suidhelper`); both sides read it from `/etc/hyper/config.toml` so the
+  data root has a single source of truth (see `work_dir/0`). Everything else is
+  compile-time.
   """
+
+  # The shared data-root config file, read by both this node and the setuid
+  # helper. Absent in local dev / CI, where `@dev_work_dir` is used instead.
+  @config_path "/etc/hyper/config.toml"
+  @dev_work_dir "/srv/hyper"
 
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
@@ -19,11 +24,31 @@ defmodule Hyper.Config do
   @doc """
   Root work directory for this node. All firecracker paths derive from it.
 
-  Shared with the setuid helper via `/etc/hyper/config.toml`; populated into the
-  app env at runtime by `config/runtime.exs`.
+  Read from `#{@config_path}` (the single source of truth shared with the setuid
+  helper) the first time it is needed, then cached in `:persistent_term`. Falls
+  back to `#{@dev_work_dir}` when the file is absent (local dev / CI, where the
+  helper is not installed anyway).
   """
   @spec work_dir :: Path.t()
-  def work_dir, do: Application.fetch_env!(:hyper, :work_dir)
+  def work_dir do
+    case :persistent_term.get({__MODULE__, :work_dir}, nil) do
+      nil ->
+        work_dir = load_work_dir()
+        :persistent_term.put({__MODULE__, :work_dir}, work_dir)
+        work_dir
+
+      work_dir ->
+        work_dir
+    end
+  end
+
+  @spec load_work_dir :: Path.t()
+  defp load_work_dir do
+    case File.read(@config_path) do
+      {:ok, body} -> body |> Toml.decode!() |> Map.fetch!("work_dir")
+      {:error, _} -> @dev_work_dir
+    end
+  end
 
   @doc "Directory holding redistributable binaries downloaded by the node."
   @spec redist_dir :: Path.t()
