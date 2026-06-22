@@ -2,25 +2,40 @@ defmodule Hyper.Node.FireVMM.State do
   @moduledoc """
   `:gen_statem` controller for one microVM. Owns the firecracker daemon's
   lifecycle: launches it into the per-VM `DynamicSupervisor`, monitors it, and
-  decides what happens when it dies. The boot protocol (waiting for the API,
-  then configuring + starting the guest) is modelled as states rather than a
-  blocking call, so the controller stays responsive to daemon death and `stop`
-  while a VM is coming up.
+  decides what happens when it dies. The boot protocol is modelled as states (not
+  a blocking call) so the controller stays responsive to daemon death and `stop`
+  while a VM comes up.
 
       :booting --> :awaiting_api --> :staging --> :configuring --> :running <-> :paused --> :stopping
           ^             |                  |
           +- :crashed <-+------------------+   (daemon died / never came up; recover)
 
+  States:
+
+    * `:booting`      - resolve the boot spec, launch (or re-adopt) the jailed
+                        daemon, monitor it.
+    * `:awaiting_api` - poll the daemon's API socket until it answers (or the
+                        readiness deadline lapses). A re-adopted, already-running
+                        daemon skips straight to `:running`.
+    * `:staging`      - stage the kernel + rootfs device into the jail chroot and
+                        rewrite the spec to in-jail paths.
+    * `:configuring`  - push machine-config, boot-source, drives, NICs, then
+                        `InstanceStart`.
+    * `:running`      - guest is live; handles `pause`/`stop`.
+    * `:paused`       - guest paused; handles `resume`/`stop`.
+    * `:stopping`     - tearing down; daemon death is expected and ignored.
+    * `:crashed`      - daemon died unexpectedly; after a delay, recover back to
+                        `:booting`.
+
   Uses `:handle_event_function` mode: each state's events live in a nested
-  submodule (`Booting`, `AwaitingApi`, ...), and `handle_event/4` dispatches to
-  them - except daemon death, which is one shared clause across every live
-  state. Each boot step does one short thing and returns control to the
-  gen_statem loop; the firecracker API structs are built by
+  submodule (`Booting`, `AwaitingApi`, ...) that `handle_event/4` dispatches to -
+  except daemon death, one shared clause across every live state. Each step does
+  one short thing and returns to the gen_statem loop; API structs come from
   `Hyper.Node.FireVMM.BootSpec` and every call goes through the per-VM `Client`.
 
-  The gen_statem *data* (this module's struct) holds the start `Opts` plus the
-  runtime fields (the daemon and its monitor, the resolved boot spec, the
-  readiness deadline); the gen_statem *state* is the lifecycle atom above.
+  The gen_statem *data* (this struct) holds the start `Opts` plus runtime fields
+  (daemon + monitor, resolved boot spec, readiness deadline); the *state* is the
+  lifecycle atom above.
   """
 
   @behaviour :gen_statem
