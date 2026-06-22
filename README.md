@@ -15,6 +15,8 @@ same niche as [Daytona](https://github.com/daytonaio/daytona),
 
 ## Quick Start
 
+<!-- TODO(markovejnovic): Deeper quick start -->
+
 Please read the [Hexdocs](https://hyper.hexdocs.pm/) for guides on using,
 deploying and integrating Hyper.
 
@@ -63,7 +65,7 @@ not enjoy existing products:
   people, go with Daytona.** Hyper is a technical-first product, and
   consequently we will not be providing you with direct support, SDKs, etc.
 - [Freestyle.sh](https://www.freestyle.sh/) is amazing in terms of performance,
-  and probably beats Hyper on performance alone, however, the incredibly
+  and probably beats Hyper on performance alone, however, the incredible
   unreliability has caused me to churn. **If you need raw performance, esp.
   when it comes to forking RAM state, Freestyle is better than Hyper.**
 - [Runloop](https://runloop.ai/) is incredibly naive and, based on my
@@ -87,3 +89,23 @@ The reasons to use Hyper are:
 Hyper is licensed under the GNU Affero General Public License v3.0 or later
 (AGPL-3.0-or-later). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions
 are governed by the [Contributor License Agreement](CLA.md).
+
+### Why AGPL?
+
+Hyper is infrastructure meant to be run as a service. If you modify Hyper and
+offer it to others over a network, we expect you to share your changes
+publicly. The product is built by humans for humans and we want to keep it that
+way -- we don't want anyone taking Hyper closed-source and reselling it. Hyper
+is free of charge, and we expect you to play nicely with that philosophy. In
+practical terms, for most users:
+
+- **Running Hyper as-is internally** imposes no copyleft obligations. You do
+  not need to share your source.
+- **The VMs and workloads Hyper runs are yours.** Copyleft covers Hyper itself,
+  not the things you orchestrate with it. Your code stays your code.
+- **Modifying Hyper** and offering any form of product built with it as a
+  service, however, **requires** that you make your modifications open-source.
+  We wish to make Hyper better, and that means you need to be a part of it.
+
+This section is a plain-language summary, not legally binding. For the
+authoritative terms, see [LICENSE](LICENSE).
