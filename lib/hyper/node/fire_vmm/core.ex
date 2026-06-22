@@ -31,24 +31,10 @@ defmodule Hyper.Node.FireVMM.Core do
 
   @impl true
   def init(opts) do
-    # Resolve the jailer command (binary + args + host-side socket the controller
-    # talks to) here, where the daemon lives, and hand the controller a fully
-    # populated start struct.
-    cmd = FireVMM.Jailer.command(opts)
-
-    state_opts = %State.Opts{
-      id: opts.vm_id,
-      type: opts.type,
-      source: opts.source,
-      binary: cmd.binary,
-      args: cmd.args,
-      socket_path: cmd.host_socket
-    }
-
     children = [
       {DynamicSupervisor,
        name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
-      {State, state_opts}
+      {State, opts}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
