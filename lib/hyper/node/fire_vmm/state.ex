@@ -12,11 +12,10 @@ defmodule Hyper.Node.FireVMM.State do
 
   States:
 
-    * `:booting`      - resolve the boot spec, launch (or re-adopt) the jailed
-                        daemon, monitor it.
+    * `:booting`      - resolve the boot spec, launch the jailed daemon, monitor
+                        it.
     * `:awaiting_api` - poll the daemon's API socket until it answers (or the
-                        readiness deadline lapses). A re-adopted, already-running
-                        daemon skips straight to `:running`.
+                        readiness deadline lapses), then `:staging`.
     * `:staging`      - stage the kernel + rootfs device into the jail chroot and
                         rewrite the spec to in-jail paths.
     * `:configuring`  - push machine-config, boot-source, drives, NICs, then
@@ -68,7 +67,7 @@ defmodule Hyper.Node.FireVMM.State do
           boot_deadline: integer() | nil
         }
 
-  # Delay before a crashed VM tries to recover (cold boot / re-adopt).
+  # Delay before a crashed VM tries to recover (cold boot).
   @recover_delay Time.s(1)
 
   def child_spec(opts) do
@@ -137,13 +136,12 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @impl :gen_statem
-  # Graceful stop: take the daemon down with us. Crash: leave it running so the
-  # restarted controller re-adopts it (re-adopted in Booting via Daemon.ensure/1).
-  def terminate(reason, _state, %State{opts: %Opts{vm_id: id}, daemon: daemon}) do
-    if daemon && (reason in [:normal, :shutdown] or match?({:shutdown, _}, reason)) do
-      Daemon.stop(id, daemon)
-    end
-
+  # Always take the daemon down with us. `:one_for_all` on `Core` would discard
+  # the daemon container on a controller crash anyway (and MuonTrap kills the OS
+  # process when its port closes), so this is the ordered, explicit teardown for
+  # graceful stops and a belt-and-suspenders kill on crashes where terminate runs.
+  def terminate(_reason, _state, %State{opts: %Opts{vm_id: id}, daemon: daemon}) do
+    if daemon, do: Daemon.stop(id, daemon)
     :ok
   end
 
@@ -153,10 +151,10 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule Booting do
     @moduledoc """
-    Resolve the boot spec, launch (or re-adopt) the jailed firecracker daemon and
-    monitor it, then advance to `:awaiting_api` with a readiness deadline. An
-    early `stop` short-circuits to `:stopping`; pause/resume are rejected (the
-    guest is not running yet).
+    Resolve the boot spec, launch the jailed firecracker daemon and monitor it,
+    then advance to `:awaiting_api` with a readiness deadline. An early `stop`
+    short-circuits to `:stopping`; pause/resume are rejected (the guest is not
+    running yet).
     """
 
     alias Hyper.Node.FireVMM.{BootSpec, Opts}
@@ -166,10 +164,10 @@ defmodule Hyper.Node.FireVMM.State do
     # How long to wait for the daemon's API to come up.
     @ready_timeout Time.s(10)
 
-    # Resolve the boot spec, launch (or re-adopt) the daemon and monitor it, then
-    # start waiting for its API.
+    # Resolve the boot spec, launch the daemon and monitor it, then start waiting
+    # for its API.
     def handle(:state_timeout, :launch, %{opts: %Opts{source: source, type: type} = opts} = data) do
-      pid = Daemon.ensure(opts)
+      pid = Daemon.start(opts)
       spec = BootSpec.resolve(source, type)
       deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
 
@@ -196,10 +194,9 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule AwaitingApi do
     @moduledoc """
-    Poll the daemon's API socket until it answers. A re-adopted daemon already
-    serving a guest (`Running`/`Paused`) skips straight to `:running`; a freshly
-    launched daemon (`Not started`) advances to `:staging`. If the readiness
-    deadline lapses before the API responds, the boot fails.
+    Poll the freshly launched daemon's API socket until it answers, then advance
+    to `:staging`. If the readiness deadline lapses before the API responds, the
+    boot fails.
     """
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
@@ -209,16 +206,10 @@ defmodule Hyper.Node.FireVMM.State do
     # How often to probe the daemon's API while waiting for it.
     @probe_interval Time.ms(50)
 
-    # Poll the daemon's API until it answers. A re-adopted daemon (controller
-    # restarted, daemon survived) may already be running its guest ("Running" /
-    # "Paused"); re-issuing pre-boot config would 400 and the stop-on-failure
-    # path would kill it, so it skips straight to :running. A freshly-launched
-    # daemon reports "Not started" -> configure it.
+    # Poll the daemon's API until it answers, then stage + configure. Give up if
+    # the readiness deadline passes first.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
       case Client.run(Client.via(id), &Operations.describe_instance/1) do
-        {:ok, %InstanceInfo{state: state}} when state in ["Running", "Paused"] ->
-          {:next_state, :running, data}
-
         {:ok, %InstanceInfo{}} ->
           {:next_state, :staging, data, [{:state_timeout, 0, :stage}]}
 
@@ -360,8 +351,8 @@ defmodule Hyper.Node.FireVMM.State do
   defmodule Crashed do
     @moduledoc """
     The daemon died unexpectedly. After a short recover delay, return to
-    `:booting` (cold boot, or re-adopt a surviving daemon). A `stop` arriving
-    before the delay fires short-circuits to `:stopping`.
+    `:booting` for a cold boot. A `stop` arriving before the delay fires
+    short-circuits to `:stopping`.
     """
 
     def handle(:state_timeout, :recover, data) do

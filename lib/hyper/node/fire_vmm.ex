@@ -4,8 +4,8 @@ defmodule Hyper.Node.FireVMM do
   no lifecycle invariant rides on the ordering of a flat child list:
 
     1. `Hyper.Node.FireVMM.Core` - the daemon container + `:gen_statem`
-       controller, coupled under `:rest_for_one` (the daemon survives a
-       controller restart). All order-sensitivity is contained there.
+       controller, coupled under `:one_for_all` (a controller crash also discards
+       the daemon, so no VM is orphaned). All order-sensitivity is contained there.
     2. `Hyper.Node.FireVMM.Client` - the API client. It depends only on `vm_id`
        (it derives the socket itself) and on nothing else in the tree, so it is
        an independent peer: its crashes don't disturb the core, and a core

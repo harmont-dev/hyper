@@ -1,22 +1,26 @@
 defmodule Hyper.Node.FireVMM.Core do
   @moduledoc """
   The lifecycle-coupled core of one microVM: the daemon container and its
-  controller. Isolated from the API client (`Hyper.Node.FireVMM.Client`) so the
-  *only* order-sensitive relationship in the VM tree lives in this two-child
-  supervisor, where "daemon container first" is self-evident.
+  controller, restarted as a pair. Isolated from the API client
+  (`Hyper.Node.FireVMM.Client`) so the *only* order-sensitive relationship in the
+  VM tree lives in this two-child supervisor, where "daemon container first" is
+  self-evident.
 
     1. `DynamicSupervisor` (`{vm_id, :daemon_sup}`) - starts **empty**, the
-       holding pen for the jailer OS process. MUST be the first child.
+       holding pen for the jailer OS process (a `:temporary` child). MUST be the
+       first child so it is registered before the controller launches into it.
     2. `Hyper.Node.FireVMM.State` - the `:gen_statem` controller; launches the
-       jailer into the supervisor above (as a `:temporary` child) and monitors
-       it. The state machine, not the supervisor, owns the daemon's lifecycle.
+       jailer into the supervisor above and monitors it.
 
-  `:rest_for_one`, container first:
+  `:one_for_all`, container first: a crash of *either* child takes both down and
+  restarts the pair. So a controller crash also discards the daemon - no orphaned
+  VM, and the fresh controller always cold-boots. The daemon is killed via
+  `MuonTrap`, which terminates the OS process when its port closes (container
+  teardown or BEAM death), so no firecracker process outlives the supervisor.
 
-    * controller crashes -> only it restarts; the daemon survives and the
-      controller re-adopts it (`State.ensure_daemon/1`). A controller bug does
-      not kill a live, stateful VM.
-    * container crashes  -> controller restarts too -> cold boot.
+  A firecracker crash is a *separate* concern: the daemon is a `:temporary` child
+  of the container, so it terminating does not trip this supervisor - the
+  controller's monitor handles it in the `:crashed` state and relaunches.
   """
 
   use Supervisor
@@ -37,6 +41,6 @@ defmodule Hyper.Node.FireVMM.Core do
       {State, opts}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :one_for_all)
   end
 end
