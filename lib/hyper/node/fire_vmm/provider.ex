@@ -78,7 +78,7 @@ defmodule Hyper.Node.FireVMM.Provider do
   defp install(dl), do: Targz.install(dl.url, dl.sha256, install_dir())
 
   defp reinstall(dl) do
-    File.rm_rf!(install_dir())
+    _ = File.rm_rf!(install_dir())
     install(dl)
   end
 

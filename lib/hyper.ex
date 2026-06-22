@@ -26,10 +26,13 @@ defmodule Hyper do
   Placement: scheduled onto the most available node, preferring nodes that
   already have the VM's image layers resident (colocation).
   """
+  # Aspirational @spec for an as-yet unimplemented stub: it raises today, so its
+  # success typing is none(). Suppress the contract mismatch until it is built.
+  @dialyzer {:nowarn_function, create_vm: 1}
   @spec create_vm(vm_spec()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%{source: _source}), do: raise("not implemented")
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.t()) :: node() | nil
+  @spec whereis(Hyper.Vm.id()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 end

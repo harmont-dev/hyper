@@ -114,9 +114,10 @@ defmodule Hyper.Node.FireVMM.State do
   # Graceful stop: take the daemon down with us. Crash: leave it running so the
   # restarted controller re-adopts it (re-adopted in Booting via Daemon.ensure/1).
   def terminate(reason, _state, %State{opts: %Opts{vm_id: id}, daemon: daemon}) do
-    if daemon && (reason in [:normal, :shutdown] or match?({:shutdown, _}, reason)) do
-      Daemon.stop(id, daemon)
-    end
+    _ =
+      if daemon && (reason in [:normal, :shutdown] or match?({:shutdown, _}, reason)) do
+        Daemon.stop(id, daemon)
+      end
 
     :ok
   end

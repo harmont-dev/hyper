@@ -54,9 +54,9 @@ defmodule Hyper.Node do
   end
 
   @doc "Start a microVM on this node."
-  @spec start_vm(Hyper.Node.FireVMM.opts()) :: DynamicSupervisor.on_start_child()
+  @spec start_vm(Hyper.Node.FireVMM.Opts.t()) :: DynamicSupervisor.on_start_child()
   @decorate with_span("Hyper.Node.start_vm", include: [:opts])
-  def start_vm(%{id: _} = opts) do
+  def start_vm(%Hyper.Node.FireVMM.Opts{} = opts) do
     DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
   end
 

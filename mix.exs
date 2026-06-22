@@ -203,7 +203,7 @@ defmodule Mix.Tasks.Compile.FirecrackerGen do
       operation_subdirectory: "operations",
       schema_subdirectory: "schemas",
       schema_use: Hyper.Firecracker.Api.Codec,
-      extra_fields: [__info__: :map],
+      extra_fields: [__info__: :any],
       field_casing: :snake,
       types: [specs: :spec]
     ],
