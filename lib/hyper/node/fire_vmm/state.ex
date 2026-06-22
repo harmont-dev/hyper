@@ -15,8 +15,7 @@ defmodule Hyper.Node.FireVMM.State do
   loop: `:awaiting_api` polls `describe_instance` on a `:state_timeout` cadence
   until the daemon answers (or a deadline lapses); `:configuring` issues the
   pre-boot config + `InstanceStart`. The firecracker API structs are built by
-  `Hyper.Node.FireVMM.BootSpec`; every call goes through `runner/1` - the
-  injected test closure or the per-VM `Client`.
+  `Hyper.Node.FireVMM.BootSpec`; every call goes through the per-VM `Client`.
 
   The gen_statem *data* (this module's struct) holds the immutable start config
   in `:opts` and the runtime fields (the daemon and its monitor, the resolved
@@ -33,18 +32,14 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.State.Daemon
   alias Unit.Time
 
-  @typedoc "A closure that runs one generated API operation, returning its result."
-  @type run :: ((keyword() -> term()) -> term())
-
   defmodule Opts do
     @moduledoc """
     Immutable start config for `Hyper.Node.FireVMM.State`. `:id`, `:socket_path`,
     and `:source` are required; `:binary`/`:args` default to a safe jailer command
-    in `init/1`, and `:run` is a test seam (nil -> the real Client-backed closure
-    is built at boot time). Carried verbatim as the controller's `:opts`.
+    in `init/1`. Carried verbatim as the controller's `:opts`.
     """
     @enforce_keys [:id, :socket_path, :source]
-    defstruct [:id, :socket_path, :source, :type, :binary, :args, :run]
+    defstruct [:id, :socket_path, :source, :type, :binary, :args]
 
     @type t :: %__MODULE__{
             id: Hyper.Vm.id(),
@@ -52,8 +47,7 @@ defmodule Hyper.Node.FireVMM.State do
             source: Hyper.Vm.source(),
             type: Hyper.Vm.Instance.t() | nil,
             binary: String.t() | nil,
-            args: [String.t()] | nil,
-            run: Hyper.Node.FireVMM.State.run() | nil
+            args: [String.t()] | nil
           }
   end
 
@@ -133,8 +127,8 @@ defmodule Hyper.Node.FireVMM.State do
   # pre-boot config would 400 and the stop-on-failure path would kill it, so an
   # already-started guest skips straight to :running. A freshly-launched daemon
   # reports "Not started" -> configure it.
-  def awaiting_api(:state_timeout, :probe, data) do
-    case runner(data).(&Operations.describe_instance/1) do
+  def awaiting_api(:state_timeout, :probe, %State{opts: %Opts{id: id}} = data) do
+    case run(id, &Operations.describe_instance/1) do
       {:ok, info} ->
         if instance_started?(info) do
           {:next_state, :running, data}
@@ -165,8 +159,8 @@ defmodule Hyper.Node.FireVMM.State do
 
   # Issue the pre-boot config and start the guest. One short blocking step of a
   # few fast calls; aborts and tears down on the first error.
-  def configuring(:state_timeout, :configure, %State{spec: spec} = data) do
-    case apply_spec(runner(data), spec) do
+  def configuring(:state_timeout, :configure, %State{opts: %Opts{id: id}, spec: spec} = data) do
+    case apply_spec(id, spec) do
       :ok -> {:next_state, :running, data}
       {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
     end
@@ -184,8 +178,8 @@ defmodule Hyper.Node.FireVMM.State do
     {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
   end
 
-  def running({:call, from}, :pause, data) do
-    case set_vm_state(runner(data), "Paused") do
+  def running({:call, from}, :pause, %State{opts: %Opts{id: id}} = data) do
+    case set_vm_state(id, "Paused") do
       :ok -> {:next_state, :paused, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
@@ -199,8 +193,8 @@ defmodule Hyper.Node.FireVMM.State do
     {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
   end
 
-  def paused({:call, from}, :resume, data) do
-    case set_vm_state(runner(data), "Resumed") do
+  def paused({:call, from}, :resume, %State{opts: %Opts{id: id}} = data) do
+    case set_vm_state(id, "Resumed") do
       :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
@@ -242,14 +236,14 @@ defmodule Hyper.Node.FireVMM.State do
 
   # Cold boot: machine-config -> boot-source -> drives -> NICs -> InstanceStart.
   # Aborts at the first error, returned verbatim.
-  @spec apply_spec(run(), BootSpec.Cold.t()) :: :ok | {:error, term()}
-  defp apply_spec(run, %BootSpec.Cold{} = cold) do
+  @spec apply_spec(Hyper.Vm.id(), BootSpec.Cold.t()) :: :ok | {:error, term()}
+  defp apply_spec(id, %BootSpec.Cold{} = cold) do
     with :ok <-
-           run.(fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end),
-         :ok <- run.(fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end),
-         :ok <- put_each(run, cold.drives, &drive_put/2),
-         :ok <- put_each(run, cold.network_interfaces, &nic_put/2) do
-      run.(fn opts ->
+           run(id, fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end),
+         :ok <- run(id, fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end),
+         :ok <- put_each(id, cold.drives, &drive_put/2),
+         :ok <- put_each(id, cold.network_interfaces, &nic_put/2) do
+      run(id, fn opts ->
         Operations.create_sync_action(%InstanceActionInfo{action_type: "InstanceStart"}, opts)
       end)
     end
@@ -265,37 +259,34 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   # Issue `put_fun` for each item, halting at the first error.
-  @spec put_each(run(), [item], (run(), item -> :ok | {:error, term()})) :: :ok | {:error, term()}
+  @spec put_each(Hyper.Vm.id(), [item], (Hyper.Vm.id(), item -> :ok | {:error, term()})) ::
+          :ok | {:error, term()}
         when item: var
-  defp put_each(run, items, put_fun) do
+  defp put_each(id, items, put_fun) do
     Enum.reduce_while(items, :ok, fn item, :ok ->
-      case put_fun.(run, item) do
+      case put_fun.(id, item) do
         :ok -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}
       end
     end)
   end
 
-  defp drive_put(run, drive) do
-    run.(fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
+  defp drive_put(id, drive) do
+    run(id, fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
   end
 
-  defp nic_put(run, nic) do
-    run.(fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end)
+  defp nic_put(id, nic) do
+    run(id, fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end)
   end
 
-  defp set_vm_state(run, state) do
-    run.(fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
+  defp set_vm_state(id, state) do
+    run(id, fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
   end
 
-  # The API `run` closure for this VM: injected one (tests) or the real
-  # Client-backed one, serialized through the per-VM Client GenServer.
-  defp runner(%State{opts: %Opts{run: run}}) when is_function(run, 1) do
-    run
-  end
-
-  defp runner(%State{opts: %Opts{id: id}}) do
-    &Client.run(Client.via(id), &1)
+  # Issue one generated API operation against this VM's daemon, serialized
+  # through the per-VM Client (which supplies the socket path).
+  defp run(id, op_fun) do
+    Client.run(Client.via(id), op_fun)
   end
 
   # --- daemon lifecycle ----------------------------------------------------
