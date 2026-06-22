@@ -94,6 +94,7 @@ defmodule Hyper.Node do
   def test_system do
     with {:ok, _} <- Hyper.Node.Config.Budget.load(),
          :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
+         :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Sys.Linux.Dmsetup.test_system() do
