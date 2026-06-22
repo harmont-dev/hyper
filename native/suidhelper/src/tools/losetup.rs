@@ -38,8 +38,11 @@ pub struct LosetupArgs {
 
 #[derive(Subcommand)]
 enum LosetupOp {
-    /// Attach a backing file to the next free loop device (always read-only).
+    /// Attach a backing file to the next free loop device.
     Attach {
+        /// Attach read-write (default is read-only).
+        #[arg(long)]
+        rw: bool,
         #[arg(value_parser = ok_backing_file)]
         path: String,
     },
@@ -75,8 +78,12 @@ impl IsTool for Losetup {
     fn run_privileged(&self) -> Self::RunT {
         let mut cmd = Command::new(&self.bin);
         match &self.op {
-            LosetupOp::Attach { path } => {
-                cmd.args(["--find", "--show", "--read-only"]).arg(path);
+            LosetupOp::Attach { rw, path } => {
+                cmd.args(["--find", "--show"]);
+                if !*rw {
+                    cmd.arg("--read-only");
+                }
+                cmd.arg(path);
             }
             LosetupOp::Detach { dev } => {
                 let dev: &Path = dev.as_ref();
@@ -127,4 +134,25 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
     // The fd is a bare RawFd (no CLOEXEC), so a spawned child inherits it; losetup
     // reopens the exact validated inode via /proc/self/fd.
     Ok(format!("/proc/self/fd/{fd}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct T {
+        #[command(flatten)]
+        args: LosetupArgs,
+    }
+
+    #[test]
+    fn attach_defaults_readonly_and_rw_flag_flips_it() {
+        // We assert on the parsed op, not on running losetup.
+        let ro = T::try_parse_from(["x", "attach", "/srv/hyper/test.img"]).unwrap();
+        let rw = T::try_parse_from(["x", "attach", "--rw", "/srv/hyper/test.img"]).unwrap();
+        assert!(matches!(ro.args.op, LosetupOp::Attach { rw: false, .. }));
+        assert!(matches!(rw.args.op, LosetupOp::Attach { rw: true, .. }));
+    }
 }
