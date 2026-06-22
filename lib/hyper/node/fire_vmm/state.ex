@@ -125,8 +125,6 @@ defmodule Hyper.Node.FireVMM.State do
     Hyper.Cluster.Routing.via({id, :state})
   end
 
-  # --- per-state event handlers --------------------------------------------
-
   defmodule Booting do
     @moduledoc false
 
