@@ -157,25 +157,26 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule Staging do
     @moduledoc """
-    Stage the kernel file and rootfs block device into the jail chroot, rewrite
-    the boot spec to the in-jail paths (`BootSpec.jailify/3`), then advance to
-    `:configuring`. Staging failure fails the boot.
+    Stage the kernel + rootfs device into the jail chroot and rewrite the boot
+    spec to the in-jail paths (`Hyper.Node.FireVMM.ChrootJail.stage/4`), then
+    advance to `:configuring`. Staging failure fails the boot.
     """
 
-    alias Hyper.Node.FireVMM.{BootSpec, Opts}
-    alias Hyper.Node.FireVMM.Jail.Stage
+    alias Hyper.Node.FireVMM.{ChrootJail, Opts}
 
-    # Stage the kernel + rootfs device into the chroot, then rewrite the boot
-    # spec to the in-jail paths and proceed to configuring.
-    def handle(:state_timeout, :stage, %{opts: %Opts{} = opts, spec: spec} = data) do
-      %Opts{vm_id: id, uid: uid, gid: gid, source: source} = opts
+    # Stage the kernel + rootfs device into the chroot, rewriting the boot spec to
+    # the in-jail paths, then proceed to configuring.
+    def handle(
+          :state_timeout,
+          :stage,
+          %{opts: %Opts{vm_id: id, uid: uid, gid: gid}, spec: spec} = data
+        ) do
+      case ChrootJail.stage(id, uid, gid, spec) do
+        {:ok, spec} ->
+          {:next_state, :configuring, %{data | spec: spec}, [{:state_timeout, 0, :configure}]}
 
-      with {:ok, jail_kernel} <- Stage.kernel(id, uid, gid, source.kernel_image_path),
-           {:ok, jail_root} <- Stage.root_drive(id, uid, gid, source.root_drive_path) do
-        data = %{data | spec: BootSpec.jailify(spec, jail_kernel, jail_root)}
-        {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
-      else
-        {:error, reason} -> {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
+        {:error, reason} ->
+          {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
       end
     end
 

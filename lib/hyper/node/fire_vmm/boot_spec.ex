@@ -42,21 +42,4 @@ defmodule Hyper.Node.FireVMM.BootSpec do
       ]
     }
   end
-
-  @doc """
-  Return a copy of `cold` with the kernel and rootfs paths replaced by their
-  in-jail (chroot-relative) equivalents, for use after the artifacts are staged.
-  """
-  @spec jailify(Cold.t(), String.t(), String.t()) :: Cold.t()
-  def jailify(%Cold{} = cold, jail_kernel_path, jail_root_path) do
-    %Cold{
-      cold
-      | boot_source: %{cold.boot_source | kernel_image_path: jail_kernel_path},
-        drives:
-          Enum.map(cold.drives, fn
-            %{drive_id: "rootfs"} = d -> %{d | path_on_host: jail_root_path}
-            other -> other
-          end)
-    }
-  end
 end
