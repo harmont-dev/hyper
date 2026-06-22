@@ -20,6 +20,8 @@ pub enum Error {
     Block(String),
     #[error("dm device name must be a safe hyper-* name: {0}")]
     Name(String),
+    #[error("path must be a non-traversing path under /srv/hyper/jails: {0}")]
+    Jail(String),
 }
 
 // `/dev/loop` followed by its number and nothing else. Matching the digit suffix
@@ -112,5 +114,49 @@ impl FromStr for DmName {
 impl fmt::Display for DmName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+/// Hyper's jail root: staged kernels and device nodes must land under here.
+const JAIL_BASE: &str = "/srv/hyper/jails";
+
+/// A staging destination inside a VM's chroot. Validated lexically (the file may
+/// not exist yet): absolute, under JAIL_BASE, no `.`/`..` components.
+#[derive(Debug, Clone)]
+pub struct JailPath(PathBuf);
+
+impl FromStr for JailPath {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use std::path::Component;
+        let p = PathBuf::from(s);
+        let ok = p.is_absolute()
+            && p.starts_with(JAIL_BASE)
+            && p.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+        if ok {
+            Ok(Self(p))
+        } else {
+            Err(Error::Jail(s.to_string()))
+        }
+    }
+}
+
+impl AsRef<Path> for JailPath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+mod jail_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn jailpath_rejects_traversal_and_outside() {
+        assert!(JailPath::from_str("/srv/hyper/jails/firecracker/v/root/rootfs").is_ok());
+        assert!(JailPath::from_str("/etc/passwd").is_err());
+        assert!(JailPath::from_str("/srv/hyper/jails/../../etc/x").is_err());
     }
 }

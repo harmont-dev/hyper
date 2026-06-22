@@ -6,10 +6,14 @@
 mod blockdev;
 mod dmsetup;
 mod losetup;
+mod mknod;
+mod stage;
 
 pub use blockdev::{Blockdev, BlockdevArgs, BlockdevOut};
 pub use dmsetup::{Dmsetup, DmsetupArgs, DmsetupOut};
 pub use losetup::{Losetup, LosetupArgs, LosetupOut};
+pub use mknod::{Mknod, MknodArgs, MknodOut};
+pub use stage::{Stage, StageArgs, StageOut};
 
 use crate::safe_bin::SafeBin;
 use crate::setuid_privileged::{self, Privileged};
@@ -38,6 +42,8 @@ pub enum ToolOutput {
     Losetup(LosetupOut),
     Dmsetup(DmsetupOut),
     Blockdev(BlockdevOut),
+    Mknod(MknodOut),
+    Stage(StageOut),
 }
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
@@ -95,6 +101,16 @@ pub enum Tool {
         #[command(flatten)]
         args: BlockdevArgs,
     },
+    /// Create a block device node inside a VM chroot.
+    Mknod {
+        #[command(flatten)]
+        args: MknodArgs,
+    },
+    /// Stage a regular file (kernel/image) into a VM chroot.
+    Stage {
+        #[command(flatten)]
+        args: StageArgs,
+    },
 }
 
 impl Tool {
@@ -113,6 +129,8 @@ impl Tool {
             Tool::Blockdev { bin, args } => {
                 Ok(ToolOutput::Blockdev(Blockdev::new(bin.into(), args).run()?))
             }
+            Tool::Mknod { args } => Ok(ToolOutput::Mknod(Mknod::new(args).run()?)),
+            Tool::Stage { args } => Ok(ToolOutput::Stage(Stage::new(args).run()?)),
         }
     }
 }
