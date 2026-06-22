@@ -59,9 +59,6 @@ pub enum Error {
 /// src O_RDONLY|O_NOFOLLOW; walks dest parents with O_NOFOLLOW; uses linkat
 /// (EXDEV fallback: openat O_CREAT|O_EXCL|O_NOFOLLOW + io::copy); sets
 /// ownership with fchownat(AT_SYMLINK_NOFOLLOW).
-///
-/// Does NOT call `check_owner` — the caller (chroot_jail::prepare) does it
-/// once before invoking this. All other validation is intact.
 pub(crate) fn stage_file(src: &str, dest: &JailPath, uid: u32, gid: u32) -> Result<(), Error> {
     // ── 1. Canonicalize source and confine it under HYPER_BASE ──────────────
     let src_canon = std::fs::canonicalize(src)

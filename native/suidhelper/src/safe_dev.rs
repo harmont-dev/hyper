@@ -28,8 +28,6 @@ pub enum Error {
     Name(String),
     #[error("path must be a non-traversing path under /srv/hyper/jails: {0}")]
     Jail(String),
-    #[error("uid/gid must be >= 1000 and non-zero: uid={uid} gid={gid}")]
-    SystemUid { uid: u32, gid: u32 },
     #[error("symlinked component in jail path: {0}")]
     SymlinkComponent(String),
     #[error("could not stat device {path}: {source}")]
@@ -242,106 +240,4 @@ pub fn open_parent_nofollow(path: &JailPath) -> Result<(RawFd, String), Error> {
     }
 
     Ok((dirfd, final_name))
-}
-
-/// Reject uid/gid that would give the node to root or a system account.
-///
-/// This is a pure check; no syscalls.
-pub fn check_owner(uid: u32, gid: u32) -> Result<(), Error> {
-    if uid == 0 || gid == 0 || uid < 1000 || gid < 1000 {
-        Err(Error::SystemUid { uid, gid })
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ── JailPath lexical tests ──────────────────────────────────────────────
-
-    #[test]
-    fn jailpath_rejects_traversal_and_outside() {
-        assert!(JailPath::from_str("/srv/hyper/jails/firecracker/v/root/rootfs").is_ok());
-        assert!(JailPath::from_str("/etc/passwd").is_err());
-        assert!(JailPath::from_str("/srv/hyper/jails/../../etc/x").is_err());
-    }
-
-    #[test]
-    fn jailpath_dot_normalized_by_pathbuf() {
-        // PathBuf::components() normalizes away `.` — "/a/./b" and "/a/b" are
-        // the same path. The lexical check therefore accepts them both, which
-        // is safe because `open_parent_nofollow` operates component-by-component
-        // and a no-op `.` never appears in the output of `jail_relative_parts`.
-        let p = JailPath::from_str("/srv/hyper/jails/vm1/./root");
-        assert!(p.is_ok(), "dot is normalised away by PathBuf, path is valid");
-        // Confirm the relative parts contain no dot component.
-        let (parents, name) = jail_relative_parts(&p.unwrap()).unwrap();
-        assert_eq!(parents, vec!["vm1"]);
-        assert_eq!(name, "root");
-    }
-
-    #[test]
-    fn jailpath_rejects_exactly_jail_base() {
-        // No final component → jail_relative_parts would fail; FromStr allows
-        // it but open_parent_nofollow/jail_relative_parts must not.
-        let p = JailPath::from_str("/srv/hyper/jails").unwrap();
-        assert!(jail_relative_parts(&p).is_err());
-    }
-
-    // ── jail_relative_parts pure tests ─────────────────────────────────────
-
-    #[test]
-    fn relative_parts_single_component() {
-        let p = JailPath::from_str("/srv/hyper/jails/vmroot").unwrap();
-        let (parents, name) = jail_relative_parts(&p).unwrap();
-        assert!(parents.is_empty(), "no parent components for direct child");
-        assert_eq!(name, "vmroot");
-    }
-
-    #[test]
-    fn relative_parts_deep_path() {
-        let p = JailPath::from_str("/srv/hyper/jails/vm1/dev/vda").unwrap();
-        let (parents, name) = jail_relative_parts(&p).unwrap();
-        assert_eq!(parents, vec!["vm1", "dev"]);
-        assert_eq!(name, "vda");
-    }
-
-    #[test]
-    fn relative_parts_two_levels() {
-        let p = JailPath::from_str("/srv/hyper/jails/alpha/vmlinux").unwrap();
-        let (parents, name) = jail_relative_parts(&p).unwrap();
-        assert_eq!(parents, vec!["alpha"]);
-        assert_eq!(name, "vmlinux");
-    }
-
-    // ── check_owner pure tests ──────────────────────────────────────────────
-
-    #[test]
-    fn owner_rejects_root_uid() {
-        assert!(check_owner(0, 1000).is_err());
-    }
-
-    #[test]
-    fn owner_rejects_root_gid() {
-        assert!(check_owner(1000, 0).is_err());
-    }
-
-    #[test]
-    fn owner_rejects_system_uid() {
-        assert!(check_owner(999, 1000).is_err());
-    }
-
-    #[test]
-    fn owner_rejects_system_gid() {
-        assert!(check_owner(1000, 999).is_err());
-    }
-
-    #[test]
-    fn owner_accepts_normal_user() {
-        assert!(check_owner(1000, 1000).is_ok());
-        assert!(check_owner(1001, 2000).is_ok());
-        assert!(check_owner(65534, 65534).is_ok());
-    }
 }

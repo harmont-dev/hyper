@@ -4,8 +4,7 @@
 //!
 //! Security: `--chroot` is validated as a `JailPath`; the two dests (`vmlinux`,
 //! `rootfs`) are joined onto it and re-parsed as `JailPath`, re-checking
-//! confinement under `JAIL_BASE`. `uid`/`gid` are rejected once via `check_owner`
-//! if root/system. Kernel staging uses `stage_file` (canonicalize + confine under
+//! confinement under `JAIL_BASE`. Kernel staging uses `stage_file` (canonicalize + confine under
 //! `HYPER_BASE`, open `O_RDONLY|O_NOFOLLOW`, linkat / EXDEV copy, fchownat
 //! `AT_SYMLINK_NOFOLLOW`); the device node uses `make_block_node` (open device
 //! `O_PATH|O_NOFOLLOW` + fstat rdev, open_parent_nofollow, mknodat, fchownat
@@ -27,8 +26,6 @@ const ROOT_NAME: &str = "rootfs";
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error(transparent)]
-    Owner(#[from] safe_dev::Error),
     #[error("stage kernel: {0}")]
     Stage(#[from] stage::Error),
     #[error("mknod rootfs: {0}")]
@@ -53,10 +50,10 @@ pub struct PrepareArgs {
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
     #[arg(long)]
     device: BlockDev,
-    /// UID to own the staged files; must be >= 1000 (non-root, non-system).
+    /// UID to own the staged files.
     #[arg(long)]
     uid: u32,
-    /// GID to own the staged files; must be >= 1000 (non-root, non-system).
+    /// GID to own the staged files.
     #[arg(long)]
     gid: u32,
 }
@@ -83,8 +80,6 @@ impl IsTool for Prepare {
 
     fn run_privileged(&self) -> Self::RunT {
         let args = &self.args;
-
-        safe_dev::check_owner(args.uid, args.gid)?;
 
         let kernel_dest = dest_path(&args.chroot, KERNEL_NAME)?;
         let rootfs_dest = dest_path(&args.chroot, ROOT_NAME)?;

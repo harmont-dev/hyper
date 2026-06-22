@@ -43,9 +43,6 @@ pub enum Error {
 /// Security: opens `device` O_PATH|O_NOFOLLOW and fstats to get rdev;
 /// walks parent components of `dest` with O_NOFOLLOW; uses mknodat +
 /// fchownat(AT_SYMLINK_NOFOLLOW) so no race can redirect via symlink.
-///
-/// Does NOT call `check_owner` — the caller (chroot_jail::prepare) does it
-/// once before invoking this. All other validation is intact.
 pub(crate) fn make_block_node(dest: &JailPath, device: &BlockDev, uid: u32, gid: u32) -> Result<(), Error> {
     // ── 1. Open device with O_PATH|O_NOFOLLOW and fstat to get rdev ────────
     let dev_path: &std::path::Path = device.as_ref();
