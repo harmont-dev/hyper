@@ -8,10 +8,6 @@ defmodule Hyper.Config do
   @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
   @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
-  # dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
-  # Standardised repo-wide; deltas must be created with this chunk size.
-  @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
-  @thin_block_sectors Application.compile_env(:hyper, :thin_block_sectors, 128)
   @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
   @doc "Root work directory for this node. All firecracker paths derive from it."
@@ -94,26 +90,6 @@ defmodule Hyper.Config do
   """
   @spec scratch_dir :: Path.t()
   def scratch_dir, do: Path.join(@work_dir, "scratch")
-
-  @doc "dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB)."
-  @spec chunk_sectors :: pos_integer()
-  def chunk_sectors, do: @chunk_sectors
-
-  @doc "dm-thin pool data block size, in 512-byte sectors (128 = 64 KiB)."
-  @spec thin_block_sectors :: pos_integer()
-  def thin_block_sectors, do: @thin_block_sectors
-
-  @doc "Sparse size of the node's dm-thin pool data device."
-  @spec thin_pool_data_size :: Unit.Information.t()
-  def thin_pool_data_size, do: Unit.Information.gib(64)
-
-  @doc "Sparse size of the node's dm-thin pool metadata device."
-  @spec thin_pool_meta_size :: Unit.Information.t()
-  def thin_pool_meta_size, do: Unit.Information.gib(1)
-
-  @doc "Alias for chroot_base/0: the jail base staged artifacts must live under."
-  @spec jail_base :: Path.t()
-  def jail_base, do: chroot_base()
 
   @doc """
   Per-architecture vmlinux (guest kernel) image paths, keyed by `Sys.Arch.t()`.

@@ -13,6 +13,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
   use GenServer
 
+  alias Hyper.Node.Config.Img, as: ImgConfig
   alias Hyper.SuidHelper
   alias Unit.Information
 
@@ -45,19 +46,19 @@ defmodule Hyper.Node.Img.ThinPool do
     Process.flag(:trap_exit, true)
 
     with :ok <- File.mkdir_p(Hyper.Config.scratch_dir()),
-         {:ok, meta} <- ensure_backing(@meta_file, Hyper.Config.thin_pool_meta_size()),
-         {:ok, data} <- ensure_backing(@data_file, Hyper.Config.thin_pool_data_size()),
+         {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
+         {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
          :ok <- zero_metadata(meta),
          {:ok, meta_loop} <- SuidHelper.Losetup.attach_rw(meta),
          {:ok, data_loop} <- SuidHelper.Losetup.attach_rw(data),
-         sectors = div(Information.as_bytes(Hyper.Config.thin_pool_data_size()), 512),
+         sectors = div(Information.as_bytes(ImgConfig.thin_pool_data_size()), 512),
          {:ok, pool_dev} <-
            SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,
              meta_loop,
              data_loop,
              sectors,
-             Hyper.Config.thin_block_sectors(),
+             ImgConfig.thin_block_sectors(),
              0
            ) do
       {:ok, %State{pool_dev: pool_dev, meta_loop: meta_loop, data_loop: data_loop}}
