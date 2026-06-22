@@ -63,14 +63,14 @@ defmodule Hyper.Node do
   resolve the kernel, and start the VM supervisor. The uid is freed and the
   writable layer torn down automatically when the VM supervisor dies.
   """
-  @spec start_image_vm(map()) :: {:ok, pid()} | {:error, term()}
-  @decorate with_span("Hyper.Node.start_image_vm", include: [:params])
-  def start_image_vm(%{vm_id: _vm_id, img_id: _img_id, arch: _arch} = params) do
+  @spec start_image_vm(Hyper.Vm.id(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
+  def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
-         {:ok, writable} <- start_writable_or_release(params[:img_id], params[:vm_id], uid),
+         {:ok, writable} <- start_writable_or_release(spec.img_id, vm_id, uid),
          dev = Img.Writable.blk_path(writable),
-         kernel = Vmlinux.path(params[:arch]),
-         opts = build_opts(params, uid, dev, kernel),
+         kernel = Vmlinux.path(spec.arch),
+         opts = build_opts(vm_id, spec, uid, dev, kernel),
          {:ok, pid} <- start_vm_or_release(opts, uid, writable) do
       # Bind the uid and the writable layer to the VM supervisor's lifetime.
       :ok = Users.bind(uid, pid)
@@ -80,7 +80,7 @@ defmodule Hyper.Node do
     end
   end
 
-  @doc "Tear down an image-backed VM started by `start_image_vm/1`."
+  @doc "Tear down an image-backed VM started by `start_image_vm/2`."
   @spec stop_image_vm(pid()) :: :ok
   def stop_image_vm(pid) do
     case DynamicSupervisor.terminate_child(@vm_sup, pid) do
@@ -90,21 +90,22 @@ defmodule Hyper.Node do
   end
 
   @doc false
-  @spec build_opts(map(), Users.id(), Path.t(), Path.t()) :: FireVMM.Opts.t()
-  def build_opts(%{vm_id: vm_id, type: type, arch: arch} = params, uid, dev, kernel) do
+  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), Path.t(), Path.t()) ::
+          FireVMM.Opts.t()
+  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, dev, kernel) do
     source =
       %{
         kernel_image_path: kernel,
         root_drive_path: dev
       }
-      |> maybe_put(:boot_args, Map.get(params, :boot_args))
+      |> maybe_put(:boot_args, spec.boot_args)
 
     %FireVMM.Opts{
       vm_id: vm_id,
       uid: uid,
       gid: uid,
-      type: type,
-      arch: arch,
+      type: spec.type,
+      arch: spec.arch,
       source: source
     }
   end
