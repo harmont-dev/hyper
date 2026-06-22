@@ -7,12 +7,14 @@ mod blockdev;
 mod dmsetup;
 mod losetup;
 mod mknod;
+mod reset_jail;
 mod stage;
 
 pub use blockdev::{Blockdev, BlockdevArgs, BlockdevOut};
 pub use dmsetup::{Dmsetup, DmsetupArgs, DmsetupOut};
 pub use losetup::{Losetup, LosetupArgs, LosetupOut};
 pub use mknod::{Mknod, MknodArgs, MknodOut};
+pub use reset_jail::{ResetJail, ResetJailArgs, ResetJailOut};
 pub use stage::{Stage, StageArgs, StageOut};
 
 use crate::safe_bin::SafeBin;
@@ -43,6 +45,7 @@ pub enum ToolOutput {
     Dmsetup(DmsetupOut),
     Blockdev(BlockdevOut),
     Mknod(MknodOut),
+    ResetJail(ResetJailOut),
     Stage(StageOut),
 }
 
@@ -106,6 +109,11 @@ pub enum Tool {
         #[command(flatten)]
         args: MknodArgs,
     },
+    /// Remove stale per-VM chroot and cgroup leaf before relaunching the jailer.
+    ResetJail {
+        #[command(flatten)]
+        args: ResetJailArgs,
+    },
     /// Stage a regular file (kernel/image) into a VM chroot.
     Stage {
         #[command(flatten)]
@@ -130,6 +138,9 @@ impl Tool {
                 Ok(ToolOutput::Blockdev(Blockdev::new(bin.into(), args).run()?))
             }
             Tool::Mknod { args } => Ok(ToolOutput::Mknod(Mknod::new(args).run()?)),
+            Tool::ResetJail { args } => {
+                Ok(ToolOutput::ResetJail(ResetJail::new(args).run()?))
+            }
             Tool::Stage { args } => Ok(ToolOutput::Stage(Stage::new(args).run()?)),
         }
     }
