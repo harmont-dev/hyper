@@ -20,17 +20,19 @@ defmodule Hyper.Node.Users do
       * `next` - the next never-allocated id (bump pointer), advanced up to `max`
       * `max`  - top of the configured range (inclusive)
       * `freed` - stack of returned ids available for reuse
+      * `owners` - map of monitor references to bound ids
 
     The untouched tail of the range (`next..max`) is never materialised, so memory
     is O(ids handed out and returned), not O(range size).
     """
     @enforce_keys [:max, :next]
-    defstruct [:max, :next, freed: []]
+    defstruct [:max, :next, freed: [], owners: %{}]
 
     @type t :: %__MODULE__{
             max: Hyper.Node.Users.id(),
             next: Hyper.Node.Users.id(),
-            freed: [Hyper.Node.Users.id()]
+            freed: [Hyper.Node.Users.id()],
+            owners: %{reference() => Hyper.Node.Users.id()}
           }
   end
 
@@ -50,6 +52,18 @@ defmodule Hyper.Node.Users do
       end
     end
   end
+
+  @doc "Allocate an id without auto-freeing. Pair with `release/1` or `bind/2`."
+  @spec claim() :: {:ok, id()} | {:error, :exhausted}
+  def claim, do: GenServer.call(__MODULE__, {:new})
+
+  @doc "Return an id to the pool."
+  @spec release(id()) :: :ok
+  def release(id), do: GenServer.cast(__MODULE__, {:free, id})
+
+  @doc "Free `id` automatically when `owner` dies."
+  @spec bind(id(), pid()) :: :ok
+  def bind(id, owner), do: GenServer.call(__MODULE__, {:bind, id, owner})
 
   @doc """
   Verify the configured uid/gid range is free, raising if anything occupies it.
@@ -105,8 +119,25 @@ defmodule Hyper.Node.Users do
   end
 
   @impl true
+  def handle_call({:bind, id, owner}, _from, %State{owners: owners} = state) do
+    ref = Process.monitor(owner)
+    {:reply, :ok, %{state | owners: Map.put(owners, ref, id)}}
+  end
+
+  @impl true
   def handle_cast({:free, id}, %State{freed: freed} = state) do
     {:noreply, %{state | freed: [id | freed]}}
+  end
+
+  @impl true
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %State{owners: owners, freed: freed} = state
+      ) do
+    case Map.pop(owners, ref) do
+      {nil, _} -> {:noreply, state}
+      {id, owners} -> {:noreply, %{state | owners: owners, freed: [id | freed]}}
+    end
   end
 
   # Passwd entries whose uid falls within [min, max].
