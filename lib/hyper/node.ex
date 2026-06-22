@@ -153,7 +153,8 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
-         :ok <- Sys.Linux.Dmsetup.test_system() do
+         :ok <- Sys.Linux.Dmsetup.test_system(),
+         :ok <- Sys.Linux.Dmsetup.test_targets() do
       Hyper.Node.FireVMM.test_system()
     end
   end

@@ -8,6 +8,8 @@ defmodule Sys.Linux.Dmsetup do
   @typedoc "A device-mapper device name (becomes /dev/mapper/<name>)."
   @type name :: String.t()
 
+  @required_targets ~w(snapshot thin thin-pool)
+
   @doc "Check that the setuid helper and the device-mapper tooling it execs are present."
   @spec test_system() :: :ok | {:error, term()}
   def test_system do
@@ -24,6 +26,30 @@ defmodule Sys.Linux.Dmsetup do
       true ->
         :ok
     end
+  end
+
+  @doc "Verify the kernel exposes the dm targets we use (snapshot, thin, thin-pool)."
+  @spec test_targets() :: :ok | {:error, {:missing_dm_targets, [String.t()]}}
+  def test_targets do
+    case System.cmd(Hyper.Config.dmsetup_path(), ["targets"], stderr_to_stdout: true) do
+      {out, 0} ->
+        have = parse_targets(out)
+        missing = Enum.reject(@required_targets, &MapSet.member?(have, &1))
+        if missing == [], do: :ok, else: {:error, {:missing_dm_targets, missing}}
+
+      {out, code} ->
+        {:error, {:dmsetup_targets_failed, code, String.trim(out)}}
+    end
+  end
+
+  @doc false
+  @spec parse_targets(String.t()) :: MapSet.t(String.t())
+  def parse_targets(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.map(&(&1 |> String.split() |> List.first()))
+    |> Enum.reject(&is_nil/1)
+    |> MapSet.new()
   end
 
   @doc """
