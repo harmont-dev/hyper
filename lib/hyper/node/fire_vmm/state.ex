@@ -30,6 +30,7 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.BootSpec
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.State
+  alias Hyper.Node.FireVMM.State.Daemon
 
   @typedoc "A closure that runs one generated API operation, returning its result."
   @type run :: ((keyword() -> term()) -> term())
@@ -251,33 +252,12 @@ defmodule Hyper.Node.FireVMM.State do
 
   # --- daemon lifecycle ----------------------------------------------------
 
-  # Re-adopt a surviving daemon after a controller restart, else launch fresh.
-  defp ensure_daemon(%State{opts: %Opts{id: id}} = data) do
-    case DynamicSupervisor.which_children(daemon_sup(id)) do
-      [{_, pid, _, _}] when is_pid(pid) -> monitor(data, pid)
-      _ -> start_daemon(data)
-    end
-  end
-
-  defp start_daemon(%State{opts: %Opts{id: id, binary: bin, args: args}} = data) do
-    # The jailer creates the chroot (and thus the socket's parent dir) itself, so
-    # there's nothing to mkdir here. MuonTrap just supervises the OS process.
-    spec =
-      Supervisor.child_spec(
-        {MuonTrap.Daemon, [bin, args, []]},
-        # :temporary -> the state machine, not the supervisor, decides restarts.
-        id: :firecracker,
-        restart: :temporary
-      )
-
-    {:ok, pid} = DynamicSupervisor.start_child(daemon_sup(id), spec)
-    monitor(data, pid)
-  end
+  # Launch (or re-adopt) the daemon via `Daemon`, then monitor it ourselves.
+  defp ensure_daemon(%State{opts: %Opts{id: id, binary: bin, args: args}} = data),
+    do: monitor(data, Daemon.ensure(id, bin, args))
 
   defp stop_daemon(%State{daemon: nil}), do: :ok
-
-  defp stop_daemon(%State{opts: %Opts{id: id}, daemon: pid}),
-    do: DynamicSupervisor.terminate_child(daemon_sup(id), pid)
+  defp stop_daemon(%State{opts: %Opts{id: id}, daemon: pid}), do: Daemon.stop(id, pid)
 
   defp monitor(data, pid), do: %{data | daemon: pid, daemon_ref: Process.monitor(pid)}
   defp clear_daemon(data), do: %{data | daemon: nil, daemon_ref: nil}
@@ -285,6 +265,5 @@ defmodule Hyper.Node.FireVMM.State do
   defp recover_after, do: 1_000
   defp now, do: System.monotonic_time(:millisecond)
 
-  defp daemon_sup(id), do: Hyper.Cluster.Routing.via({id, :daemon_sup})
   defp via(id), do: Hyper.Cluster.Routing.via({id, :state})
 end

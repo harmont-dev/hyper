@@ -10,10 +10,6 @@ defmodule Hyper.Vm do
   What a VM boots from: explicit, already-jail-visible artifact paths for a cold
   boot (kernel + root drive). `boot_args` defaults to a standard serial-console
   cmdline when omitted.
-
-  There is no snapshot/restore path: firecracker snapshots capture guest RAM +
-  CPU state, not disk, and would be a separate axis layered on top of this if
-  reintroduced.
   """
   @type source :: %{
           required(:kernel_image_path) => Path.t(),
