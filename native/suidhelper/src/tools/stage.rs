@@ -61,7 +61,7 @@ pub(crate) fn stage_file(src: &str, dest: &JailPath, uid: u32, gid: u32) -> Resu
     // ── 1. Canonicalize source and confine it under HYPER_BASE ──────────────
     let src_canon = std::fs::canonicalize(src)
         .map_err(|source| Error::Source { path: PathBuf::from(src), source })?;
-    let base = crate::config::hyper_base();
+    let base = crate::config::Config::get().hyper_base();
     if !src_canon.starts_with(base) {
         return Err(Error::OutsideBase { base, path: src_canon });
     }

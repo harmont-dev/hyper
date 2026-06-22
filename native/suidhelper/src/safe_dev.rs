@@ -144,7 +144,7 @@ impl FromStr for JailPath {
         use std::path::Component;
         let p = PathBuf::from(s);
         let ok = p.is_absolute()
-            && p.starts_with(crate::config::jail_base())
+            && p.starts_with(crate::config::Config::get().jail_base())
             && p.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
         if ok {
             Ok(Self(p))
@@ -174,7 +174,7 @@ pub fn jail_relative_parts(path: &JailPath) -> Result<(Vec<String>, String), Err
     // Strip the JAIL_BASE prefix. The lexical check in FromStr guarantees this
     // succeeds.
     let rel = p
-        .strip_prefix(crate::config::jail_base())
+        .strip_prefix(crate::config::Config::get().jail_base())
         .map_err(|_| Error::Jail(p.display().to_string()))?;
 
     let mut components: Vec<String> = rel
@@ -218,8 +218,8 @@ pub fn open_parent_nofollow(path: &JailPath) -> Result<(RawFd, String), Error> {
     // Open JAIL_BASE itself (absolute path; O_NOFOLLOW only matters for the
     // final component of open(), which is a directory here — a symlink at
     // JAIL_BASE itself is also caught because we request O_DIRECTORY).
-    let jail_base = crate::config::jail_base();
-    let mut dirfd = openat(None::<RawFd>, jail_base, base_flags, Mode::empty())
+    let jail_base = crate::config::Config::get().jail_base();
+    let mut dirfd = openat(None::<RawFd>, &jail_base, base_flags, Mode::empty())
         .map_err(|e| Error::SymlinkComponent(format!("{}: {e}", jail_base.display())))?;
 
     // Walk each parent component relative to the previous dirfd.

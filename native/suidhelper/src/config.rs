@@ -26,11 +26,38 @@ static CONFIG_PATH: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from(CONFIG_PA
 
 /// Hyper's /etc/hyper/config.toml file format.
 #[derive(Debug, Clone, Deserialize)]
-struct Config {
-    pub work_dir: PathBuf,
+pub struct Config {
+    work_dir: PathBuf,
 }
 
 impl Config {
+    /// The process-wide config, loaded once (and forced unprivileged by
+    /// [`Config::init`]). A load failure is fatal: the helper cannot safely
+    /// operate without a trusted data root, so it prints the error and exits
+    /// rather than guessing a default.
+    pub fn get() -> &'static Config {
+        LazyLock::force(&CONFIG)
+    }
+
+    /// Force the config to load now. Call this once at the very start of `main`,
+    /// after privileges have already been dropped (the `.preinit_array` entry in
+    /// `setuid_privileged` runs before `main`), so the file is never first read
+    /// lazily from inside a `Privileged` scope - i.e. it is guaranteed to be read
+    /// as the real uid, not as root.
+    pub fn init() {
+        let _ = Self::get();
+    }
+
+    /// Hyper's data root.
+    pub fn hyper_base(&self) -> &Path {
+        self.work_dir.as_path()
+    }
+
+    /// Hyper's jail root, `<work_dir>/jails`.
+    pub fn jail_base(&self) -> PathBuf {
+        self.work_dir.join("jails")
+    }
+
     /// Read, ownership-check, parse, and validate the config file. See the module
     /// docs for the trust model.
     pub fn safe_load() -> Result<Self, LoadingError> {
@@ -62,35 +89,10 @@ impl Config {
     }
 }
 
-/// The process-wide config, loaded once. A load failure is fatal: the helper
-/// cannot safely operate without a trusted data root, so it prints the error and
-/// exits rather than guessing a default.
+/// The process-wide config, loaded once on first access via [`Config::get`].
 static CONFIG: LazyLock<Config> = LazyLock::new(|| {
     Config::safe_load().unwrap_or_else(|e| {
         eprintln!("hyper-suidhelper: {e}");
         std::process::exit(2);
     })
 });
-
-/// `<work_dir>/jails`, computed once from the loaded config.
-static JAIL_BASE: LazyLock<PathBuf> = LazyLock::new(|| CONFIG.work_dir.join("jails"));
-
-/// Force the config to load now. Call this once at the very start of `main`,
-/// after privileges have already been dropped (the `.preinit_array` entry in
-/// `setuid_privileged` runs before `main`), so the file is never first read
-/// lazily from inside a `Privileged` scope - i.e. it is guaranteed to be read as
-/// the real uid, not as root.
-pub fn init() {
-    LazyLock::force(&CONFIG);
-    LazyLock::force(&JAIL_BASE);
-}
-
-/// Hyper's data root.
-pub fn hyper_base() -> &'static Path {
-    CONFIG.work_dir.as_path()
-}
-
-/// Hyper's jail root, `<work_dir>/jails`.
-pub fn jail_base() -> &'static Path {
-    JAIL_BASE.as_path()
-}

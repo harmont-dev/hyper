@@ -122,7 +122,7 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
     let real =
         std::fs::canonicalize(p).map_err(|source| Error::Canonicalize { path: PathBuf::from(p), source })?;
 
-    let base = crate::config::hyper_base();
+    let base = crate::config::Config::get().hyper_base();
     if !real.starts_with(base) {
         return Err(Error::OutsideBase { base, path: real });
     }

@@ -71,7 +71,7 @@ impl SysTest {
         Privileged::smoke_test()?;
         Ok(Self {
             sys_test: "ok",
-            hyper_base: crate::config::hyper_base().to_string_lossy().into_owned(),
+            hyper_base: crate::config::Config::get().hyper_base().to_string_lossy().into_owned(),
         })
     }
 }
@@ -81,7 +81,7 @@ fn main() {
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
     // Load the config now - we are post-drop (real uid) and before any
     // `Privileged` scope, so the file is read unprivileged, never as root.
-    config::init();
+    config::Config::init();
 
     // Each command yields a serializable value (errors stringified to unify); we
     // render the final JSON line here.
