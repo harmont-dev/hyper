@@ -34,7 +34,10 @@ use setuid_privileged::Privileged;
 use tools::Tool;
 
 #[derive(Parser)]
-#[command(name = "hyper-suidhelper", about = "Privileged device helper for the Hyper node")]
+#[command(
+    name = "hyper-suidhelper",
+    about = "Privileged device helper for the Hyper node"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -77,7 +80,9 @@ fn main() {
     // serialize it here so the tools never touch JSON.
     let output = match Cli::parse().command {
         Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
-        Command::SysTest => SysTest::perform().map(Output::SysTest).map_err(|e| e.to_string()),
+        Command::SysTest => SysTest::perform()
+            .map(Output::SysTest)
+            .map_err(|e| e.to_string()),
     };
 
     match output.and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())) {

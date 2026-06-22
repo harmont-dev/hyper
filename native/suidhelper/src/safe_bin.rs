@@ -26,9 +26,16 @@ pub enum Error {
     #[error("--bin must be an absolute path: {0}")]
     NotAbsolute(PathBuf),
     #[error("--bin basename must be `{expected}`: {got}")]
-    Name { expected: &'static str, got: PathBuf },
+    Name {
+        expected: &'static str,
+        got: PathBuf,
+    },
     #[error("--bin {path}: {source}")]
-    Stat { path: PathBuf, #[source] source: io::Error },
+    Stat {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("{0} is a symlink")]
     Symlink(PathBuf),
     #[error("{0} is not owned by root")]
@@ -59,11 +66,18 @@ impl<const NAME: &'static str> FromStr for SafeBin<NAME> {
 
         match bin.file_name().and_then(OsStr::to_str) {
             Some(name) if name == NAME => {}
-            _ => return Err(Error::Name { expected: NAME, got: bin.to_path_buf() }),
+            _ => {
+                return Err(Error::Name {
+                    expected: NAME,
+                    got: bin.to_path_buf(),
+                })
+            }
         }
 
-        let meta =
-            fs::symlink_metadata(bin).map_err(|source| Error::Stat { path: bin.to_path_buf(), source })?;
+        let meta = fs::symlink_metadata(bin).map_err(|source| Error::Stat {
+            path: bin.to_path_buf(),
+            source,
+        })?;
 
         if meta.file_type().is_symlink() {
             return Err(Error::Symlink(bin.to_path_buf()));
