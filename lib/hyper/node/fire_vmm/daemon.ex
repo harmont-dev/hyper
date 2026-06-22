@@ -17,8 +17,9 @@ defmodule Hyper.Node.FireVMM.Daemon do
 
   alias Hyper.Node.FireVMM.{Jailer, Opts}
   alias Hyper.SuidHelper
+  alias Unit.Time
 
-  @shutdown_ms 5_000
+  @shutdown_timeout Time.s(5)
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
   def child_spec(%Opts{} = opts) do
@@ -27,7 +28,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
       start: {__MODULE__, :start_link, [opts]},
       restart: :permanent,
       type: :worker,
-      shutdown: @shutdown_ms
+      shutdown: Time.as_ms(@shutdown_timeout)
     }
   end
 
