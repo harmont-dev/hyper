@@ -19,12 +19,6 @@ defmodule Hyper.Node.FireVMM.State do
     * `:running`      - guest is live; handles `stop`.
     * `:stopping`     - teardown requested in-band; reject further calls.
 
-  Uses `:handle_event_function` mode: each state's events live in a nested
-  submodule (`AwaitingApi`, `Configuring`, ...) that `handle_event/4` dispatches to.
-  Each step does one short thing and returns to the gen_statem loop; API structs
-  come from `Hyper.Node.FireVMM.BootSpec` and every call goes through the per-VM
-  `Client`.
-
   The gen_statem *data* (this struct) holds the start `Opts`, the resolved boot
   spec, and the readiness deadline; the *state* is the lifecycle atom above.
   """
@@ -102,11 +96,7 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule AwaitingApi do
-    @moduledoc """
-    Poll the (already-launched) daemon's API socket until it answers, then advance
-    to `:configuring`. If the readiness deadline lapses before the API responds,
-    the boot fails.
-    """
+    @moduledoc "Poll the (already-launched) daemon's API socket, then advance to `:configuring`."
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
     alias Hyper.Node.FireVMM.{Client, Opts}
@@ -137,13 +127,7 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Configuring do
-    @moduledoc """
-    Stage the kernel + rootfs device into the jail chroot (`ChrootJail.stage/4`,
-    which also rewrites the spec to in-jail paths), then push the cold-boot config
-    to firecracker through the per-VM `Client` (machine-config -> boot-source ->
-    drives -> NICs -> `InstanceStart`) and enter `:running`. Any step failing
-    fails the boot; staging failures are tagged `{:staging, reason}`.
-    """
+    @moduledoc "Stage the kernel + rootfs device into the jail chroot. Enter `:running` after."
 
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
     alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
@@ -220,9 +204,9 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule Stopping do
     @moduledoc """
-    Teardown was requested in-band (`stop/1`). The actual teardown is
-    supervisor-driven (the node terminates the VM tree); here we just reject any
-    further calls with `{:error, :stopping}`.
+    Teardown was requested in-band.
+
+    Actual tear-down is handled by the parent supervisor.
     """
 
     def handle({:call, from}, _event, _data) do
