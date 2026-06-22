@@ -76,7 +76,7 @@ defmodule Hyper.Node.Layer.Server do
     Process.flag(:trap_exit, true)
 
     with {:ok, layer_path} <- Repo.find_layer(layer_id),
-         {:ok, blk_path} <- SuidHelper.losetup_attach_ro(layer_path) do
+         {:ok, blk_path} <- SuidHelper.Losetup.attach_ro(layer_path) do
       # Start with no holders, so a mounted-but-unused layer reaps itself.
       {:ok, arm_idle(%State{blk_path: blk_path})}
     else
@@ -124,7 +124,7 @@ defmodule Hyper.Node.Layer.Server do
 
   @impl true
   def terminate(_reason, %State{blk_path: blk_path}) do
-    case SuidHelper.losetup_detach(blk_path) do
+    case SuidHelper.Losetup.detach(blk_path) do
       :ok ->
         :ok
 

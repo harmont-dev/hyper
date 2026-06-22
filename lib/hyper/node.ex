@@ -155,7 +155,6 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
-         :ok <- Hyper.SuidHelper.test_targets(),
          {:ok, base} <- Hyper.SuidHelper.sys_test(),
          :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()

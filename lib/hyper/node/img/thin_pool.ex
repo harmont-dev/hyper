@@ -48,11 +48,11 @@ defmodule Hyper.Node.Img.ThinPool do
          {:ok, meta} <- ensure_backing(@meta_file, Hyper.Config.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, Hyper.Config.thin_pool_data_size()),
          :ok <- zero_metadata(meta),
-         {:ok, meta_loop} <- SuidHelper.losetup_attach_rw(meta),
-         {:ok, data_loop} <- SuidHelper.losetup_attach_rw(data),
+         {:ok, meta_loop} <- SuidHelper.Losetup.attach_rw(meta),
+         {:ok, data_loop} <- SuidHelper.Losetup.attach_rw(data),
          sectors = div(Information.as_bytes(Hyper.Config.thin_pool_data_size()), 512),
          {:ok, pool_dev} <-
-           SuidHelper.dmsetup_create_thin_pool(
+           SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,
              meta_loop,
              data_loop,
@@ -70,29 +70,29 @@ defmodule Hyper.Node.Img.ThinPool do
   def handle_call({:create_external, name, origin_dev, sectors}, _from, state) do
     {id, state} = id_alloc(state)
 
-    with :ok <- SuidHelper.dmsetup_message(@pool_name, "create_thin #{id}"),
+    with :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_thin #{id}"),
          {:ok, dev} <-
-           SuidHelper.dmsetup_create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
+           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->
-        _ = SuidHelper.dmsetup_message(@pool_name, "delete #{id}")
+        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
         {:reply, {:error, reason}, id_free(state, id)}
     end
   end
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
-    _ = SuidHelper.dmsetup_remove(name)
-    _ = SuidHelper.dmsetup_message(@pool_name, "delete #{id}")
+    _ = SuidHelper.Dmsetup.remove(name)
+    _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
     {:reply, :ok, id_free(state, id)}
   end
 
   @impl true
   def terminate(_reason, state) do
-    _ = SuidHelper.dmsetup_remove(@pool_name)
-    _ = SuidHelper.losetup_detach(state.data_loop)
-    _ = SuidHelper.losetup_detach(state.meta_loop)
+    _ = SuidHelper.Dmsetup.remove(@pool_name)
+    _ = SuidHelper.Losetup.detach(state.data_loop)
+    _ = SuidHelper.Losetup.detach(state.meta_loop)
     :ok
   end
 
