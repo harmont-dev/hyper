@@ -1,31 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Typestate-validated filesystem *names*.
-//!
-//! A [`SafePath`] is a `PathBuf` that has passed a set of **lexical** checks
-//! chosen at the type level. Each type parameter is an independent axis; the
-//! marker in each slot decides whether that axis is enforced, and the universal
-//! [`Any`] marker turns an axis off. A specific flavor is a type alias filling in
-//! the markers it cares about.
-//!
-//! Scope: this module reasons about the path *string* only - it never touches the
-//! filesystem. Existence, file type, ownership, and mode are deliberately NOT
-//! here: checked by name they are time-of-check-to-time-of-use races (a `stat`
-//! result is stale the instant you act on the name), so calling them "safe" would
-//! be a footgun. Those belong on a verified file descriptor (`open` once with
-//! `O_NOFOLLOW`, `fstat`, then operate through that same fd) - a separate concern
-//! for a future `safe_file` module. `SafePath` is the cheap, may-not-exist
-//! front gate, not the airtight boundary.
-//!
-//! Mechanism (option B): one trait per axis, implemented by the markers valid for
-//! that axis (plus `Any`). The position of each parameter therefore enforces at
-//! compile time that, e.g., slot `A` is an absoluteness choice. Validation runs
-//! every axis and reports the first failure via one shared [`ValidationError`];
-//! there is no per-combination error type (Rust cannot synthesise one), so every
-//! flavor funnels through one enum and simply never produces variants it does not
-//! check.
-
-// Flavors are wired into the tools incrementally; drop once each is used.
-#![allow(dead_code)]
 
 use std::marker::PhantomData;
 use std::path::{Component, Path, PathBuf};
