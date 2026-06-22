@@ -24,15 +24,16 @@ defmodule Hyper.Node.FireVMM do
   def cpu_period, do: Unit.Time.ms(100)
 
   defmodule Opts do
-    @moduledoc "Options to pass into the jailer command."
+    @moduledoc "Per-VM request: instance size + architecture, isolation ids, and boot source."
 
-    defstruct [:vm_id, :uid, :gid, :type, :source]
+    defstruct [:vm_id, :uid, :gid, :type, :arch, :source]
 
     @type t :: %__MODULE__{
             vm_id: Hyper.Vm.id(),
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
             type: Hyper.Vm.Instance.t(),
+            arch: Hyper.Vm.Instance.arch(),
             source: Hyper.Vm.source()
           }
   end

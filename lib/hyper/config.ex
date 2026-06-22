@@ -11,6 +11,7 @@ defmodule Hyper.Config do
   # dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
   # Standardised repo-wide; deltas must be created with this chunk size.
   @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
+  @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
   @doc "Root work directory for this node. All firecracker paths derive from it."
   @spec work_dir :: Path.t()
@@ -96,4 +97,12 @@ defmodule Hyper.Config do
   @doc "dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB)."
   @spec chunk_sectors :: pos_integer()
   def chunk_sectors, do: @chunk_sectors
+
+  @doc """
+  Per-architecture vmlinux (guest kernel) image paths, keyed by `Sys.Arch.t()`.
+  The operator places the kernels on the host and points these at them;
+  `Hyper.Node.Vmlinux` resolves and validates them per node.
+  """
+  @spec vmlinux :: %{optional(Sys.Arch.t()) => Path.t()}
+  def vmlinux, do: @vmlinux
 end

@@ -30,6 +30,9 @@ defmodule Hyper.Vm.Instance do
           | :giga
           | :tera
 
+  @typedoc "The CPU architecture an instance's guest runs on."
+  @type arch :: Sys.Arch.t()
+
   @specs %{
     micro: %Spec{
       vcpus: 0.25,
@@ -113,6 +116,10 @@ defmodule Hyper.Vm.Instance do
   @doc "All known instance types."
   @spec types() :: [t()]
   def types, do: Map.keys(@specs)
+
+  @doc "All supported instance architectures."
+  @spec arches() :: [arch()]
+  def arches, do: [:x86_64, :aarch64]
 
   @doc """
   The full resource bundle for a `type`. `vcpus` and `mem` feed both the cgroup
