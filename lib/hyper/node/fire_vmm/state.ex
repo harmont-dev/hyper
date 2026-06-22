@@ -53,7 +53,7 @@ defmodule Hyper.Node.FireVMM.State do
         }
 
   # How long to wait for the daemon's API to come up before failing the boot.
-  @ready_timeout Time.s(10)
+  @ready_timeout Time.s(5)
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
