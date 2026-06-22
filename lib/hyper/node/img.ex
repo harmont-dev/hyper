@@ -5,6 +5,7 @@ defmodule Hyper.Node.Img do
 
     * a unique `Registry` (`img_id -> Img.Server`), and
     * a `DynamicSupervisor` holding the (shared, read-only) image servers.
+    * a `ThinPool`, per node, which manages each `dm-thin` instance on this machine.
 
   On top of that tree it leases an image for the lifetime of a VM
   (`with_image/3`).
