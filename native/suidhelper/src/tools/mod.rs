@@ -10,10 +10,10 @@ mod losetup;
 pub(crate) mod mknod;
 pub(crate) mod stage;
 
-pub use blockdev::{Blockdev, BlockdevArgs, BlockdevOut};
-pub use chroot_jail::{ChrootJailOp, PrepareOut, RemoveOut};
-pub use dmsetup::{Dmsetup, DmsetupArgs, DmsetupOut};
-pub use losetup::{Losetup, LosetupArgs, LosetupOut};
+pub use blockdev::{Blockdev, BlockdevArgs};
+pub use chroot_jail::ChrootJailOp;
+pub use dmsetup::{Dmsetup, DmsetupArgs};
+pub use losetup::{Losetup, LosetupArgs};
 
 use crate::safe_bin::SafeBin;
 use crate::setuid_privileged::{self, Privileged};
@@ -34,21 +34,10 @@ pub enum Error {
     Tool(Box<dyn std::error::Error>),
 }
 
-/// The typed result of running a tool, ready to be serialized by the caller.
-/// Untagged so each tool's own output shape is emitted verbatim.
-#[derive(Serialize)]
-#[serde(untagged)]
-pub enum ToolOutput {
-    Losetup(LosetupOut),
-    Dmsetup(DmsetupOut),
-    Blockdev(BlockdevOut),
-    Prepare(PrepareOut),
-    Remove(RemoveOut),
-}
-
 /// A device tool: the clap args it accepts, the result type it produces, and how
 /// to run it. `run` performs the operation (invoking the real binary) and returns
-/// a serializable result - no argv is exposed to the caller.
+/// the result already serialized to a `serde_json::Value` - no argv is exposed to
+/// the caller, and the dispatcher needs no per-tool sum type.
 pub trait IsTool {
     type Args: clap::Args;
     type Output: Serialize;
@@ -64,15 +53,17 @@ pub trait IsTool {
 
     /// The privilege boundary: `run_privileged` executes as root inside the
     /// `Privileged` guard's scope; the guard drops privileges to the real uid
-    /// when it falls out of scope, so `parse` never runs as root. The root window
-    /// is exactly the one `run_privileged` call.
-    fn run(&self) -> Result<Self::Output, Error> {
+    /// when it falls out of scope, so `parse` (and serialization) never run as
+    /// root. The root window is exactly the one `run_privileged` call. Serializes
+    /// the parsed output to a `Value` so every tool returns one common type.
+    fn run(&self) -> Result<serde_json::Value, Error> {
         let res = {
             let _privileged = Privileged::acquire()?;
             self.run_privileged()
         };
 
-        self.parse(res).map_err(Error::Tool)
+        let output = self.parse(res).map_err(Error::Tool)?;
+        serde_json::to_value(output).map_err(|e| Error::Tool(Box::new(e)))
     }
 }
 
@@ -109,22 +100,14 @@ pub enum Tool {
 }
 
 impl Tool {
-    /// Hand off to `finish`, which keeps the root window as small as possible:
-    /// only the tool's `run` executes as root; privileges are dropped before its
-    /// `post` parses the result. The `--bin` is already validated (it is a
-    /// `SafeBin`, constructed only by its value parser).
-    pub fn run(self) -> Result<ToolOutput, Error> {
+    /// Dispatch to the selected tool's `run` (or, for `chroot-jail`, its nested
+    /// op), returning its already-serialized `Value`. The `--bin` is already
+    /// validated (it is a `SafeBin`, constructed only by its value parser).
+    pub fn run(self) -> Result<serde_json::Value, Error> {
         match self {
-            Tool::Losetup { bin, args } => {
-                Ok(ToolOutput::Losetup(Losetup::new(bin.into(), args).run()?))
-            }
-            Tool::Dmsetup { bin, args } => {
-                Ok(ToolOutput::Dmsetup(Dmsetup::new(bin.into(), args).run()?))
-            }
-            Tool::Blockdev { bin, args } => {
-                Ok(ToolOutput::Blockdev(Blockdev::new(bin.into(), args).run()?))
-            }
-            // `chroot-jail` is a pure dispatcher: it routes to its nested tool.
+            Tool::Losetup { bin, args } => Losetup::new(bin.into(), args).run(),
+            Tool::Dmsetup { bin, args } => Dmsetup::new(bin.into(), args).run(),
+            Tool::Blockdev { bin, args } => Blockdev::new(bin.into(), args).run(),
             Tool::ChrootJail { op } => op.run(),
         }
     }

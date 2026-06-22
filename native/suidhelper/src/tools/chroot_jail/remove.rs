@@ -61,8 +61,8 @@ pub enum RemoveOut {
     Removed,
 }
 
-/// Run the `remove` op in its own privileged scope.
-pub fn run(args: RemoveArgs) -> Result<RemoveOut, crate::tools::Error> {
+/// Run the `remove` op in its own privileged scope (returns its serialized `Value`).
+pub fn run(args: RemoveArgs) -> Result<serde_json::Value, crate::tools::Error> {
     Remove { args }.run()
 }
 

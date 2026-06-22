@@ -50,11 +50,12 @@ enum Command {
 }
 
 /// The serializable result of a command, emitted as the JSON line on stdout.
-/// Untagged so each command's own output shape is printed verbatim.
+/// Untagged so each command's own output shape is printed verbatim. Tools already
+/// serialize themselves to a `Value`; `sys-test` carries its own struct.
 #[derive(Serialize)]
 #[serde(untagged)]
 enum Output {
-    Tool(tools::ToolOutput),
+    Tool(serde_json::Value),
     SysTest(SysTest),
 }
 
@@ -75,7 +76,7 @@ fn main() {
     // Privileges are already dropped to the real uid by a pre-main constructor
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
     // Each command yields a serializable value (errors stringified to unify); we
-    // serialize it here so the tools never touch JSON.
+    // render the final JSON line here.
     let output = match Cli::parse().command {
         Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
         Command::SysTest => SysTest::perform().map(Output::SysTest).map_err(|e| e.to_string()),

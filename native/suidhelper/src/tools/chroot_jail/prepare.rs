@@ -67,8 +67,8 @@ pub enum PrepareOut {
     Prepared,
 }
 
-/// Run the `prepare` op in its own privileged scope.
-pub fn run(args: PrepareArgs) -> Result<PrepareOut, crate::tools::Error> {
+/// Run the `prepare` op in its own privileged scope (returns its serialized `Value`).
+pub fn run(args: PrepareArgs) -> Result<serde_json::Value, crate::tools::Error> {
     Prepare { args }.run()
 }
 

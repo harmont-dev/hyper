@@ -4,8 +4,8 @@
 mod prepare;
 mod remove;
 
-pub use prepare::{PrepareArgs, PrepareOut};
-pub use remove::{RemoveArgs, RemoveOut};
+pub use prepare::PrepareArgs;
+pub use remove::RemoveArgs;
 
 use clap::Subcommand;
 
@@ -18,16 +18,13 @@ pub enum ChrootJailOp {
 }
 
 impl ChrootJailOp {
-    /// Route to the selected nested tool and wrap its output. `chroot-jail` itself
-    /// carries no behaviour; each op runs in its own privileged scope.
-    pub fn run(self) -> Result<crate::tools::ToolOutput, crate::tools::Error> {
+    /// Route to the selected nested tool. `chroot-jail` itself carries no
+    /// behaviour; each op runs in its own privileged scope and returns its own
+    /// serialized `Value`.
+    pub fn run(self) -> Result<serde_json::Value, crate::tools::Error> {
         match self {
-            ChrootJailOp::Prepare(args) => {
-                Ok(crate::tools::ToolOutput::Prepare(prepare::run(args)?))
-            }
-            ChrootJailOp::Remove(args) => {
-                Ok(crate::tools::ToolOutput::Remove(remove::run(args)?))
-            }
+            ChrootJailOp::Prepare(args) => prepare::run(args),
+            ChrootJailOp::Remove(args) => remove::run(args),
         }
     }
 }
