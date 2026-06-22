@@ -79,9 +79,13 @@ jobs:
       - name: Create and migrate test DB
         env:
           MIX_ENV: test
+        # -r names the repo explicitly: ecto_repos lives in mix.exs application
+        # env (so it works when hyper is a dependency), which the ecto.* mix
+        # tasks don't discover here -- without -r they no-op and tests then hit
+        # a missing database.
         run: |
-          mix ecto.create
-          mix ecto.migrate
+          mix ecto.create -r Hyper.Img.Db.Repo
+          mix ecto.migrate -r Hyper.Img.Db.Repo
 
       - name: Test (warnings as errors)
         env:
