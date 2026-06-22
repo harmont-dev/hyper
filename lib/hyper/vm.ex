@@ -6,6 +6,7 @@ defmodule Hyper.Vm do
   # Aspirational @specs for as-yet unimplemented stubs: `fast_fork/1` only returns
   # `{:error, :not_implemented}` and `fork/1` raises, so their success typings are
   # narrower than the public contracts. Suppress until they are built out.
+  # TODO: implement fast_fork/1 and fork/1 and drop this @dialyzer suppression.
   @dialyzer {:nowarn_function, [fast_fork: 1, fork: 1]}
 
   @type t :: pid()

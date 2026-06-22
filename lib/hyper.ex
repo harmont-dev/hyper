@@ -28,6 +28,7 @@ defmodule Hyper do
   """
   # Aspirational @spec for an as-yet unimplemented stub: it raises today, so its
   # success typing is none(). Suppress the contract mismatch until it is built.
+  # TODO: implement create_vm/1 and drop this @dialyzer suppression.
   @dialyzer {:nowarn_function, create_vm: 1}
   @spec create_vm(vm_spec()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%{source: _source}), do: raise("not implemented")
