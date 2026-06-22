@@ -90,7 +90,11 @@ jobs:
       - name: Test (warnings as errors)
         env:
           MIX_ENV: test
-        run: mix test --warnings-as-errors
+        # --no-start: the app's supervision tree boots Hyper.Node, which provisions
+        # a real Firecracker host under /srv/hyper -- unavailable (and unprivileged)
+        # on a CI runner. This matches how the suite is run in development; tests
+        # that need the Repo start it themselves against the DB created above.
+        run: mix test --no-start --warnings-as-errors
 
       - name: Dialyzer
         run: mix dialyzer
