@@ -1,40 +1,33 @@
 defmodule Hyper.Node.FireVMM.State do
   @moduledoc """
-  `:gen_statem` controller for one microVM. Owns the firecracker daemon's
-  lifecycle: launches it into the per-VM `DynamicSupervisor`, monitors it, and
-  decides what happens when it dies. The boot protocol is modelled as states (not
-  a blocking call) so the controller stays responsive to daemon death and `stop`
-  while a VM comes up.
+  `:gen_statem` controller for one microVM. It drives the boot protocol against a
+  daemon whose lifecycle is owned by the supervisor (`Hyper.Node.FireVMM.Core`,
+  `:one_for_all`): the controller does not launch, monitor, or kill the daemon -
+  if firecracker dies, `Core` restarts the daemon and this controller together,
+  and `init` simply cold-boots again.
 
-      :booting --> :awaiting_api --> :staging --> :configuring --> :running <-> :paused --> :stopping
-          ^             |                  |
-          +- :crashed <-+------------------+   (daemon died / never came up; recover)
+      :awaiting_api --> :staging --> :configuring --> :running <-> :paused --> :stopping
 
   States:
 
-    * `:booting`      - resolve the boot spec, launch the jailed daemon, monitor
-                        it.
-    * `:awaiting_api` - poll the daemon's API socket until it answers (or the
-                        readiness deadline lapses), then `:staging`.
+    * `:awaiting_api` - poll the (already-launched) daemon's API socket until it
+                        answers, or fail the boot if the readiness deadline lapses.
     * `:staging`      - stage the kernel + rootfs device into the jail chroot and
                         rewrite the spec to in-jail paths.
     * `:configuring`  - push machine-config, boot-source, drives, NICs, then
                         `InstanceStart`.
     * `:running`      - guest is live; handles `pause`/`stop`.
     * `:paused`       - guest paused; handles `resume`/`stop`.
-    * `:stopping`     - tearing down; daemon death is expected and ignored.
-    * `:crashed`      - daemon died unexpectedly; after a delay, recover back to
-                        `:booting`.
+    * `:stopping`     - teardown requested in-band; reject further calls.
 
   Uses `:handle_event_function` mode: each state's events live in a nested
-  submodule (`Booting`, `AwaitingApi`, ...) that `handle_event/4` dispatches to -
-  except daemon death, one shared clause across every live state. Each step does
-  one short thing and returns to the gen_statem loop; API structs come from
-  `Hyper.Node.FireVMM.BootSpec` and every call goes through the per-VM `Client`.
+  submodule (`AwaitingApi`, `Staging`, ...) that `handle_event/4` dispatches to.
+  Each step does one short thing and returns to the gen_statem loop; API structs
+  come from `Hyper.Node.FireVMM.BootSpec` and every call goes through the per-VM
+  `Client`.
 
-  The gen_statem *data* (this struct) holds the start `Opts` plus runtime fields
-  (daemon + monitor, resolved boot spec, readiness deadline); the *state* is the
-  lifecycle atom above.
+  The gen_statem *data* (this struct) holds the start `Opts`, the resolved boot
+  spec, and the readiness deadline; the *state* is the lifecycle atom above.
   """
 
   @behaviour :gen_statem
@@ -42,14 +35,11 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.BootSpec
   alias Hyper.Node.FireVMM.Opts
   alias Hyper.Node.FireVMM.State
-  alias Hyper.Node.FireVMM.State.Daemon
   alias Unit.Time
 
   alias __MODULE__.{
     AwaitingApi,
-    Booting,
     Configuring,
-    Crashed,
     Paused,
     Running,
     Staging,
@@ -57,18 +47,16 @@ defmodule Hyper.Node.FireVMM.State do
   }
 
   @enforce_keys [:opts]
-  defstruct [:opts, :daemon, :daemon_ref, :spec, :boot_deadline]
+  defstruct [:opts, :spec, :boot_deadline]
 
   @type t :: %State{
           opts: Opts.t(),
-          daemon: pid() | nil,
-          daemon_ref: reference() | nil,
           spec: BootSpec.Cold.t() | nil,
           boot_deadline: integer() | nil
         }
 
-  # Delay before a crashed VM tries to recover (cold boot).
-  @recover_delay Time.s(1)
+  # How long to wait for the daemon's API to come up before failing the boot.
+  @ready_timeout Time.s(10)
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
@@ -99,102 +87,38 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @impl :gen_statem
-  def init(%Opts{} = opts) do
-    {:ok, :booting, %State{opts: opts}, [{:state_timeout, 0, :launch}]}
+  # The daemon is already (being) started by `Core` as our sibling. Resolve the
+  # boot spec, set the readiness deadline, and start probing the API.
+  def init(%Opts{source: source, type: type} = opts) do
+    spec = BootSpec.resolve(source, type)
+    deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
+    data = %State{opts: opts, spec: spec, boot_deadline: deadline}
+
+    {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
   end
 
   @impl :gen_statem
-  # Daemon death in any live state -> crashed, then recover. One clause for every
-  # state instead of one per state; excluded while :stopping, where teardown is
-  # already underway (and in :booting/:crashed `daemon_ref` is nil, so the ref
-  # match can't fire there anyway).
-  def handle_event(
-        :info,
-        {:DOWN, ref, :process, _pid, _reason},
-        state,
-        %State{daemon_ref: ref} = data
-      )
-      when state != :stopping do
-    {:next_state, :crashed, %{data | daemon: nil, daemon_ref: nil},
-     [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
-  end
-
   def handle_event(type, content, state, data) do
     module =
       case state do
-        :booting -> Booting
         :awaiting_api -> AwaitingApi
         :staging -> Staging
         :configuring -> Configuring
         :running -> Running
         :paused -> Paused
-        :crashed -> Crashed
         :stopping -> Stopping
       end
 
     module.handle(type, content, data)
   end
 
-  @impl :gen_statem
-  # Always take the daemon down with us. `:one_for_all` on `Core` would discard
-  # the daemon container on a controller crash anyway (and MuonTrap kills the OS
-  # process when its port closes), so this is the ordered, explicit teardown for
-  # graceful stops and a belt-and-suspenders kill on crashes where terminate runs.
-  def terminate(_reason, _state, %State{opts: %Opts{vm_id: id}, daemon: daemon}) do
-    if daemon, do: Daemon.stop(id, daemon)
-    :ok
-  end
-
   defp via(id) do
     Hyper.Cluster.Routing.via({id, :state})
   end
 
-  defmodule Booting do
-    @moduledoc """
-    Resolve the boot spec, launch the jailed firecracker daemon and monitor it,
-    then advance to `:awaiting_api` with a readiness deadline. An early `stop`
-    short-circuits to `:stopping`; pause/resume are rejected (the guest is not
-    running yet).
-    """
-
-    alias Hyper.Node.FireVMM.{BootSpec, Opts}
-    alias Hyper.Node.FireVMM.State.Daemon
-    alias Unit.Time
-
-    # How long to wait for the daemon's API to come up.
-    @ready_timeout Time.s(10)
-
-    # Resolve the boot spec, launch the daemon and monitor it, then start waiting
-    # for its API.
-    def handle(:state_timeout, :launch, %{opts: %Opts{source: source, type: type} = opts} = data) do
-      pid = Daemon.start(opts)
-      spec = BootSpec.resolve(source, type)
-      deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
-
-      data = %{
-        data
-        | spec: spec,
-          daemon: pid,
-          daemon_ref: Process.monitor(pid),
-          boot_deadline: deadline
-      }
-
-      {:next_state, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
-    end
-
-    # A caller may stop (or try to pause/resume) before the launch timeout fires.
-    def handle({:call, from}, :stop, data) do
-      {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
-      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
-    end
-  end
-
   defmodule AwaitingApi do
     @moduledoc """
-    Poll the freshly launched daemon's API socket until it answers, then advance
+    Poll the (already-launched) daemon's API socket until it answers, then advance
     to `:staging`. If the readiness deadline lapses before the API responds, the
     boot fails.
     """
@@ -219,6 +143,39 @@ defmodule Hyper.Node.FireVMM.State do
           else
             {:keep_state_and_data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
           end
+      end
+    end
+
+    def handle({:call, from}, :stop, data) do
+      {:next_state, :stopping, data, [{:reply, from, :ok}]}
+    end
+
+    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
+      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+    end
+  end
+
+  defmodule Staging do
+    @moduledoc """
+    Stage the kernel file and rootfs block device into the jail chroot, rewrite
+    the boot spec to the in-jail paths (`BootSpec.jailify/3`), then advance to
+    `:configuring`. Staging failure fails the boot.
+    """
+
+    alias Hyper.Node.FireVMM.{BootSpec, Opts}
+    alias Hyper.Node.FireVMM.Jail.Stage
+
+    # Stage the kernel + rootfs device into the chroot, then rewrite the boot
+    # spec to the in-jail paths and proceed to configuring.
+    def handle(:state_timeout, :stage, %{opts: %Opts{} = opts, spec: spec} = data) do
+      %Opts{vm_id: id, uid: uid, gid: gid, source: source} = opts
+
+      with {:ok, jail_kernel} <- Stage.kernel(id, uid, gid, source.kernel_image_path),
+           {:ok, jail_root} <- Stage.root_drive(id, uid, gid, source.root_drive_path) do
+        data = %{data | spec: BootSpec.jailify(spec, jail_kernel, jail_root)}
+        {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+      else
+        {:error, reason} -> {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
       end
     end
 
@@ -348,71 +305,12 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
-  defmodule Crashed do
-    @moduledoc """
-    The daemon died unexpectedly. After a short recover delay, return to
-    `:booting` for a cold boot. A `stop` arriving before the delay fires
-    short-circuits to `:stopping`.
-    """
-
-    def handle(:state_timeout, :recover, data) do
-      {:next_state, :booting, data, [{:state_timeout, 0, :launch}]}
-    end
-
-    # A call can arrive before the recover timeout fires.
-    def handle({:call, from}, :stop, data) do
-      {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
-      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
-    end
-  end
-
-  defmodule Staging do
-    @moduledoc """
-    Stage the kernel file and rootfs block device into the jail chroot, rewrite
-    the boot spec to the in-jail paths (`BootSpec.jailify/3`), then advance to
-    `:configuring`. Staging failure fails the boot.
-    """
-
-    alias Hyper.Node.FireVMM.{BootSpec, Opts}
-    alias Hyper.Node.FireVMM.Jail.Stage
-
-    # Stage the kernel + rootfs device into the chroot, then rewrite the boot
-    # spec to the in-jail paths and proceed to configuring.
-    def handle(:state_timeout, :stage, %{opts: %Opts{} = opts, spec: spec} = data) do
-      %Opts{vm_id: id, uid: uid, gid: gid, source: source} = opts
-
-      with {:ok, jail_kernel} <- Stage.kernel(id, uid, gid, source.kernel_image_path),
-           {:ok, jail_root} <- Stage.root_drive(id, uid, gid, source.root_drive_path) do
-        data = %{data | spec: BootSpec.jailify(spec, jail_kernel, jail_root)}
-        {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
-      else
-        {:error, reason} -> {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
-      end
-    end
-
-    def handle({:call, from}, :stop, data) do
-      {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
-      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
-    end
-  end
-
   defmodule Stopping do
     @moduledoc """
-    Teardown is underway (the controller is terminating; `terminate/2` takes the
-    daemon down). Expected daemon death is ignored here, and any caller request is
-    rejected with `{:error, :stopping}`.
+    Teardown was requested in-band (`stop/1`). The actual teardown is
+    supervisor-driven (the node terminates the VM tree); here we just reject any
+    further calls with `{:error, :stopping}`.
     """
-
-    # Daemon death during teardown is expected; ignore it (we're already stopping).
-    def handle(:info, {:DOWN, _ref, :process, _pid, _reason}, _data) do
-      :keep_state_and_data
-    end
 
     def handle({:call, from}, _event, _data) do
       {:keep_state_and_data, [{:reply, from, {:error, :stopping}}]}

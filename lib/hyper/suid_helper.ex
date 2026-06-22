@@ -250,6 +250,21 @@ defmodule Hyper.SuidHelper do
   end
 
   @doc """
+  Remove a VM's stale jail before (re)launch: recursively delete the per-VM
+  chroot dir and rmdir its (empty) cgroup leaf. Idempotent - a first boot with
+  no prior state is a no-op. The helper confines `chroot` under the jail base and
+  `cgroup` under `/sys/fs/cgroup` (see `native/suidhelper`).
+  """
+  @spec reset_jail(Path.t(), Path.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.reset_jail", include: [:chroot, :cgroup])
+  def reset_jail(chroot, cgroup) do
+    case exec(["reset-jail", "--chroot", chroot, "--cgroup", cgroup]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Run the helper's `sys-test` subcommand. Returns `{:ok, hyper_base}` where
   `hyper_base` is the work-dir the helper was compiled against.
   """

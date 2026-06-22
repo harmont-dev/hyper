@@ -126,10 +126,26 @@ defmodule Hyper.Node.FireVMM.Jailer do
     |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 
+  @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
+  @spec chroot_dir(String.t() | integer()) :: Path.t()
+  def chroot_dir(id) do
+    Path.join([Hyper.Config.chroot_base(), exec_name(), to_string(id)])
+  end
+
   @doc "Host path of the VM's chroot root (`<chroot_base>/<exec>/<id>/root`)."
   @spec chroot_root(String.t() | integer()) :: Path.t()
   def chroot_root(id) do
-    Path.join([Hyper.Config.chroot_base(), exec_name(), to_string(id), "root"])
+    Path.join(chroot_dir(id), "root")
+  end
+
+  @doc """
+  Host path of the VM's cgroup leaf (`/sys/fs/cgroup/<parent>/<exec>/<id>`), the
+  cgroup the jailer creates for firecracker. Reconstructed (the jailer owns its
+  placement) so a relaunch can clear the stale leaf left by a prior incarnation.
+  """
+  @spec cgroup_dir(String.t() | integer()) :: Path.t()
+  def cgroup_dir(id) do
+    Path.join(["/sys/fs/cgroup", Hyper.Config.parent_cgroup(), exec_name(), to_string(id)])
   end
 
   @doc """
