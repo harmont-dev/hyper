@@ -2,11 +2,16 @@
 //! Typestate-validated filesystem paths.
 //!
 //! A [`SafePath`] is a `PathBuf` that has passed a set of checks chosen at the
-//! *type* level. Each of the six type parameters is an independent axis of
+//! *type* level. Each of the seven type parameters is an independent axis of
 //! safety; the marker in each slot decides whether that axis is enforced. The
 //! universal [`Any`] marker turns an axis off, so a fully-unchecked path is
-//! `SafePath<Any, Any, Any, Any, Any, Any>` and a specific flavor is a type
+//! `SafePath<Any, Any, Any, Any, Any, Any, Any>` and a specific flavor is a type
 //! alias that fills in the markers it cares about.
+//!
+//! Six axes are pure type-level markers. The seventh, confinement
+//! ([`LivesUnder`]), carries a runtime base value, so it is supplied to the
+//! constructor ([`SafePath::under`]) rather than chosen purely by type - a
+//! `&Path` cannot be a type parameter.
 //!
 //! Mechanism (option B): one trait per axis, implemented by the markers valid
 //! for that axis (plus `Any`). The position of each parameter therefore enforces
@@ -48,6 +53,8 @@ pub enum ValidationError {
     NotRootOwned,
     #[error("writable by group or other")]
     NonRootWritable,
+    #[error("path is not under its required base directory")]
+    OutsideBase,
     #[error("could not stat path: {0}")]
     Stat(#[source] std::io::Error),
 }
@@ -68,10 +75,12 @@ pub struct RootOwner;
 /// Mode axis: require the file not be writable by group or other.
 pub struct OnlyRootWritable;
 
-// ── One trait per axis ──────────────────────────────────────────────────────
-//
-// Lexical axes inspect the path; state axes inspect the (optional) metadata and
-// advertise via `NEEDS_META` whether a `stat` must be taken at all.
+/// Confinement axis: require the path to live under `base`. Unlike the other
+/// markers this one carries a *value* (the base), because the base is runtime
+/// data - a `&Path` cannot be a type-level parameter, only its lifetime can. So
+/// it is supplied to the constructor (see [`SafePath::under`]) rather than picked
+/// purely by type.
+pub struct LivesUnder<'a>(pub &'a Path);
 
 /// Absoluteness axis.
 pub trait Absoluteness {
@@ -107,7 +116,10 @@ pub trait Writability {
     fn check(meta: Option<&Metadata>) -> Result<(), ValidationError>;
 }
 
-// ── `Any` turns every axis off ──────────────────────────────────────────────
+/// Confinement axis. `&self` because the marker carries the base value.
+pub trait Confinement {
+    fn check(&self, path: &Path) -> Result<(), ValidationError>;
+}
 
 impl Absoluteness for Any {
     fn check(_: &Path) -> Result<(), ValidationError> {
@@ -143,8 +155,11 @@ impl Writability for Any {
         Ok(())
     }
 }
-
-// ── The concrete checks ─────────────────────────────────────────────────────
+impl Confinement for Any {
+    fn check(&self, _: &Path) -> Result<(), ValidationError> {
+        Ok(())
+    }
+}
 
 impl Absoluteness for IsAbsolute {
     fn check(path: &Path) -> Result<(), ValidationError> {
@@ -211,10 +226,23 @@ impl Writability for OnlyRootWritable {
     }
 }
 
-/// A `PathBuf` proven to satisfy the six axes named by its type parameters.
-pub struct SafePath<A, S, M, I, R, O>(PathBuf, PhantomData<(A, S, M, I, R, O)>);
+impl Confinement for LivesUnder<'_> {
+    // Lexical prefix only. For a may-not-exist leaf this is the cheap first gate;
+    // the race-proof boundary is the O_NOFOLLOW parent walk (a method), and for a
+    // must-exist path, combine with canonicalisation before trusting the prefix.
+    fn check(&self, path: &Path) -> Result<(), ValidationError> {
+        if path.starts_with(self.0) {
+            Ok(())
+        } else {
+            Err(ValidationError::OutsideBase)
+        }
+    }
+}
 
-impl<A, S, M, I, R, O> SafePath<A, S, M, I, R, O>
+/// A `PathBuf` proven to satisfy the seven axes named by its type parameters.
+pub struct SafePath<A, S, M, I, R, O, C>(PathBuf, PhantomData<(A, S, M, I, R, O, C)>);
+
+impl<A, S, M, I, R, O, C> SafePath<A, S, M, I, R, O, C>
 where
     A: Absoluteness,
     S: Components,
@@ -222,12 +250,15 @@ where
     I: FileType,
     R: Ownership,
     O: Writability,
+    C: Confinement,
 {
     /// Validate `path` against every enforced axis, returning the first failure.
-    pub fn validate(path: PathBuf) -> Result<Self, ValidationError> {
+    /// `confine` carries the confinement axis's runtime base (use `Any` for none).
+    fn validate(path: PathBuf, confine: C) -> Result<Self, ValidationError> {
         // Lexical axes first - cheap, no syscall.
         A::check(&path)?;
         S::check(&path)?;
+        confine.check(&path)?;
 
         // One `stat` iff a state axis is enforced. `lstat`, so a symlinked leaf
         // is judged as a symlink (and rejected by IsRegularFile).
@@ -249,20 +280,32 @@ where
 
         Ok(Self(path, PhantomData))
     }
+}
 
-    /// The validated path.
-    pub fn as_path(&self) -> &Path {
-        &self.0
+/// Confined constructor: validate `path` under `base` (the `LivesUnder` axis).
+impl<'a, A, S, M, I, R, O> SafePath<A, S, M, I, R, O, LivesUnder<'a>>
+where
+    A: Absoluteness,
+    S: Components,
+    M: Existence,
+    I: FileType,
+    R: Ownership,
+    O: Writability,
+{
+    pub fn under(path: PathBuf, base: &'a Path) -> Result<Self, ValidationError> {
+        Self::validate(path, LivesUnder(base))
     }
 }
 
-impl<A, S, M, I, R, O> AsRef<Path> for SafePath<A, S, M, I, R, O> {
+impl<A, S, M, I, R, O, C> AsRef<Path> for SafePath<A, S, M, I, R, O, C> {
     fn as_ref(&self) -> &Path {
         &self.0
     }
 }
 
-impl<A, S, M, I, R, O> TryFrom<PathBuf> for SafePath<A, S, M, I, R, O>
+/// Unconfined entry point: every axis but confinement is type-selected, and
+/// confinement is off (`Any`), so no base value is needed.
+impl<A, S, M, I, R, O> TryFrom<PathBuf> for SafePath<A, S, M, I, R, O, Any>
 where
     A: Absoluteness,
     S: Components,
@@ -274,6 +317,6 @@ where
     type Error = ValidationError;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        Self::validate(path)
+        Self::validate(path, Any)
     }
 }
