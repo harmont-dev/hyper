@@ -13,6 +13,7 @@ defmodule Hyper.Node.Img do
 
   alias Hyper.Img.Db
   alias Hyper.Node.Img.Server
+  alias Hyper.Node.Img.ThinPool
 
   @registry Hyper.Node.Img.Registry
   @server_sup Hyper.Node.Img.Supervisor
@@ -25,6 +26,7 @@ defmodule Hyper.Node.Img do
   def init(_opts) do
     children = [
       {Registry, keys: :unique, name: @registry},
+      ThinPool,
       {DynamicSupervisor, strategy: :one_for_one, name: @server_sup}
     ]
 
