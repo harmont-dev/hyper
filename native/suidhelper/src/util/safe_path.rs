@@ -7,7 +7,7 @@ use thiserror::Error as ThisError;
 
 /// The single error type shared by every `SafePath` flavor. A given flavor only
 /// ever yields the variants for the axes it actually enforces.
-#[derive(Debug, ThisError)]
+#[derive(Debug, Clone, Copy, ThisError)]
 pub enum ValidationError {
     #[error("path is not absolute")]
     NotAbsolute,

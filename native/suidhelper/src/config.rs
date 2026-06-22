@@ -2,7 +2,7 @@
 //! Runtime host configuration, read from a single root-owned TOML file.
 
 use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
-use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::fcntl::OFlag;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -11,12 +11,12 @@ use thiserror::Error;
 
 #[derive(Debug, Copy, Clone, Error)]
 pub enum LoadingError {
-    #[error("{0:?} does not exist or is unreadable")]
-    MissingFile(&'static Path),
-    #[error("{0:?} is owned by someone other than root:root")]
-    BadOwner(&'static Path),
-    #[error("{0:?} is writable by non-owners")]
-    BadMode(&'static Path),
+    #[error(transparent)]
+    Path(#[from] safe_path::ValidationError),
+    #[error(transparent)]
+    File(#[from] safe_file::ValidationError),
+    #[error("{0:?} could not be read")]
+    Unreadable(&'static Path),
     #[error("{0:?} is not valid TOML")]
     Malformed(&'static Path),
     #[error("work_dir in {0:?} must be an absolute path")]
@@ -70,32 +70,20 @@ impl Config {
         // writable by others - i.e. only root could have authored it. Read through
         // that same fd, so the checks ride the descriptor we use (no TOCTOU
         // re-resolve).
-        let safe_path: SafePath<IsAbsolute, StrictComponents> = PathBuf::from(CONFIG_PATHSTR)
-            .try_into()
-            .map_err(|_| LoadingError::MissingFile(path))?;
+        let safe_path: SafePath<IsAbsolute, StrictComponents> =
+            PathBuf::from(CONFIG_PATHSTR).try_into()?;
 
         let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-            SafeFile::open(&safe_path, OFlag::O_RDONLY).map_err(|e| from_validation(e, path))?;
+            SafeFile::open(&safe_path, OFlag::O_RDONLY)?;
 
         let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
-            .map_err(|_| LoadingError::MissingFile(path))?;
+            .map_err(|_| LoadingError::Unreadable(path))?;
         let config: Config = toml::from_str(&body).map_err(|_| LoadingError::Malformed(path))?;
 
         if !config.work_dir.is_absolute() {
             return Err(LoadingError::Relative(path));
         }
         Ok(config)
-    }
-}
-
-/// Map a `SafeFile` open/verify failure onto this module's `LoadingError`,
-/// preserving the original buckets (bad owner/type vs bad mode vs unreadable).
-fn from_validation(e: safe_file::ValidationError, path: &'static Path) -> LoadingError {
-    use safe_file::ValidationError as V;
-    match e {
-        V::Open(_) | V::Fstat(_) => LoadingError::MissingFile(path),
-        V::WrongFileType | V::NotRootOwned => LoadingError::BadOwner(path),
-        V::NonRootWritable => LoadingError::BadMode(path),
     }
 }
 

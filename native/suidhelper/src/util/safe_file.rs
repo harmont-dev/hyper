@@ -23,7 +23,7 @@ use thiserror::Error as ThisError;
 
 /// The single error type shared by every `SafeFile` flavor. A given flavor only
 /// ever yields the variants for the axes it actually enforces.
-#[derive(Debug, ThisError)]
+#[derive(Debug, Clone, Copy, ThisError)]
 pub enum ValidationError {
     #[error("open failed: {0}")]
     Open(#[source] nix::Error),
