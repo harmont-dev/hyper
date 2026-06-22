@@ -31,6 +31,7 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.State
   alias Hyper.Node.FireVMM.State.Daemon
+  alias Unit.Time
 
   @typedoc "A closure that runs one generated API operation, returning its result."
   @type run :: ((keyword() -> term()) -> term())
@@ -68,24 +69,38 @@ defmodule Hyper.Node.FireVMM.State do
         }
 
   # How long to wait for the daemon's API to come up, and how often to probe it.
-  @ready_timeout_ms 10_000
-  @probe_interval_ms 50
+  @ready_timeout Time.s(10)
+  @probe_interval Time.ms(50)
+  # Delay before a crashed VM tries to recover (cold boot / re-adopt).
+  @recover_delay Time.s(1)
 
-  def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+  def child_spec(opts) do
+    %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+  end
 
-  def start_link(%Opts{id: id} = opts), do: :gen_statem.start_link(via(id), __MODULE__, opts, [])
+  def start_link(%Opts{id: id} = opts) do
+    :gen_statem.start_link(via(id), __MODULE__, opts, [])
+  end
 
   @spec pause(String.t()) :: :ok
-  def pause(id), do: :gen_statem.call(via(id), :pause)
+  def pause(id) do
+    :gen_statem.call(via(id), :pause)
+  end
 
   @spec resume(String.t()) :: :ok
-  def resume(id), do: :gen_statem.call(via(id), :resume)
+  def resume(id) do
+    :gen_statem.call(via(id), :resume)
+  end
 
   @spec stop(String.t()) :: :ok
-  def stop(id), do: :gen_statem.call(via(id), :stop)
+  def stop(id) do
+    :gen_statem.call(via(id), :stop)
+  end
 
   @impl :gen_statem
-  def callback_mode, do: :state_functions
+  def callback_mode do
+    :state_functions
+  end
 
   @impl :gen_statem
   def init(%Opts{} = opts) do
@@ -99,17 +114,19 @@ defmodule Hyper.Node.FireVMM.State do
   # for its API.
   def booting(:state_timeout, :launch, %State{opts: %Opts{source: source, type: type}} = data) do
     data = ensure_daemon(%{data | spec: BootSpec.resolve(source, type)})
-    deadline = now() + @ready_timeout_ms
+    deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
     {:next_state, :awaiting_api, %{data | boot_deadline: deadline}, [{:state_timeout, 0, :probe}]}
   end
 
   # A caller may stop (or try to pause/resume) before the launch timeout fires;
   # handle it here so an early call can't crash the controller.
-  def booting({:call, from}, :stop, data),
-    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  def booting({:call, from}, :stop, data) do
+    {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  end
 
-  def booting({:call, from}, event, _data) when event in [:pause, :resume],
-    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  def booting({:call, from}, event, _data) when event in [:pause, :resume] do
+    {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  end
 
   # Poll the daemon's API until it answers. A re-adopted daemon (controller
   # restarted, daemon survived) may already be running its guest; re-issuing
@@ -119,27 +136,32 @@ defmodule Hyper.Node.FireVMM.State do
   def awaiting_api(:state_timeout, :probe, data) do
     case runner(data).(&Operations.describe_instance/1) do
       {:ok, info} ->
-        if instance_started?(info),
-          do: {:next_state, :running, data},
-          else: {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+        if instance_started?(info) do
+          {:next_state, :running, data}
+        else
+          {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+        end
 
       {:error, _reason} ->
-        if now() >= data.boot_deadline do
+        if System.monotonic_time(:millisecond) >= data.boot_deadline do
           {:stop, {:shutdown, {:boot_failed, :daemon_unready}}, data}
         else
-          {:keep_state_and_data, [{:state_timeout, @probe_interval_ms, :probe}]}
+          {:keep_state_and_data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
         end
     end
   end
 
-  def awaiting_api(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
-    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  def awaiting_api(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
+    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  end
 
-  def awaiting_api({:call, from}, :stop, data),
-    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  def awaiting_api({:call, from}, :stop, data) do
+    {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  end
 
-  def awaiting_api({:call, from}, event, _data) when event in [:pause, :resume],
-    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  def awaiting_api({:call, from}, event, _data) when event in [:pause, :resume] do
+    {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  end
 
   # Issue the pre-boot config and start the guest. One short blocking step of a
   # few fast calls; aborts and tears down on the first error.
@@ -150,14 +172,17 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
-  def configuring(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
-    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  def configuring(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
+    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  end
 
-  def configuring({:call, from}, :stop, data),
-    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  def configuring({:call, from}, :stop, data) do
+    {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  end
 
-  def configuring({:call, from}, event, _data) when event in [:pause, :resume],
-    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  def configuring({:call, from}, event, _data) when event in [:pause, :resume] do
+    {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  end
 
   def running({:call, from}, :pause, data) do
     case set_vm_state(runner(data), "Paused") do
@@ -166,11 +191,13 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
-  def running({:call, from}, :stop, data),
-    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  def running({:call, from}, :stop, data) do
+    {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  end
 
-  def running(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
-    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  def running(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
+    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  end
 
   def paused({:call, from}, :resume, data) do
     case set_vm_state(runner(data), "Resumed") do
@@ -179,27 +206,35 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
-  def paused(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data),
-    do: {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  def paused(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
+    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+  end
 
-  def crashed(:state_timeout, :recover, data),
-    do: {:next_state, :booting, data, [{:state_timeout, 0, :launch}]}
+  def crashed(:state_timeout, :recover, data) do
+    {:next_state, :booting, data, [{:state_timeout, 0, :launch}]}
+  end
 
   # Same as :booting: a call can arrive before the recover timeout fires.
-  def crashed({:call, from}, :stop, data),
-    do: {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  def crashed({:call, from}, :stop, data) do
+    {:next_state, :stopping, data, [{:reply, from, :ok}]}
+  end
 
-  def crashed({:call, from}, event, _data) when event in [:pause, :resume],
-    do: {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  def crashed({:call, from}, event, _data) when event in [:pause, :resume] do
+    {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+  end
 
-  def stopping({:call, from}, _event, _data),
-    do: {:keep_state_and_data, [{:reply, from, {:error, :stopping}}]}
+  def stopping({:call, from}, _event, _data) do
+    {:keep_state_and_data, [{:reply, from, {:error, :stopping}}]}
+  end
 
   @impl :gen_statem
   # Graceful stop: take the daemon down with us. Crash: leave it running so the
   # restarted controller re-adopts it (see ensure_daemon/1).
-  def terminate(reason, _state, data) do
-    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason), do: stop_daemon(data)
+  def terminate(reason, _state, %State{opts: %Opts{id: id}, daemon: daemon}) do
+    if daemon && (reason in [:normal, :shutdown] or match?({:shutdown, _}, reason)) do
+      Daemon.stop(id, daemon)
+    end
+
     :ok
   end
 
@@ -221,8 +256,13 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @spec instance_started?(map()) :: boolean()
-  defp instance_started?(%{state: state}) when state in ["Running", "Paused"], do: true
-  defp instance_started?(_), do: false
+  defp instance_started?(%{state: state}) when state in ["Running", "Paused"] do
+    true
+  end
+
+  defp instance_started?(_) do
+    false
+  end
 
   # Issue `put_fun` for each item, halting at the first error.
   @spec put_each(run(), [item], (run(), item -> :ok | {:error, term()})) :: :ok | {:error, term()}
@@ -236,34 +276,48 @@ defmodule Hyper.Node.FireVMM.State do
     end)
   end
 
-  defp drive_put(run, drive),
-    do: run.(fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
+  defp drive_put(run, drive) do
+    run.(fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
+  end
 
-  defp nic_put(run, nic),
-    do: run.(fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end)
+  defp nic_put(run, nic) do
+    run.(fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end)
+  end
 
-  defp set_vm_state(run, state),
-    do: run.(fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
+  defp set_vm_state(run, state) do
+    run.(fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
+  end
 
   # The API `run` closure for this VM: injected one (tests) or the real
   # Client-backed one, serialized through the per-VM Client GenServer.
-  defp runner(%State{opts: %Opts{run: run}}) when is_function(run, 1), do: run
-  defp runner(%State{opts: %Opts{id: id}}), do: &Client.run(Client.via(id), &1)
+  defp runner(%State{opts: %Opts{run: run}}) when is_function(run, 1) do
+    run
+  end
+
+  defp runner(%State{opts: %Opts{id: id}}) do
+    &Client.run(Client.via(id), &1)
+  end
 
   # --- daemon lifecycle ----------------------------------------------------
 
   # Launch (or re-adopt) the daemon via `Daemon`, then monitor it ourselves.
-  defp ensure_daemon(%State{opts: %Opts{id: id, binary: bin, args: args}} = data),
-    do: monitor(data, Daemon.ensure(id, bin, args))
+  defp ensure_daemon(%State{opts: %Opts{id: id, binary: bin, args: args}} = data) do
+    monitor(data, Daemon.ensure(id, bin, args))
+  end
 
-  defp stop_daemon(%State{daemon: nil}), do: :ok
-  defp stop_daemon(%State{opts: %Opts{id: id}, daemon: pid}), do: Daemon.stop(id, pid)
+  defp monitor(data, pid) do
+    %{data | daemon: pid, daemon_ref: Process.monitor(pid)}
+  end
 
-  defp monitor(data, pid), do: %{data | daemon: pid, daemon_ref: Process.monitor(pid)}
-  defp clear_daemon(data), do: %{data | daemon: nil, daemon_ref: nil}
+  defp clear_daemon(data) do
+    %{data | daemon: nil, daemon_ref: nil}
+  end
 
-  defp recover_after, do: 1_000
-  defp now, do: System.monotonic_time(:millisecond)
+  defp recover_after do
+    Time.as_ms(@recover_delay)
+  end
 
-  defp via(id), do: Hyper.Cluster.Routing.via({id, :state})
+  defp via(id) do
+    Hyper.Cluster.Routing.via({id, :state})
+  end
 end
