@@ -14,7 +14,9 @@
 //! `fstat`. Existence is NOT an axis: a `SafeFile` holds an open fd, so the file
 //! provably exists by construction.
 
-use nix::sys::stat::{fstat, FileStat, SFlag};
+use super::safe_path::SafePath;
+use nix::fcntl::{open as nix_open, OFlag};
+use nix::sys::stat::{fstat, FileStat, Mode, SFlag};
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use thiserror::Error as ThisError;
@@ -23,6 +25,8 @@ use thiserror::Error as ThisError;
 /// ever yields the variants for the axes it actually enforces.
 #[derive(Debug, ThisError)]
 pub enum ValidationError {
+    #[error("open failed: {0}")]
+    Open(#[source] nix::Error),
     #[error("file is not of the required type")]
     WrongFileType,
     #[error("file is not owned by root:root")]
@@ -127,6 +131,34 @@ impl<T, R, O> SafeFile<T, R, O> {
     /// Relinquish ownership, returning the inner [`OwnedFd`] (not closed here).
     pub fn into_owned_fd(self) -> OwnedFd {
         self.0
+    }
+}
+
+impl<T, R, O> SafeFile<T, R, O>
+where
+    T: FileType,
+    R: Ownership,
+    O: Writability,
+{
+    /// Open `path` and verify it. A successful open proves existence (you hold an
+    /// fd); the shared `fstat` then proves the type/owner/mode axes - all recorded
+    /// in the returned type. `O_NOFOLLOW` and `O_CLOEXEC` are always added, so a
+    /// symlinked final component is rejected; pass `OFlag::O_PATH` to only
+    /// identify/verify, or `OFlag::O_RDONLY` to also read the contents.
+    ///
+    /// NOTE: `O_NOFOLLOW` guards only the final component - parent directories are
+    /// still followed, so this is for paths with trusted parents (e.g. a fixed
+    /// `/etc` file). A confined tree needs the fd-by-fd parent walk instead.
+    pub fn open<A, S>(path: &SafePath<A, S>, flags: OFlag) -> Result<Self, ValidationError> {
+        let raw = nix_open(
+            path.as_ref(),
+            flags | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(ValidationError::Open)?;
+        // SAFETY: `nix_open` just handed us this fd; nobody else owns it.
+        let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+        Self::try_from(owned)
     }
 }
 
