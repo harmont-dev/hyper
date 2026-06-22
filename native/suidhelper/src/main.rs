@@ -25,13 +25,13 @@
 
 mod safe_bin;
 mod safe_dev;
-mod setuid_privileged;
 mod tools;
+mod util;
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use setuid_privileged::Privileged;
 use tools::Tool;
+use util::setuid_privileged::{self, Privileged};
 
 #[derive(Parser)]
 #[command(name = "hyper-suidhelper", about = "Privileged device helper for the Hyper node")]

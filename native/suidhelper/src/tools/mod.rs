@@ -16,7 +16,7 @@ pub use dmsetup::{Dmsetup, DmsetupArgs};
 pub use losetup::{Losetup, LosetupArgs};
 
 use crate::safe_bin::SafeBin;
-use crate::setuid_privileged::{self, Privileged};
+use crate::util::setuid_privileged::{self, Privileged};
 use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
