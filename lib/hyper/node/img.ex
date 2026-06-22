@@ -14,6 +14,7 @@ defmodule Hyper.Node.Img do
   alias Hyper.Img.Db
   alias Hyper.Node.Img.Server
   alias Hyper.Node.Img.ThinPool
+  alias Hyper.Node.Img.Writable
 
   @registry Hyper.Node.Img.Registry
   @server_sup Hyper.Node.Img.Supervisor
@@ -44,6 +45,15 @@ defmodule Hyper.Node.Img do
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, _} = err -> err
     end
+  end
+
+  @doc "Start a per-VM writable layer for `vm_id` over `img_id`."
+  @spec start_writable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
+  def start_writable(img_id, vm_id) do
+    DynamicSupervisor.start_child(
+      @server_sup,
+      {Writable, %Writable.Opts{img_id: img_id, vm_id: vm_id}}
+    )
   end
 
   @doc "Every image id currently active on this node."
