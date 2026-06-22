@@ -6,6 +6,17 @@ defmodule Hyper.Vm do
   @type t :: pid()
   @type id :: String.t()
 
+  @typedoc """
+  What a VM boots from: explicit, already-jail-visible artifact paths for a cold
+  boot (kernel + root drive). `boot_args` defaults to a standard serial-console
+  cmdline when omitted.
+  """
+  @type source :: %{
+          required(:kernel_image_path) => Path.t(),
+          required(:root_drive_path) => Path.t(),
+          optional(:boot_args) => String.t()
+        }
+
   @doc """
   Attempt to create a fast fork of this VM.
 

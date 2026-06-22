@@ -26,13 +26,14 @@ defmodule Hyper.Node.FireVMM do
   defmodule Opts do
     @moduledoc "Options to pass into the jailer command."
 
-    defstruct [:vm_id, :uid, :gid, :type]
+    defstruct [:vm_id, :uid, :gid, :type, :source]
 
     @type t :: %__MODULE__{
-            vm_id: integer(),
+            vm_id: Hyper.Vm.id(),
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
-            type: Hyper.Vm.Instance.t()
+            type: Hyper.Vm.Instance.t(),
+            source: Hyper.Vm.source()
           }
   end
 
@@ -55,8 +56,11 @@ defmodule Hyper.Node.FireVMM do
   @impl true
   def init(opts) do
     children = [
-      {Core, opts},
-      {Client, %Client.Opts{vm_id: opts.vm_id}}
+      # Client must be registered before Core: Core starts the State machine,
+      # which calls Client.run while waiting for the daemon's API. Client depends
+      # only on vm_id (an independent peer), so it has no reverse dependency.
+      {Client, %Client.Opts{vm_id: opts.vm_id}},
+      {Core, opts}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
