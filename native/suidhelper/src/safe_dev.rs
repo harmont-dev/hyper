@@ -129,7 +129,11 @@ impl fmt::Display for DmName {
     }
 }
 
+/// Hyper's data root. Single source of truth; keep in sync with config :hyper, work_dir.
+pub const HYPER_BASE: &str = "/srv/hyper";
+
 /// Hyper's jail root: staged kernels and device nodes must land under here.
+/// JAIL_BASE is HYPER_BASE + "/jails" — they share the same root; keep in sync.
 /// MUST equal <config :hyper, work_dir>/jails (config/config.exs).
 /// Keep in sync with Elixir config; changing this without rebuilding the helper breaks staging.
 pub const JAIL_BASE: &str = "/srv/hyper/jails";

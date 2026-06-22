@@ -1,5 +1,5 @@
 use super::IsTool;
-use crate::safe_dev::LoopDev;
+use crate::safe_dev::{LoopDev, HYPER_BASE};
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
 use nix::fcntl::{open, OFlag};
@@ -9,11 +9,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use thiserror::Error as ThisError;
-
-// Hyper's data root: loop backing files (layer images, scratch COW files) must
-// live under here. Keep in sync with the deployment's layer_dir / scratch_dir.
-// MUST equal config :hyper, work_dir (config/config.exs); rebuild helper if changed.
-const HYPER_BASE: &str = "/srv/hyper";
 
 #[derive(Debug, ThisError)]
 pub enum Error {

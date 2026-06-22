@@ -61,12 +61,13 @@ enum Output {
 #[derive(Serialize)]
 struct SysTest {
     sys_test: &'static str,
+    hyper_base: &'static str,
 }
 
 impl SysTest {
     fn perform() -> Result<Self, setuid_privileged::Error> {
         Privileged::smoke_test()?;
-        Ok(Self { sys_test: "ok" })
+        Ok(Self { sys_test: "ok", hyper_base: crate::safe_dev::HYPER_BASE })
     }
 }
 
