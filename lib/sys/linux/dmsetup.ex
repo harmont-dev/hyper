@@ -69,4 +69,65 @@ defmodule Sys.Linux.Dmsetup do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Create a dm-thin pool `name` backed by loop devices `meta_dev` (metadata) and
+  `data_dev` (data). `sectors` is the data device's logical size; `block_sectors`
+  the allocation block size; `low_water` the low-water mark in blocks.
+  """
+  @spec create_thin_pool(
+          name(),
+          Path.t(),
+          Path.t(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
+  @decorate with_span("Sys.Linux.Dmsetup.create_thin_pool", include: [:name])
+  def create_thin_pool(name, meta_dev, data_dev, sectors, block_sectors, low_water) do
+    table = "0 #{sectors} thin-pool #{meta_dev} #{data_dev} #{block_sectors} #{low_water}"
+
+    case SuidHelper.run("dmsetup", Hyper.Config.dmsetup_path(), [
+           "create",
+           name,
+           "--table",
+           table
+         ]) do
+      {:ok, %{"device" => dev}} -> {:ok, dev}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc "Send a thin-pool message (`create_thin <id>` / `delete <id>`) to pool `name`."
+  @spec message(name(), String.t()) :: :ok | {:error, {non_neg_integer(), String.t()}}
+  @decorate with_span("Sys.Linux.Dmsetup.message", include: [:name, :msg])
+  def message(name, msg) do
+    case SuidHelper.run("dmsetup", Hyper.Config.dmsetup_path(), [
+           "message",
+           name,
+           "--message",
+           msg
+         ]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Create a dm-thin volume `name` of `sectors` from thin device id `dev_id` in
+  `pool_dev`, with `origin_dev` as its read-only external origin (unprovisioned
+  reads fall through to it; writes go to the pool). Returns `/dev/mapper/<name>`.
+  """
+  @spec create_thin_external(name(), Path.t(), non_neg_integer(), pos_integer(), Path.t()) ::
+          {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
+  @decorate with_span("Sys.Linux.Dmsetup.create_thin_external", include: [:name])
+  def create_thin_external(name, pool_dev, dev_id, sectors, origin_dev) do
+    table = "0 #{sectors} thin #{pool_dev} #{dev_id} #{origin_dev}"
+
+    case SuidHelper.run("dmsetup", Hyper.Config.dmsetup_path(), ["create", name, "--table", table]) do
+      {:ok, %{"device" => dev}} -> {:ok, dev}
+      {:error, _} = err -> err
+    end
+  end
 end

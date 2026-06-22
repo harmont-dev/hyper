@@ -15,6 +15,16 @@ defmodule Sys.Linux.Losetup do
     end
   end
 
+  @doc "Attach the given image file read-write as a loop-back block device."
+  @spec mount_rw(Path.t()) :: {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
+  @decorate with_span("Sys.Linux.Losetup.mount_rw", include: [:img_path])
+  def mount_rw(img_path) do
+    case SuidHelper.run("losetup", Hyper.Config.losetup_path(), ["attach", "--rw", img_path]) do
+      {:ok, %{"device" => dev}} -> {:ok, dev}
+      {:error, _} = err -> err
+    end
+  end
+
   @doc "Detach the given loop block device."
   @spec umount(Path.t()) :: {:ok, Path.t()} | {:error, {non_neg_integer(), String.t()}}
   @decorate with_span("Sys.Linux.Losetup.umount", include: [:blk_path])

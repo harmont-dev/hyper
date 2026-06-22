@@ -12,16 +12,21 @@ defmodule Hyper.SuidHelper do
   @typedoc "The JSON object the helper prints on success."
   @type result :: %{optional(String.t()) => term()}
 
+  @binless ~w(mknod stage)
+
   @doc """
   Run one helper subcommand. `tool` is the subcommand (`"losetup"`, `"dmsetup"`,
-  `"blockdev"`), `tool_bin` the absolute path to the real binary it execs, and
+  `"blockdev"`, `"mknod"`, `"stage"`), `tool_bin` the absolute path to the real binary it execs, and
   `args` the operation's arguments. Returns the decoded JSON object, or
   `{:error, {exit_code, message}}` when the helper exits non-zero.
   """
   @spec run(String.t(), Path.t(), [String.t()]) ::
           {:ok, result()} | {:error, {non_neg_integer(), String.t()}}
   def run(tool, tool_bin, args) do
-    argv = [tool, "--bin", tool_bin | args]
+    argv =
+      if tool in @binless,
+        do: [tool | args],
+        else: [tool, "--bin", tool_bin | args]
 
     # stderr_to_stdout: on success the helper writes only the JSON line to stdout;
     # on failure it writes the message to stderr and exits non-zero. Merging lets
