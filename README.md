@@ -2,6 +2,15 @@
   <img src="docs/res/Hyper-Banner.png" alt="Hyper" />
 </p>
 
+<p align="center">
+  <a href="https://hex.pm/packages/hyper"><img src="https://img.shields.io/hexpm/v/hyper.svg" alt="Hex.pm version" /></a>
+  <a href="https://hyper.hexdocs.pm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hyper.svg" alt="License: AGPL-3.0" /></a>
+  <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
+  <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
+  <img src="https://img.shields.io/badge/elixir-~%3E%201.20-4B275F.svg" alt="Elixir ~> 1.20" />
+</p>
+
 _This project is primarily developed by [harmont.dev](https://harmont.dev)
 which uses it as the core VM orchestrator._
 
@@ -63,7 +72,9 @@ not enjoy existing products:
   write my own. **Daytona has much better support than Hyper ever will. If you
   do not want to maintain your code and want a Slack channel with really awesome
   people, go with Daytona.** Hyper is a technical-first product, and
-  consequently we will not be providing you with direct support, SDKs, etc.
+  consequently we do not offer guaranteed support, SLAs, or polished SDKs. There
+  is a [community Discord](https://discord.gg/hm-dev) where you can ask
+  questions, but please do not expect dedicated support.
 - [Freestyle.sh](https://www.freestyle.sh/) is amazing in terms of performance,
   and probably beats Hyper on performance alone, however, the incredible
   unreliability has caused me to churn. **If you need raw performance, esp.
