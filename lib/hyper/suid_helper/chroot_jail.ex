@@ -1,4 +1,4 @@
-defmodule Hyper.SuidHelper.Jail do
+defmodule Hyper.SuidHelper.ChrootJail do
   @moduledoc """
   Privileged chroot/jail lifecycle, via the setuid helper's `chroot-jail`
   subcommands (`prepare` / `remove`). These are built into the helper (no
@@ -20,7 +20,7 @@ defmodule Hyper.SuidHelper.Jail do
   """
   @spec prepare(Path.t(), Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Jail.prepare", include: [:chroot_root, :device])
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.prepare", include: [:chroot_root, :device])
   def prepare(chroot_root, kernel, device, uid, gid) do
     argv = [
       "chroot-jail",
@@ -50,7 +50,7 @@ defmodule Hyper.SuidHelper.Jail do
   `cgroup` under `/sys/fs/cgroup` (see `native/suidhelper`).
   """
   @spec remove(Path.t(), Path.t()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Jail.remove", include: [:chroot, :cgroup])
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.remove", include: [:chroot, :cgroup])
   def remove(chroot, cgroup) do
     case SuidHelper.exec(["chroot-jail", "remove", "--chroot", chroot, "--cgroup", cgroup]) do
       {:ok, _} -> :ok

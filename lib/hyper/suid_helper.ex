@@ -2,10 +2,10 @@ defmodule Hyper.SuidHelper do
   @moduledoc """
   Interface to the setuid-root device helper (`hyper-suidhelper`), split by tool:
 
-    * `Hyper.SuidHelper.Losetup`  - loop devices
-    * `Hyper.SuidHelper.Dmsetup`  - device-mapper (snapshot / thin)
-    * `Hyper.SuidHelper.Blockdev` - block-device queries
-    * `Hyper.SuidHelper.Jail`     - chroot lifecycle (prepare / remove)
+    * `Hyper.SuidHelper.Losetup`    - loop devices
+    * `Hyper.SuidHelper.Dmsetup`    - device-mapper (snapshot / thin)
+    * `Hyper.SuidHelper.Blockdev`   - block-device queries
+    * `Hyper.SuidHelper.ChrootJail` - chroot lifecycle (prepare / remove)
 
   Elixir runs unprivileged; these submodules are the only path to the privileged operations. Each
   builds the argv for one operation and shells the helper through `exec/1`, which decodes the
