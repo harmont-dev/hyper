@@ -2,73 +2,121 @@
   <img src="docs/res/Hyper-Banner.png" alt="Hyper" />
 </p>
 
+<p align="center">
+  <a href="https://hex.pm/packages/hyper"><img src="https://img.shields.io/hexpm/v/hyper.svg" alt="Hex.pm version" /></a>
+  <a href="https://hyper.hexdocs.pm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hyper.svg" alt="License: AGPL-3.0" /></a>
+  <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
+  <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
+  <img src="https://img.shields.io/badge/elixir-~%3E%201.20-4B275F.svg" alt="Elixir ~> 1.20" />
+</p>
+
 _This project is primarily developed by [harmont.dev](https://harmont.dev)
 which uses it as the core VM orchestrator._
-
-Hyper is a distributed orchestrator for [Firecracker](https://firecracker-microvm.github.io/)
-microVMs. It schedules virtual machines across a cluster of nodes and boots
-them from a shared, copy-on-write image store, so that VMs start fast and reuse
-disk that is already resident on a node.
 
 > **Status:** early and under active development. Interfaces and behavior are
 > expected to change.
 
-## What it does
+Hyper is a distributed orchestrator for
+[Firecracker](https://firecracker-microvm.github.io/) microVMs. Hyper fits the
+same niche as [Daytona](https://github.com/daytonaio/daytona),
+[Runloop](https://runloop.ai/) and similar.
 
-- **Distributed scheduling.** Add nodes to grow the cluster; Hyper places
-  incoming VMs onto nodes that can satisfy their resource requirements. Placement
-  is driven by per-node **hard budgets** (memory, disk — exceeding them crashes
-  VMs) and **soft budgets** (vCPU, disk/network bandwidth — exceeding them only
-  degrades performance).
+## Quick Start
 
-- **Copy-on-write images and layers.** An image is a chain of layers that
-  compose as COW block devices — a base layer, any number of immutable
-  intermediate layers, and an optional mutable top layer. Layers are stacked at
-  runtime with `losetup`, `dm-snapshot`, and `dm-thin`. This keeps stored bytes
-  small (only diffs are kept) and makes forking a VM cheap.
+<!-- TODO(markovejnovic): Deeper quick start -->
 
-- **Colocation-aware placement.** Because the shared layer store is far larger
-  and slower than a node's local NVMe, Hyper prefers nodes that already have a
-  VM's required layers mounted, avoiding a slow layer download on boot.
+Please read the [Hexdocs](https://hyper.hexdocs.pm/) for guides on using,
+deploying and integrating Hyper.
 
-- **Shared storage + metadata.** Layer and image blobs live on a shared pool
-  filesystem (local, NFS, S3, or similar). A side-car PostgreSQL database tracks
-  layer/image dependencies and the leases that mark which layers are currently
-  in use.
+## Features
 
-For the full design — layer algebra, budgets, and the scheduling strategy — see
-the [architecture guide](docs/cookbook/architecture.md).
+- **Fully distributed** -- nodes that are added to the cluster automatically
+  become VM runners.
+- **Affinity-based scheduling** -- Hyper automatically schedules new VMs on
+  nodes with the most shared resources. Forked VMs prefer being scheduled on
+  nodes where the original VM ran, with fallbacks across the cluster.
+- **Disk layering** -- Forking virtual machines creates thin COW layers rather
+  than full disk snapshots. This gives Hyper a significant performance edge
+  over sandbox providers which do not implement this.
+- **Telemetry** -- Hyper is mostly fully instrumented with
+  [Otel](https://opentelemetry.io/) so you get full traces on if/why things are
+  not performing as expected.
+- **Minimal stack** -- Hyper makes very few assumptions on your cloud, and only
+  requires a Postgres database as a minimal external dependency.
+- **🔮 BEAM-native** -- Hyper is written on the
+  [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
+  means that fault-tolerance is built into the virtual machine, and allows you
+  to interactively debug any issues you run into.
+- gRPC Interface -- although the author exclusively uses Hyper through the
+  BEAM-native interfaces, we recognize this may not be ideal for all languages
+  and existing stacks. For that reason, Hyper has a GRPC interface, so you can
+  call it from any language you already use.
 
-## How it works
+## Docs
 
-Hyper is built in Elixir/OTP. It uses [libcluster](https://github.com/bitwalker/libcluster)
-for node discovery and [Horde](https://github.com/derekkraan/horde) for
-distributed process supervision, runs each VM under the Firecracker
-[jailer](https://github.com/firecracker-microvm/firecracker/blob/main/docs/jailer.md)
-(cgroups v2 + chroot isolation), and emits [OpenTelemetry](https://opentelemetry.io/)
-traces.
+Full docs on getting started, as well as useful diagrams are available on
+[Hexdocs](https://hyper.hexdocs.pm/).
 
-## Requirements
+## Why?
 
-- Linux with KVM, cgroups v2, and `dmsetup` / `losetup` available
-- Firecracker and its jailer binary
-- PostgreSQL (metadata database)
-- A shared layer storage medium reachable by every node
+The reason I have written this is because I was slightly dissatisfied with
+existing products. Not to slander any other products (I have a lot of respect
+and have built on their shoulders), but here is the rough overview of why I did
+not enjoy existing products:
 
-## Installation
+- [Daytona](http://daytona.io/) (the best overall, in my experience) was a
+  container-first SAAS. Their recent additions of VMs have been unreliable and
+  buggy for me -- between snapshots not getting committed and their VM feature
+  not being available open-source, I was ultimately dissatisfied and decided to
+  write my own. **Daytona has much better support than Hyper ever will. If you
+  do not want to maintain your code and want a Slack channel with really awesome
+  people, go with Daytona.** Hyper is a technical-first product, and
+  consequently we do not offer guaranteed support, SLAs, or polished SDKs. There
+  is a [community Discord](https://discord.gg/hm-dev) where you can ask
+  questions, but please do not expect dedicated support.
+- [Freestyle.sh](https://www.freestyle.sh/) is amazing in terms of performance,
+  and probably beats Hyper on performance alone, however, the incredible
+  unreliability has caused me to churn. **If you need raw performance, esp.
+  when it comes to forking RAM state, Freestyle is better than Hyper.**
+- [Runloop](https://runloop.ai/) is incredibly naive and, based on my
+  experience, not much more than a firecracker wrapper. There is no support for
+  forking, and Runloop is absurdly expensive for what it's worth.
 
-The package can be added to your list of dependencies in `mix.exs`:
+The reasons to use Hyper are:
 
-```elixir
-def deps do
-  [
-    {:hyper, "~> 0.1.0"}
-  ]
-end
-```
-
+- You need good distributed performance. Hyper is designed to scale to
+  extremely high numbers of host nodes.
+- You do not want limits. All other providers have limits, and although those
+  are in place to avoid abuse, I believe that limits should not exist -- just
+  charge per compute hour and abuse should be curbed financially. Why can you
+  not get a 128-core VM? With Hyper, you can.
+- You need good disk forking. Hyper has great support for forking block storage
+  and this is designed as a first-party feature. Hyper **does not support RAM
+  snapshotting and will not in the foreseeable future**.
+  
 ## License
 
 Hyper is licensed under the GNU Affero General Public License v3.0 or later
 (AGPL-3.0-or-later). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions
 are governed by the [Contributor License Agreement](CLA.md).
+
+### Why AGPL?
+
+Hyper is infrastructure meant to be run as a service. If you modify Hyper and
+offer it to others over a network, we expect you to share your changes
+publicly. The product is built by humans for humans and we want to keep it that
+way -- we don't want anyone taking Hyper closed-source and reselling it. Hyper
+is free of charge, and we expect you to play nicely with that philosophy. In
+practical terms, for most users:
+
+- **Running Hyper as-is internally** imposes no copyleft obligations. You do
+  not need to share your source.
+- **The VMs and workloads Hyper runs are yours.** Copyleft covers Hyper itself,
+  not the things you orchestrate with it. Your code stays your code.
+- **Modifying Hyper** and offering any form of product built with it as a
+  service, however, **requires** that you make your modifications open-source.
+  We wish to make Hyper better, and that means you need to be a part of it.
+
+This section is a plain-language summary, not legally binding. For the
+authoritative terms, see [LICENSE](LICENSE).
