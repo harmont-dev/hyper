@@ -72,8 +72,6 @@ pub trait Confinement {
     fn check(&self, path: &Path) -> Result<(), ValidationError>;
 }
 
-// ── `Any` turns every axis off ──────────────────────────────────────────────
-
 impl Absoluteness for Any {
     fn check(_: &Path) -> Result<(), ValidationError> {
         Ok(())
@@ -89,8 +87,6 @@ impl Confinement for Any {
         Ok(())
     }
 }
-
-// ── The concrete checks ─────────────────────────────────────────────────────
 
 impl Absoluteness for IsAbsolute {
     fn check(path: &Path) -> Result<(), ValidationError> {
