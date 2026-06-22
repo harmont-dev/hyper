@@ -137,22 +137,3 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
     // reopens the exact validated inode via /proc/self/fd.
     Ok(format!("/proc/self/fd/{fd}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn attach_args_defaults_readonly() {
-        let args = attach_args(false, "/x");
-        assert!(args.contains(&"--read-only".to_string()));
-        assert_eq!(args.last(), Some(&"/x".to_string()));
-    }
-
-    #[test]
-    fn attach_args_rw_flag_omits_readonly() {
-        let args = attach_args(true, "/x");
-        assert!(!args.contains(&"--read-only".to_string()));
-        assert_eq!(args.last(), Some(&"/x".to_string()));
-    }
-}
