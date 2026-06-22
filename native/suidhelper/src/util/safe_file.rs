@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Typestate-validated file descriptors.
 //!
-//! A [`SafeFile`] owns an open fd (closing it on drop, never before) and proves,
-//! in its type, which `fstat`-verified properties that fd has. It is the fd half
-//! of the safety story: once a name is resolved to a descriptor, the descriptor
-//! is what you verify and operate through, immune to the by-name
-//! time-of-check/time-of-use races - the checks ride the same fd you go on to
-//! use.
-//!
 //! Each type parameter is an independent axis (file type, ownership, mode); the
 //! marker in each slot says whether it is enforced, and [`Any`] turns an axis
 //! off. Verification happens once, in `TryFrom<OwnedFd>`, sharing a single
