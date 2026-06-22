@@ -62,8 +62,6 @@ pub trait Writability {
     fn check(stat: &FileStat) -> Result<(), ValidationError>;
 }
 
-// ── `Any` turns every axis off ──────────────────────────────────────────────
-
 impl FileType for Any {
     fn check(_: &FileStat) -> Result<(), ValidationError> {
         Ok(())
@@ -79,8 +77,6 @@ impl Writability for Any {
         Ok(())
     }
 }
-
-// ── The concrete checks (all read the one shared fstat) ──────────────────────
 
 impl FileType for IsRegularFile {
     fn check(stat: &FileStat) -> Result<(), ValidationError> {

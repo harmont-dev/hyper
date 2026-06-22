@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Runtime host configuration, read from a single root-owned TOML file.
 
+use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
+use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use nix::fcntl::OFlag;
 use serde::Deserialize;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -63,29 +65,37 @@ impl Config {
     pub fn safe_load() -> Result<Self, LoadingError> {
         let path = CONFIG_PATH.as_path();
 
-        // O_NOFOLLOW: refuse a symlink swapped in for the file itself.
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(nix::libc::O_NOFOLLOW)
-            .open(path)
+        // Lexical gate (the path is a constant, so belt-and-braces), then open
+        // O_NOFOLLOW and prove on the held fd: regular file, owned root:root, not
+        // writable by others - i.e. only root could have authored it. Read through
+        // that same fd, so the checks ride the descriptor we use (no TOCTOU
+        // re-resolve).
+        let safe_path: SafePath<IsAbsolute, StrictComponents> = PathBuf::from(CONFIG_PATHSTR)
+            .try_into()
             .map_err(|_| LoadingError::MissingFile(path))?;
 
-        let meta = file.metadata().map_err(|_| LoadingError::MissingFile(path))?;
-        // Only root may have authored the confinement root.
-        if !meta.is_file() || meta.uid() != 0 || meta.gid() != 0 {
-            return Err(LoadingError::BadOwner(path));
-        }
-        if meta.mode() & 0o022 != 0 {
-            return Err(LoadingError::BadMode(path));
-        }
+        let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
+            SafeFile::open(&safe_path, OFlag::O_RDONLY).map_err(|e| from_validation(e, path))?;
 
-        let body = std::io::read_to_string(file).map_err(|_| LoadingError::MissingFile(path))?;
+        let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
+            .map_err(|_| LoadingError::MissingFile(path))?;
         let config: Config = toml::from_str(&body).map_err(|_| LoadingError::Malformed(path))?;
 
         if !config.work_dir.is_absolute() {
             return Err(LoadingError::Relative(path));
         }
         Ok(config)
+    }
+}
+
+/// Map a `SafeFile` open/verify failure onto this module's `LoadingError`,
+/// preserving the original buckets (bad owner/type vs bad mode vs unreadable).
+fn from_validation(e: safe_file::ValidationError, path: &'static Path) -> LoadingError {
+    use safe_file::ValidationError as V;
+    match e {
+        V::Open(_) | V::Fstat(_) => LoadingError::MissingFile(path),
+        V::WrongFileType | V::NotRootOwned => LoadingError::BadOwner(path),
+        V::NonRootWritable => LoadingError::BadMode(path),
     }
 }
 
