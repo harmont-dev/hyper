@@ -22,8 +22,6 @@ config :libcluster,
   ]
 
 config :hyper,
-  # Must equal the setuid helper's compiled-in base; the node verifies this at
-  # startup (Hyper.SuidHelper.sys_test reports it) and refuses to boot on mismatch.
   work_dir: "/srv/hyper",
   cgroup_parent: "hyper",
   uid_gid_range: {900_000, 999_999},
