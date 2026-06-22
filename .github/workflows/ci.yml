@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel a previous in-progress run for the same ref when a new one starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  elixir:
+    name: Elixir (mix check)
+    runs-on: ubuntu-latest
+    env:
+      # setup-beam caches hex/rebar; MIX_ENV is overridden per-step where :test
+      # is needed (ecto + test). compile/format/credo/dialyzer run in :dev so the
+      # dev-only deps (dialyxir, credo) are available.
+      MIX_ENV: dev
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          elixir-version: "1.20"
+          otp-version: "28"
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+
+      - name: Cache dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        # --force matches the `mix check` alias: re-surfaces warnings even on a
+        # cached _build, where an unchanged module would otherwise be skipped.
+        run: mix compile --warnings-as-errors --force
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Credo
+        run: mix credo --strict
+
+      - name: Create and migrate test DB
+        env:
+          MIX_ENV: test
+        # -r names the repo explicitly: ecto_repos lives in mix.exs application
+        # env (so it works when hyper is a dependency), which the ecto.* mix
+        # tasks don't discover here -- without -r they no-op and tests then hit
+        # a missing database.
+        run: |
+          mix ecto.create -r Hyper.Img.Db.Repo
+          mix ecto.migrate -r Hyper.Img.Db.Repo
+
+      - name: Test (warnings as errors)
+        env:
+          MIX_ENV: test
+        # --no-start: the app's supervision tree boots Hyper.Node, which provisions
+        # a real Firecracker host under /srv/hyper -- unavailable (and unprivileged)
+        # on a CI runner. This matches how the suite is run in development; tests
+        # that need the Repo start it themselves against the DB created above.
+        run: mix test --no-start --warnings-as-errors
+
+      - name: Dialyzer
+        run: mix dialyzer
+
+  rust:
+    name: Rust (suidhelper)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/suidhelper
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
+      # call and installs the pinned nightly toolchain, components, and targets.
+      - name: Show toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/suidhelper
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: test
+        run: cargo test --all-features

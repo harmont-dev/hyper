@@ -17,7 +17,11 @@ const HYPER_BASE: &str = "/srv/hyper";
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("backing file {path}: {source}")]
-    Canonicalize { path: PathBuf, #[source] source: io::Error },
+    Canonicalize {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("backing file must be under {base}: {path}")]
     OutsideBase { base: &'static str, path: PathBuf },
     #[error("opening backing file {path}: {errno}")]
@@ -44,9 +48,7 @@ enum LosetupOp {
         path: String,
     },
     /// Detach a loop device.
-    Detach {
-        dev: LoopDev,
-    },
+    Detach { dev: LoopDev },
 }
 
 #[derive(Serialize)]
@@ -90,7 +92,9 @@ impl IsTool for Losetup {
     fn parse(&self, res: Self::RunT) -> Result<LosetupOut, Box<dyn std::error::Error>> {
         let out = res.map_err(Error::Spawn)?;
         if !out.status.success() {
-            return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into());
+            return Err(
+                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
+            );
         }
 
         Ok(match &self.op {
@@ -107,19 +111,32 @@ impl IsTool for Losetup {
 /// `/proc/self/fd/N`. Operating on the validated fd (not the path) closes the
 /// TOCTOU window: a swap after the check can't redirect losetup elsewhere.
 fn ok_backing_file(p: &str) -> Result<String, Error> {
-    let real =
-        std::fs::canonicalize(p).map_err(|source| Error::Canonicalize { path: PathBuf::from(p), source })?;
+    let real = std::fs::canonicalize(p).map_err(|source| Error::Canonicalize {
+        path: PathBuf::from(p),
+        source,
+    })?;
 
     if !real.starts_with(HYPER_BASE) {
-        return Err(Error::OutsideBase { base: HYPER_BASE, path: real });
+        return Err(Error::OutsideBase {
+            base: HYPER_BASE,
+            path: real,
+        });
     }
 
     // O_PATH: no read perms needed; O_NOFOLLOW: refuse if the final component got
     // swapped to a symlink between canonicalize and here.
-    let fd = open(&real, OFlag::O_PATH | OFlag::O_NOFOLLOW, StatMode::empty())
-        .map_err(|errno| Error::OpenBacking { path: real.clone(), errno })?;
+    let fd =
+        open(&real, OFlag::O_PATH | OFlag::O_NOFOLLOW, StatMode::empty()).map_err(|errno| {
+            Error::OpenBacking {
+                path: real.clone(),
+                errno,
+            }
+        })?;
 
-    let st = fstat(fd).map_err(|errno| Error::OpenBacking { path: real.clone(), errno })?;
+    let st = fstat(fd).map_err(|errno| Error::OpenBacking {
+        path: real.clone(),
+        errno,
+    })?;
     if st.st_mode & SFlag::S_IFMT.bits() != SFlag::S_IFREG.bits() {
         return Err(Error::NotRegularFile(real));
     }

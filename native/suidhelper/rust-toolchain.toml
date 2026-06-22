@@ -6,3 +6,6 @@ channel = "nightly"
 # self-contained via the bundled rust-lld, so no external cross toolchain is
 # needed (see .cargo/config.toml).
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
+# Pin the lint/format tooling so `cargo fmt`/`cargo clippy` auto-install it
+# (rustup honors this file in CI and locally).
+components = ["clippy", "rustfmt"]

@@ -39,7 +39,10 @@ fn is_hyper_dm(p: &str) -> bool {
 // A device-mapper name we own: `hyper-*`, restricted to a charset with no path
 // separators. Shared by `is_hyper_dm` and [`DmName`] so the two never drift.
 fn is_hyper_name(name: &str) -> bool {
-    name.starts_with("hyper-") && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    name.starts_with("hyper-")
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
 }
 
 /// A loop device path, `/dev/loopN`.
