@@ -37,7 +37,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   """
   @spec start_link(Opts.t()) :: {:ok, pid()} | {:error, term()}
   def start_link(%Opts{vm_id: id} = opts) do
-    with :ok <- SuidHelper.Jail.reset(Jailer.chroot_dir(id), Jailer.cgroup_dir(id)) do
+    with :ok <- SuidHelper.Jail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id)) do
       cmd = Jailer.command(opts)
       MuonTrap.Daemon.start_link(cmd.binary, cmd.args, [])
     end

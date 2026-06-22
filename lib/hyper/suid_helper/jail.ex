@@ -1,9 +1,9 @@
 defmodule Hyper.SuidHelper.Jail do
   @moduledoc """
-  Privileged chroot/jail staging, via the setuid helper's `mknod` / `stage` /
-  `reset-jail` subcommands. These are built into the helper (no external binary),
-  so there is no separate `test_system/0` - `Hyper.SuidHelper.test_system/0`
-  already checks the helper itself is present.
+  Privileged chroot/jail lifecycle, via the setuid helper's `chroot-jail`
+  subcommands (`prepare` / `remove`). These are built into the helper (no
+  external binary), so there is no separate `test_system/0` -
+  `Hyper.SuidHelper.test_system/0` already checks the helper itself is present.
   """
 
   use OpenTelemetryDecorator
@@ -13,40 +13,24 @@ defmodule Hyper.SuidHelper.Jail do
   @type err :: SuidHelper.err()
 
   @doc """
-  Create a block-device node at `dest` mirroring `device` (a host block-device
-  path), owned `uid:gid`. The helper reads major:minor from the device itself.
+  Prepare `chroot_root`'s boot artifacts: stage the `kernel` file in and `mknod`
+  a node mirroring the rootfs `device`, both owned `uid:gid`. The helper places
+  them at the fixed in-jail names (`/vmlinux`, `/rootfs`) and reads the device's
+  major:minor itself.
   """
-  @spec mknod(Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Jail.mknod", include: [:dest, :device])
-  def mknod(dest, device, uid, gid) do
+  @spec prepare(Path.t(), Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) ::
+          :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Jail.prepare", include: [:chroot_root, :device])
+  def prepare(chroot_root, kernel, device, uid, gid) do
     argv = [
-      "mknod",
-      "--dest",
-      dest,
+      "chroot-jail",
+      "prepare",
+      "--chroot",
+      chroot_root,
+      "--kernel",
+      kernel,
       "--device",
       device,
-      "--uid",
-      to_string(uid),
-      "--gid",
-      to_string(gid)
-    ]
-
-    case SuidHelper.exec(argv) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
-    end
-  end
-
-  @doc "Hardlink-or-copy `src` to `dest` inside a chroot, owned `uid:gid`."
-  @spec stage(Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Jail.stage", include: [:src, :dest])
-  def stage(src, dest, uid, gid) do
-    argv = [
-      "stage",
-      "--src",
-      src,
-      "--dest",
-      dest,
       "--uid",
       to_string(uid),
       "--gid",
@@ -65,10 +49,10 @@ defmodule Hyper.SuidHelper.Jail do
   prior state is a no-op. The helper confines `chroot` under the jail base and
   `cgroup` under `/sys/fs/cgroup` (see `native/suidhelper`).
   """
-  @spec reset(Path.t(), Path.t()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Jail.reset", include: [:chroot, :cgroup])
-  def reset(chroot, cgroup) do
-    case SuidHelper.exec(["reset-jail", "--chroot", chroot, "--cgroup", cgroup]) do
+  @spec remove(Path.t(), Path.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Jail.remove", include: [:chroot, :cgroup])
+  def remove(chroot, cgroup) do
+    case SuidHelper.exec(["chroot-jail", "remove", "--chroot", chroot, "--cgroup", cgroup]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end

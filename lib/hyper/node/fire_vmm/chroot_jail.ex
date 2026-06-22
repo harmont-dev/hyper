@@ -31,34 +31,15 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
           {:ok, Cold.t()} | {:error, term()}
   @decorate with_span("Hyper.Node.FireVMM.ChrootJail.stage", include: [:vm_id])
   def stage(vm_id, uid, gid, %Cold{} = cold) do
-    with {:ok, jail_kernel} <- stage_kernel(vm_id, uid, gid, cold.boot_source.kernel_image_path),
-         {:ok, jail_root} <- stage_root_drive(vm_id, uid, gid, root_drive_host_path(cold)) do
-      {:ok, jailify(cold, jail_kernel, jail_root)}
-    end
-  end
+    chroot_root = Jailer.chroot_root(vm_id)
+    kernel = cold.boot_source.kernel_image_path
+    device = root_drive_host_path(cold)
 
-  # Hardlink/copy the kernel file into the chroot; return its in-jail path.
-  @spec stage_kernel(Hyper.Vm.id(), non_neg_integer(), non_neg_integer(), Path.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  defp stage_kernel(vm_id, uid, gid, host_kernel) do
-    dest = Path.join(Jailer.chroot_root(vm_id), @kernel_name)
-
-    case SuidHelper.Jail.stage(host_kernel, dest, uid, gid) do
-      :ok -> {:ok, in_jail(@kernel_name)}
-      {:error, _} = err -> err
-    end
-  end
-
-  # Create the rootfs device node (mirroring `host_dev`) in the chroot; return its
-  # in-jail path.
-  @spec stage_root_drive(Hyper.Vm.id(), non_neg_integer(), non_neg_integer(), Path.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  defp stage_root_drive(vm_id, uid, gid, host_dev) do
-    dest = Path.join(Jailer.chroot_root(vm_id), @root_name)
-
-    case SuidHelper.Jail.mknod(dest, host_dev, uid, gid) do
-      :ok -> {:ok, in_jail(@root_name)}
-      {:error, _} = err -> err
+    # The helper places the kernel at <chroot_root>/@kernel_name and the rootfs
+    # node at <chroot_root>/@root_name; those names are the contract it rewrites
+    # the spec against below.
+    with :ok <- SuidHelper.Jail.prepare(chroot_root, kernel, device, uid, gid) do
+      {:ok, jailify(cold, in_jail(@kernel_name), in_jail(@root_name))}
     end
   end
 

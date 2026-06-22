@@ -4,18 +4,16 @@
 //! privilege boundary.
 
 mod blockdev;
+mod chroot_jail;
 mod dmsetup;
 mod losetup;
-mod mknod;
-mod reset_jail;
-mod stage;
+pub(crate) mod mknod;
+pub(crate) mod stage;
 
 pub use blockdev::{Blockdev, BlockdevArgs, BlockdevOut};
+pub use chroot_jail::{ChrootJail, ChrootJailOp, ChrootJailOut};
 pub use dmsetup::{Dmsetup, DmsetupArgs, DmsetupOut};
 pub use losetup::{Losetup, LosetupArgs, LosetupOut};
-pub use mknod::{Mknod, MknodArgs, MknodOut};
-pub use reset_jail::{ResetJail, ResetJailArgs, ResetJailOut};
-pub use stage::{Stage, StageArgs, StageOut};
 
 use crate::safe_bin::SafeBin;
 use crate::setuid_privileged::{self, Privileged};
@@ -44,9 +42,7 @@ pub enum ToolOutput {
     Losetup(LosetupOut),
     Dmsetup(DmsetupOut),
     Blockdev(BlockdevOut),
-    Mknod(MknodOut),
-    ResetJail(ResetJailOut),
-    Stage(StageOut),
+    ChrootJail(ChrootJailOut),
 }
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
@@ -104,20 +100,10 @@ pub enum Tool {
         #[command(flatten)]
         args: BlockdevArgs,
     },
-    /// Create a block device node inside a VM chroot.
-    Mknod {
-        #[command(flatten)]
-        args: MknodArgs,
-    },
-    /// Remove stale per-VM chroot and cgroup leaf before relaunching the jailer.
-    ResetJail {
-        #[command(flatten)]
-        args: ResetJailArgs,
-    },
-    /// Stage a regular file (kernel/image) into a VM chroot.
-    Stage {
-        #[command(flatten)]
-        args: StageArgs,
+    /// chroot/jail lifecycle operations (scoped subcommands).
+    ChrootJail {
+        #[command(subcommand)]
+        op: ChrootJailOp,
     },
 }
 
@@ -137,11 +123,9 @@ impl Tool {
             Tool::Blockdev { bin, args } => {
                 Ok(ToolOutput::Blockdev(Blockdev::new(bin.into(), args).run()?))
             }
-            Tool::Mknod { args } => Ok(ToolOutput::Mknod(Mknod::new(args).run()?)),
-            Tool::ResetJail { args } => {
-                Ok(ToolOutput::ResetJail(ResetJail::new(args).run()?))
+            Tool::ChrootJail { op } => {
+                Ok(ToolOutput::ChrootJail(ChrootJail::new(op).run()?))
             }
-            Tool::Stage { args } => Ok(ToolOutput::Stage(Stage::new(args).run()?)),
         }
     }
 }
