@@ -82,12 +82,26 @@ defmodule Hyper.Node.FireVMM.State do
     {:ok, :booting, %State{opts: opts}, [{:state_timeout, 0, :launch}]}
   end
 
-  # Resolve the boot spec, then launch (or re-adopt) the daemon and start waiting
-  # for its API.
-  def booting(:state_timeout, :launch, %State{opts: %Opts{source: source, type: type}} = data) do
-    data = ensure_daemon(%{data | spec: BootSpec.resolve(source, type)})
+  # Resolve the boot spec, launch (or re-adopt) the daemon and monitor it, then
+  # start waiting for its API.
+  def booting(
+        :state_timeout,
+        :launch,
+        %State{opts: %Opts{source: source, type: type} = opts} = data
+      ) do
+    pid = Daemon.ensure(opts)
+    spec = BootSpec.resolve(source, type)
     deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
-    {:next_state, :awaiting_api, %{data | boot_deadline: deadline}, [{:state_timeout, 0, :probe}]}
+
+    data = %{
+      data
+      | spec: spec,
+        daemon: pid,
+        daemon_ref: Process.monitor(pid),
+        boot_deadline: deadline
+    }
+
+    {:next_state, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
   end
 
   # A caller may stop (or try to pause/resume) before the launch timeout fires;
@@ -123,7 +137,8 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   def awaiting_api(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
-    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+    {:next_state, :crashed, %{data | daemon: nil, daemon_ref: nil},
+     [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
   end
 
   def awaiting_api({:call, from}, :stop, data) do
@@ -144,7 +159,8 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   def configuring(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
-    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+    {:next_state, :crashed, %{data | daemon: nil, daemon_ref: nil},
+     [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
   end
 
   def configuring({:call, from}, :stop, data) do
@@ -156,7 +172,7 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   def running({:call, from}, :pause, %State{opts: %Opts{vm_id: id}} = data) do
-    case set_vm_state(Client.via(id), "Paused") do
+    case Client.run(Client.via(id), fn opts -> Operations.patch_vm(%Vm{state: "Paused"}, opts) end) do
       :ok -> {:next_state, :paused, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
@@ -167,18 +183,22 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   def running(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
-    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+    {:next_state, :crashed, %{data | daemon: nil, daemon_ref: nil},
+     [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
   end
 
   def paused({:call, from}, :resume, %State{opts: %Opts{vm_id: id}} = data) do
-    case set_vm_state(Client.via(id), "Resumed") do
+    case Client.run(Client.via(id), fn opts ->
+           Operations.patch_vm(%Vm{state: "Resumed"}, opts)
+         end) do
       :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
       {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
     end
   end
 
   def paused(:info, {:DOWN, ref, :process, _pid, _reason}, %State{daemon_ref: ref} = data) do
-    {:next_state, :crashed, clear_daemon(data), [{:state_timeout, recover_after(), :recover}]}
+    {:next_state, :crashed, %{data | daemon: nil, daemon_ref: nil},
+     [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
   end
 
   def crashed(:state_timeout, :recover, data) do
@@ -200,7 +220,7 @@ defmodule Hyper.Node.FireVMM.State do
 
   @impl :gen_statem
   # Graceful stop: take the daemon down with us. Crash: leave it running so the
-  # restarted controller re-adopts it (see ensure_daemon/1).
+  # restarted controller re-adopts it (re-adopted in booting/3 via Daemon.ensure/1).
   def terminate(reason, _state, %State{opts: %Opts{vm_id: id}, daemon: daemon}) do
     if daemon && (reason in [:normal, :shutdown] or match?({:shutdown, _}, reason)) do
       Daemon.stop(id, daemon)
@@ -211,71 +231,35 @@ defmodule Hyper.Node.FireVMM.State do
 
   # --- boot protocol -------------------------------------------------------
 
-  # Cold boot: machine-config -> boot-source -> drives -> NICs -> InstanceStart.
-  # Aborts at the first error, returned verbatim.
+  # Cold boot, issued through the Client and aborting at the first error:
+  # machine-config -> boot-source -> each drive -> each NIC -> InstanceStart.
   @spec apply_spec(Hyper.Vm.id(), BootSpec.Cold.t()) :: :ok | {:error, term()}
   defp apply_spec(id, %BootSpec.Cold{} = cold) do
     via = Client.via(id)
 
-    with :ok <-
-           Client.run(via, fn opts ->
-             Operations.put_machine_configuration(cold.machine_config, opts)
-           end),
-         :ok <-
-           Client.run(via, fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end),
-         :ok <- put_each(via, cold.drives, &drive_put/2),
-         :ok <- put_each(via, cold.network_interfaces, &nic_put/2) do
-      Client.run(via, fn opts ->
-        Operations.create_sync_action(%InstanceActionInfo{action_type: "InstanceStart"}, opts)
-      end)
-    end
-  end
+    ops =
+      [
+        fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end,
+        fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end
+      ] ++
+        Enum.map(cold.drives, fn drive ->
+          fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end
+        end) ++
+        Enum.map(cold.network_interfaces, fn nic ->
+          fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end
+        end) ++
+        [
+          fn opts ->
+            Operations.create_sync_action(%InstanceActionInfo{action_type: "InstanceStart"}, opts)
+          end
+        ]
 
-  # Issue `put_fun` for each item, halting at the first error.
-  @spec put_each(GenServer.server(), [item], (GenServer.server(), item ->
-                                                :ok | {:error, term()})) ::
-          :ok | {:error, term()}
-        when item: var
-  defp put_each(via, items, put_fun) do
-    Enum.reduce_while(items, :ok, fn item, :ok ->
-      case put_fun.(via, item) do
+    Enum.reduce_while(ops, :ok, fn op, :ok ->
+      case Client.run(via, op) do
         :ok -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}
       end
     end)
-  end
-
-  defp drive_put(via, drive) do
-    Client.run(via, fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end)
-  end
-
-  defp nic_put(via, nic) do
-    Client.run(via, fn opts ->
-      Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts)
-    end)
-  end
-
-  defp set_vm_state(via, state) do
-    Client.run(via, fn opts -> Operations.patch_vm(%Vm{state: state}, opts) end)
-  end
-
-  # --- daemon lifecycle ----------------------------------------------------
-
-  # Launch (or re-adopt) the daemon via `Daemon`, then monitor it ourselves.
-  defp ensure_daemon(%State{opts: opts} = data) do
-    monitor(data, Daemon.ensure(opts))
-  end
-
-  defp monitor(data, pid) do
-    %{data | daemon: pid, daemon_ref: Process.monitor(pid)}
-  end
-
-  defp clear_daemon(data) do
-    %{data | daemon: nil, daemon_ref: nil}
-  end
-
-  defp recover_after do
-    Time.as_ms(@recover_delay)
   end
 
   defp via(id) do
