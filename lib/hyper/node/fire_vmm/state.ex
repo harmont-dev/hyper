@@ -54,17 +54,17 @@ defmodule Hyper.Node.FireVMM.State do
     :gen_statem.start_link(via(id), __MODULE__, opts, [])
   end
 
-  @spec pause(String.t()) :: :ok
+  @spec pause(Hyper.Vm.id()) :: :ok
   def pause(id) do
     :gen_statem.call(via(id), :pause)
   end
 
-  @spec resume(String.t()) :: :ok
+  @spec resume(Hyper.Vm.id()) :: :ok
   def resume(id) do
     :gen_statem.call(via(id), :resume)
   end
 
-  @spec stop(String.t()) :: :ok
+  @spec stop(Hyper.Vm.id()) :: :ok
   def stop(id) do
     :gen_statem.call(via(id), :stop)
   end
@@ -279,6 +279,11 @@ defmodule Hyper.Node.FireVMM.State do
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
     end
+
+    # Already running: resume is a no-op.
+    def handle({:call, from}, :resume, _data) do
+      {:keep_state_and_data, [{:reply, from, :ok}]}
+    end
   end
 
   defmodule Paused do
@@ -294,6 +299,15 @@ defmodule Hyper.Node.FireVMM.State do
         :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
         {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
       end
+    end
+
+    def handle({:call, from}, :stop, data) do
+      {:next_state, :stopping, data, [{:reply, from, :ok}]}
+    end
+
+    # Already paused: pause is a no-op.
+    def handle({:call, from}, :pause, _data) do
+      {:keep_state_and_data, [{:reply, from, :ok}]}
     end
   end
 
@@ -316,6 +330,11 @@ defmodule Hyper.Node.FireVMM.State do
 
   defmodule Stopping do
     @moduledoc false
+
+    # Daemon death during teardown is expected; ignore it (we're already stopping).
+    def handle(:info, {:DOWN, _ref, :process, _pid, _reason}, _data) do
+      :keep_state_and_data
+    end
 
     def handle({:call, from}, _event, _data) do
       {:keep_state_and_data, [{:reply, from, {:error, :stopping}}]}

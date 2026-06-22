@@ -29,7 +29,7 @@ defmodule Hyper.Node.FireVMM do
     defstruct [:vm_id, :uid, :gid, :type, :source]
 
     @type t :: %__MODULE__{
-            vm_id: integer(),
+            vm_id: Hyper.Vm.id(),
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
             type: Hyper.Vm.Instance.t(),
@@ -57,7 +57,7 @@ defmodule Hyper.Node.FireVMM do
   def init(opts) do
     children = [
       # Client must be registered before Core: Core starts the State machine,
-      # whose booting/2 calls Client.run as soon as it launches. Client depends
+      # which calls Client.run while waiting for the daemon's API. Client depends
       # only on vm_id (an independent peer), so it has no reverse dependency.
       {Client, %Client.Opts{vm_id: opts.vm_id}},
       {Core, opts}
