@@ -127,15 +127,6 @@ impl fmt::Display for DmName {
     }
 }
 
-/// Hyper's data root. Single source of truth; keep in sync with config :hyper, work_dir.
-pub const HYPER_BASE: &str = "/srv/hyper";
-
-/// Hyper's jail root: staged kernels and device nodes must land under here.
-/// JAIL_BASE is HYPER_BASE + "/jails" — they share the same root; keep in sync.
-/// MUST equal <config :hyper, work_dir>/jails (config/config.exs).
-/// Keep in sync with Elixir config; changing this without rebuilding the helper breaks staging.
-pub const JAIL_BASE: &str = "/srv/hyper/jails";
-
 /// A staging destination inside a VM's chroot. Validated lexically first (the
 /// file may not exist yet): absolute, under `JAIL_BASE`, no `.`/`..`
 /// components.
@@ -153,7 +144,7 @@ impl FromStr for JailPath {
         use std::path::Component;
         let p = PathBuf::from(s);
         let ok = p.is_absolute()
-            && p.starts_with(JAIL_BASE)
+            && p.starts_with(crate::config::jail_base())
             && p.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
         if ok {
             Ok(Self(p))
@@ -183,7 +174,7 @@ pub fn jail_relative_parts(path: &JailPath) -> Result<(Vec<String>, String), Err
     // Strip the JAIL_BASE prefix. The lexical check in FromStr guarantees this
     // succeeds.
     let rel = p
-        .strip_prefix(JAIL_BASE)
+        .strip_prefix(crate::config::jail_base())
         .map_err(|_| Error::Jail(p.display().to_string()))?;
 
     let mut components: Vec<String> = rel
@@ -227,8 +218,9 @@ pub fn open_parent_nofollow(path: &JailPath) -> Result<(RawFd, String), Error> {
     // Open JAIL_BASE itself (absolute path; O_NOFOLLOW only matters for the
     // final component of open(), which is a directory here — a symlink at
     // JAIL_BASE itself is also caught because we request O_DIRECTORY).
-    let mut dirfd = openat(None::<RawFd>, JAIL_BASE, base_flags, Mode::empty())
-        .map_err(|e| Error::SymlinkComponent(format!("{JAIL_BASE}: {e}")))?;
+    let jail_base = crate::config::jail_base();
+    let mut dirfd = openat(None::<RawFd>, jail_base, base_flags, Mode::empty())
+        .map_err(|e| Error::SymlinkComponent(format!("{jail_base}: {e}")))?;
 
     // Walk each parent component relative to the previous dirfd.
     for component in &parents {

@@ -1,7 +1,13 @@
 defmodule Hyper.Config do
-  @moduledoc "Compile-time host configuration, read from `config :hyper, ...` (see `config/config.exs`)."
+  @moduledoc """
+  Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
 
-  @work_dir Application.compile_env!(:hyper, :work_dir)
+  `work_dir` is the one value shared with the setuid helper
+  (`native/suidhelper`); both sides read it from `/etc/hyper/config.toml` at
+  runtime (loaded into the app env by `config/runtime.exs`) so the data root has
+  a single source of truth. Everything else is compile-time.
+  """
+
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
   @layer_dir Application.compile_env!(:hyper, :layer_dir)
@@ -10,13 +16,18 @@ defmodule Hyper.Config do
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
   @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
-  @doc "Root work directory for this node. All firecracker paths derive from it."
+  @doc """
+  Root work directory for this node. All firecracker paths derive from it.
+
+  Shared with the setuid helper via `/etc/hyper/config.toml`; populated into the
+  app env at runtime by `config/runtime.exs`.
+  """
   @spec work_dir :: Path.t()
-  def work_dir, do: @work_dir
+  def work_dir, do: Application.fetch_env!(:hyper, :work_dir)
 
   @doc "Directory holding redistributable binaries downloaded by the node."
   @spec redist_dir :: Path.t()
-  def redist_dir, do: Path.join(@work_dir, "redist")
+  def redist_dir, do: Path.join(work_dir(), "redist")
 
   @doc "Directory where `Hyper.Node.FireVMM.Provider` installs the firecracker release."
   @spec firecracker_install_dir :: Path.t()
@@ -28,7 +39,7 @@ defmodule Hyper.Config do
   If it does not exist, `Hyper.Node` will attempt to create one.
   """
   @spec chroot_base :: Path.t()
-  def chroot_base, do: Path.join(@work_dir, "jails")
+  def chroot_base, do: Path.join(work_dir(), "jails")
 
   @doc """
   A name for the parent cgroup which is used as a supervision cgroup for all VMs.
@@ -42,7 +53,7 @@ defmodule Hyper.Config do
   will attempt to create one.
   """
   @spec socket_dir :: Path.t()
-  def socket_dir, do: Path.join(@work_dir, "socks")
+  def socket_dir, do: Path.join(work_dir(), "socks")
 
   @doc """
   Range in which `Hyper` will attempt to allocate uid/gids. Whenever a VM is allocated, it will
@@ -89,7 +100,7 @@ defmodule Hyper.Config do
   writable. If it does not exist, `Hyper.Node` will attempt to create one.
   """
   @spec scratch_dir :: Path.t()
-  def scratch_dir, do: Path.join(@work_dir, "scratch")
+  def scratch_dir, do: Path.join(work_dir(), "scratch")
 
   @doc """
   Per-architecture vmlinux (guest kernel) image paths, keyed by `Sys.Arch.t()`.

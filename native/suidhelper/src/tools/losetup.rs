@@ -1,5 +1,5 @@
 use super::IsTool;
-use crate::safe_dev::{LoopDev, HYPER_BASE};
+use crate::safe_dev::LoopDev;
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
 use nix::fcntl::{open, OFlag};
@@ -122,8 +122,9 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
     let real =
         std::fs::canonicalize(p).map_err(|source| Error::Canonicalize { path: PathBuf::from(p), source })?;
 
-    if !real.starts_with(HYPER_BASE) {
-        return Err(Error::OutsideBase { base: HYPER_BASE, path: real });
+    let base = crate::config::hyper_base();
+    if !real.starts_with(base) {
+        return Err(Error::OutsideBase { base, path: real });
     }
 
     // O_PATH: no read perms needed; O_NOFOLLOW: refuse if the final component got

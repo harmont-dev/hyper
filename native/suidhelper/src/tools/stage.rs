@@ -22,10 +22,8 @@
 //!   • Ownership is set with `fchownat(parent_fd, final_name, …,
 //!     AT_SYMLINK_NOFOLLOW)` — never plain `chown`, which follows a
 //!     final-component symlink.
-//!
-//! uid/gid must be >= 1000 (non-root, non-system).
 
-use crate::safe_dev::{self, JailPath, HYPER_BASE};
+use crate::safe_dev::{self, JailPath};
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::sys::stat::Mode;
 use nix::unistd::{close, fchownat, linkat, Gid, Uid};
@@ -63,8 +61,9 @@ pub(crate) fn stage_file(src: &str, dest: &JailPath, uid: u32, gid: u32) -> Resu
     // ── 1. Canonicalize source and confine it under HYPER_BASE ──────────────
     let src_canon = std::fs::canonicalize(src)
         .map_err(|source| Error::Source { path: PathBuf::from(src), source })?;
-    if !src_canon.starts_with(HYPER_BASE) {
-        return Err(Error::OutsideBase { base: HYPER_BASE, path: src_canon });
+    let base = crate::config::hyper_base();
+    if !src_canon.starts_with(base) {
+        return Err(Error::OutsideBase { base, path: src_canon });
     }
 
     // Open the canonical source with O_RDONLY|O_NOFOLLOW so a race cannot

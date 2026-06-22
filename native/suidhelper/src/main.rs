@@ -69,7 +69,7 @@ struct SysTest {
 impl SysTest {
     fn perform() -> Result<Self, setuid_privileged::Error> {
         Privileged::smoke_test()?;
-        Ok(Self { sys_test: "ok", hyper_base: crate::safe_dev::HYPER_BASE })
+        Ok(Self { sys_test: "ok", hyper_base: crate::config::hyper_base() })
     }
 }
 
