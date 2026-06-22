@@ -32,16 +32,29 @@ pub struct LosetupArgs {
     op: LosetupOp,
 }
 
+#[derive(Args)]
+struct AttachArgs {
+    /// Attach read-write (default is read-only).
+    #[arg(long)]
+    rw: bool,
+    #[arg(value_parser = ok_backing_file)]
+    path: String,
+}
+
+impl AttachArgs {
+    fn enrich_command(&self, cmd: &mut Command) {
+        cmd.arg("--find").arg("--show");
+        if !self.rw {
+            cmd.arg("--read-only");
+        }
+        cmd.arg(&self.path);
+    }
+}
+
 #[derive(Subcommand)]
 enum LosetupOp {
     /// Attach a backing file to the next free loop device.
-    Attach {
-        /// Attach read-write (default is read-only).
-        #[arg(long)]
-        rw: bool,
-        #[arg(value_parser = ok_backing_file)]
-        path: String,
-    },
+    Attach(AttachArgs),
     /// Detach a loop device.
     Detach {
         dev: LoopDev,
@@ -74,8 +87,8 @@ impl IsTool for Losetup {
     fn run_privileged(&self) -> Self::RunT {
         let mut cmd = Command::new(&self.bin);
         match &self.op {
-            LosetupOp::Attach { rw, path } => {
-                cmd.args(attach_args(*rw, path));
+            LosetupOp::Attach(args) => {
+                args.enrich_command(&mut cmd);
             }
             LosetupOp::Detach { dev } => {
                 let dev: &Path = dev.as_ref();
@@ -93,22 +106,12 @@ impl IsTool for Losetup {
         }
 
         Ok(match &self.op {
-            LosetupOp::Attach { .. } => LosetupOut::Attached {
+            LosetupOp::Attach(_) => LosetupOut::Attached {
                 device: String::from_utf8_lossy(&out.stdout).trim().to_string(),
             },
             LosetupOp::Detach { .. } => LosetupOut::Detached,
         })
     }
-}
-
-/// Build the losetup arguments for an attach. Read-only unless `rw`.
-fn attach_args(rw: bool, path: &str) -> Vec<String> {
-    let mut args = vec!["--find".to_string(), "--show".to_string()];
-    if !rw {
-        args.push("--read-only".to_string());
-    }
-    args.push(path.to_string());
-    args
 }
 
 /// losetup backing files must live under Hyper's data root. Resolve symlinks,

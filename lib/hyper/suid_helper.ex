@@ -7,14 +7,13 @@ defmodule Hyper.SuidHelper do
     * `Hyper.SuidHelper.Blockdev` - block-device queries
     * `Hyper.SuidHelper.Jail`     - chroot staging (mknod / stage / reset)
 
-  The node runs unprivileged; these submodules are the only path to the privileged
-  operations. Each builds the argv for one operation and shells the helper through
-  `exec/1`, which decodes the JSON the helper prints on success. The helper
-  validates every argument before briefly escalating to root (see
-  `native/suidhelper`).
+  Elixir runs unprivileged; these submodules are the only path to the privileged operations. Each
+  builds the argv for one operation and shells the helper through `exec/1`, which decodes the
+  JSON the helper prints on success. The helper validates every argument before briefly
+  escalating to root (see `native/suidhelper`).
 
-  `test_system/0` aggregates each tool's own presence check; `sys_test/0` runs the
-  helper's self-test and reports the base path it was compiled against.
+  `test_system/0` aggregates each tool's own presence check; `sys_test/0` runs the helper's
+  self-test and reports the base path it was compiled against.
   """
 
   alias Hyper.SuidHelper.{Blockdev, Dmsetup, Losetup}
