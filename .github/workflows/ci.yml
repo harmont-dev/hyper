@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel a previous in-progress run for the same ref when a new one starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (suidhelper)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/suidhelper
+    steps:
+      - uses: actions/checkout@v4
+
+      # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
+      # call and installs the pinned nightly toolchain, components, and targets.
+      - name: Show toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/suidhelper
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: test
+        run: cargo test --all-features
