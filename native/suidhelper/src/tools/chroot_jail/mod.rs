@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `chroot-jail`: per-VM chroot/jail lifecycle. This is a pure CLI dispatcher -
-//! NOT an `IsTool`. Each nested op (`prepare`, `remove`) is its own `IsTool` with
-//! its own privileged scope and security model (see the submodules).
+//! `chroot-jail`: per-VM chroot/jail lifecycle.
 
 mod prepare;
 mod remove;
