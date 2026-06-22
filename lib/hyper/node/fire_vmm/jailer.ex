@@ -126,6 +126,12 @@ defmodule Hyper.Node.FireVMM.Jailer do
     |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
   end
 
+  @doc "Host path of the VM's chroot root (`<chroot_base>/<exec>/<id>/root`)."
+  @spec chroot_root(String.t() | integer()) :: Path.t()
+  def chroot_root(id) do
+    Path.join([Hyper.Config.chroot_base(), exec_name(), to_string(id), "root"])
+  end
+
   @doc """
   Host-side path of the API socket firecracker opens inside the jail.
 
