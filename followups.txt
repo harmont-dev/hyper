@@ -1,0 +1,46 @@
+================================================================================
+FOLLOWUPS — deferred work, tracked so it isn't lost
+================================================================================
+
+[ ] Boot-time stale-device sweeper
+    dm/loop devices are host kernel state and outlive a killed node or crash
+    (terminate doesn't run on :kill / power loss). Before the node takes work,
+    sweep and tear down orphaned "hyper-img-*" / "hyper-layer-*" dm devices and
+    their backing loop devices. (Owner: node startup; was plan.txt Q4.)
+
+[ ] dm-thin for the per-VM writable layer (Img.Writable, Phase B perf)
+    Img.Writable's first cut may use a transient dm-snapshot (no pool to manage).
+    dm-thin external origin (composed image = origin, thin vol = scratch) is
+    faster: needs a per-node thin pool (data + metadata devices) provisioned and
+    a Dmsetup.create_thin_* API. Decide pool sizing / where metadata lives.
+
+[ ] Layer compaction / chain-depth cap
+    Deep dm-snapshot chains cause read amplification (O(depth)). Periodically
+    merge deltas into a fresh base blob and/or cap chain depth at image build
+    time. Operational + build-pipeline concern.
+
+[ ] Img.Server refcounting
+    Lands WITH Img.Writable (Phase B): give Img.Server acquire/release + idle-reap
+    (mirror Layer.Server), held by Img.Writable instances. Until then Img.Server
+    has no holders and is not reaped.
+
+[ ] Rust setuid device helper (if not built in Phase A)
+    Least-privilege wrapper for losetup/dmsetup so the unprivileged node can do
+    device ops. Whitelist + name/table validation, root:root mode 4755. Needed for
+    Layer.Server (losetup) too, not just dm.
+
+[ ] Wire the VM flow end-to-end
+    Connect with_image (DB lease + heartbeat) with activate (Img.Server) and
+    Img.Writable into one path: lease -> activate image -> writable -> boot VM ->
+    teardown -> release. Currently these are independent pieces.
+
+[ ] Test database config
+    config :hyper, Hyper.Img.Db.Repo for :test (hyper_test DB +
+    Ecto.Adapters.SQL.Sandbox pool) so the suite can boot the Repo. (From the
+    earlier Ecto wiring.)
+
+[ ] DB chunk_size / size fields (ONLY if we drop the standardized 4 KiB chunk)
+    Currently chunk size is fixed repo-wide (plan.txt Q1). If we ever need
+    per-delta chunk sizes, add fields to img/db/blob.ex (or image_layer.ex) and
+    thread them into the dmsetup table.
+================================================================================
