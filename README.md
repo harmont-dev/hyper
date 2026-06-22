@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="https://hex.pm/packages/hyper"><img src="https://img.shields.io/hexpm/v/hyper.svg" alt="Hex.pm version" /></a>
-  <a href="https://hyper.hexdocs.pm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hyper.svg" alt="License: AGPL-3.0" /></a>
+  <a href="https://hex.pm/packages/hypervm"><img src="https://img.shields.io/hexpm/v/hypervm.svg" alt="Hex.pm version" /></a>
+  <a href="https://hexdocs.pm/hypervm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hypervm.svg" alt="License: AGPL-3.0" /></a>
   <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
   <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
   <img src="https://img.shields.io/badge/elixir-~%3E%201.20-4B275F.svg" alt="Elixir ~> 1.20" />
@@ -26,7 +26,7 @@ same niche as [Daytona](https://github.com/daytonaio/daytona),
 
 <!-- TODO(markovejnovic): Deeper quick start -->
 
-Please read the [Hexdocs](https://hyper.hexdocs.pm/) for guides on using,
+Please read the [Hexdocs](https://hexdocs.pm/hypervm/) for guides on using,
 deploying and integrating Hyper.
 
 ## Features
@@ -56,7 +56,7 @@ deploying and integrating Hyper.
 ## Docs
 
 Full docs on getting started, as well as useful diagrams are available on
-[Hexdocs](https://hyper.hexdocs.pm/).
+[Hexdocs](https://hexdocs.pm/hypervm/).
 
 ## Why?
 
@@ -94,7 +94,19 @@ The reasons to use Hyper are:
 - You need good disk forking. Hyper has great support for forking block storage
   and this is designed as a first-party feature. Hyper **does not support RAM
   snapshotting and will not in the foreseeable future**.
-  
+
+## Contributing
+
+Contributions are welcome. Hyper is a technical-first project with a strict
+quality gate (`mix check` must pass) and a few Linux/Firecracker prerequisites.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+Note that all contributions are governed by the
+[Contributor License Agreement](CLA.md): by submitting a PR you assign
+copyright in your contribution to the project owner, which keeps Hyper's
+copyright consolidated. If that is a dealbreaker for you, it is better to know
+up front.
+
 ## License
 
 Hyper is licensed under the GNU Affero General Public License v3.0 or later
