@@ -140,6 +140,9 @@ defmodule Hyper.MixProject do
   # Hex package metadata. Required for `mix hex.publish`.
   defp package do
     [
+      # The OTP app is `:hyper`, but `hyper` is already taken on Hex, so the
+      # package publishes as `hypervm`. Package name and app name are independent.
+      name: "hypervm",
       licenses: ["AGPL-3.0-or-later"],
       # priv/firecracker ships the OpenAPI spec so the `:firecracker_gen` compiler
       # can regenerate the bindings in a consumer's build (they are gitignored, so
