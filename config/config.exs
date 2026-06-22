@@ -22,6 +22,10 @@ config :libcluster,
   ]
 
 config :hyper,
+  # WARNING: work_dir MUST equal the setuid helper's compiled-in HYPER_BASE constant
+  # (native/suidhelper/src/tools/stage.rs and tools/losetup.rs). chroot_base is
+  # derived as <work_dir>/jails, which must match JAIL_BASE in safe_dev.rs.
+  # Changing work_dir without rebuilding+reinstalling the helper breaks device staging.
   work_dir: "/srv/hyper",
   cgroup_parent: "hyper",
   uid_gid_range: {900_000, 999_999},

@@ -38,6 +38,7 @@ use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 // Source files (kernels, layer images) live under Hyper's data root.
+// MUST equal config :hyper, work_dir (config/config.exs); rebuild helper if changed.
 const HYPER_BASE: &str = "/srv/hyper";
 
 #[derive(Debug, ThisError)]

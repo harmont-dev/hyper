@@ -45,6 +45,11 @@ defmodule Hyper.Node.Img.Writable do
   @spec acquire(GenServer.server(), pid()) :: :ok
   def acquire(server, holder), do: GenServer.call(server, {:acquire, holder})
 
+  @doc """
+  Release the calling process's hold on the writable volume.
+
+  The VM-supervisor holder is released via its monitor :DOWN, not this function.
+  """
   @spec release(GenServer.server()) :: :ok
   def release(server), do: GenServer.call(server, {:release, self()})
 

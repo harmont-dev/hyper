@@ -130,6 +130,8 @@ impl fmt::Display for DmName {
 }
 
 /// Hyper's jail root: staged kernels and device nodes must land under here.
+/// MUST equal <config :hyper, work_dir>/jails (config/config.exs).
+/// Keep in sync with Elixir config; changing this without rebuilding the helper breaks staging.
 pub const JAIL_BASE: &str = "/srv/hyper/jails";
 
 /// A staging destination inside a VM's chroot. Validated lexically first (the
