@@ -79,11 +79,7 @@ impl IsTool for Losetup {
         let mut cmd = Command::new(&self.bin);
         match &self.op {
             LosetupOp::Attach { rw, path } => {
-                cmd.args(["--find", "--show"]);
-                if !*rw {
-                    cmd.arg("--read-only");
-                }
-                cmd.arg(path);
+                cmd.args(attach_args(*rw, path));
             }
             LosetupOp::Detach { dev } => {
                 let dev: &Path = dev.as_ref();
@@ -107,6 +103,16 @@ impl IsTool for Losetup {
             LosetupOp::Detach { .. } => LosetupOut::Detached,
         })
     }
+}
+
+/// Build the losetup arguments for an attach. Read-only unless `rw`.
+fn attach_args(rw: bool, path: &str) -> Vec<String> {
+    let mut args = vec!["--find".to_string(), "--show".to_string()];
+    if !rw {
+        args.push("--read-only".to_string());
+    }
+    args.push(path.to_string());
+    args
 }
 
 /// losetup backing files must live under Hyper's data root. Resolve symlinks,
@@ -139,20 +145,18 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
-    #[derive(Parser)]
-    struct T {
-        #[command(flatten)]
-        args: LosetupArgs,
+    #[test]
+    fn attach_args_defaults_readonly() {
+        let args = attach_args(false, "/x");
+        assert!(args.contains(&"--read-only".to_string()));
+        assert_eq!(args.last(), Some(&"/x".to_string()));
     }
 
     #[test]
-    fn attach_defaults_readonly_and_rw_flag_flips_it() {
-        // We assert on the parsed op, not on running losetup.
-        let ro = T::try_parse_from(["x", "attach", "/srv/hyper/test.img"]).unwrap();
-        let rw = T::try_parse_from(["x", "attach", "--rw", "/srv/hyper/test.img"]).unwrap();
-        assert!(matches!(ro.args.op, LosetupOp::Attach { rw: false, .. }));
-        assert!(matches!(rw.args.op, LosetupOp::Attach { rw: true, .. }));
+    fn attach_args_rw_flag_omits_readonly() {
+        let args = attach_args(true, "/x");
+        assert!(!args.contains(&"--read-only".to_string()));
+        assert_eq!(args.last(), Some(&"/x".to_string()));
     }
 }
