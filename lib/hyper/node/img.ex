@@ -4,7 +4,9 @@ defmodule Hyper.Node.Img do
   operations. Owns:
 
     * a unique `Registry` (`img_id -> Img.Server`), and
-    * a `DynamicSupervisor` holding the (shared, read-only) image servers.
+    * a `DynamicSupervisor` holding the (shared, read-only) image servers, and
+    * a *separate* `DynamicSupervisor` holding the per-VM mutable layers
+      (`Img.Mutable`), so the writable layers form their own process tree.
     * a `ThinPool`, per node, which manages each `dm-thin` instance on this machine.
 
   On top of that tree it leases an image for the lifetime of a VM
@@ -13,12 +15,13 @@ defmodule Hyper.Node.Img do
   use Supervisor
 
   alias Hyper.Img.Db
+  alias Hyper.Node.Img.Mutable
   alias Hyper.Node.Img.Server
   alias Hyper.Node.Img.ThinPool
-  alias Hyper.Node.Img.Writable
 
   @registry Hyper.Node.Img.Registry
   @server_sup Hyper.Node.Img.Supervisor
+  @mutable_sup Hyper.Node.Img.MutableSupervisor
 
   def start_link(opts \\ []) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -29,7 +32,8 @@ defmodule Hyper.Node.Img do
     children = [
       {Registry, keys: :unique, name: @registry},
       ThinPool,
-      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup}
+      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup},
+      {DynamicSupervisor, strategy: :one_for_one, name: @mutable_sup}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -48,12 +52,12 @@ defmodule Hyper.Node.Img do
     end
   end
 
-  @doc "Activate a per-VM writable layer for `vm_id` over `img_id`."
-  @spec activate_writable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
-  def activate_writable(img_id, vm_id) do
+  @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
+  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
+  def create_mutable(img_id, vm_id) do
     DynamicSupervisor.start_child(
-      @server_sup,
-      {Writable, %Writable.Opts{img_id: img_id, vm_id: vm_id}}
+      @mutable_sup,
+      {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}
     )
   end
 

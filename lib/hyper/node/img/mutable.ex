@@ -1,10 +1,14 @@
-defmodule Hyper.Node.Img.Writable do
+defmodule Hyper.Node.Img.Mutable do
   @moduledoc """
-  The per-VM writable rootfs. On start it activates (or reuses) the image's
+  The per-VM mutable rootfs. On start it activates (or reuses) the image's
   read-only `Img.Server`, takes a reference on it, reads the composed device's
   size, and asks the node `ThinPool` for a thin volume with that device as a
-  read-only external origin. `blk_path/1` is the writable host device the VM
+  read-only external origin. `blk_path/1` is the mutable host device the VM
   boots from (staged into the jail by `mknod` from this path).
+
+  Mutable layers live in their own `DynamicSupervisor`, separate from the shared
+  read-only `Img.Server`s; the firecracker VM is handed this layer directly and
+  cannot be booted from a bare `Hyper.Img`.
 
   Monitor-refcounted like `Img.Server`/`Layer.Server`: the VM supervisor holds
   it; when the last holder dies it idle-reaps, destroying its thin volume in

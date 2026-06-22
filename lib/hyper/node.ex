@@ -59,23 +59,22 @@ defmodule Hyper.Node do
   end
 
   @doc """
-  Boot an image-backed VM on this node: claim a uid, build the writable rootfs,
-  resolve the kernel, and start the VM supervisor. The uid is freed and the
-  writable layer torn down automatically when the VM supervisor dies.
+  Boot an image-backed VM on this node: claim a uid, build the mutable rootfs
+  layer, resolve the kernel, and start the VM supervisor. The uid is freed and
+  the mutable layer torn down automatically when the VM supervisor dies.
   """
   @spec start_image_vm(Hyper.Vm.id(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
-         {:ok, writable} <- start_writable_or_release(spec.img_id, vm_id, uid),
-         dev = Img.Writable.blk_path(writable),
+         {:ok, mutable} <- start_mutable_or_release(spec.img_id, vm_id, uid),
          kernel = Vmlinux.path(spec.arch),
-         opts = build_opts(vm_id, spec, uid, dev, kernel),
-         {:ok, pid} <- start_vm_or_release(opts, uid, writable) do
-      # Bind the uid and the writable layer to the VM supervisor's lifetime.
+         opts = build_opts(vm_id, spec, uid, mutable, kernel),
+         {:ok, pid} <- start_vm_or_release(opts, uid, mutable) do
+      # Bind the uid and the mutable layer to the VM supervisor's lifetime.
       :ok = Users.bind(uid, pid)
-      :ok = Img.Writable.acquire(writable, pid)
-      :ok = Img.Writable.release(writable)
+      :ok = Img.Mutable.acquire(mutable, pid)
+      :ok = Img.Mutable.release(mutable)
       {:ok, pid}
     end
   end
@@ -90,23 +89,18 @@ defmodule Hyper.Node do
   end
 
   @doc false
-  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), Path.t(), Path.t()) ::
+  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
-  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, dev, kernel) do
-    source =
-      %{
-        kernel_image_path: kernel,
-        root_drive_path: dev
-      }
-      |> maybe_put(:boot_args, spec.boot_args)
-
+  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, mutable, kernel) do
     %FireVMM.Opts{
       vm_id: vm_id,
       uid: uid,
       gid: uid,
       type: spec.type,
       arch: spec.arch,
-      source: source
+      mutable: mutable,
+      kernel: kernel,
+      boot_args: spec.boot_args
     }
   end
 
@@ -171,16 +165,13 @@ defmodule Hyper.Node do
     end
   end
 
-  defp maybe_put(map, _k, nil), do: map
-  defp maybe_put(map, k, v), do: Map.put(map, k, v)
-
-  # Acquire the writable on our own pid initially so it does not idle-reap during
-  # boot; release on failure so it tears down.
-  defp start_writable_or_release(img_id, vm_id, uid) do
-    case Img.activate_writable(img_id, vm_id) do
-      {:ok, writable} ->
-        :ok = Img.Writable.acquire(writable)
-        {:ok, writable}
+  # Acquire the mutable layer on our own pid initially so it does not idle-reap
+  # during boot; release on failure so it tears down.
+  defp start_mutable_or_release(img_id, vm_id, uid) do
+    case Img.create_mutable(img_id, vm_id) do
+      {:ok, mutable} ->
+        :ok = Img.Mutable.acquire(mutable)
+        {:ok, mutable}
 
       {:error, reason} ->
         Users.release(uid)
@@ -188,13 +179,13 @@ defmodule Hyper.Node do
     end
   end
 
-  defp start_vm_or_release(opts, uid, writable) do
+  defp start_vm_or_release(opts, uid, mutable) do
     case start_vm(opts) do
       {:ok, pid} ->
         {:ok, pid}
 
       {:error, reason} ->
-        Img.Writable.release(writable)
+        Img.Mutable.release(mutable)
         Users.release(uid)
         {:error, reason}
     end

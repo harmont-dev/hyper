@@ -27,6 +27,7 @@ mod safe_bin;
 mod safe_dev;
 mod tools;
 mod util;
+mod config;
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;

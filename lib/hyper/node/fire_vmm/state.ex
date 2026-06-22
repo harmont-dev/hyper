@@ -28,6 +28,7 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.BootSpec
   alias Hyper.Node.FireVMM.Opts
   alias Hyper.Node.FireVMM.State
+  alias Hyper.Node.Img.Mutable
   alias Unit.Time
 
   alias __MODULE__.{
@@ -68,15 +69,25 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @impl :gen_statem
-  # The daemon is already (being) started by `Core` as our sibling. Resolve the
-  # boot spec, set the readiness deadline, and start probing the API.
-  def init(%Opts{source: source, type: type} = opts) do
-    spec = BootSpec.resolve(source, type)
+  # The daemon is already (being) started by `Core` as our sibling. Read the root
+  # device off the per-VM mutable layer, resolve the boot spec, set the readiness
+  # deadline, and start probing the API.
+  def init(%Opts{mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} = opts) do
+    spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
     deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
     data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 
     {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
   end
+
+  # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +
+  # device. `boot_args` is omitted when nil so BootSpec applies its default.
+  @spec boot_source(Path.t(), Path.t(), String.t() | nil) :: Hyper.Vm.source()
+  defp boot_source(kernel, dev, nil),
+    do: %{kernel_image_path: kernel, root_drive_path: dev}
+
+  defp boot_source(kernel, dev, boot_args),
+    do: %{kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
 
   @impl :gen_statem
   def handle_event(type, content, state, data) do
