@@ -11,7 +11,7 @@ pub(crate) mod mknod;
 pub(crate) mod stage;
 
 pub use blockdev::{Blockdev, BlockdevArgs, BlockdevOut};
-pub use chroot_jail::{ChrootJail, ChrootJailOp, ChrootJailOut};
+pub use chroot_jail::{ChrootJailOp, PrepareOut, RemoveOut};
 pub use dmsetup::{Dmsetup, DmsetupArgs, DmsetupOut};
 pub use losetup::{Losetup, LosetupArgs, LosetupOut};
 
@@ -42,7 +42,8 @@ pub enum ToolOutput {
     Losetup(LosetupOut),
     Dmsetup(DmsetupOut),
     Blockdev(BlockdevOut),
-    ChrootJail(ChrootJailOut),
+    Prepare(PrepareOut),
+    Remove(RemoveOut),
 }
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
@@ -123,9 +124,8 @@ impl Tool {
             Tool::Blockdev { bin, args } => {
                 Ok(ToolOutput::Blockdev(Blockdev::new(bin.into(), args).run()?))
             }
-            Tool::ChrootJail { op } => {
-                Ok(ToolOutput::ChrootJail(ChrootJail::new(op).run()?))
-            }
+            // `chroot-jail` is a pure dispatcher: it routes to its nested tool.
+            Tool::ChrootJail { op } => op.run(),
         }
     }
 }

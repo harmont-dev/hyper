@@ -166,8 +166,13 @@ pub struct RemoveArgs {
 
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
-pub enum ChrootJailOut {
+pub enum PrepareOut {
     Prepared,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum RemoveOut {
     Removed,
 }
 
@@ -181,99 +186,133 @@ pub enum ChrootJailOp {
     Remove(RemoveArgs),
 }
 
-// ── Tool implementation ───────────────────────────────────────────────────────
+// ── Dispatcher ────────────────────────────────────────────────────────────────
+// `chroot-jail` is NOT an `IsTool` - it carries no behaviour of its own. It just
+// routes to the selected nested tool, each of which IS an `IsTool` with its own
+// privileged scope.
 
-pub struct ChrootJail {
-    op: ChrootJailOp,
-}
-
-impl ChrootJail {
-    pub fn new(op: ChrootJailOp) -> Self {
-        Self { op }
-    }
-}
-
-impl IsTool for ChrootJail {
-    /// Not used at dispatch; the subcommand op is held directly on `ChrootJail`.
-    type Args = ();
-    type Output = ChrootJailOut;
-    type RunT = Result<(), Error>;
-
-    fn run_privileged(&self) -> Self::RunT {
-        match &self.op {
+impl ChrootJailOp {
+    pub fn run(self) -> Result<super::ToolOutput, super::Error> {
+        match self {
             ChrootJailOp::Prepare(args) => {
-                // ── 1. Reject system/root uid/gid before doing anything ──────
-                safe_dev::check_owner(args.uid, args.gid)?;
-
-                // ── 2. Construct dest JailPaths for kernel and rootfs ─────────
-                // Parsing as JailPath re-validates confinement under JAIL_BASE
-                // (a bad --chroot makes these fail); the open_parent_nofollow
-                // walk inside each helper is the real symlink guard.
-                let kernel_dest = dest_path(&args.chroot, KERNEL_NAME)?;
-                let rootfs_dest = dest_path(&args.chroot, ROOT_NAME)?;
-
-                // ── 3. Stage kernel file to <chroot>/vmlinux ─────────────────
-                stage::stage_file(&args.kernel, &kernel_dest, args.uid, args.gid)?;
-
-                // ── 4. mknod rootfs device node at <chroot>/rootfs ───────────
-                mknod::make_block_node(&rootfs_dest, &args.device, args.uid, args.gid)?;
-
-                Ok(())
+                Ok(super::ToolOutput::Prepare(Prepare::new(args).run()?))
             }
-
             ChrootJailOp::Remove(args) => {
-                // ── 1. Validate operands (pure, no filesystem) ──────────────
-                let chroot = validate_chroot(&args.chroot)?;
-                let cgroup = validate_cgroup(&args.cgroup)?;
-
-                // ── 2. Remove chroot subtree ──────────────────────────────────
-                // remove_dir_all does not follow symlinks for deletion. The <exec>/<id>
-                // components are root-owned (not writable by the unprivileged node or
-                // the jail uid), so a symlinked-component redirect is not reachable.
-                // ENOENT is success (idempotent — first boot has no chroot yet).
-                let chroot_path: &Path = chroot.as_ref();
-                match std::fs::remove_dir_all(chroot_path) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                    Err(source) => {
-                        return Err(Error::RemoveChroot {
-                            path: chroot_path.to_path_buf(),
-                            source,
-                        })
-                    }
-                }
-
-                // ── 3. Remove cgroup leaf (non-recursive rmdir, best-effort) ──
-                // remove_dir only ever removes an empty leaf — even a mis-constructed
-                // path is safe because it just no-ops. ENOENT and ENOTEMPTY are
-                // success: the cgroup may never have been created, or the process may
-                // have moved out of it before we get here.
-                match std::fs::remove_dir(&cgroup) {
-                    Ok(()) => {}
-                    Err(e)
-                        if e.kind() == io::ErrorKind::NotFound
-                            || e.raw_os_error() == Some(nix::libc::ENOTEMPTY) =>
-                    {
-                        // Best-effort: treat as success.
-                    }
-                    Err(source) => {
-                        return Err(Error::RemoveCgroup {
-                            path: cgroup,
-                            source,
-                        })
-                    }
-                }
-
-                Ok(())
+                Ok(super::ToolOutput::Remove(Remove::new(args).run()?))
             }
         }
     }
+}
 
-    fn parse(&self, res: Self::RunT) -> Result<ChrootJailOut, Box<dyn std::error::Error>> {
+// ── prepare ─────────────────────────────────────────────────────────────────────
+
+struct Prepare {
+    args: PrepareArgs,
+}
+
+impl Prepare {
+    fn new(args: PrepareArgs) -> Self {
+        Self { args }
+    }
+}
+
+impl IsTool for Prepare {
+    type Args = PrepareArgs;
+    type Output = PrepareOut;
+    type RunT = Result<(), Error>;
+
+    fn run_privileged(&self) -> Self::RunT {
+        let args = &self.args;
+
+        // 1. Reject system/root uid/gid before doing anything.
+        safe_dev::check_owner(args.uid, args.gid)?;
+
+        // 2. Construct dest JailPaths for kernel and rootfs. Parsing as a
+        //    JailPath re-validates confinement under JAIL_BASE (a bad --chroot
+        //    fails here); the open_parent_nofollow walk inside each helper is the
+        //    real symlink guard.
+        let kernel_dest = dest_path(&args.chroot, KERNEL_NAME)?;
+        let rootfs_dest = dest_path(&args.chroot, ROOT_NAME)?;
+
+        // 3. Stage kernel file to <chroot>/vmlinux.
+        stage::stage_file(&args.kernel, &kernel_dest, args.uid, args.gid)?;
+
+        // 4. mknod rootfs device node at <chroot>/rootfs.
+        mknod::make_block_node(&rootfs_dest, &args.device, args.uid, args.gid)?;
+
+        Ok(())
+    }
+
+    fn parse(&self, res: Self::RunT) -> Result<PrepareOut, Box<dyn std::error::Error>> {
         res?;
-        Ok(match &self.op {
-            ChrootJailOp::Prepare(_) => ChrootJailOut::Prepared,
-            ChrootJailOp::Remove(_) => ChrootJailOut::Removed,
-        })
+        Ok(PrepareOut::Prepared)
+    }
+}
+
+// ── remove ──────────────────────────────────────────────────────────────────────
+
+struct Remove {
+    args: RemoveArgs,
+}
+
+impl Remove {
+    fn new(args: RemoveArgs) -> Self {
+        Self { args }
+    }
+}
+
+impl IsTool for Remove {
+    type Args = RemoveArgs;
+    type Output = RemoveOut;
+    type RunT = Result<(), Error>;
+
+    fn run_privileged(&self) -> Self::RunT {
+        let args = &self.args;
+
+        // 1. Validate operands (pure, no filesystem).
+        let chroot = validate_chroot(&args.chroot)?;
+        let cgroup = validate_cgroup(&args.cgroup)?;
+
+        // 2. Remove chroot subtree. remove_dir_all does not follow symlinks for
+        //    deletion, and the <exec>/<id> components are root-owned (not writable
+        //    by the node or the jail uid), so a symlinked-component redirect is
+        //    unreachable. ENOENT is success (idempotent - first boot has none).
+        let chroot_path: &Path = chroot.as_ref();
+        match std::fs::remove_dir_all(chroot_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(Error::RemoveChroot {
+                    path: chroot_path.to_path_buf(),
+                    source,
+                })
+            }
+        }
+
+        // 3. Remove cgroup leaf (non-recursive rmdir, best-effort). rmdir only
+        //    removes an empty leaf, so a mis-constructed path just no-ops.
+        //    ENOENT/ENOTEMPTY are treated as success.
+        match std::fs::remove_dir(&cgroup) {
+            Ok(()) => {}
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(nix::libc::ENOTEMPTY) =>
+            {
+                // Best-effort: treat as success.
+            }
+            Err(source) => {
+                return Err(Error::RemoveCgroup {
+                    path: cgroup,
+                    source,
+                })
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse(&self, res: Self::RunT) -> Result<RemoveOut, Box<dyn std::error::Error>> {
+        res?;
+        Ok(RemoveOut::Removed)
     }
 }
