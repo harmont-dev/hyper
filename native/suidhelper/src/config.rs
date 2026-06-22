@@ -65,11 +65,6 @@ impl Config {
     pub fn safe_load() -> Result<Self, LoadingError> {
         let path = CONFIG_PATH.as_path();
 
-        // Lexical gate (the path is a constant, so belt-and-braces), then open
-        // O_NOFOLLOW and prove on the held fd: regular file, owned root:root, not
-        // writable by others - i.e. only root could have authored it. Read through
-        // that same fd, so the checks ride the descriptor we use (no TOCTOU
-        // re-resolve).
         let safe_path: SafePath<IsAbsolute, StrictComponents> =
             PathBuf::from(CONFIG_PATHSTR).try_into()?;
 
