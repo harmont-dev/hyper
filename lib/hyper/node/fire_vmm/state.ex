@@ -6,7 +6,7 @@ defmodule Hyper.Node.FireVMM.State do
   if firecracker dies, `Core` restarts the daemon and this controller together,
   and `init` simply cold-boots again.
 
-      :awaiting_api --> :staging --> :configuring --> :running <-> :paused --> :stopping
+      :awaiting_api --> :staging --> :configuring --> :running --> :stopping
 
   States:
 
@@ -16,8 +16,7 @@ defmodule Hyper.Node.FireVMM.State do
                         rewrite the spec to in-jail paths.
     * `:configuring`  - push machine-config, boot-source, drives, NICs, then
                         `InstanceStart`.
-    * `:running`      - guest is live; handles `pause`/`stop`.
-    * `:paused`       - guest paused; handles `resume`/`stop`.
+    * `:running`      - guest is live; handles `stop`.
     * `:stopping`     - teardown requested in-band; reject further calls.
 
   Uses `:handle_event_function` mode: each state's events live in a nested
@@ -40,7 +39,6 @@ defmodule Hyper.Node.FireVMM.State do
   alias __MODULE__.{
     AwaitingApi,
     Configuring,
-    Paused,
     Running,
     Staging,
     Stopping
@@ -64,16 +62,6 @@ defmodule Hyper.Node.FireVMM.State do
 
   def start_link(%Opts{vm_id: id} = opts) do
     :gen_statem.start_link(via(id), __MODULE__, opts, [])
-  end
-
-  @spec pause(Hyper.Vm.id()) :: :ok
-  def pause(id) do
-    :gen_statem.call(via(id), :pause)
-  end
-
-  @spec resume(Hyper.Vm.id()) :: :ok
-  def resume(id) do
-    :gen_statem.call(via(id), :resume)
   end
 
   @spec stop(Hyper.Vm.id()) :: :ok
@@ -105,7 +93,6 @@ defmodule Hyper.Node.FireVMM.State do
         :staging -> Staging
         :configuring -> Configuring
         :running -> Running
-        :paused -> Paused
         :stopping -> Stopping
       end
 
@@ -149,10 +136,6 @@ defmodule Hyper.Node.FireVMM.State do
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
     end
-
-    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
-      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
-    end
   end
 
   defmodule Staging do
@@ -182,10 +165,6 @@ defmodule Hyper.Node.FireVMM.State do
 
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
-      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
     end
   end
 
@@ -251,58 +230,10 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Running do
-    @moduledoc """
-    The guest is live. Handles `pause` (-> `:paused`) and `stop` (-> `:stopping`);
-    `resume` is a no-op.
-    """
-
-    alias Hyper.Firecracker.Api.{Operations, Vm}
-    alias Hyper.Node.FireVMM.{Client, Opts}
-
-    def handle({:call, from}, :pause, %{opts: %Opts{vm_id: id}} = data) do
-      case Client.run(Client.via(id), fn opts ->
-             Operations.patch_vm(%Vm{state: "Paused"}, opts)
-           end) do
-        :ok -> {:next_state, :paused, data, [{:reply, from, :ok}]}
-        {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
-      end
-    end
+    @moduledoc "The guest is live. Handles `stop` (-> `:stopping`)."
 
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    # Already running: resume is a no-op.
-    def handle({:call, from}, :resume, _data) do
-      {:keep_state_and_data, [{:reply, from, :ok}]}
-    end
-  end
-
-  defmodule Paused do
-    @moduledoc """
-    The guest is suspended. Handles `resume` (-> `:running`) and `stop`
-    (-> `:stopping`); `pause` is a no-op.
-    """
-
-    alias Hyper.Firecracker.Api.{Operations, Vm}
-    alias Hyper.Node.FireVMM.{Client, Opts}
-
-    def handle({:call, from}, :resume, %{opts: %Opts{vm_id: id}} = data) do
-      case Client.run(Client.via(id), fn opts ->
-             Operations.patch_vm(%Vm{state: "Resumed"}, opts)
-           end) do
-        :ok -> {:next_state, :running, data, [{:reply, from, :ok}]}
-        {:error, _} = err -> {:keep_state_and_data, [{:reply, from, err}]}
-      end
-    end
-
-    def handle({:call, from}, :stop, data) do
-      {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-
-    # Already paused: pause is a no-op.
-    def handle({:call, from}, :pause, _data) do
-      {:keep_state_and_data, [{:reply, from, :ok}]}
     end
   end
 
