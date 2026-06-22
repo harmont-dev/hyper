@@ -80,6 +80,149 @@ impl fmt::Display for SnapshotTable {
     }
 }
 
+/// A dm-thin-pool table: `0 <sectors> thin-pool <meta> <data> <block_sectors> <low_water>`.
+/// meta/data are our own loop devices; no feature args are accepted.
+#[derive(Clone)]
+pub struct ThinPoolTable {
+    sectors: u64,
+    metadata: LoopDev,
+    data: LoopDev,
+    block_sectors: u64,
+    low_water: u64,
+}
+
+impl FromStr for ThinPoolTable {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let f: Vec<&str> = s.split_whitespace().collect();
+        let ["0", sectors, "thin-pool", meta, data, block, low] = f.as_slice() else {
+            return Err(Error::BadTable(s.to_string()));
+        };
+        Ok(Self {
+            sectors: sectors.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            metadata: meta.parse()?,
+            data: data.parse()?,
+            block_sectors: block.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            low_water: low.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+        })
+    }
+}
+
+impl fmt::Display for ThinPoolTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let meta: &Path = self.metadata.as_ref();
+        let data: &Path = self.data.as_ref();
+        write!(
+            f,
+            "0 {} thin-pool {} {} {} {}",
+            self.sectors, meta.display(), data.display(), self.block_sectors, self.low_water
+        )
+    }
+}
+
+/// A dm-thin table: `0 <sectors> thin <pool> <dev_id> [<external_origin>]`.
+/// pool + origin are anchored to our own dm/loop devices.
+#[derive(Clone)]
+pub struct ThinTable {
+    sectors: u64,
+    pool: BlockDev,
+    dev_id: u64,
+    origin: Option<BlockDev>,
+}
+
+impl FromStr for ThinTable {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let f: Vec<&str> = s.split_whitespace().collect();
+        let (sectors, pool, dev_id, origin) = match f.as_slice() {
+            ["0", sectors, "thin", pool, id] => (sectors, pool, id, None),
+            ["0", sectors, "thin", pool, id, origin] => (sectors, pool, id, Some(origin)),
+            _ => return Err(Error::BadTable(s.to_string())),
+        };
+        Ok(Self {
+            sectors: sectors.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            pool: pool.parse()?,
+            dev_id: dev_id.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            origin: origin.map(|o| o.parse()).transpose()?,
+        })
+    }
+}
+
+impl fmt::Display for ThinTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pool: &Path = self.pool.as_ref();
+        write!(f, "0 {} thin {} {}", self.sectors, pool.display(), self.dev_id)?;
+        if let Some(origin) = &self.origin {
+            let origin: &Path = origin.as_ref();
+            write!(f, " {}", origin.display())?;
+        }
+        Ok(())
+    }
+}
+
+/// Any dm table we are willing to create. The variant is chosen by the target
+/// keyword; every variant re-renders from validated fields so dmsetup only ever
+/// sees a table we reconstructed.
+#[derive(Clone)]
+pub enum DmTable {
+    Snapshot(SnapshotTable),
+    ThinPool(ThinPoolTable),
+    Thin(ThinTable),
+}
+
+impl FromStr for DmTable {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_whitespace().nth(2) {
+            Some("snapshot") => Ok(DmTable::Snapshot(s.parse()?)),
+            Some("thin-pool") => Ok(DmTable::ThinPool(s.parse()?)),
+            Some("thin") => Ok(DmTable::Thin(s.parse()?)),
+            _ => Err(Error::BadTable(s.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for DmTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DmTable::Snapshot(t) => t.fmt(f),
+            DmTable::ThinPool(t) => t.fmt(f),
+            DmTable::Thin(t) => t.fmt(f),
+        }
+    }
+}
+
+/// A thin-pool message we permit: provision or drop a thin device by id.
+#[derive(Clone)]
+pub enum ThinMessage {
+    CreateThin(u64),
+    Delete(u64),
+}
+
+impl FromStr for ThinMessage {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["create_thin", id] => Ok(ThinMessage::CreateThin(
+                id.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            )),
+            ["delete", id] => Ok(ThinMessage::Delete(
+                id.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            )),
+            _ => Err(Error::BadTable(s.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for ThinMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ThinMessage::CreateThin(id) => write!(f, "create_thin {id}"),
+            ThinMessage::Delete(id) => write!(f, "delete {id}"),
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct DmsetupArgs {
     #[command(subcommand)]
@@ -93,12 +236,17 @@ enum DmOp {
         #[arg(long)]
         readonly: bool,
         #[arg(long)]
-        table: SnapshotTable,
+        table: DmTable,
     },
     Remove {
         #[arg(long)]
         retry: bool,
         name: DmName,
+    },
+    Message {
+        name: DmName,
+        #[arg(long)]
+        message: ThinMessage,
     },
 }
 
@@ -107,6 +255,7 @@ enum DmOp {
 pub enum DmsetupOut {
     Created { device: String },
     Removed,
+    Messaged,
 }
 
 pub struct Dmsetup {
@@ -142,6 +291,9 @@ impl IsTool for Dmsetup {
                 }
                 cmd.arg(name.to_string());
             }
+            DmOp::Message { name, message } => {
+                cmd.arg("message").arg(name.to_string()).arg("0").arg(message.to_string());
+            }
         }
 
         cmd.env_clear().output()
@@ -156,6 +308,49 @@ impl IsTool for Dmsetup {
         Ok(match &self.op {
             DmOp::Create { name, .. } => DmsetupOut::Created { device: format!("/dev/mapper/{name}") },
             DmOp::Remove { .. } => DmsetupOut::Removed,
+            DmOp::Message { .. } => DmsetupOut::Messaged,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thin_pool_table_roundtrips() {
+        let t: DmTable = "0 134217728 thin-pool /dev/loop0 /dev/loop1 128 0".parse().unwrap();
+        assert_eq!(
+            t.to_string(),
+            "0 134217728 thin-pool /dev/loop0 /dev/loop1 128 0"
+        );
+    }
+
+    #[test]
+    fn thin_table_with_external_origin_roundtrips() {
+        let t: DmTable =
+            "0 4194304 thin /dev/mapper/hyper-thinpool 7 /dev/mapper/hyper-img-abc-1".parse().unwrap();
+        assert_eq!(
+            t.to_string(),
+            "0 4194304 thin /dev/mapper/hyper-thinpool 7 /dev/mapper/hyper-img-abc-1"
+        );
+    }
+
+    #[test]
+    fn snapshot_table_still_parses() {
+        let t: DmTable = "0 100 snapshot /dev/loop0 /dev/loop1 P 8".parse().unwrap();
+        assert_eq!(t.to_string(), "0 100 snapshot /dev/loop0 /dev/loop1 P 8");
+    }
+
+    #[test]
+    fn rejects_arbitrary_target() {
+        assert!("0 100 linear /dev/sda 0".parse::<DmTable>().is_err());
+    }
+
+    #[test]
+    fn message_only_allows_create_and_delete() {
+        assert!("create_thin 7".parse::<ThinMessage>().is_ok());
+        assert!("delete 7".parse::<ThinMessage>().is_ok());
+        assert!("reserve_metadata_snap".parse::<ThinMessage>().is_err());
     }
 }
