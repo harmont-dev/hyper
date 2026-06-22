@@ -48,9 +48,9 @@ defmodule Hyper.Node.Img do
     end
   end
 
-  @doc "Start a per-VM writable layer for `vm_id` over `img_id`."
-  @spec start_writable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
-  def start_writable(img_id, vm_id) do
+  @doc "Activate a per-VM writable layer for `vm_id` over `img_id`."
+  @spec activate_writable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
+  def activate_writable(img_id, vm_id) do
     DynamicSupervisor.start_child(
       @server_sup,
       {Writable, %Writable.Opts{img_id: img_id, vm_id: vm_id}}

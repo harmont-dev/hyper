@@ -177,7 +177,7 @@ defmodule Hyper.Node do
   # Acquire the writable on our own pid initially so it does not idle-reap during
   # boot; release on failure so it tears down.
   defp start_writable_or_release(img_id, vm_id, uid) do
-    case Img.start_writable(img_id, vm_id) do
+    case Img.activate_writable(img_id, vm_id) do
       {:ok, writable} ->
         :ok = Img.Writable.acquire(writable)
         {:ok, writable}
