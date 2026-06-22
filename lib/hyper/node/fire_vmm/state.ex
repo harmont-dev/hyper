@@ -95,32 +95,19 @@ defmodule Hyper.Node.FireVMM.State do
      [{:state_timeout, Time.as_ms(@recover_delay), :recover}]}
   end
 
-  def handle_event(type, content, :booting, data) do
-    Booting.handle(type, content, data)
-  end
+  def handle_event(type, content, state, data) do
+    module =
+      case state do
+        :booting -> Booting
+        :awaiting_api -> AwaitingApi
+        :configuring -> Configuring
+        :running -> Running
+        :paused -> Paused
+        :crashed -> Crashed
+        :stopping -> Stopping
+      end
 
-  def handle_event(type, content, :awaiting_api, data) do
-    AwaitingApi.handle(type, content, data)
-  end
-
-  def handle_event(type, content, :configuring, data) do
-    Configuring.handle(type, content, data)
-  end
-
-  def handle_event(type, content, :running, data) do
-    Running.handle(type, content, data)
-  end
-
-  def handle_event(type, content, :paused, data) do
-    Paused.handle(type, content, data)
-  end
-
-  def handle_event(type, content, :crashed, data) do
-    Crashed.handle(type, content, data)
-  end
-
-  def handle_event(type, content, :stopping, data) do
-    Stopping.handle(type, content, data)
+    module.handle(type, content, data)
   end
 
   @impl :gen_statem
