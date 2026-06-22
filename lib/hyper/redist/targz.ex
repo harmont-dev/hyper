@@ -21,9 +21,8 @@ defmodule Hyper.Redist.Targz do
       tar = Path.join(tmp, "download.tar.gz")
 
       with :ok <- fetch(url, tar),
-           :ok <- verify_checksum(tar, sha256),
-           :ok <- extract(tar, dest_dir) do
-        :ok
+           :ok <- verify_checksum(tar, sha256) do
+        extract(tar, dest_dir)
       end
     end)
   end
