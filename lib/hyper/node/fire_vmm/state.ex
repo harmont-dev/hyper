@@ -152,7 +152,12 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Booting do
-    @moduledoc false
+    @moduledoc """
+    Resolve the boot spec, launch (or re-adopt) the jailed firecracker daemon and
+    monitor it, then advance to `:awaiting_api` with a readiness deadline. An
+    early `stop` short-circuits to `:stopping`; pause/resume are rejected (the
+    guest is not running yet).
+    """
 
     alias Hyper.Node.FireVMM.{BootSpec, Opts}
     alias Hyper.Node.FireVMM.State.Daemon
@@ -190,7 +195,12 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule AwaitingApi do
-    @moduledoc false
+    @moduledoc """
+    Poll the daemon's API socket until it answers. A re-adopted daemon already
+    serving a guest (`Running`/`Paused`) skips straight to `:running`; a freshly
+    launched daemon (`Not started`) advances to `:staging`. If the readiness
+    deadline lapses before the API responds, the boot fails.
+    """
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
     alias Hyper.Node.FireVMM.{Client, Opts}
@@ -231,7 +241,11 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Configuring do
-    @moduledoc false
+    @moduledoc """
+    Push the cold-boot config to firecracker through the per-VM `Client`
+    (machine-config -> boot-source -> drives -> NICs -> `InstanceStart`), aborting
+    at the first error, then enter `:running`. Any step failing fails the boot.
+    """
 
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
     alias Hyper.Node.FireVMM.{BootSpec, Client, Opts}
@@ -288,7 +302,10 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Running do
-    @moduledoc false
+    @moduledoc """
+    The guest is live. Handles `pause` (-> `:paused`) and `stop` (-> `:stopping`);
+    `resume` is a no-op.
+    """
 
     alias Hyper.Firecracker.Api.{Operations, Vm}
     alias Hyper.Node.FireVMM.{Client, Opts}
@@ -313,7 +330,10 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Paused do
-    @moduledoc false
+    @moduledoc """
+    The guest is suspended. Handles `resume` (-> `:running`) and `stop`
+    (-> `:stopping`); `pause` is a no-op.
+    """
 
     alias Hyper.Firecracker.Api.{Operations, Vm}
     alias Hyper.Node.FireVMM.{Client, Opts}
@@ -338,7 +358,11 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Crashed do
-    @moduledoc false
+    @moduledoc """
+    The daemon died unexpectedly. After a short recover delay, return to
+    `:booting` (cold boot, or re-adopt a surviving daemon). A `stop` arriving
+    before the delay fires short-circuits to `:stopping`.
+    """
 
     def handle(:state_timeout, :recover, data) do
       {:next_state, :booting, data, [{:state_timeout, 0, :launch}]}
@@ -355,7 +379,11 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Staging do
-    @moduledoc false
+    @moduledoc """
+    Stage the kernel file and rootfs block device into the jail chroot, rewrite
+    the boot spec to the in-jail paths (`BootSpec.jailify/3`), then advance to
+    `:configuring`. Staging failure fails the boot.
+    """
 
     alias Hyper.Node.FireVMM.{BootSpec, Opts}
     alias Hyper.Node.FireVMM.Jail.Stage
@@ -384,7 +412,11 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   defmodule Stopping do
-    @moduledoc false
+    @moduledoc """
+    Teardown is underway (the controller is terminating; `terminate/2` takes the
+    daemon down). Expected daemon death is ignored here, and any caller request is
+    rejected with `{:error, :stopping}`.
+    """
 
     # Daemon death during teardown is expected; ignore it (we're already stopping).
     def handle(:info, {:DOWN, _ref, :process, _pid, _reason}, _data) do
