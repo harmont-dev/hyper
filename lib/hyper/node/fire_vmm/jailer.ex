@@ -127,13 +127,13 @@ defmodule Hyper.Node.FireVMM.Jailer do
   end
 
   @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
-  @spec chroot_dir(String.t() | integer()) :: Path.t()
+  @spec chroot_dir(Hyper.Vm.id()) :: Path.t()
   def chroot_dir(id) do
-    Path.join([Hyper.Config.chroot_base(), exec_name(), to_string(id)])
+    Path.join([Hyper.Config.chroot_base(), exec_name(), id])
   end
 
   @doc "Host path of the VM's chroot root (`<chroot_base>/<exec>/<id>/root`)."
-  @spec chroot_root(String.t() | integer()) :: Path.t()
+  @spec chroot_root(Hyper.Vm.id()) :: Path.t()
   def chroot_root(id) do
     Path.join(chroot_dir(id), "root")
   end
@@ -143,9 +143,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   cgroup the jailer creates for firecracker. Reconstructed (the jailer owns its
   placement) so a relaunch can clear the stale leaf left by a prior incarnation.
   """
-  @spec cgroup_dir(String.t() | integer()) :: Path.t()
+  @spec cgroup_dir(Hyper.Vm.id()) :: Path.t()
   def cgroup_dir(id) do
-    Path.join(["/sys/fs/cgroup", Hyper.Config.parent_cgroup(), exec_name(), to_string(id)])
+    Path.join(["/sys/fs/cgroup", Hyper.Config.parent_cgroup(), exec_name(), id])
   end
 
   @doc """
@@ -155,12 +155,12 @@ defmodule Hyper.Node.FireVMM.Jailer do
   derive it independently and are guaranteed to agree. We do not control where
   the jailer places the socket, so the path is reconstructed here.
   """
-  @spec host_socket(String.t() | integer()) :: Path.t()
+  @spec host_socket(Hyper.Vm.id()) :: Path.t()
   def host_socket(id) do
     Path.join([
       Hyper.Config.chroot_base(),
       exec_name(),
-      to_string(id),
+      id,
       "root",
       @jail_socket
     ])
