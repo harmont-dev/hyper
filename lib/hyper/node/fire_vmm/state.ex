@@ -6,21 +6,21 @@ defmodule Hyper.Node.FireVMM.State do
   if firecracker dies, `Core` restarts the daemon and this controller together,
   and `init` simply cold-boots again.
 
-      :awaiting_api --> :staging --> :configuring --> :running --> :stopping
+      :awaiting_api --> :configuring --> :running --> :stopping
 
   States:
 
     * `:awaiting_api` - poll the (already-launched) daemon's API socket until it
                         answers, or fail the boot if the readiness deadline lapses.
-    * `:staging`      - stage the kernel + rootfs device into the jail chroot and
-                        rewrite the spec to in-jail paths.
-    * `:configuring`  - push machine-config, boot-source, drives, NICs, then
+    * `:configuring`  - stage the kernel + rootfs device into the jail chroot
+                        (rewriting the spec to in-jail paths), then push
+                        machine-config, boot-source, drives, NICs, and
                         `InstanceStart`.
     * `:running`      - guest is live; handles `stop`.
     * `:stopping`     - teardown requested in-band; reject further calls.
 
   Uses `:handle_event_function` mode: each state's events live in a nested
-  submodule (`AwaitingApi`, `Staging`, ...) that `handle_event/4` dispatches to.
+  submodule (`AwaitingApi`, `Configuring`, ...) that `handle_event/4` dispatches to.
   Each step does one short thing and returns to the gen_statem loop; API structs
   come from `Hyper.Node.FireVMM.BootSpec` and every call goes through the per-VM
   `Client`.
@@ -40,7 +40,6 @@ defmodule Hyper.Node.FireVMM.State do
     AwaitingApi,
     Configuring,
     Running,
-    Staging,
     Stopping
   }
 
@@ -90,7 +89,6 @@ defmodule Hyper.Node.FireVMM.State do
     module =
       case state do
         :awaiting_api -> AwaitingApi
-        :staging -> Staging
         :configuring -> Configuring
         :running -> Running
         :stopping -> Stopping
@@ -106,8 +104,8 @@ defmodule Hyper.Node.FireVMM.State do
   defmodule AwaitingApi do
     @moduledoc """
     Poll the (already-launched) daemon's API socket until it answers, then advance
-    to `:staging`. If the readiness deadline lapses before the API responds, the
-    boot fails.
+    to `:configuring`. If the readiness deadline lapses before the API responds,
+    the boot fails.
     """
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
@@ -117,12 +115,12 @@ defmodule Hyper.Node.FireVMM.State do
     # How often to probe the daemon's API while waiting for it.
     @probe_interval Time.ms(50)
 
-    # Poll the daemon's API until it answers, then stage + configure. Give up if
-    # the readiness deadline passes first.
+    # Poll the daemon's API until it answers, then configure. Give up if the
+    # readiness deadline passes first.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
       case Client.run(Client.via(id), &Operations.describe_instance/1) do
         {:ok, %InstanceInfo{}} ->
-          {:next_state, :staging, data, [{:state_timeout, 0, :stage}]}
+          {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
 
         {:error, _reason} ->
           if System.monotonic_time(:millisecond) >= data.boot_deadline do
@@ -138,51 +136,34 @@ defmodule Hyper.Node.FireVMM.State do
     end
   end
 
-  defmodule Staging do
-    @moduledoc """
-    Stage the kernel + rootfs device into the jail chroot and rewrite the boot
-    spec to the in-jail paths (`Hyper.Node.FireVMM.ChrootJail.stage/4`), then
-    advance to `:configuring`. Staging failure fails the boot.
-    """
-
-    alias Hyper.Node.FireVMM.{ChrootJail, Opts}
-
-    # Stage the kernel + rootfs device into the chroot, rewriting the boot spec to
-    # the in-jail paths, then proceed to configuring.
-    def handle(
-          :state_timeout,
-          :stage,
-          %{opts: %Opts{vm_id: id, uid: uid, gid: gid}, spec: spec} = data
-        ) do
-      case ChrootJail.stage(id, uid, gid, spec) do
-        {:ok, spec} ->
-          {:next_state, :configuring, %{data | spec: spec}, [{:state_timeout, 0, :configure}]}
-
-        {:error, reason} ->
-          {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
-      end
-    end
-
-    def handle({:call, from}, :stop, data) do
-      {:next_state, :stopping, data, [{:reply, from, :ok}]}
-    end
-  end
-
   defmodule Configuring do
     @moduledoc """
-    Push the cold-boot config to firecracker through the per-VM `Client`
-    (machine-config -> boot-source -> drives -> NICs -> `InstanceStart`), aborting
-    at the first error, then enter `:running`. Any step failing fails the boot.
+    Stage the kernel + rootfs device into the jail chroot (`ChrootJail.stage/4`,
+    which also rewrites the spec to in-jail paths), then push the cold-boot config
+    to firecracker through the per-VM `Client` (machine-config -> boot-source ->
+    drives -> NICs -> `InstanceStart`) and enter `:running`. Any step failing
+    fails the boot; staging failures are tagged `{:staging, reason}`.
     """
 
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
-    alias Hyper.Node.FireVMM.{BootSpec, Client, Opts}
+    alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
 
-    # Issue the pre-boot config and start the guest, then run.
-    def handle(:state_timeout, :configure, %{opts: %Opts{vm_id: id}, spec: spec} = data) do
-      case apply_spec(id, spec) do
-        :ok -> {:next_state, :running, data}
-        {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
+    # Stage boot artifacts into the chroot, then issue the pre-boot config and
+    # start the guest.
+    def handle(
+          :state_timeout,
+          :configure,
+          %{opts: %Opts{vm_id: id, uid: uid, gid: gid}, spec: spec} = data
+        ) do
+      case ChrootJail.stage(id, uid, gid, spec) do
+        {:ok, jailed_spec} ->
+          case apply_spec(id, jailed_spec) do
+            :ok -> {:next_state, :running, data}
+            {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
+          end
+
+        {:error, reason} ->
+          {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
       end
     end
 

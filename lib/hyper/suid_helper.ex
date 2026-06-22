@@ -5,7 +5,7 @@ defmodule Hyper.SuidHelper do
     * `Hyper.SuidHelper.Losetup`  - loop devices
     * `Hyper.SuidHelper.Dmsetup`  - device-mapper (snapshot / thin)
     * `Hyper.SuidHelper.Blockdev` - block-device queries
-    * `Hyper.SuidHelper.Jail`     - chroot staging (mknod / stage / reset)
+    * `Hyper.SuidHelper.Jail`     - chroot lifecycle (prepare / remove)
 
   Elixir runs unprivileged; these submodules are the only path to the privileged operations. Each
   builds the argv for one operation and shells the helper through `exec/1`, which decodes the
