@@ -36,7 +36,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         id: beam
@@ -98,7 +98,7 @@ jobs:
       run:
         working-directory: native/suidhelper
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
       # call and installs the pinned nightly toolchain, components, and targets.
