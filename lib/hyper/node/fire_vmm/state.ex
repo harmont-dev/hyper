@@ -7,7 +7,7 @@ defmodule Hyper.Node.FireVMM.State do
   blocking call, so the controller stays responsive to daemon death and `stop`
   while a VM is coming up.
 
-      :booting --> :awaiting_api --> :configuring --> :running <-> :paused --> :stopping
+      :booting --> :awaiting_api --> :staging --> :configuring --> :running <-> :paused --> :stopping
           ^             |                  |
           +- :crashed <-+------------------+   (daemon died / never came up; recover)
 
@@ -30,7 +30,17 @@ defmodule Hyper.Node.FireVMM.State do
   alias Hyper.Node.FireVMM.State
   alias Hyper.Node.FireVMM.State.Daemon
   alias Unit.Time
-  alias __MODULE__.{AwaitingApi, Booting, Configuring, Crashed, Paused, Running, Stopping}
+
+  alias __MODULE__.{
+    AwaitingApi,
+    Booting,
+    Configuring,
+    Crashed,
+    Paused,
+    Running,
+    Staging,
+    Stopping
+  }
 
   @enforce_keys [:opts]
   defstruct [:opts, :daemon, :daemon_ref, :spec, :boot_deadline]
@@ -100,6 +110,7 @@ defmodule Hyper.Node.FireVMM.State do
       case state do
         :booting -> Booting
         :awaiting_api -> AwaitingApi
+        :staging -> Staging
         :configuring -> Configuring
         :running -> Running
         :paused -> Paused
@@ -184,7 +195,7 @@ defmodule Hyper.Node.FireVMM.State do
           {:next_state, :running, data}
 
         {:ok, %InstanceInfo{}} ->
-          {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+          {:next_state, :staging, data, [{:state_timeout, 0, :stage}]}
 
         {:error, _reason} ->
           if System.monotonic_time(:millisecond) >= data.boot_deadline do
@@ -319,6 +330,35 @@ defmodule Hyper.Node.FireVMM.State do
     end
 
     # A call can arrive before the recover timeout fires.
+    def handle({:call, from}, :stop, data) do
+      {:next_state, :stopping, data, [{:reply, from, :ok}]}
+    end
+
+    def handle({:call, from}, event, _data) when event in [:pause, :resume] do
+      {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
+    end
+  end
+
+  defmodule Staging do
+    @moduledoc false
+
+    alias Hyper.Node.FireVMM.{BootSpec, Opts}
+    alias Hyper.Node.FireVMM.Jail.Stage
+
+    # Stage the kernel + rootfs device into the chroot, then rewrite the boot
+    # spec to the in-jail paths and proceed to configuring.
+    def handle(:state_timeout, :stage, %{opts: %Opts{} = opts, spec: spec} = data) do
+      %Opts{vm_id: id, uid: uid, gid: gid, source: source} = opts
+
+      with {:ok, jail_kernel} <- Stage.kernel(id, uid, gid, source.kernel_image_path),
+           {:ok, jail_root} <- Stage.root_drive(id, uid, gid, source.root_drive_path) do
+        data = %{data | spec: BootSpec.jailify(spec, jail_kernel, jail_root)}
+        {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+      else
+        {:error, reason} -> {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
+      end
+    end
+
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
     end
