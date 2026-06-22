@@ -153,9 +153,21 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
-         :ok <- Sys.Linux.Dmsetup.test_system(),
-         :ok <- Sys.Linux.Dmsetup.test_targets() do
+         :ok <- Hyper.SuidHelper.test_system(),
+         :ok <- Hyper.SuidHelper.test_targets(),
+         {:ok, base} <- Hyper.SuidHelper.sys_test(),
+         :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
+    end
+  end
+
+  @spec check_helper_base(Path.t()) ::
+          :ok | {:error, {:suid_helper_base_mismatch, Path.t(), Path.t()}}
+  defp check_helper_base(base) do
+    if base == Hyper.Config.work_dir() do
+      :ok
+    else
+      {:error, {:suid_helper_base_mismatch, base, Hyper.Config.work_dir()}}
     end
   end
 

@@ -10,7 +10,7 @@ defmodule Hyper.Node.FireVMM.Jail.Stage do
   use OpenTelemetryDecorator
 
   alias Hyper.Node.FireVMM.Jailer
-  alias Sys.Linux.Mknod
+  alias Hyper.SuidHelper
 
   @kernel_name "vmlinux"
   @root_name "rootfs"
@@ -32,7 +32,7 @@ defmodule Hyper.Node.FireVMM.Jail.Stage do
   def kernel(vm_id, uid, gid, host_kernel_path) do
     dest = Path.join(Jailer.chroot_root(vm_id), @kernel_name)
 
-    case Mknod.stage(host_kernel_path, dest, uid, gid) do
+    case SuidHelper.stage(host_kernel_path, dest, uid, gid) do
       :ok -> {:ok, jail_path(@kernel_name)}
       {:error, _} = err -> err
     end
@@ -45,7 +45,7 @@ defmodule Hyper.Node.FireVMM.Jail.Stage do
   def root_drive(vm_id, uid, gid, host_dev) do
     dest = Path.join(Jailer.chroot_root(vm_id), @root_name)
 
-    case Mknod.block(dest, host_dev, uid, gid) do
+    case SuidHelper.mknod(dest, host_dev, uid, gid) do
       :ok -> {:ok, jail_path(@root_name)}
       {:error, _} = err -> err
     end

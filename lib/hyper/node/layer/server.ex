@@ -13,7 +13,7 @@ defmodule Hyper.Node.Layer.Server do
 
   alias Hyper.Node.Layer
   alias Hyper.Node.Layer.Repo
-  alias Sys.Linux.Losetup
+  alias Hyper.SuidHelper
 
   # Grace period after the last holder leaves before the layer is unmounted. Keeps
   # bursty acquire/release cycles from thrashing the mount.
@@ -76,7 +76,7 @@ defmodule Hyper.Node.Layer.Server do
     Process.flag(:trap_exit, true)
 
     with {:ok, layer_path} <- Repo.find_layer(layer_id),
-         {:ok, blk_path} <- Losetup.mount_ro(layer_path) do
+         {:ok, blk_path} <- SuidHelper.losetup_attach_ro(layer_path) do
       # Start with no holders, so a mounted-but-unused layer reaps itself.
       {:ok, arm_idle(%State{blk_path: blk_path})}
     else
@@ -124,8 +124,8 @@ defmodule Hyper.Node.Layer.Server do
 
   @impl true
   def terminate(_reason, %State{blk_path: blk_path}) do
-    case Losetup.umount(blk_path) do
-      {:ok, _path} ->
+    case SuidHelper.losetup_detach(blk_path) do
+      :ok ->
         :ok
 
       {:error, {errc, out}} ->

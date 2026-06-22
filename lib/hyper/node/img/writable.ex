@@ -16,7 +16,7 @@ defmodule Hyper.Node.Img.Writable do
 
   alias Hyper.Node.Img
   alias Hyper.Node.Img.{Server, ThinPool}
-  alias Sys.Linux.Dmsetup
+  alias Hyper.SuidHelper
 
   @idle_timeout_ms :timer.seconds(30)
 
@@ -61,7 +61,7 @@ defmodule Hyper.Node.Img.Writable do
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, sectors} <- Dmsetup.device_sectors(ro_dev),
+         {:ok, sectors} <- SuidHelper.device_sectors(ro_dev),
          {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev, sectors) do
       state = %State{
         img_server: img_server,
