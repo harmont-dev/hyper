@@ -35,6 +35,15 @@ defmodule Hyper.Node.Img.Mutable do
   defmodule State do
     @moduledoc false
     defstruct [:img_server, :thin_name, :thin_id, :blk_path, holders: %{}, idle_ref: nil]
+
+    @type t :: %__MODULE__{
+            img_server: GenServer.server(),
+            thin_name: String.t(),
+            thin_id: non_neg_integer(),
+            blk_path: Path.t(),
+            holders: %{pid() => reference()},
+            idle_ref: reference() | nil
+          }
   end
 
   @spec start_link(Opts.t()) :: GenServer.on_start()

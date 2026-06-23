@@ -55,10 +55,13 @@ defmodule Hyper.Node.Img do
   @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
   @spec create_mutable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
   def create_mutable(img_id, vm_id) do
-    DynamicSupervisor.start_child(
-      @mutable_sup,
-      {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}
-    )
+    case DynamicSupervisor.start_child(
+           @mutable_sup,
+           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}
+         ) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, _} = err -> err
+    end
   end
 
   @doc "Every image id currently active on this node."
