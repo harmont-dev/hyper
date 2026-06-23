@@ -63,8 +63,8 @@ cluster. The contract lives at `proto/hyper/grpc/v0/hyper.proto`
 > **v0:** unstable — the contract may change without notice during early
 > development.
 
-The server is opt-in and configured entirely from your own `config/`; it is
-stateless and may run on every node. See
+The server always runs on every node and is configured (port, TLS) entirely
+from your own `config/`; it is stateless. See
 [the gRPC guide](docs/grpc.md) for configuration, TLS, connecting from any
 language, and regenerating the bindings.
 

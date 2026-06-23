@@ -24,36 +24,20 @@ A machine is addressed by its **`vm_id`** — a URL-safe base64 string the serve
 mints at creation. The server is stateless and identical on every node;
 placement and routing are cluster-wide, so any node can serve any request.
 
-### Optional fields
-
-`CreateMachineRequest` uses proto3 `optional` (explicit field presence) instead
-of magic sentinel enum values. An **unset** field is absent on the wire (and
-`nil` in Elixir), and the server applies its default:
-
-| Field           | Type           | Unset means                          |
-| --------------- | -------------- | ------------------------------------ |
-| `img_id`        | `string`       | required                             |
-| `instance_type` | `InstanceType` | `INSTANCE_TYPE_BASE`                 |
-| `arch`          | `Architecture` | resolve to the scheduling node's arch|
-| `boot_args`     | `string`       | the standard serial-console cmdline  |
-
-There is no `*_UNSPECIFIED` member: leave the field out to get the default.
-
 ## Configuring the server
 
-The server is **off by default**. Enable and configure it from your own
-application config under `config :hyper, Hyper.Grpc`. Only `:enabled` is special
-— every other key is passed straight through to
+The server **always runs** — it is a core interface, not an opt-in add-on, and
+an idle listener costs next to nothing. With no config it serves plaintext on
+port `50051`. Tune the listener from your own application config under
+`config :hyper, Hyper.Grpc`; every key is passed straight through to
 [`GRPC.Server.Supervisor`](https://hexdocs.pm/grpc_server/GRPC.Server.Supervisor.html),
-so you control the listener entirely (`Hyper.Grpc.Config` documents this).
+so you control it entirely (`Hyper.Grpc.Config` documents this).
 
 ### Plaintext (development)
 
 ```elixir
 # config/dev.exs
-config :hyper, Hyper.Grpc,
-  enabled: true,
-  port: 50_051
+config :hyper, Hyper.Grpc, port: 50_051
 ```
 
 `:port` defaults to `50051` if omitted.
@@ -67,7 +51,6 @@ paths are read at boot, not compile time:
 # config/runtime.exs
 if config_env() == :prod do
   config :hyper, Hyper.Grpc,
-    enabled: true,
     port: 50_051,
     cred:
       GRPC.Credential.new(
@@ -85,9 +68,10 @@ supervisor option works too (`adapter_opts:`, `max_body_size:`, …).
 
 ### How it starts
 
-`Hyper.Application` splices `Hyper.Grpc.server_children/0` into its supervision
-tree. That returns `[]` when `enabled: false`, so a default build starts no
-server. Run the server on as many nodes as you like.
+`Hyper.Application` unconditionally splices `Hyper.Grpc.server_children/0` into
+its supervision tree on every node. Because each node binds `:port`, running
+several nodes on one host (e.g. a local cluster) means giving each its own port
+in config.
 
 ## Connecting
 
@@ -124,21 +108,3 @@ adapter):
     %Hyper.Grpc.V0.StopMachineRequest{vm_id: vm_id}
   )
 ```
-
-## Regenerating the bindings
-
-The Elixir bindings (`lib/hyper/grpc/v0/hyper.pb.ex`) are **not committed** —
-they are generated from the `.proto` by the `:grpc_gen` Mix compiler before the
-Elixir compiler runs, the same way the Firecracker bindings are. Editing the
-`.proto` and recompiling is enough; to force a regen run `mix grpc.gen`.
-
-This requires `protoc` and the `protoc-gen-elixir` plugin in any environment
-that compiles Hyper from a fresh tree:
-
-```sh
-sudo apt-get install -y protobuf-compiler   # or: brew install protobuf
-mix escript.install hex protobuf 0.17.0     # provides protoc-gen-elixir
-```
-
-The plugin escript installs to `~/.mix/escripts`, which the compiler prepends to
-`PATH` automatically.

@@ -15,10 +15,11 @@ defmodule Hyper.Grpc do
 
   ## Serving
 
-  The server is started by `Hyper.Application` when enabled in config. It is
-  stateless and may run on every node; placement and routing are cluster-wide.
-  See `Hyper.Grpc.Config` for configuration — operators own the listener (port,
-  TLS, adapter options) entirely from their own `config/`.
+  The server is always started by `Hyper.Application` — it is a core interface,
+  not an add-on, and an idle listener costs next to nothing. It is stateless and
+  runs on every node; placement and routing are cluster-wide. See
+  `Hyper.Grpc.Config` for configuration — operators own the listener (port, TLS,
+  adapter options) entirely from their own `config/`.
 
   ## Connecting from the BEAM
 
@@ -35,58 +36,50 @@ defmodule Hyper.Grpc do
     gRPC server configuration, read from application env:
 
         config :hyper, Hyper.Grpc,
-          enabled: true,
           port: 50_051,
           # any other GRPC.Server.Supervisor option, e.g. TLS:
           cred: GRPC.Credential.new(ssl: [certfile: "/path/cert.pem", keyfile: "/path/key.pem"])
 
-    `:enabled` (default `false`) gates whether the server starts. Every other
-    key is passed straight through to `GRPC.Server.Supervisor`, so operators
-    control the listener — port, TLS credentials, adapter options, body limits —
-    entirely from their own config. Hyper prescribes nothing beyond defaulting
-    `:port` and pointing the supervisor at `Hyper.Grpc.Endpoint`.
+    The server always runs (it is a core interface, not opt-in); this config
+    only tunes the listener. Every key is passed straight through to
+    `GRPC.Server.Supervisor`, so operators control port, TLS credentials,
+    adapter options, and body limits entirely from their own config. Hyper
+    prescribes nothing beyond defaulting `:port` and pointing the supervisor at
+    `Hyper.Grpc.Endpoint`.
 
     Load secrets however you like: put cert/key paths in `config/runtime.exs` and
     build the credential there, or read them from a vault — Hyper never touches
     the filesystem on your behalf.
+
+    > #### Co-located nodes {: .info}
+    >
+    > Every node binds `:port`. Running multiple nodes on one host (e.g. a local
+    > cluster) requires giving each a distinct port via its own config.
     """
 
     @default_port 50_051
 
-    @doc "Whether the gRPC server should start."
-    @spec enabled?() :: boolean()
-    def enabled?, do: Keyword.get(all(), :enabled, false)
-
     @doc """
     The options spliced into the `GRPC.Server.Supervisor` child: the operator's
-    config minus `:enabled`, with the endpoint, `start_server`, and a default
-    port filled in if absent.
+    config, with the endpoint, `start_server`, and a default port filled in if
+    absent.
     """
     @spec server_options() :: keyword()
     def server_options do
-      all()
-      |> Keyword.delete(:enabled)
+      Application.get_env(:hyper, Hyper.Grpc, [])
       |> Keyword.put_new(:endpoint, Hyper.Grpc.Endpoint)
       |> Keyword.put_new(:start_server, true)
       |> Keyword.put_new(:port, @default_port)
     end
-
-    @spec all() :: keyword()
-    defp all, do: Application.get_env(:hyper, Hyper.Grpc, [])
   end
 
   @doc """
-  The supervisor children for the gRPC server: empty unless the server is
-  enabled (see `Hyper.Grpc.Config`). Spliced into the app supervision tree by
-  `Hyper.Application`.
+  The gRPC server's supervisor child. Always present — the server is a core
+  interface, started unconditionally by `Hyper.Application`.
   """
-  @spec server_children() :: [Supervisor.child_spec() | {module(), term()}]
+  @spec server_children() :: [{module(), keyword()}]
   def server_children do
-    if Config.enabled?() do
-      [{GRPC.Server.Supervisor, Config.server_options()}]
-    else
-      []
-    end
+    [{GRPC.Server.Supervisor, Config.server_options()}]
   end
 
   @doc """

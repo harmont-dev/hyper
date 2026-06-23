@@ -43,8 +43,6 @@ config :hyper, Hyper.Img.Db.Repo,
   hostname: "localhost",
   pool_size: 10
 
-# The public gRPC interface is opt-in and off by default. Operators enable and
-# configure it from their own config (port, TLS, adapter opts) -- see
-# `Hyper.Grpc.Config`. Everything but `:enabled` is passed through to
-# `GRPC.Server.Supervisor`.
-config :hyper, Hyper.Grpc, enabled: false
+# The public gRPC interface always runs (it is a core interface, not opt-in).
+# Tune the listener -- port, TLS, adapter opts -- from your own config; see
+# `Hyper.Grpc.Config`. With no config it serves plaintext on port 50051.
