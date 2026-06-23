@@ -15,6 +15,7 @@ defmodule Hyper.MixProject do
       # the only hook that also fires when hyper is compiled AS A DEPENDENCY.
       compilers: [:firecracker_gen | Mix.compilers()],
       deps: deps(),
+      test_coverage: [tool: ExCoveralls],
       docs: docs(),
       package: package(),
       aliases: aliases(),
@@ -24,6 +25,18 @@ defmodule Hyper.MixProject do
         plt_core_path: "priv/plts",
         # Verify @specs against actual returns, and flag ignored return values.
         flags: [:unmatched_returns, :extra_return, :missing_return]
+      ]
+    ]
+  end
+
+  # Run the coverage tasks in :test so test-only deps (excoveralls) load and the
+  # Repo-backed tests see the test database. Mirrors how `mix test` selects :test.
+  def cli do
+    [
+      preferred_envs: [
+        coveralls: :test,
+        "coveralls.json": :test,
+        "coveralls.html": :test
       ]
     ]
   end
@@ -43,6 +56,7 @@ defmodule Hyper.MixProject do
   defp deps do
     [
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:excoveralls, "~> 0.18", only: :test, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
