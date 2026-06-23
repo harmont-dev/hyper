@@ -30,3 +30,44 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           bash .github/scripts/check-versions.sh "$version"
+
+  build-suidhelper:
+    name: Build suidhelper (${{ matrix.target }})
+    needs: verify-versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    defaults:
+      run:
+        working-directory: native/suidhelper
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
+      # call and installs the pinned nightly + both musl targets.
+      - name: Show toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/suidhelper
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage renamed artifact
+        run: |
+          v="${{ needs.verify-versions.outputs.version }}"
+          out="hyper-suidhelper-${v}-${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/hyper-suidhelper" "dist/${out}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suidhelper-${{ matrix.target }}
+          path: native/suidhelper/dist/*
+          if-no-files-found: error
