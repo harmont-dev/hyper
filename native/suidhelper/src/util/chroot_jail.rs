@@ -147,38 +147,33 @@ fn stage_kernel(chroot: &SafeDir, src: &str, uid: u32, gid: u32) -> Result<(), E
 
     match chroot.link_from(&src_canon, KERNEL_NAME) {
         Ok(()) => {}
+        // Cross-filesystem: open the confined source O_RDONLY|O_NOFOLLOW, create
+        // the dest O_CREAT|O_EXCL|O_NOFOLLOW, and copy. Both fds are RAII.
         Err(safe_dir::Error::Link { source, .. }) if source == Errno::EXDEV => {
-            copy_kernel(chroot, &src_canon)?;
+            let src_raw = nix_open(
+                &src_canon,
+                OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|source| Error::OpenSrc {
+                path: src_canon.clone(),
+                source,
+            })?;
+            // SAFETY: nix_open just handed us this fd; File owns and closes it.
+            let mut src_file = unsafe { std::fs::File::from_raw_fd(src_raw) };
+
+            let dest = chroot.create_file(KERNEL_NAME, 0o600)?;
+            let mut dest_file = std::fs::File::from(dest.into_owned_fd());
+
+            io::copy(&mut src_file, &mut dest_file).map_err(|source| Error::Copy {
+                name: KERNEL_NAME.to_string(),
+                source,
+            })?;
         }
         Err(e) => return Err(Error::Fs(e)),
     }
 
     chroot.chown(KERNEL_NAME, uid, gid)?;
-    Ok(())
-}
-
-/// EXDEV fallback: open the confined source `O_RDONLY|O_NOFOLLOW`, create the
-/// dest `O_CREAT|O_EXCL|O_NOFOLLOW`, and copy. Both fds are RAII.
-fn copy_kernel(chroot: &SafeDir, src_canon: &Path) -> Result<(), Error> {
-    let src_raw = nix_open(
-        src_canon,
-        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|source| Error::OpenSrc {
-        path: src_canon.to_path_buf(),
-        source,
-    })?;
-    // SAFETY: nix_open just handed us this fd; File takes ownership and closes it.
-    let mut src_file = unsafe { std::fs::File::from_raw_fd(src_raw) };
-
-    let dest = chroot.create_file(KERNEL_NAME, 0o600)?;
-    let mut dest_file = std::fs::File::from(dest.into_owned_fd());
-
-    io::copy(&mut src_file, &mut dest_file).map_err(|source| Error::Copy {
-        name: KERNEL_NAME.to_string(),
-        source,
-    })?;
     Ok(())
 }
 
