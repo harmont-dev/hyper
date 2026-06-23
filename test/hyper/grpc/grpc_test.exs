@@ -10,7 +10,7 @@ defmodule Hyper.GrpcTest do
     test "raises ArgumentError when tls_cert is nil" do
       Application.put_env(:hyper, Hyper.Grpc,
         enabled: true,
-        port: 50051,
+        port: 50_051,
         tls_cert: nil,
         tls_key: "/path/to/key.pem"
       )
@@ -23,7 +23,7 @@ defmodule Hyper.GrpcTest do
     test "raises ArgumentError when tls_key is nil" do
       Application.put_env(:hyper, Hyper.Grpc,
         enabled: true,
-        port: 50051,
+        port: 50_051,
         tls_cert: "/path/to/cert.pem",
         tls_key: nil
       )
@@ -34,7 +34,7 @@ defmodule Hyper.GrpcTest do
     end
 
     test "raises ArgumentError when tls_cert is missing from config" do
-      Application.put_env(:hyper, Hyper.Grpc, enabled: true, port: 50051, tls_key: "/k.pem")
+      Application.put_env(:hyper, Hyper.Grpc, enabled: true, port: 50_051, tls_key: "/k.pem")
 
       assert_raise ArgumentError, ~r/:tls_cert/, fn ->
         Hyper.Grpc.server_children()
