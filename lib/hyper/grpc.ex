@@ -60,17 +60,27 @@ defmodule Hyper.Grpc do
     @default_port 50_051
 
     @doc """
+    Whether the gRPC server should start. Defaults to `true`.
+    """
+    @spec enabled?() :: boolean()
+    def enabled?, do: Keyword.get(all(), :enabled, true)
+
+    @doc """
     The options spliced into the `GRPC.Server.Supervisor` child: the operator's
-    config, with the endpoint, `start_server`, and a default port filled in if
-    absent.
+    config (minus `:enabled`), with the endpoint, `start_server`, and a default
+    port filled in if absent.
     """
     @spec server_options() :: keyword()
     def server_options do
-      Application.get_env(:hyper, Hyper.Grpc, [])
+      all()
+      |> Keyword.delete(:enabled)
       |> Keyword.put_new(:endpoint, Hyper.Grpc.Endpoint)
       |> Keyword.put_new(:start_server, true)
       |> Keyword.put_new(:port, @default_port)
     end
+
+    @spec all() :: keyword()
+    defp all, do: Application.get_env(:hyper, __MODULE__, [])
   end
 
   @doc """
@@ -79,7 +89,11 @@ defmodule Hyper.Grpc do
   """
   @spec server_children() :: [{module(), keyword()}]
   def server_children do
-    [{GRPC.Server.Supervisor, Config.server_options()}]
+    if Config.enabled?() do
+      [{GRPC.Server.Supervisor, Config.server_options()}]
+    else
+      []
+    end
   end
 
   @doc """
