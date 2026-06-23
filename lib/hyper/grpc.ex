@@ -45,28 +45,48 @@ defmodule Hyper.Grpc do
   Connect a BEAM client channel to a Hyper gRPC endpoint at `addr`
   (`"host:port"`). Pass `ca:` (PEM path) to verify the server's TLS certificate;
   omit it for an insecure (plaintext) connection.
+
+  Defaults to `GRPC.Client.Adapters.Mint` (`:gun` is an optional dep not
+  included in this project). Pass `adapter:` in `opts` to override.
   """
   @spec connect(String.t(), keyword()) :: {:ok, GRPC.Channel.t()} | {:error, term()}
   def connect(addr, opts \\ []) do
-    case Keyword.fetch(opts, :ca) do
-      {:ok, ca} -> GRPC.Stub.connect(addr, cred: GRPC.Credential.new(ssl: [cacertfile: ca]))
-      :error -> GRPC.Stub.connect(addr)
+    {ca, rest} = Keyword.pop(opts, :ca)
+    stub_opts = Keyword.put_new(rest, :adapter, GRPC.Client.Adapters.Mint)
+
+    case ca do
+      nil ->
+        GRPC.Stub.connect(addr, stub_opts)
+
+      path ->
+        GRPC.Stub.connect(
+          addr,
+          Keyword.put(stub_opts, :cred, GRPC.Credential.new(ssl: [cacertfile: path]))
+        )
     end
   end
 
   @spec grpc_child(keyword()) :: {module(), keyword()}
   defp grpc_child(config) do
     port = Keyword.fetch!(config, :port)
+    tls_cert = fetch_tls_key!(config, :tls_cert, "HYPER_GRPC_TLS_CERT")
+    tls_key = fetch_tls_key!(config, :tls_key, "HYPER_GRPC_TLS_KEY")
 
-    cred =
-      GRPC.Credential.new(
-        ssl: [
-          certfile: Keyword.fetch!(config, :tls_cert),
-          keyfile: Keyword.fetch!(config, :tls_key)
-        ]
-      )
+    cred = GRPC.Credential.new(ssl: [certfile: tls_cert, keyfile: tls_key])
 
     {GRPC.Server.Supervisor,
      endpoint: Hyper.Grpc.Endpoint, port: port, start_server: true, adapter_opts: [cred: cred]}
+  end
+
+  @spec fetch_tls_key!(keyword(), atom(), String.t()) :: String.t()
+  defp fetch_tls_key!(config, key, env_var) do
+    case Keyword.get(config, key) do
+      value when is_binary(value) and value != "" ->
+        value
+
+      _ ->
+        raise ArgumentError,
+              "Hyper.Grpc is enabled but :#{key} is not configured (set #{env_var})"
+    end
   end
 end
