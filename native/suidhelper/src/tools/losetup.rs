@@ -43,7 +43,7 @@ struct AttachArgs {
     #[arg(long)]
     rw: bool,
     #[arg(value_parser = ok_backing_file)]
-    path: String,
+    path: PathBuf,
 }
 
 impl AttachArgs {
@@ -69,7 +69,7 @@ enum LosetupOp {
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum LosetupOut {
-    Attached { device: String },
+    Attached { device: PathBuf },
     Detached,
 }
 
@@ -112,7 +112,7 @@ impl IsTool for Losetup {
 
         Ok(match &self.op {
             LosetupOp::Attach(_) => LosetupOut::Attached {
-                device: String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                device: PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()),
             },
             LosetupOp::Detach { .. } => LosetupOut::Detached,
         })
@@ -123,7 +123,7 @@ impl IsTool for Losetup {
 /// check the real path is in-bounds, then open *that* inode and return
 /// `/proc/self/fd/N`. Operating on the validated fd (not the path) closes the
 /// TOCTOU window: a swap after the check can't redirect losetup elsewhere.
-fn ok_backing_file(p: &str) -> Result<String, Error> {
+fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
     let real =
         std::fs::canonicalize(p).map_err(|source| Error::Canonicalize { path: PathBuf::from(p), source })?;
 
@@ -145,5 +145,5 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
     // SafeFile's own fd closes on drop.
     let inheritable =
         dup(file.as_raw_fd()).map_err(|errno| Error::OpenBacking { path: real, errno })?;
-    Ok(format!("/proc/self/fd/{inheritable}"))
+    Ok(PathBuf::from(format!("/proc/self/fd/{inheritable}")))
 }

@@ -29,6 +29,7 @@ mod config;
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;
+use std::path::PathBuf;
 use tools::Tool;
 use util::setuid_privileged::{self, Privileged};
 
@@ -61,7 +62,7 @@ enum Output {
 #[derive(Serialize)]
 struct SysTest {
     sys_test: &'static str,
-    hyper_base: String,
+    hyper_base: PathBuf,
 }
 
 impl SysTest {
@@ -69,7 +70,7 @@ impl SysTest {
         Privileged::smoke_test()?;
         Ok(Self {
             sys_test: "ok",
-            hyper_base: crate::config::Config::get().hyper_base().to_string_lossy().into_owned(),
+            hyper_base: crate::config::Config::get().hyper_base().to_path_buf(),
         })
     }
 }

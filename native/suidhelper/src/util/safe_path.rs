@@ -17,8 +17,6 @@ pub enum ValidationError {
     NotUnderBase,
     #[error("path has no final component (equals the base)")]
     NoLeaf,
-    #[error("path component is not valid UTF-8")]
-    NonUtf8,
 }
 
 /// Absoluteness axis: require an absolute path.
@@ -71,7 +69,7 @@ impl<A> SafePath<A, StrictComponents> {
     ///
     /// Errs if the path is not under `base`, equals `base` (no final component),
     /// or contains a non-UTF-8 component.
-    pub fn relative_to(&self, base: &Path) -> Result<(Vec<String>, String), ValidationError> {
+    pub fn relative_to(&self, base: &Path) -> Result<(Vec<PathBuf>, PathBuf), ValidationError> {
         let rel = self
             .0
             .strip_prefix(base)
@@ -80,9 +78,7 @@ impl<A> SafePath<A, StrictComponents> {
         let mut components = Vec::new();
         for component in rel.components() {
             match component {
-                Component::Normal(s) => {
-                    components.push(s.to_str().ok_or(ValidationError::NonUtf8)?.to_string())
-                }
+                Component::Normal(s) => components.push(PathBuf::from(s)),
                 // StrictComponents guarantees this is unreachable; reject anyway.
                 _ => return Err(ValidationError::NotUnderBase),
             }

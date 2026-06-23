@@ -2,20 +2,21 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
-use crate::util::safe_dev::BlockDev;
 use crate::tools::IsTool;
 use crate::util::chroot_jail::{self, ChrootJail};
+use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct PrepareArgs {
     /// Chroot root directory (under JAIL_BASE, shape <JAIL_BASE>/<exec>/<id>).
     #[arg(long)]
-    chroot: String,
+    chroot: PathBuf,
     /// Host kernel image path (under /srv/hyper); staged as <chroot>/vmlinux.
     #[arg(long)]
-    kernel: String,
+    kernel: PathBuf,
     /// Host block device to mirror as <chroot>/rootfs (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
     #[arg(long)]
@@ -50,8 +51,8 @@ impl IsTool for Prepare {
 
     fn run_privileged(&self) -> Self::RunT {
         let args = &self.args;
-        ChrootJail::new(&args.chroot, args.uid, args.gid)
-            .with_kernel(&args.kernel)
+        ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
+            .with_kernel(args.kernel.clone())
             .with_rootfs(args.device.clone())
             .build()
     }

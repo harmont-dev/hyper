@@ -41,25 +41,21 @@ pub enum Error {
         #[source]
         source: nix::Error,
     },
-    #[error("copy kernel into {name:?}: {source}")]
-    Copy {
-        name: String,
-        #[source]
-        source: io::Error,
-    },
+    #[error("copy kernel: {0}")]
+    Copy(#[source] io::Error),
 }
 
 /// An unfilled artifact slot.
 pub struct Unset;
 /// The kernel slot, carrying its host source path.
-pub struct Kernel(String);
+pub struct Kernel(PathBuf);
 /// The rootfs slot, carrying the block device to mirror.
 pub struct Rootfs(BlockDev);
 
 /// A description of a VM chroot's contents. Type parameters track which slots are
 /// filled; see the module docs.
 pub struct ChrootJail<K, R> {
-    chroot: String,
+    chroot: PathBuf,
     uid: u32,
     gid: u32,
     kernel: K,
@@ -69,7 +65,7 @@ pub struct ChrootJail<K, R> {
 impl ChrootJail<Unset, Unset> {
     /// A jail at `chroot` (shape `<JAIL_BASE>/<exec>/<id>`), everything owned by
     /// `uid:gid`.
-    pub fn new(chroot: impl Into<String>, uid: u32, gid: u32) -> Self {
+    pub fn new(chroot: impl Into<PathBuf>, uid: u32, gid: u32) -> Self {
         Self {
             chroot: chroot.into(),
             uid,
@@ -82,7 +78,7 @@ impl ChrootJail<Unset, Unset> {
 
 impl<R> ChrootJail<Unset, R> {
     /// Stage the guest kernel from host path `source` as `vmlinux`.
-    pub fn with_kernel(self, source: impl Into<String>) -> ChrootJail<Kernel, R> {
+    pub fn with_kernel(self, source: impl Into<PathBuf>) -> ChrootJail<Kernel, R> {
         ChrootJail {
             chroot: self.chroot,
             uid: self.uid,
@@ -119,9 +115,9 @@ impl ChrootJail<Kernel, Rootfs> {
 
 /// Open the chroot directory by walking it from `JAIL_BASE` with `O_NOFOLLOW`, so
 /// a symlinked component cannot redirect outside the jail.
-fn open_chroot(chroot: &str) -> Result<SafeDir, Error> {
+fn open_chroot(chroot: &Path) -> Result<SafeDir, Error> {
     let jail_base = Config::get().jail_base();
-    let path: SafePath<IsAbsolute, StrictComponents> = PathBuf::from(chroot).try_into()?;
+    let path: SafePath<IsAbsolute, StrictComponents> = chroot.to_path_buf().try_into()?;
     let (parents, leaf) = path.relative_to(&jail_base)?;
     let anchor: SafePath<IsAbsolute, StrictComponents> = jail_base.try_into()?;
 
@@ -132,9 +128,10 @@ fn open_chroot(chroot: &str) -> Result<SafeDir, Error> {
 
 /// Stage host file `src` into `chroot` as `vmlinux`: confine the source under
 /// `HYPER_BASE`, hard-link it (copy across filesystems), then chown to `uid:gid`.
-fn stage_kernel(chroot: &SafeDir, src: &str, uid: u32, gid: u32) -> Result<(), Error> {
+fn stage_kernel(chroot: &SafeDir, src: &Path, uid: u32, gid: u32) -> Result<(), Error> {
+    let kernel = Path::new(KERNEL_NAME);
     let src_canon = std::fs::canonicalize(src).map_err(|source| Error::Source {
-        path: PathBuf::from(src),
+        path: src.to_path_buf(),
         source,
     })?;
     let base = Config::get().hyper_base();
@@ -145,7 +142,7 @@ fn stage_kernel(chroot: &SafeDir, src: &str, uid: u32, gid: u32) -> Result<(), E
         });
     }
 
-    match chroot.link_from(&src_canon, KERNEL_NAME) {
+    match chroot.link_from(&src_canon, kernel) {
         Ok(()) => {}
         // Cross-filesystem: open the confined source O_RDONLY|O_NOFOLLOW, create
         // the dest O_CREAT|O_EXCL|O_NOFOLLOW, and copy. Both fds are RAII.
@@ -162,18 +159,15 @@ fn stage_kernel(chroot: &SafeDir, src: &str, uid: u32, gid: u32) -> Result<(), E
             // SAFETY: nix_open just handed us this fd; File owns and closes it.
             let mut src_file = unsafe { std::fs::File::from_raw_fd(src_raw) };
 
-            let dest = chroot.create_file(KERNEL_NAME, 0o600)?;
+            let dest = chroot.create_file(kernel, 0o600)?;
             let mut dest_file = std::fs::File::from(dest.into_owned_fd());
 
-            io::copy(&mut src_file, &mut dest_file).map_err(|source| Error::Copy {
-                name: KERNEL_NAME.to_string(),
-                source,
-            })?;
+            io::copy(&mut src_file, &mut dest_file).map_err(Error::Copy)?;
         }
         Err(e) => return Err(Error::Fs(e)),
     }
 
-    chroot.chown(KERNEL_NAME, uid, gid)?;
+    chroot.chown(kernel, uid, gid)?;
     Ok(())
 }
 
@@ -184,6 +178,6 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
     let dev_path: SafePath<IsAbsolute, StrictComponents> = device.as_ref().to_path_buf().try_into()?;
     let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
-    chroot.mknod_block(ROOTFS_NAME, rdev, uid, gid)?;
+    chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;
     Ok(())
 }

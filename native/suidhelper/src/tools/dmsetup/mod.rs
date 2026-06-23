@@ -57,7 +57,7 @@ enum DmOp {
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum DmsetupOut {
-    Created { device: String },
+    Created { device: PathBuf },
     Removed,
     Messaged,
 }
@@ -110,7 +110,9 @@ impl IsTool for Dmsetup {
         }
 
         Ok(match &self.op {
-            DmOp::Create { name, .. } => DmsetupOut::Created { device: format!("/dev/mapper/{name}") },
+            DmOp::Create { name, .. } => DmsetupOut::Created {
+                device: PathBuf::from(format!("/dev/mapper/{name}")),
+            },
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
         })

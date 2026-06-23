@@ -19,26 +19,26 @@ use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::libc::dev_t;
 use nix::sys::stat::{mknodat, Mode, SFlag};
 use nix::unistd::{dup, fchownat, linkat, unlinkat, Gid, Uid, UnlinkatFlags};
-use std::path::Path;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("openat {name:?}: {source}")]
-    Open { name: String, source: nix::Error },
+    Open { name: PathBuf, source: nix::Error },
     #[error("readdir: {0}")]
     ReadDir(#[source] nix::Error),
-    #[error("non-utf8 directory entry")]
-    BadName,
     #[error("unlinkat {name:?}: {source}")]
-    Unlink { name: String, source: nix::Error },
+    Unlink { name: PathBuf, source: nix::Error },
     #[error("mknodat {name:?}: {source}")]
-    Mknod { name: String, source: nix::Error },
+    Mknod { name: PathBuf, source: nix::Error },
     #[error("fchownat {name:?}: {source}")]
-    Chown { name: String, source: nix::Error },
+    Chown { name: PathBuf, source: nix::Error },
     #[error("linkat -> {name:?}: {source}")]
-    Link { name: String, source: nix::Error },
+    Link { name: PathBuf, source: nix::Error },
     #[error("dup: {0}")]
     Dup(#[source] nix::Error),
 }
@@ -54,7 +54,6 @@ impl Error {
             | Error::Chown { source, .. }
             | Error::Link { source, .. } => Some(*source),
             Error::ReadDir(source) | Error::Dup(source) => Some(*source),
-            Error::BadName => None,
         }
     }
 }
@@ -74,7 +73,7 @@ impl SafeDir {
     pub fn open<A, S>(path: &SafePath<A, S>) -> Result<Self, Error> {
         let raw = openat(None::<RawFd>, path.as_ref(), dir_flags(), Mode::empty()).map_err(
             |source| Error::Open {
-                name: path.as_ref().display().to_string(),
+                name: path.as_ref().to_path_buf(),
                 source,
             },
         )?;
@@ -84,10 +83,10 @@ impl SafeDir {
 
     /// Descend into child directory `name` - one step of the walk. `O_NOFOLLOW`
     /// rejects a symlinked component; the open is relative to this dir's fd.
-    pub fn openat_dir(&self, name: &str) -> Result<SafeDir, Error> {
+    pub fn openat_dir(&self, name: &Path) -> Result<SafeDir, Error> {
         let raw = openat(Some(self.0.as_raw_fd()), name, dir_flags(), Mode::empty()).map_err(
             |source| Error::Open {
-                name: name.to_string(),
+                name: name.to_path_buf(),
                 source,
             },
         )?;
@@ -98,7 +97,7 @@ impl SafeDir {
     /// Walk `components` from this dir, one `openat_dir` step each, returning the
     /// directory they name. Every step is `O_NOFOLLOW` and relative to the
     /// previous pinned fd, so arriving proves confinement under this anchor.
-    pub fn descend(&self, components: &[String]) -> Result<SafeDir, Error> {
+    pub fn descend(&self, components: &[PathBuf]) -> Result<SafeDir, Error> {
         let mut dir = match components.first() {
             None => return self.try_clone(),
             Some(first) => self.openat_dir(first)?,
@@ -118,7 +117,7 @@ impl SafeDir {
 
     /// Create file `name` in this directory, failing if it exists
     /// (`O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW`).
-    pub fn create_file(&self, name: &str, mode: u32) -> Result<SafeFile<Any, Any, Any>, Error> {
+    pub fn create_file(&self, name: &Path, mode: u32) -> Result<SafeFile<Any, Any, Any>, Error> {
         let raw = openat(
             Some(self.0.as_raw_fd()),
             name,
@@ -126,7 +125,7 @@ impl SafeDir {
             Mode::from_bits_truncate(mode),
         )
         .map_err(|source| Error::Open {
-            name: name.to_string(),
+            name: name.to_path_buf(),
             source,
         })?;
         // SAFETY: as above.
@@ -135,7 +134,7 @@ impl SafeDir {
 
     /// Create a block device node `name` in this directory with the given
     /// `rdev`, then chown it to `uid:gid`.
-    pub fn mknod_block(&self, name: &str, rdev: dev_t, uid: u32, gid: u32) -> Result<(), Error> {
+    pub fn mknod_block(&self, name: &Path, rdev: dev_t, uid: u32, gid: u32) -> Result<(), Error> {
         mknodat(
             Some(self.0.as_raw_fd()),
             name,
@@ -144,29 +143,29 @@ impl SafeDir {
             rdev,
         )
         .map_err(|source| Error::Mknod {
-            name: name.to_string(),
+            name: name.to_path_buf(),
             source,
         })?;
         self.chown(name, uid, gid)
     }
 
     /// Hard-link the file at host path `src` into this directory as `name`.
-    pub fn link_from(&self, src: &Path, name: &str) -> Result<(), Error> {
+    pub fn link_from(&self, src: &Path, name: &Path) -> Result<(), Error> {
         linkat(
             None::<RawFd>,
             src,
             Some(self.0.as_raw_fd()),
-            Path::new(name),
+            name,
             AtFlags::empty(),
         )
         .map_err(|source| Error::Link {
-            name: name.to_string(),
+            name: name.to_path_buf(),
             source,
         })
     }
 
     /// `chown` entry `name` to `uid:gid` without following a final symlink.
-    pub fn chown(&self, name: &str, uid: u32, gid: u32) -> Result<(), Error> {
+    pub fn chown(&self, name: &Path, uid: u32, gid: u32) -> Result<(), Error> {
         fchownat(
             Some(self.0.as_raw_fd()),
             name,
@@ -175,26 +174,26 @@ impl SafeDir {
             AtFlags::AT_SYMLINK_NOFOLLOW,
         )
         .map_err(|source| Error::Chown {
-            name: name.to_string(),
+            name: name.to_path_buf(),
             source,
         })
     }
 
     /// Remove the non-directory entry `name` from this directory.
-    pub fn unlink(&self, name: &str) -> Result<(), Error> {
+    pub fn unlink(&self, name: &Path) -> Result<(), Error> {
         unlinkat(Some(self.0.as_raw_fd()), name, UnlinkatFlags::NoRemoveDir).map_err(|source| {
             Error::Unlink {
-                name: name.to_string(),
+                name: name.to_path_buf(),
                 source,
             }
         })
     }
 
     /// Remove the (empty) child directory `name` from this directory.
-    pub fn rmdir(&self, name: &str) -> Result<(), Error> {
+    pub fn rmdir(&self, name: &Path) -> Result<(), Error> {
         unlinkat(Some(self.0.as_raw_fd()), name, UnlinkatFlags::RemoveDir).map_err(|source| {
             Error::Unlink {
-                name: name.to_string(),
+                name: name.to_path_buf(),
                 source,
             }
         })
@@ -203,7 +202,7 @@ impl SafeDir {
     /// Recursively remove child `name` and everything under it, fd-relative the
     /// whole way: descend with `O_NOFOLLOW` (so symlinked subdirs are unlinked,
     /// never followed), empty each level, then `rmdir` it.
-    pub fn remove_dir_all(&self, name: &str) -> Result<(), Error> {
+    pub fn remove_dir_all(&self, name: &Path) -> Result<(), Error> {
         let child = self.openat_dir(name)?;
         child.clear()?;
         self.rmdir(name)
@@ -225,7 +224,7 @@ impl SafeDir {
     /// pairs - fully drained before any caller mutates the directory, so we never
     /// `readdir` and unlink concurrently. Reads through a fresh fd (`openat "."`)
     /// so this dir's own offset is untouched.
-    fn entries(&self) -> Result<Vec<(String, bool)>, Error> {
+    fn entries(&self) -> Result<Vec<(PathBuf, bool)>, Error> {
         let raw = openat(
             Some(self.0.as_raw_fd()),
             ".",
@@ -239,25 +238,26 @@ impl SafeDir {
         let mut out = Vec::new();
         for entry in dir.iter() {
             let entry = entry.map_err(Error::ReadDir)?;
-            let name = entry.file_name().to_str().map_err(|_| Error::BadName)?;
-            if name == "." || name == ".." {
+            let bytes = entry.file_name().to_bytes();
+            if bytes == b"." || bytes == b".." {
                 continue;
             }
+            let name = PathBuf::from(OsStr::from_bytes(bytes));
             // A symlink reports as Symlink (not Directory) so it is unlinked, never
             // descended. DT_UNKNOWN falls back to a confined open probe below.
             let is_dir = match entry.file_type() {
                 Some(Type::Directory) => true,
                 Some(_) => false,
-                None => self.probe_is_dir(name),
+                None => self.probe_is_dir(&name),
             };
-            out.push((name.to_string(), is_dir));
+            out.push((name, is_dir));
         }
         Ok(out)
     }
 
     /// Fallback for filesystems that return `DT_UNKNOWN`: a confined `openat`
     /// with `O_DIRECTORY|O_NOFOLLOW` succeeds iff `name` is a real directory.
-    fn probe_is_dir(&self, name: &str) -> bool {
+    fn probe_is_dir(&self, name: &Path) -> bool {
         self.openat_dir(name).is_ok()
     }
 }

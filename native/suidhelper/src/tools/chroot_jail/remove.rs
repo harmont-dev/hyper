@@ -17,7 +17,7 @@ use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
 use nix::errno::Errno;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
 /// The cgroup virtual filesystem root.
@@ -29,12 +29,12 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 pub enum Error {
     #[error("--chroot path: {0}")]
     ChrootPath(#[source] safe_path::ValidationError),
-    #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0}")]
-    ChrootDepth(String),
+    #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
+    ChrootDepth(PathBuf),
     #[error("--cgroup path: {0}")]
     CgroupPath(#[source] safe_path::ValidationError),
-    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0}")]
-    CgroupDepth(String),
+    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
+    CgroupDepth(PathBuf),
     #[error("walking: {0}")]
     Walk(#[source] safe_dir::Error),
     #[error("removing chroot: {0}")]
@@ -47,10 +47,10 @@ pub enum Error {
 pub struct RemoveArgs {
     /// Per-VM chroot directory to remove, shape <JAIL_BASE>/<exec>/<id>.
     #[arg(long)]
-    chroot: String,
+    chroot: PathBuf,
     /// Per-VM cgroup leaf directory to remove, under /sys/fs/cgroup.
     #[arg(long)]
-    cgroup: String,
+    cgroup: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -87,13 +87,13 @@ impl IsTool for Remove {
 
 /// Recursively remove the per-VM chroot `<JAIL_BASE>/<exec>/<id>`, fd-relative
 /// after an `O_NOFOLLOW` walk from `JAIL_BASE`. Idempotent on a missing target.
-fn remove_chroot(chroot: &str) -> Result<(), Error> {
+fn remove_chroot(chroot: &Path) -> Result<(), Error> {
     let jail_base = Config::get().jail_base();
-    let path: LexicalPath = PathBuf::from(chroot).try_into().map_err(Error::ChrootPath)?;
+    let path: LexicalPath = chroot.to_path_buf().try_into().map_err(Error::ChrootPath)?;
     let (parents, leaf) = path.relative_to(&jail_base).map_err(Error::ChrootPath)?;
     // Exactly <exec>/<id>: one parent component, one leaf.
     if parents.len() != 1 {
-        return Err(Error::ChrootDepth(chroot.to_string()));
+        return Err(Error::ChrootDepth(chroot.to_path_buf()));
     }
 
     let Some(parent) = walk(jail_base, &parents)? else {
@@ -108,13 +108,13 @@ fn remove_chroot(chroot: &str) -> Result<(), Error> {
 
 /// Remove the (empty) per-VM cgroup leaf, fd-relative after an `O_NOFOLLOW` walk
 /// from `/sys/fs/cgroup`. Idempotent on `ENOENT`/`ENOTEMPTY`.
-fn remove_cgroup(cgroup: &str) -> Result<(), Error> {
+fn remove_cgroup(cgroup: &Path) -> Result<(), Error> {
     let base = PathBuf::from(CGROUP_BASE);
-    let path: LexicalPath = PathBuf::from(cgroup).try_into().map_err(Error::CgroupPath)?;
+    let path: LexicalPath = cgroup.to_path_buf().try_into().map_err(Error::CgroupPath)?;
     let (parents, leaf) = path.relative_to(&base).map_err(Error::CgroupPath)?;
     // At least two components below the base: one or more parents, plus the leaf.
     if parents.is_empty() {
-        return Err(Error::CgroupDepth(cgroup.to_string()));
+        return Err(Error::CgroupDepth(cgroup.to_path_buf()));
     }
 
     let Some(parent) = walk(base, &parents)? else {
@@ -130,7 +130,7 @@ fn remove_cgroup(cgroup: &str) -> Result<(), Error> {
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
 /// `Ok(None)` if `base` or any parent is already gone (`ENOENT`), so callers can
 /// treat removal as idempotent.
-fn walk(base: PathBuf, parents: &[String]) -> Result<Option<SafeDir>, Error> {
+fn walk(base: PathBuf, parents: &[PathBuf]) -> Result<Option<SafeDir>, Error> {
     let base_path: LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
     let anchor = match SafeDir::open(&base_path) {
         Ok(dir) => dir,
