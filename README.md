@@ -48,25 +48,10 @@ deploying and integrating Hyper.
   [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
   means that fault-tolerance is built into the virtual machine, and allows you
   to interactively debug any issues you run into.
-- gRPC Interface -- although the author exclusively uses Hyper through the
+- **gRPC Interface** -- although the author exclusively uses Hyper through the
   BEAM-native interfaces, we recognize this may not be ideal for all languages
   and existing stacks. For that reason, Hyper has a GRPC interface, so you can
   call it from any language you already use.
-
-## gRPC interface
-
-Hyper exposes a public gRPC API so consumers in any language can drive the
-cluster. The contract lives at `proto/hyper/grpc/v0/hyper.proto`
-(`hyper.grpc.v0.Machines`): `CreateMachine`, `StopMachine`, `GetMachine`,
-`ListMachines`. Machines are addressed by a `vm_id` string minted at creation.
-
-> **v0:** unstable — the contract may change without notice during early
-> development.
-
-The server always runs on every node and is configured (port, TLS) entirely
-from your own `config/`; it is stateless. See
-[the gRPC guide](docs/grpc.md) for configuration, TLS, connecting from any
-language, and regenerating the bindings.
 
 ## Docs
 
