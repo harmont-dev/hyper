@@ -44,7 +44,7 @@ defmodule Sys.Linux.Proc.StatPropertiesTest do
   end
 
   property "missing trailing columns default to zero (older-kernel compatibility)" do
-    check all(n <- integer(3..10), cols <- list_of(counter(), length: n)) do
+    check all(n <- integer(3..9), cols <- list_of(counter(), length: n)) do
       t = CpuTimes.from_columns(cols)
 
       present = [

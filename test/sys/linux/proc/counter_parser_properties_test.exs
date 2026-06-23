@@ -15,7 +15,7 @@ defmodule Sys.Linux.Proc.CounterParserPropertiesTest do
   # An interface/device name: lowercase letters/digits, optionally with a `:alias`.
   defp ifname do
     gen all(
-          base <- string(?a..?z, min_length: 1, max_length: 6),
+          base <- string([?a..?z, ?0..?9], min_length: 1, max_length: 6),
           alias_suffix <- one_of([constant(""), map(integer(0..9), &":#{&1}")])
         ) do
       base <> alias_suffix
