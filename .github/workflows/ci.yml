@@ -84,8 +84,8 @@ jobs:
         # tasks don't discover here -- without -r they no-op and tests then hit
         # a missing database.
         run: |
-          mix ecto.create -r Hyper.Img.Db.Repo
-          mix ecto.migrate -r Hyper.Img.Db.Repo
+          mix ecto.create -r Hyper.Img.Db.Repo.Postgres
+          mix ecto.migrate -r Hyper.Img.Db.Repo.Postgres
 
       - name: Test (warnings as errors)
         env:

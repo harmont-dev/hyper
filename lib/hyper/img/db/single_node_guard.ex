@@ -55,6 +55,9 @@ defmodule Hyper.Img.Db.SingleNodeGuard do
     {:noreply, state}
   end
 
+  @impl true
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
+
+  @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 end
