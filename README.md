@@ -7,6 +7,7 @@
   <a href="https://hexdocs.pm/hypervm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hypervm.svg" alt="License: AGPL-3.0" /></a>
   <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
+  <a href="https://codecov.io/gh/harmont-dev/hyper"><img src="https://codecov.io/gh/harmont-dev/hyper/branch/main/graph/badge.svg" alt="Coverage" /></a>
   <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
   <img src="https://img.shields.io/badge/elixir-~%3E%201.20-4B275F.svg" alt="Elixir ~> 1.20" />
 </p>
