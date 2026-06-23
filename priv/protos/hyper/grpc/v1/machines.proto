@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package hyper.grpc.v1;
+
+// Hyper microVM orchestration. Every machine is addressed by its `vm_id`, a
+// URL-safe base64 string minted by the server at creation time.
+service Machines {
+  // Create and boot a microVM from an image. Placement is cluster-wide and
+  // automatic. Returns the minted vm_id and the node the guest booted on.
+  rpc CreateMachine(CreateMachineRequest) returns (CreateMachineResponse);
+
+  // Stop and tear down a running microVM. NOT_FOUND if no such vm_id runs.
+  rpc StopMachine(StopMachineRequest) returns (StopMachineResponse);
+
+  // Locate a microVM: the node it currently runs on. NOT_FOUND if unknown.
+  rpc GetMachine(GetMachineRequest) returns (GetMachineResponse);
+
+  // List every microVM currently known to the cluster.
+  rpc ListMachines(ListMachinesRequest) returns (ListMachinesResponse);
+}
+
+// Fixed (vCPU, memory, disk) sizes, like cloud instance classes.
+// UNSPECIFIED is treated as BASE.
+enum InstanceType {
+  INSTANCE_TYPE_UNSPECIFIED = 0;
+  INSTANCE_TYPE_MICRO = 1;
+  INSTANCE_TYPE_MILLI = 2;
+  INSTANCE_TYPE_CENTI = 3;
+  INSTANCE_TYPE_DECI = 4;
+  INSTANCE_TYPE_BASE = 5;
+  INSTANCE_TYPE_DECA = 6;
+  INSTANCE_TYPE_HECTO = 7;
+  INSTANCE_TYPE_KILO = 8;
+  INSTANCE_TYPE_MEGA = 9;
+  INSTANCE_TYPE_GIGA = 10;
+  INSTANCE_TYPE_TERA = 11;
+}
+
+// Guest CPU architecture. UNSPECIFIED resolves to the scheduling node's arch.
+enum Architecture {
+  ARCHITECTURE_UNSPECIFIED = 0;
+  ARCHITECTURE_X86_64 = 1;
+  ARCHITECTURE_AARCH64 = 2;
+}
+
+message CreateMachineRequest {
+  string img_id = 1;               // required: content-addressed image id
+  InstanceType instance_type = 2;  // optional: defaults to BASE
+  Architecture arch = 3;           // optional: defaults to node arch
+  string boot_args = 4;            // optional: extra kernel cmdline
+}
+
+message CreateMachineResponse {
+  string vm_id = 1;
+  string node = 2;  // erlang node the guest booted on
+}
+
+message StopMachineRequest {
+  string vm_id = 1;
+}
+
+message StopMachineResponse {}
+
+message GetMachineRequest {
+  string vm_id = 1;
+}
+
+message GetMachineResponse {
+  string vm_id = 1;
+  string node = 2;
+}
+
+message ListMachinesRequest {}
+
+message ListMachinesResponse {
+  repeated Machine machines = 1;
+}
+
+message Machine {
+  string vm_id = 1;
+  string node = 2;
+}
