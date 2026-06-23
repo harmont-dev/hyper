@@ -22,12 +22,6 @@ defmodule Hyper.Grpc.Codec do
 
   alias Hyper.Vm.Spec
 
-  @type response ::
-          CreateMachineResponse.t()
-          | GetMachineResponse.t()
-          | ListMachinesResponse.t()
-          | StopMachineResponse.t()
-
   @instance_types %{
     INSTANCE_TYPE_MICRO: :micro,
     INSTANCE_TYPE_MILLI: :milli,
@@ -73,25 +67,31 @@ defmodule Hyper.Grpc.Codec do
 
   @doc """
   Convert a domain result to an outbound response message, or an error to a
-  `GRPC.RPCError` (which the server raises). Dispatches on the result's shape.
+  `GRPC.RPCError` (which the server raises). Dispatches on the result's shape;
+  each shape carries its own precise return type below.
   """
-  @spec to_grpc(term()) :: response() | GRPC.RPCError.t()
+  @spec to_grpc({:created, Hyper.Vm.id(), node()}) :: CreateMachineResponse.t()
   def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
     do: %CreateMachineResponse{vm_id: vm_id, node: to_string(node)}
 
+  @spec to_grpc({:located, Hyper.Vm.id(), node()}) :: GetMachineResponse.t()
   def to_grpc({:located, vm_id, node}),
     do: %GetMachineResponse{vm_id: vm_id, node: to_string(node)}
 
+  @spec to_grpc({:machines, [{Hyper.Vm.id(), node()}]}) :: ListMachinesResponse.t()
   def to_grpc({:machines, machines}),
     do: %ListMachinesResponse{machines: Enum.map(machines, &machine/1)}
 
+  @spec to_grpc(:stopped) :: StopMachineResponse.t()
   def to_grpc(:stopped), do: %StopMachineResponse{}
 
+  @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
   def to_grpc({:error, reason}), do: rpc_error(reason)
 
   # A :gen_statem call exit from State.stop/1: :noproc (unknown vm_id) → NOT_FOUND,
   # :nodedown (downed host) → UNAVAILABLE, anything else is a real controller
   # failure → INTERNAL, so a genuine crash is never masked as a clean NOT_FOUND.
+  @spec to_grpc({:exit, term()}) :: GRPC.RPCError.t()
   def to_grpc({:exit, :noproc}), do: rpc_error(:not_found)
   def to_grpc({:exit, {:noproc, _}}), do: rpc_error(:not_found)
   def to_grpc({:exit, :nodedown}), do: rpc_error(:machine_unreachable)

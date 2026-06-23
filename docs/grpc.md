@@ -2,8 +2,8 @@
 
 Hyper's native API is BEAM-native (Elixir/Erlang processes calling `Hyper.*`).
 The gRPC interface puts that same machine lifecycle behind a language-agnostic
-contract, so consumers in **any** language — and off-BEAM services — can create,
-stop, locate, and list microVMs.
+contract, so consumers in **any** language — and off-BEAM services — can
+create, stop, locate, and list microVMs.
 
 > **v0 — unstable.** The contract may change without notice during early
 > development. Pin to a commit if you depend on it.
@@ -11,7 +11,7 @@ stop, locate, and list microVMs.
 ## The contract
 
 The service is `hyper.grpc.v0.Machines`, defined in
-[`proto/hyper/grpc/v0/hyper.proto`](../proto/hyper/grpc/v0/hyper.proto):
+[`proto/hyper/grpc/v0/hyper.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v0/hyper.proto):
 
 | RPC            | Purpose                                            | Errors |
 | -------------- | -------------------------------------------------- | ------ |
