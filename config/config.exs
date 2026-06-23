@@ -42,7 +42,3 @@ config :hyper, Hyper.Img.Db.Repo,
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
-
-# The public gRPC interface always runs (it is a core interface, not opt-in).
-# Tune the listener -- port, TLS, adapter opts -- from your own config; see
-# `Hyper.Grpc.Config`. With no config it serves plaintext on port 50051.
