@@ -1,11 +1,14 @@
 use super::IsTool;
 use crate::safe_dev::LoopDev;
+use crate::util::safe_file::{self, Any, IsRegularFile, SafeFile};
+use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
-use nix::fcntl::{open, OFlag};
-use nix::sys::stat::{fstat, Mode as StatMode, SFlag};
+use nix::fcntl::OFlag;
+use nix::unistd::dup;
 use serde::Serialize;
 use std::io;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use thiserror::Error as ThisError;
@@ -16,10 +19,12 @@ pub enum Error {
     Canonicalize { path: PathBuf, #[source] source: io::Error },
     #[error("backing file must be under {}: {path}", .base.display())]
     OutsideBase { base: &'static Path, path: PathBuf },
-    #[error("opening backing file {path}: {errno}")]
+    #[error("backing path: {0}")]
+    BackingPath(#[from] safe_path::ValidationError),
+    #[error("backing file: {0}")]
+    Backing(#[from] safe_file::ValidationError),
+    #[error("duplicating backing fd {path}: {errno}")]
     OpenBacking { path: PathBuf, errno: Errno },
-    #[error("{0} is not a regular file")]
-    NotRegularFile(PathBuf),
     #[error("running losetup: {0}")]
     Spawn(#[source] io::Error),
     #[error("losetup failed: {0}")]
@@ -127,17 +132,18 @@ fn ok_backing_file(p: &str) -> Result<String, Error> {
         return Err(Error::OutsideBase { base, path: real });
     }
 
-    // O_PATH: no read perms needed; O_NOFOLLOW: refuse if the final component got
-    // swapped to a symlink between canonicalize and here.
-    let fd = open(&real, OFlag::O_PATH | OFlag::O_NOFOLLOW, StatMode::empty())
-        .map_err(|errno| Error::OpenBacking { path: real.clone(), errno })?;
+    // `canonicalize` already resolved every symlink and `..`, so the result is
+    // absolute and component-strict. Open it as a verified regular-file handle
+    // (O_PATH to identify; SafeFile fstats the held fd and O_NOFOLLOW refuses a
+    // final-component swap raced in after the check).
+    let safe: SafePath<IsAbsolute, StrictComponents> = real.clone().try_into()?;
+    let file = SafeFile::<IsRegularFile, Any, Any>::open(&safe, OFlag::O_PATH)?;
 
-    let st = fstat(fd).map_err(|errno| Error::OpenBacking { path: real.clone(), errno })?;
-    if st.st_mode & SFlag::S_IFMT.bits() != SFlag::S_IFREG.bits() {
-        return Err(Error::NotRegularFile(real));
-    }
-
-    // The fd is a bare RawFd (no CLOEXEC), so a spawned child inherits it; losetup
-    // reopens the exact validated inode via /proc/self/fd.
-    Ok(format!("/proc/self/fd/{fd}"))
+    // losetup runs as a child and reopens the *validated inode* via /proc/self/fd.
+    // SafeFile's fd is O_CLOEXEC (it would vanish on exec), so dup an inheritable
+    // copy that survives into the child; the dup is intentionally leaked, and the
+    // SafeFile's own fd closes on drop.
+    let inheritable =
+        dup(file.as_raw_fd()).map_err(|errno| Error::OpenBacking { path: real, errno })?;
+    Ok(format!("/proc/self/fd/{inheritable}"))
 }
