@@ -20,8 +20,10 @@ pub enum ValidationError {
 }
 
 /// Absoluteness axis: require an absolute path.
+#[derive(Debug)]
 pub struct IsAbsolute;
 /// Components axis: reject `.`, `..`, and empty components.
+#[derive(Debug)]
 pub struct StrictComponents;
 
 /// Absoluteness axis.
@@ -59,6 +61,7 @@ impl Components for StrictComponents {
 }
 
 /// A `PathBuf` proven to satisfy the lexical axes named by its type parameters.
+#[derive(Debug)]
 pub struct SafePath<A, S>(PathBuf, PhantomData<(A, S)>);
 
 impl<A> SafePath<A, StrictComponents> {
@@ -106,5 +109,45 @@ where
         A::check(&path)?;
         S::check(&path)?;
         Ok(Self(path, PhantomData))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type StrictAbs = SafePath<IsAbsolute, StrictComponents>;
+
+    #[test]
+    fn accepts_absolute_strict_path() {
+        let p: StrictAbs = PathBuf::from("/srv/hyper/jails").try_into().unwrap();
+        assert_eq!(p.as_ref(), Path::new("/srv/hyper/jails"));
+    }
+
+    #[test]
+    fn rejects_relative_path() {
+        let err = StrictAbs::try_from(PathBuf::from("srv/hyper")).unwrap_err();
+        assert!(matches!(err, ValidationError::NotAbsolute));
+    }
+
+    #[test]
+    fn rejects_dotdot_component() {
+        let err = StrictAbs::try_from(PathBuf::from("/srv/../etc")).unwrap_err();
+        assert!(matches!(err, ValidationError::LooseComponents));
+    }
+
+    #[test]
+    fn relative_to_splits_parents_and_leaf() {
+        let p: StrictAbs = PathBuf::from("/srv/hyper/jails/vm0").try_into().unwrap();
+        let (parents, leaf) = p.relative_to(Path::new("/srv/hyper")).unwrap();
+        assert_eq!(parents, vec![PathBuf::from("jails")]);
+        assert_eq!(leaf, PathBuf::from("vm0"));
+    }
+
+    #[test]
+    fn relative_to_rejects_path_outside_base() {
+        let p: StrictAbs = PathBuf::from("/etc/passwd").try_into().unwrap();
+        let err = p.relative_to(Path::new("/srv/hyper")).unwrap_err();
+        assert!(matches!(err, ValidationError::NotUnderBase));
     }
 }
