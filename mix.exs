@@ -167,7 +167,15 @@ defmodule Hyper.MixProject do
         "dialyzer"
       ],
       # Force a regeneration of the Firecracker bindings (ignores staleness).
-      "firecracker.gen": ["compile.firecracker_gen --force"]
+      "firecracker.gen": ["compile.firecracker_gen --force"],
+      # Regenerate the vendored gRPC bindings in lib/hyper/grpc/v1/ from the
+      # .proto file. Requires protoc + protoc-gen-elixir escript:
+      #   mix escript.install hex protobuf
+      # NOT run in CI; the generated files are committed.
+      "proto.gen": [
+        "cmd protoc --elixir_out=plugins=grpc:./lib " <>
+          "--proto_path=priv/protos priv/protos/hyper/grpc/v1/machines.proto"
+      ]
     ]
   end
 end
