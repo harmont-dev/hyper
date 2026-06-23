@@ -38,7 +38,9 @@ impl FromStr for SnapshotTable {
         }
 
         Ok(Self {
-            sectors: sectors.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            sectors: sectors
+                .parse()
+                .map_err(|_| Error::BadTable(s.to_string()))?,
             origin: origin.parse()?,
             cow: cow.parse()?,
             persistent,

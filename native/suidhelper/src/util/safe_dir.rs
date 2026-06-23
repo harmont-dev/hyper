@@ -71,12 +71,13 @@ impl SafeDir {
     /// Open `path` as an anchor directory. This is the one absolute open; it
     /// should be a fixed, trusted root (e.g. the jail base or `/sys/fs/cgroup`).
     pub fn open<A, S>(path: &SafePath<A, S>) -> Result<Self, Error> {
-        let raw = openat(None::<RawFd>, path.as_ref(), dir_flags(), Mode::empty()).map_err(
-            |source| Error::Open {
-                name: path.as_ref().to_path_buf(),
-                source,
-            },
-        )?;
+        let raw =
+            openat(None::<RawFd>, path.as_ref(), dir_flags(), Mode::empty()).map_err(|source| {
+                Error::Open {
+                    name: path.as_ref().to_path_buf(),
+                    source,
+                }
+            })?;
         // SAFETY: openat just handed us this fd; nobody else owns it.
         Ok(Self(unsafe { OwnedFd::from_raw_fd(raw) }))
     }

@@ -16,7 +16,11 @@ use thiserror::Error as ThisError;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("backing file {path}: {source}")]
-    Canonicalize { path: PathBuf, #[source] source: io::Error },
+    Canonicalize {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("backing file must be under {}: {path}", .base.display())]
     OutsideBase { base: &'static Path, path: PathBuf },
     #[error("backing path: {0}")]
@@ -124,8 +128,10 @@ impl IsTool for Losetup {
 /// `/proc/self/fd/N`. Operating on the validated fd (not the path) closes the
 /// TOCTOU window: a swap after the check can't redirect losetup elsewhere.
 fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
-    let real =
-        std::fs::canonicalize(p).map_err(|source| Error::Canonicalize { path: PathBuf::from(p), source })?;
+    let real = std::fs::canonicalize(p).map_err(|source| Error::Canonicalize {
+        path: PathBuf::from(p),
+        source,
+    })?;
 
     let base = crate::config::Config::get().hyper_base();
     if !real.starts_with(base) {

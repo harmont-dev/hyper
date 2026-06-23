@@ -100,7 +100,10 @@ impl IsTool for Dmsetup {
                 cmd.arg(name.to_string());
             }
             DmOp::Message { name, message } => {
-                cmd.arg("message").arg(name.to_string()).arg("0").arg(message.to_string());
+                cmd.arg("message")
+                    .arg(name.to_string())
+                    .arg("0")
+                    .arg(message.to_string());
             }
         }
 

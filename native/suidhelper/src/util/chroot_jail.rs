@@ -146,7 +146,10 @@ fn stage_kernel(chroot: &SafeDir, src: &Path, uid: u32, gid: u32) -> Result<(), 
         Ok(()) => {}
         // Cross-filesystem: open the confined source O_RDONLY|O_NOFOLLOW, create
         // the dest O_CREAT|O_EXCL|O_NOFOLLOW, and copy. Both fds are RAII.
-        Err(safe_dir::Error::Link { source, .. }) if source == Errno::EXDEV => {
+        Err(safe_dir::Error::Link {
+            source: Errno::EXDEV,
+            ..
+        }) => {
             let src_raw = nix_open(
                 &src_canon,
                 OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
@@ -175,7 +178,8 @@ fn stage_kernel(chroot: &SafeDir, src: &Path, uid: u32, gid: u32) -> Result<(), 
 /// `uid:gid`. The device is opened as a verified `SafeFile<IsBlockDevice>`, so the
 /// number comes from a real device node, never a caller-supplied value.
 fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Result<(), Error> {
-    let dev_path: SafePath<IsAbsolute, StrictComponents> = device.as_ref().to_path_buf().try_into()?;
+    let dev_path: SafePath<IsAbsolute, StrictComponents> =
+        device.as_ref().to_path_buf().try_into()?;
     let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
     chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;

@@ -23,9 +23,9 @@
 //!     target/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
 //! Then: config :hyper, suid_helper: "/usr/local/bin/hyper-suidhelper"
 
+mod config;
 mod tools;
 mod util;
-mod config;
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;

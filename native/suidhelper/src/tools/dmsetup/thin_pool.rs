@@ -23,7 +23,9 @@ impl FromStr for ThinPoolTable {
             return Err(Error::BadTable(s.to_string()));
         };
         Ok(Self {
-            sectors: sectors.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            sectors: sectors
+                .parse()
+                .map_err(|_| Error::BadTable(s.to_string()))?,
             metadata: meta.parse()?,
             data: data.parse()?,
             block_sectors: block.parse().map_err(|_| Error::BadTable(s.to_string()))?,
@@ -39,7 +41,11 @@ impl fmt::Display for ThinPoolTable {
         write!(
             f,
             "0 {} thin-pool {} {} {} {}",
-            self.sectors, meta.display(), data.display(), self.block_sectors, self.low_water
+            self.sectors,
+            meta.display(),
+            data.display(),
+            self.block_sectors,
+            self.low_water
         )
     }
 }

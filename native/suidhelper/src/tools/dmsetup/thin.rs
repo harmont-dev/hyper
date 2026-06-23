@@ -24,7 +24,9 @@ impl FromStr for ThinTable {
             _ => return Err(Error::BadTable(s.to_string())),
         };
         Ok(Self {
-            sectors: sectors.parse().map_err(|_| Error::BadTable(s.to_string()))?,
+            sectors: sectors
+                .parse()
+                .map_err(|_| Error::BadTable(s.to_string()))?,
             pool: pool.parse()?,
             dev_id: dev_id.parse().map_err(|_| Error::BadTable(s.to_string()))?,
             origin: origin.map(|o| o.parse()).transpose()?,
@@ -35,7 +37,13 @@ impl FromStr for ThinTable {
 impl fmt::Display for ThinTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let pool: &Path = self.pool.as_ref();
-        write!(f, "0 {} thin {} {}", self.sectors, pool.display(), self.dev_id)?;
+        write!(
+            f,
+            "0 {} thin {} {}",
+            self.sectors,
+            pool.display(),
+            self.dev_id
+        )?;
         if let Some(origin) = &self.origin {
             let origin: &Path = origin.as_ref();
             write!(f, " {}", origin.display())?;
