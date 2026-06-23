@@ -31,6 +31,11 @@ defmodule Hyper.Node do
   use Supervisor
   use OpenTelemetryDecorator
 
+  alias Hyper.Node.FireVMM
+  alias Hyper.Node.Img
+  alias Hyper.Node.Users
+  alias Hyper.Node.Vmlinux
+
   @vm_sup Hyper.Node.VMSupervisor
 
   def start_link(opts \\ []) do
@@ -53,11 +58,57 @@ defmodule Hyper.Node do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
+  @doc """
+  Boot an image-backed VM on this node: claim a uid, build the mutable rootfs
+  layer, resolve the kernel, and start the VM supervisor. The uid is freed and
+  the mutable layer torn down automatically when the VM supervisor dies.
+  """
+  @spec start_image_vm(Hyper.Vm.id(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
+  def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
+    with {:ok, uid} <- Users.claim(),
+         {:ok, mutable} <- start_mutable_or_release(spec.img_id, vm_id, uid),
+         kernel = Vmlinux.path(spec.arch),
+         opts = build_opts(vm_id, spec, uid, mutable, kernel),
+         {:ok, pid} <- start_vm_or_release(opts, uid, mutable) do
+      # Bind the uid and the mutable layer to the VM supervisor's lifetime.
+      :ok = Users.bind(uid, pid)
+      :ok = Img.Mutable.acquire(mutable, pid)
+      :ok = Img.Mutable.release(mutable)
+      {:ok, pid}
+    end
+  end
+
+  @doc "Tear down an image-backed VM started by `start_image_vm/2`."
+  @spec stop_image_vm(pid()) :: :ok
+  def stop_image_vm(pid) do
+    case DynamicSupervisor.terminate_child(@vm_sup, pid) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+    end
+  end
+
+  @doc false
+  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
+          FireVMM.Opts.t()
+  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, mutable, kernel) do
+    %FireVMM.Opts{
+      vm_id: vm_id,
+      uid: uid,
+      gid: uid,
+      type: spec.type,
+      arch: spec.arch,
+      mutable: mutable,
+      kernel: kernel,
+      boot_args: spec.boot_args
+    }
+  end
+
   @doc "Start a microVM on this node."
-  @spec start_vm(Hyper.Node.FireVMM.Opts.t()) :: DynamicSupervisor.on_start_child()
+  @spec start_vm(FireVMM.Opts.t()) :: DynamicSupervisor.on_start_child()
   @decorate with_span("Hyper.Node.start_vm", include: [:opts])
-  def start_vm(%Hyper.Node.FireVMM.Opts{} = opts) do
-    DynamicSupervisor.start_child(@vm_sup, {Hyper.Node.FireVMM, opts})
+  def start_vm(%FireVMM.Opts{} = opts) do
+    DynamicSupervisor.start_child(@vm_sup, {FireVMM, opts})
   end
 
   @doc """
@@ -97,8 +148,46 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
-         :ok <- Sys.Linux.Dmsetup.test_system() do
+         :ok <- Hyper.SuidHelper.test_system(),
+         {:ok, base} <- Hyper.SuidHelper.sys_test(),
+         :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
+    end
+  end
+
+  @spec check_helper_base(Path.t()) ::
+          :ok | {:error, {:suid_helper_base_mismatch, Path.t(), Path.t()}}
+  defp check_helper_base(base) do
+    if base == Hyper.Config.work_dir() do
+      :ok
+    else
+      {:error, {:suid_helper_base_mismatch, base, Hyper.Config.work_dir()}}
+    end
+  end
+
+  # Acquire the mutable layer on our own pid initially so it does not idle-reap
+  # during boot; release on failure so it tears down.
+  defp start_mutable_or_release(img_id, vm_id, uid) do
+    case Img.create_mutable(img_id, vm_id) do
+      {:ok, mutable} ->
+        :ok = Img.Mutable.acquire(mutable)
+        {:ok, mutable}
+
+      {:error, reason} ->
+        Users.release(uid)
+        {:error, reason}
+    end
+  end
+
+  defp start_vm_or_release(opts, uid, mutable) do
+    case start_vm(opts) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, reason} ->
+        Img.Mutable.release(mutable)
+        Users.release(uid)
+        {:error, reason}
     end
   end
 end

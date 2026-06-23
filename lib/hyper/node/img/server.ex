@@ -17,7 +17,7 @@ defmodule Hyper.Node.Img.Server do
 
   alias Hyper.Img.Db
   alias Hyper.Node.Layer
-  alias Sys.Linux.Dmsetup
+  alias Hyper.SuidHelper
 
   # Grace period after the last holder leaves before the image is torn down.
   @idle_timeout_ms :timer.seconds(30)
@@ -169,13 +169,13 @@ defmodule Hyper.Node.Img.Server do
   @spec build_chain(Hyper.Img.id(), [Path.t()]) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- Dmsetup.device_sectors(base) do
+    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(base) do
       deltas
       |> Enum.with_index(1)
       |> Enum.reduce_while({:ok, base, []}, fn {cow_dev, idx}, {:ok, origin, names} ->
         name = dm_name(img_id, idx)
 
-        case Dmsetup.create_snapshot(name, origin, cow_dev, sectors) do
+        case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_dev, sectors) do
           {:ok, dev} ->
             {:cont, {:ok, dev, [name | names]}}
 
@@ -199,7 +199,7 @@ defmodule Hyper.Node.Img.Server do
 
   @spec remove_quietly(String.t()) :: :ok
   defp remove_quietly(name) do
-    case Dmsetup.remove(name) do
+    case SuidHelper.Dmsetup.remove(name) do
       :ok ->
         :ok
 

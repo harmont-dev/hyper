@@ -22,7 +22,6 @@ config :libcluster,
   ]
 
 config :hyper,
-  work_dir: "/srv/hyper",
   cgroup_parent: "hyper",
   uid_gid_range: {900_000, 999_999},
   layer_dir: "/srv/hyper/layers",

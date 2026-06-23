@@ -1,11 +1,15 @@
-//! Validated device-path operands.
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Validated device-name operands.
 //!
 //! The privileged tools must only ever touch Hyper's own devices, never
 //! arbitrary system storage like `/dev/sda`. These newtypes encode that: each
-//! wraps a `PathBuf` and is constructed only through its [`FromStr`] impl (the
-//! check is a textual match on the device-node name), so holding one is proof the
-//! path is in-bounds. Because they parse via `FromStr`, clap validates the
+//! wraps a `PathBuf`/`String` and is constructed only through its [`FromStr`]
+//! impl (a textual match on the device-node name), so holding one is proof the
+//! name is in-bounds. Because they parse via `FromStr`, clap validates the
 //! operands at argument-parse time; borrow them as a `Path` via `AsRef`.
+//!
+//! Filesystem path safety (confinement, symlink-free walks, fd-relative ops)
+//! lives in `crate::util::{safe_path, safe_file, safe_dir}`, not here.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -29,8 +33,8 @@ fn is_loop(p: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
-// `/dev/mapper/` plus a `hyper-*` name with no path separators, so the device is
-// always a direct child of `/dev/mapper` (the charset excludes `/`, so no
+// `/dev/mapper/` plus a `hyper-*` name with no path separators, so the device
+// is always a direct child of `/dev/mapper` (the charset excludes `/`, so no
 // traversal).
 fn is_hyper_dm(p: &str) -> bool {
     p.strip_prefix("/dev/mapper/").is_some_and(is_hyper_name)
@@ -67,7 +71,7 @@ impl AsRef<Path> for LoopDev {
     }
 }
 
-/// A block-device operand: a loop device or one of our own dm devices - never
+/// A block-device operand: a loop device or one of our own dm devices — never
 /// arbitrary system storage.
 #[derive(Debug, Clone)]
 pub struct BlockDev(PathBuf);

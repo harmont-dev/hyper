@@ -1,12 +1,18 @@
+mod message;
+mod snapshot;
+mod table;
+mod thin;
+mod thin_pool;
+
 use super::IsTool;
-use crate::safe_dev::{self, BlockDev, DmName, LoopDev};
+use crate::util::safe_dev::{self, DmName};
 use clap::{Args, Subcommand};
+use message::ThinMessage;
 use serde::Serialize;
-use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::str::FromStr;
+use table::DmTable;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -19,67 +25,6 @@ pub enum Error {
     Spawn(#[source] io::Error),
     #[error("dmsetup failed: {0}")]
     Failed(String),
-}
-
-/// A dm-snapshot table line: `0 <sectors> snapshot <origin> <cow> P|N <chunk>`.
-/// Only this target is accepted - other dm targets (linear, crypt, ...) could map
-/// arbitrary devices - and origin/cow are anchored to loop / hyper-* devices by
-/// their types. Parsed from the caller's string, then rendered back via
-/// `Display` so dmsetup only ever sees a table we reconstructed ourselves.
-#[derive(Clone)]
-pub struct SnapshotTable {
-    sectors: u64,
-    origin: BlockDev,
-    cow: LoopDev,
-    persistent: bool,
-    chunk: u64,
-}
-
-impl FromStr for SnapshotTable {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fields: Vec<&str> = s.split_whitespace().collect();
-        let [start, sectors, "snapshot", origin, cow, mode, chunk] = fields.as_slice() else {
-            return Err(Error::BadTable(s.to_string()));
-        };
-
-        let persistent = match *mode {
-            "P" => true,
-            "N" => false,
-            _ => return Err(Error::BadTable(s.to_string())),
-        };
-
-        if *start != "0" {
-            return Err(Error::BadTable(s.to_string()));
-        }
-
-        Ok(Self {
-            sectors: sectors
-                .parse()
-                .map_err(|_| Error::BadTable(s.to_string()))?,
-            origin: origin.parse()?,
-            cow: cow.parse()?,
-            persistent,
-            chunk: chunk.parse().map_err(|_| Error::BadTable(s.to_string()))?,
-        })
-    }
-}
-
-impl fmt::Display for SnapshotTable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let origin: &Path = self.origin.as_ref();
-        let cow: &Path = self.cow.as_ref();
-        write!(
-            f,
-            "0 {} snapshot {} {} {} {}",
-            self.sectors,
-            origin.display(),
-            cow.display(),
-            if self.persistent { "P" } else { "N" },
-            self.chunk,
-        )
-    }
 }
 
 #[derive(Args)]
@@ -95,20 +40,26 @@ enum DmOp {
         #[arg(long)]
         readonly: bool,
         #[arg(long)]
-        table: SnapshotTable,
+        table: DmTable,
     },
     Remove {
         #[arg(long)]
         retry: bool,
         name: DmName,
     },
+    Message {
+        name: DmName,
+        #[arg(long)]
+        message: ThinMessage,
+    },
 }
 
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum DmsetupOut {
-    Created { device: String },
+    Created { device: PathBuf },
     Removed,
+    Messaged,
 }
 
 pub struct Dmsetup {
@@ -148,6 +99,12 @@ impl IsTool for Dmsetup {
                 }
                 cmd.arg(name.to_string());
             }
+            DmOp::Message { name, message } => {
+                cmd.arg("message")
+                    .arg(name.to_string())
+                    .arg("0")
+                    .arg(message.to_string());
+            }
         }
 
         cmd.env_clear().output()
@@ -163,9 +120,10 @@ impl IsTool for Dmsetup {
 
         Ok(match &self.op {
             DmOp::Create { name, .. } => DmsetupOut::Created {
-                device: format!("/dev/mapper/{name}"),
+                device: PathBuf::from(format!("/dev/mapper/{name}")),
             },
             DmOp::Remove { .. } => DmsetupOut::Removed,
+            DmOp::Message { .. } => DmsetupOut::Messaged,
         })
     }
 }

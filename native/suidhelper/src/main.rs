@@ -23,15 +23,15 @@
 //!     target/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
 //! Then: config :hyper, suid_helper: "/usr/local/bin/hyper-suidhelper"
 
-mod safe_bin;
-mod safe_dev;
-mod setuid_privileged;
+mod config;
 mod tools;
+mod util;
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use setuid_privileged::Privileged;
+use std::path::PathBuf;
 use tools::Tool;
+use util::setuid_privileged::{self, Privileged};
 
 #[derive(Parser)]
 #[command(
@@ -53,31 +53,40 @@ enum Command {
 }
 
 /// The serializable result of a command, emitted as the JSON line on stdout.
-/// Untagged so each command's own output shape is printed verbatim.
+/// Untagged so each command's own output shape is printed verbatim. Tools already
+/// serialize themselves to a `Value`; `sys-test` carries its own struct.
 #[derive(Serialize)]
 #[serde(untagged)]
 enum Output {
-    Tool(tools::ToolOutput),
+    Tool(serde_json::Value),
     SysTest(SysTest),
 }
 
 #[derive(Serialize)]
 struct SysTest {
     sys_test: &'static str,
+    hyper_base: PathBuf,
 }
 
 impl SysTest {
     fn perform() -> Result<Self, setuid_privileged::Error> {
         Privileged::smoke_test()?;
-        Ok(Self { sys_test: "ok" })
+        Ok(Self {
+            sys_test: "ok",
+            hyper_base: crate::config::Config::get().hyper_base().to_path_buf(),
+        })
     }
 }
 
 fn main() {
     // Privileges are already dropped to the real uid by a pre-main constructor
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
+    // Load the config now - we are post-drop (real uid) and before any
+    // `Privileged` scope, so the file is read unprivileged, never as root.
+    config::Config::init();
+
     // Each command yields a serializable value (errors stringified to unify); we
-    // serialize it here so the tools never touch JSON.
+    // render the final JSON line here.
     let output = match Cli::parse().command {
         Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
         Command::SysTest => SysTest::perform()

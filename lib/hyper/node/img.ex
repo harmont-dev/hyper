@@ -4,7 +4,10 @@ defmodule Hyper.Node.Img do
   operations. Owns:
 
     * a unique `Registry` (`img_id -> Img.Server`), and
-    * a `DynamicSupervisor` holding the (shared, read-only) image servers.
+    * a `DynamicSupervisor` holding the (shared, read-only) image servers, and
+    * a *separate* `DynamicSupervisor` holding the per-VM mutable layers
+      (`Img.Mutable`), so the writable layers form their own process tree.
+    * a `ThinPool`, per node, which manages each `dm-thin` instance on this machine.
 
   On top of that tree it leases an image for the lifetime of a VM
   (`with_image/3`).
@@ -12,10 +15,13 @@ defmodule Hyper.Node.Img do
   use Supervisor
 
   alias Hyper.Img.Db
+  alias Hyper.Node.Img.Mutable
   alias Hyper.Node.Img.Server
+  alias Hyper.Node.Img.ThinPool
 
   @registry Hyper.Node.Img.Registry
   @server_sup Hyper.Node.Img.Supervisor
+  @mutable_sup Hyper.Node.Img.MutableSupervisor
 
   def start_link(opts \\ []) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -25,7 +31,9 @@ defmodule Hyper.Node.Img do
   def init(_opts) do
     children = [
       {Registry, keys: :unique, name: @registry},
-      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup}
+      ThinPool,
+      {DynamicSupervisor, strategy: :one_for_one, name: @server_sup},
+      {DynamicSupervisor, strategy: :one_for_one, name: @mutable_sup}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -40,6 +48,18 @@ defmodule Hyper.Node.Img do
     case DynamicSupervisor.start_child(@server_sup, {Server, %Server.Opts{img_id: img_id}}) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
+  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
+  def create_mutable(img_id, vm_id) do
+    case DynamicSupervisor.start_child(
+           @mutable_sup,
+           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}
+         ) do
+      {:ok, pid} -> {:ok, pid}
       {:error, _} = err -> err
     end
   end

@@ -57,6 +57,7 @@ defmodule Hyper.MixProject do
       {:opentelemetry_exporter, "~> 1.8"},
       {:postgrex, "~> 0.20"},
       {:req, "~> 0.5"},
+      {:toml, "~> 0.7"},
       {:uuidv4, "~> 1.0"},
       # Not `only: :dev`: the generated Firecracker bindings are gitignored and
       # produced by the `:firecracker_gen` Mix compiler, which runs wherever hyper

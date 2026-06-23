@@ -1,34 +1,68 @@
 defmodule Hyper.SuidHelper do
   @moduledoc """
-  Interface to the setuid-root device helper (`hyper-suidhelper`).
+  Interface to the setuid-root device helper (`hyper-suidhelper`), split by tool:
 
-  The node runs unprivileged; this helper is the only path to the privileged
-  `losetup`/`dmsetup`/`blockdev` operations. Each call shells the configured
-  helper for one operation - `<helper> <tool> --bin <tool_bin> <args...>` - and
-  decodes the JSON object it prints on success. The helper validates every
-  argument before it briefly escalates to root (see `native/suidhelper`).
+    * `Hyper.SuidHelper.Losetup`    - loop devices
+    * `Hyper.SuidHelper.Dmsetup`    - device-mapper (snapshot / thin)
+    * `Hyper.SuidHelper.Blockdev`   - block-device queries
+    * `Hyper.SuidHelper.ChrootJail` - chroot lifecycle (prepare / remove)
+
+  Elixir runs unprivileged; these submodules are the only path to the privileged operations. Each
+  builds the argv for one operation and shells the helper through `exec/1`, which decodes the
+  JSON the helper prints on success. The helper validates every argument before briefly
+  escalating to root (see `native/suidhelper`).
+
+  `test_system/0` aggregates each tool's own presence check; `sys_test/0` runs the helper's
+  self-test and reports the base path it was compiled against.
   """
 
-  @typedoc "The JSON object the helper prints on success."
-  @type result :: %{optional(String.t()) => term()}
+  alias Hyper.SuidHelper.{Blockdev, Dmsetup, Losetup}
 
-  @doc """
-  Run one helper subcommand. `tool` is the subcommand (`"losetup"`, `"dmsetup"`,
-  `"blockdev"`), `tool_bin` the absolute path to the real binary it execs, and
-  `args` the operation's arguments. Returns the decoded JSON object, or
-  `{:error, {exit_code, message}}` when the helper exits non-zero.
-  """
-  @spec run(String.t(), Path.t(), [String.t()]) ::
-          {:ok, result()} | {:error, {non_neg_integer(), String.t()}}
-  def run(tool, tool_bin, args) do
-    argv = [tool, "--bin", tool_bin | args]
+  @typedoc "Error tuple: exit code + trimmed stderr/stdout from the helper."
+  @type err :: {non_neg_integer(), String.t()}
 
-    # stderr_to_stdout: on success the helper writes only the JSON line to stdout;
-    # on failure it writes the message to stderr and exits non-zero. Merging lets
-    # us capture either with one call.
+  @doc false
+  # Run the helper with `argv`. Returns `{:ok, decoded_json}` on exit 0,
+  # `{:error, {code, message}}` otherwise. Shared transport for the tool
+  # submodules; not part of the public API.
+  @spec exec([String.t()]) :: {:ok, map()} | {:error, err()}
+  def exec(argv) do
     case System.cmd(Hyper.Config.suid_helper(), argv, stderr_to_stdout: true) do
       {out, 0} -> {:ok, Jason.decode!(out)}
       {out, code} -> {:error, {code, String.trim(out)}}
     end
+  end
+
+  @doc """
+  Run the helper's `sys-test` subcommand (proves it can promote to root). Returns
+  `{:ok, hyper_base}` where `hyper_base` is the work-dir the helper was compiled
+  against.
+  """
+  @spec sys_test() :: {:ok, Path.t()} | {:error, err()}
+  def sys_test do
+    case exec(["sys-test"]) do
+      {:ok, %{"hyper_base" => base}} -> {:ok, base}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Check that the setuid helper and every tool it execs are usable on this
+  machine: the helper binary itself, then each tool submodule's own check.
+  """
+  @spec test_system() :: :ok | {:error, term()}
+  def test_system do
+    with :ok <- helper_present(),
+         :ok <- Losetup.test_system(),
+         :ok <- Dmsetup.test_system() do
+      Blockdev.test_system()
+    end
+  end
+
+  @spec helper_present() :: :ok | {:error, :suid_helper_not_found}
+  defp helper_present do
+    if System.find_executable(Hyper.Config.suid_helper()),
+      do: :ok,
+      else: {:error, :suid_helper_not_found}
   end
 end

@@ -1,27 +1,31 @@
 defmodule Hyper.Node.FireVMM.Core do
   @moduledoc """
-  The lifecycle-coupled core of one microVM: the daemon container and its
-  controller. Isolated from the API client (`Hyper.Node.FireVMM.Client`) so the
-  *only* order-sensitive relationship in the VM tree lives in this two-child
-  supervisor, where "daemon container first" is self-evident.
+  The lifecycle-coupled core of one microVM: the jailed firecracker daemon and
+  its controller, restarted as a pair. Isolated from the API client
+  (`Hyper.Node.FireVMM.Client`) so the *only* order-sensitive relationship in the
+  VM tree lives in this two-child supervisor.
 
-    1. `DynamicSupervisor` (`{vm_id, :daemon_sup}`) - starts **empty**, the
-       holding pen for the jailer OS process. MUST be the first child.
-    2. `Hyper.Node.FireVMM.State` - the `:gen_statem` controller; launches the
-       jailer into the supervisor above (as a `:temporary` child) and monitors
-       it. The state machine, not the supervisor, owns the daemon's lifecycle.
+    1. `Hyper.Node.FireVMM.Daemon` - the jailer OS process (under `MuonTrap`).
+       MUST be the first child: it must be (re)started before the controller so
+       the API socket is coming up by the time the controller probes.
+    2. `Hyper.Node.FireVMM.State` - the `:gen_statem` controller; drives the boot
+       protocol (await API -> stage -> configure -> run) against that daemon.
 
-  `:rest_for_one`, container first:
+  `:one_for_all`, daemon first: a crash of *either* child takes both down and
+  restarts the pair. So:
 
-    * controller crashes -> only it restarts; the daemon survives and the
-      controller re-adopts it (`State.ensure_daemon/1`). A controller bug does
-      not kill a live, stateful VM.
-    * container crashes  -> controller restarts too -> cold boot.
+    * controller crash -> daemon also discarded; no orphaned VM, fresh cold boot.
+    * firecracker crash -> the `Daemon` child exits; both restart; `Daemon`
+      resets the stale jail and relaunches, and the fresh controller cold-boots.
+
+  `MuonTrap` kills the OS process when its port closes (teardown or BEAM death),
+  so no firecracker process outlives the supervisor.
   """
 
   use Supervisor
 
   alias Hyper.Node.FireVMM
+  alias Hyper.Node.FireVMM.Daemon
   alias Hyper.Node.FireVMM.State
 
   @spec start_link(FireVMM.Opts.t()) :: Supervisor.on_start()
@@ -32,11 +36,10 @@ defmodule Hyper.Node.FireVMM.Core do
   @impl true
   def init(opts) do
     children = [
-      {DynamicSupervisor,
-       name: Hyper.Cluster.Routing.via({opts.vm_id, :daemon_sup}), strategy: :one_for_one},
+      {Daemon, opts},
       {State, opts}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :one_for_all)
   end
 end

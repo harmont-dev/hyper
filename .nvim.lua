@@ -58,3 +58,13 @@ vim.api.nvim_create_autocmd("BufWritePre", {
     end
   end,
 })
+
+-- Line-length guides for Elixir: wrap target 97, ruler at 98.
+vim.api.nvim_create_autocmd("FileType", {
+  group = group,
+  pattern = "elixir",
+  callback = function()
+    vim.opt_local.textwidth = 97
+    vim.opt_local.colorcolumn = "98"
+  end,
+})

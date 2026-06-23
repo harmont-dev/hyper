@@ -1,25 +1,58 @@
 defmodule Hyper.Config do
-  @moduledoc "Compile-time host configuration, read from `config :hyper, ...` (see `config/config.exs`)."
+  @moduledoc """
+  Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
 
-  @work_dir Application.compile_env!(:hyper, :work_dir)
+  `work_dir` is the one value shared with the setuid helper
+  (`native/suidhelper`); both sides read it from `/etc/hyper/config.toml` so the
+  data root has a single source of truth (see `work_dir/0`). Everything else is
+  compile-time.
+  """
+
+  # The shared data-root config file, read by both this node and the setuid
+  # helper. Absent in local dev / CI, where `@dev_work_dir` is used instead.
+  @config_path "/etc/hyper/config.toml"
+  @dev_work_dir "/srv/hyper"
+
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
   @layer_dir Application.compile_env!(:hyper, :layer_dir)
   @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
   @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
-  # dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
-  # Standardised repo-wide; deltas must be created with this chunk size.
-  @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
   @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
-  @doc "Root work directory for this node. All firecracker paths derive from it."
+  @doc """
+  Root work directory for this node. All firecracker paths derive from it.
+
+  Read from `#{@config_path}` (the single source of truth shared with the setuid
+  helper) the first time it is needed, then cached in `:persistent_term`. Falls
+  back to `#{@dev_work_dir}` when the file is absent (local dev / CI, where the
+  helper is not installed anyway).
+  """
   @spec work_dir :: Path.t()
-  def work_dir, do: @work_dir
+  def work_dir do
+    case :persistent_term.get({__MODULE__, :work_dir}, nil) do
+      nil ->
+        work_dir = load_work_dir()
+        :persistent_term.put({__MODULE__, :work_dir}, work_dir)
+        work_dir
+
+      work_dir ->
+        work_dir
+    end
+  end
+
+  @spec load_work_dir :: Path.t()
+  defp load_work_dir do
+    case File.read(@config_path) do
+      {:ok, body} -> body |> Toml.decode!() |> Map.fetch!("work_dir")
+      {:error, _} -> @dev_work_dir
+    end
+  end
 
   @doc "Directory holding redistributable binaries downloaded by the node."
   @spec redist_dir :: Path.t()
-  def redist_dir, do: Path.join(@work_dir, "redist")
+  def redist_dir, do: Path.join(work_dir(), "redist")
 
   @doc "Directory where `Hyper.Node.FireVMM.Provider` installs the firecracker release."
   @spec firecracker_install_dir :: Path.t()
@@ -31,7 +64,7 @@ defmodule Hyper.Config do
   If it does not exist, `Hyper.Node` will attempt to create one.
   """
   @spec chroot_base :: Path.t()
-  def chroot_base, do: Path.join(@work_dir, "jails")
+  def chroot_base, do: Path.join(work_dir(), "jails")
 
   @doc """
   A name for the parent cgroup which is used as a supervision cgroup for all VMs.
@@ -45,7 +78,7 @@ defmodule Hyper.Config do
   will attempt to create one.
   """
   @spec socket_dir :: Path.t()
-  def socket_dir, do: Path.join(@work_dir, "socks")
+  def socket_dir, do: Path.join(work_dir(), "socks")
 
   @doc """
   Range in which `Hyper` will attempt to allocate uid/gids. Whenever a VM is allocated, it will
@@ -92,11 +125,7 @@ defmodule Hyper.Config do
   writable. If it does not exist, `Hyper.Node` will attempt to create one.
   """
   @spec scratch_dir :: Path.t()
-  def scratch_dir, do: Path.join(@work_dir, "scratch")
-
-  @doc "dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB)."
-  @spec chunk_sectors :: pos_integer()
-  def chunk_sectors, do: @chunk_sectors
+  def scratch_dir, do: Path.join(work_dir(), "scratch")
 
   @doc """
   Per-architecture vmlinux (guest kernel) image paths, keyed by `Sys.Arch.t()`.
