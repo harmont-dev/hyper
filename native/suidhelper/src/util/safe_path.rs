@@ -20,8 +20,10 @@ pub enum ValidationError {
 }
 
 /// Absoluteness axis: require an absolute path.
+#[derive(Debug)]
 pub struct IsAbsolute;
 /// Components axis: reject `.`, `..`, and empty components.
+#[derive(Debug)]
 pub struct StrictComponents;
 
 /// Absoluteness axis.
@@ -59,6 +61,7 @@ impl Components for StrictComponents {
 }
 
 /// A `PathBuf` proven to satisfy the lexical axes named by its type parameters.
+#[derive(Debug)]
 pub struct SafePath<A, S>(PathBuf, PhantomData<(A, S)>);
 
 impl<A> SafePath<A, StrictComponents> {

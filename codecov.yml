@@ -1,0 +1,36 @@
+# Codecov configuration for the hyper monorepo. Two components upload under
+# distinct flags from separate CI jobs (see .github/workflows/ci.yml):
+#   elixir -> cover/excoveralls.json   (ExCoveralls / mix coveralls.json)
+#   rust   -> native/suidhelper/lcov.info  (cargo llvm-cov)
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        # Don't fail PRs on coverage deltas yet (early-stage project).
+        informational: true
+    patch:
+      default:
+        informational: true
+
+flags:
+  elixir:
+    paths:
+      - lib/
+    carryforward: true
+  rust:
+    paths:
+      - native/suidhelper/src/
+    carryforward: true
+
+# Generated bindings, deps, and test code never count toward coverage.
+ignore:
+  - "lib/hyper/firecracker/api/operations"
+  - "lib/hyper/firecracker/api/schemas"
+  - "test"
+  - "deps"
+  - "native/suidhelper/target"
+
+comment:
+  layout: "reach, flags, files"
+  require_changes: false
