@@ -9,7 +9,8 @@
 
 use super::safe_path::SafePath;
 use nix::fcntl::{open as nix_open, OFlag};
-use nix::sys::stat::{fstat, FileStat, Mode, SFlag};
+use nix::libc::dev_t;
+use nix::sys::stat::{fstat, major, makedev, minor, FileStat, Mode, SFlag};
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use thiserror::Error as ThisError;
@@ -35,6 +36,8 @@ pub struct Any;
 
 /// File-type axis: require a regular file.
 pub struct IsRegularFile;
+/// File-type axis: require a block device.
+pub struct IsBlockDevice;
 /// Ownership axis: require `root:root` (uid 0, gid 0).
 pub struct RootOwner;
 /// Mode axis: require the file not be writable by group or other.
@@ -81,6 +84,16 @@ impl FileType for IsRegularFile {
     }
 }
 
+impl FileType for IsBlockDevice {
+    fn check(stat: &FileStat) -> Result<(), ValidationError> {
+        if stat.st_mode & SFlag::S_IFMT.bits() == SFlag::S_IFBLK.bits() {
+            Ok(())
+        } else {
+            Err(ValidationError::WrongFileType)
+        }
+    }
+}
+
 impl Ownership for RootOwner {
     fn check(stat: &FileStat) -> Result<(), ValidationError> {
         if stat.st_uid == 0 && stat.st_gid == 0 {
@@ -120,6 +133,16 @@ impl<T, R, O> SafeFile<T, R, O> {
     /// Relinquish ownership, returning the inner [`OwnedFd`] (not closed here).
     pub fn into_owned_fd(self) -> OwnedFd {
         self.0
+    }
+}
+
+impl<R, O> SafeFile<IsBlockDevice, R, O> {
+    /// The device's `rdev` (major:minor), composed for `mknod`. Only callable on
+    /// a handle the type proves is a block device, so the number is read from a
+    /// verified device node, never a caller-supplied value.
+    pub fn rdev(&self) -> Result<dev_t, ValidationError> {
+        let stat = fstat(self.0.as_raw_fd()).map_err(ValidationError::Fstat)?;
+        Ok(makedev(major(stat.st_rdev), minor(stat.st_rdev)))
     }
 }
 

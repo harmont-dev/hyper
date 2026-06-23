@@ -13,6 +13,12 @@ pub enum ValidationError {
     NotAbsolute,
     #[error("path contains `.`, `..`, or empty components")]
     LooseComponents,
+    #[error("path is not under the required base directory")]
+    NotUnderBase,
+    #[error("path has no final component (equals the base)")]
+    NoLeaf,
+    #[error("path component is not valid UTF-8")]
+    NonUtf8,
 }
 
 /// The universal "axis off" marker: implements every axis trait as a no-op.
@@ -79,6 +85,36 @@ where
     /// The validated path.
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+}
+
+impl<A> SafePath<A, StrictComponents> {
+    /// Decompose the path, relative to `base`, into its parent components and
+    /// final name - the input a directory walk consumes. Gated on
+    /// `StrictComponents`, so there are no `.`/`..` to escape the split; every
+    /// component is a plain name.
+    ///
+    /// Errs if the path is not under `base`, equals `base` (no final component),
+    /// or contains a non-UTF-8 component.
+    pub fn relative_to(&self, base: &Path) -> Result<(Vec<String>, String), ValidationError> {
+        let rel = self
+            .0
+            .strip_prefix(base)
+            .map_err(|_| ValidationError::NotUnderBase)?;
+
+        let mut components = Vec::new();
+        for component in rel.components() {
+            match component {
+                Component::Normal(s) => {
+                    components.push(s.to_str().ok_or(ValidationError::NonUtf8)?.to_string())
+                }
+                // StrictComponents guarantees this is unreachable; reject anyway.
+                _ => return Err(ValidationError::NotUnderBase),
+            }
+        }
+
+        let leaf = components.pop().ok_or(ValidationError::NoLeaf)?;
+        Ok((components, leaf))
     }
 }
 
