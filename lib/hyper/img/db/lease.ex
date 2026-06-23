@@ -49,7 +49,12 @@ defmodule Hyper.Img.Db.Lease do
   """
   @spec bump(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::
           {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t()}
-  def bump(image_id, vm_id, ttl) do
+  def bump(image_id, vm_id, ttl), do: bump_with_repo(Repo, image_id, vm_id, ttl)
+
+  @doc false
+  @spec bump_with_repo(module(), Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::
+          {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t()}
+  def bump_with_repo(repo, image_id, vm_id, ttl) do
     expires_at = DateTime.add(DateTime.utc_now(), Unit.Time.as_s(ttl), :second)
 
     %__MODULE__{}
@@ -59,7 +64,7 @@ defmodule Hyper.Img.Db.Lease do
       vm_id: vm_id,
       expires_at: expires_at
     })
-    |> Repo.insert(
+    |> repo.insert(
       on_conflict: [set: [expires_at: expires_at]],
       conflict_target: [:node_id, :vm_id]
     )
