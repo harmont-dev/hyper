@@ -45,8 +45,8 @@ deploying and integrating Hyper.
   not performing as expected.
 - **Minimal stack** -- Hyper makes very few assumptions on your cloud. For
   multi-node deployments a Postgres database is required; single-node
-  deployments can use the built-in SQLite backend instead (see
-  [Architecture](docs/cookbook/architecture.md) for details).
+  deployments can use the built-in SQLite backend instead (see the
+  [intro](docs/cookbook/intro.md) for details).
 - **🔮 BEAM-native** -- Hyper is written on the
   [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
   means that fault-tolerance is built into the virtual machine, and allows you

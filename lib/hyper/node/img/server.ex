@@ -141,7 +141,6 @@ defmodule Hyper.Node.Img.Server do
   defp resolve_layers(img_id) do
     img_id
     |> Db.Image.resolve_chain()
-    |> Db.Repo.all()
     |> Enum.map(& &1.id)
   end
 

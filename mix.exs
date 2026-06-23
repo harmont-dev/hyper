@@ -48,7 +48,7 @@ defmodule Hyper.MixProject do
       mod: {Hyper.Application, []},
       # ecto_repos lives here (not config.exs) since it's well-known and
       # compile-time fixed. Mix's ecto.* tasks read it from the app env.
-      env: [ecto_repos: [Hyper.Img.Db.Repo.Postgres]]
+      env: [ecto_repos: [Hyper.Img.Db.Repo]]
     ]
   end
 

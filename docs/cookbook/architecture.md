@@ -95,59 +95,13 @@ Files](https://aws.amazon.com/s3/features/files/),
 filesystem. The author uses the local filesystem for debugging, and NFS for
 production use. This medium is referred to as the **layer storage medium**.
 
-A metadata database stores:
+A side-car PostgreSQL database stores:
 
   - The dependency relationships between each individual layer and image.
   - Leases issued out to virtual machines to track which layers are currently
     considered active.
 
-The aforementioned database is coined the **metadata database**. Two backends
-are available; see [Image-graph storage backends](#image-graph-storage-backends)
-below for how to choose one.
-
-### Image-graph storage backends
-
-The image graph (blobs, images, image-layers, leases) is stored through the
-`Hyper.Img.Db.Repo` facade. At runtime `Hyper.Img.Db.Backend` resolves that
-facade to one of two concrete backends:
-
-- **`:postgres`** (default) -- cluster-safe; required for any multi-node
-  deployment.
-- **`:sqlite`** -- a single-writer file database for single-node deployments
-  only. Selected via:
-
-  ```elixir
-  config :hyper, Hyper.Img.Db, backend: :sqlite
-  ```
-
-SQLite **must not** be used on a clustered node. `Hyper.Img.Db.SingleNodeGuard`
-enforces this automatically:
-
-- At startup the node refuses to boot if any peers are already connected.
-- At runtime the node halts itself (via `System.stop/1`) if a peer joins while
-  SQLite is active.
-
-This hard enforcement protects the SQLite file from concurrent writers, which
-would corrupt the metadata database.
-
-#### Migrations
-
-Both backends share `priv/repo/migrations` -- the DDL is written to be portable
-across PostgreSQL and SQLite. Apply migrations per backend:
-
-    mix ecto.migrate -r Hyper.Img.Db.Repo.Postgres   # default (multi-node)
-    mix ecto.migrate -r Hyper.Img.Db.Repo.Sqlite     # single-node SQLite
-
-#### Known limitation: upsert id under SQLite
-
-On SQLite (via `ecto_sqlite3`), an `ON CONFLICT DO UPDATE` upsert returns a
-struct carrying a freshly-generated UUID rather than the stored row's `id`.
-`Hyper.Img.Db.Lease.bump/3` is the only upsert in the image-graph path, and
-current callers only match `{:ok, _}` without reading back the lease `id`, so
-there is no live bug. However, any future code that reads the `id` from the
-struct returned by a lease bump under SQLite will receive an incorrect value.
-Use the Postgres backend if you need reliable round-trip identity on bumped
-leases.
+The aforementioned PostgreSQL database is coined the **metadata database**.
 
 ### Composition
 

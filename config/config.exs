@@ -37,24 +37,15 @@ if config_env() == :test do
 end
 
 # Image-graph storage backend. :postgres (default, cluster-safe) or :sqlite
-# (single-node only; enforced at runtime by Hyper.Img.Db.SingleNodeGuard).
+# (single-node only). See Hyper.Img.Db.Config and docs/cookbook/intro.md.
 config :hyper, Hyper.Img.Db, backend: :postgres
 
-config :hyper, Hyper.Img.Db.Repo.Postgres,
-  priv: "priv/repo",
-  telemetry_prefix: [:hyper, :img, :db, :repo],
+# Connection settings for the configured backend. The block below is for the
+# default Postgres backend; for SQLite, configure this repo for SQLite instead
+# (see docs/cookbook/intro.md).
+config :hyper, Hyper.Img.Db.Repo,
   database: "hyper_dev",
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
-
-config :hyper, Hyper.Img.Db.Repo.Sqlite,
-  priv: "priv/repo",
-  telemetry_prefix: [:hyper, :img, :db, :repo],
-  database: Path.expand("../priv/sqlite/hyper.db", __DIR__),
-  pool_size: 1,
-  journal_mode: :wal,
-  busy_timeout: 5_000,
-  binary_id_type: :string,
-  datetime_type: :iso8601
