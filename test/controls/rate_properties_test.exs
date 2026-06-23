@@ -19,10 +19,13 @@ defmodule Controls.RatePropertiesTest do
   end
 
   property "a counter that went backwards skips and re-baselines to the new reading" do
+    # A counter that can regress is necessarily >= 1, so prev_c starts at 1; this
+    # also keeps the `drop` range (1..prev_c) non-empty. StreamData RAISES on an
+    # empty range rather than re-generating, so an empty draw would crash the property.
     check all(
-            prev_c <- count(),
+            prev_c <- integer(1..1_000_000_000),
             prev_t <- mono(),
-            drop <- integer(1..prev_c//1),
+            drop <- integer(1..prev_c),
             t <- mono()
           ) do
       c = prev_c - drop
