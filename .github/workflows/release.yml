@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Least privilege by default; only the GitHub-release jobs escalate to write.
+permissions:
+  contents: read
+
+# Never cancel a release mid-flight (a cancelled publish can leave a half-done
+# release); serialise per-ref instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-versions:
+    name: Verify versions match tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag and verify manifests
+        id: v
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/check-versions.sh "$version"
