@@ -42,8 +42,10 @@ deploying and integrating Hyper.
 - **Telemetry** -- Hyper is mostly fully instrumented with
   [Otel](https://opentelemetry.io/) so you get full traces on if/why things are
   not performing as expected.
-- **Minimal stack** -- Hyper makes very few assumptions on your cloud, and only
-  requires a Postgres database as a minimal external dependency.
+- **Minimal stack** -- Hyper makes very few assumptions on your cloud. For
+  multi-node deployments a Postgres database is required; single-node
+  deployments can use the built-in SQLite backend instead (see
+  [Architecture](docs/cookbook/architecture.md) for details).
 - **🔮 BEAM-native** -- Hyper is written on the
   [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
   means that fault-tolerance is built into the virtual machine, and allows you
