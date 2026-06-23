@@ -87,14 +87,22 @@ jobs:
           mix ecto.create -r Hyper.Img.Db.Repo
           mix ecto.migrate -r Hyper.Img.Db.Repo
 
-      - name: Test (warnings as errors)
+      - name: Test + coverage (warnings as errors)
         env:
           MIX_ENV: test
-        # --no-start: the app's supervision tree boots Hyper.Node, which provisions
-        # a real Firecracker host under /srv/hyper -- unavailable (and unprivileged)
-        # on a CI runner. This matches how the suite is run in development; tests
-        # that need the Repo start it themselves against the DB created above.
-        run: mix test --no-start --warnings-as-errors
+        # coveralls.json wraps `mix test` (so --no-start / --warnings-as-errors
+        # still apply) and writes cover/excoveralls.json for the Codecov upload.
+        # --no-start: the supervision tree provisions a real Firecracker host
+        # under /srv/hyper, unavailable on a CI runner.
+        run: mix coveralls.json --no-start --warnings-as-errors
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cover/excoveralls.json
+          flags: elixir
+          fail_ci_if_error: false
 
       - name: Dialyzer
         run: mix dialyzer
@@ -123,5 +131,19 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: test
-        run: cargo test --all-features
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: test + coverage
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # working-directory only applies to `run:` steps, not actions.
+          files: native/suidhelper/lcov.info
+          flags: rust
+          fail_ci_if_error: false
