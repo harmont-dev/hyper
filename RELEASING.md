@@ -44,7 +44,7 @@ Both are driven by `.github/workflows/release.yml`, triggered by pushing a
    ```
 4. The workflow builds both packages and creates a **draft** GitHub Release
    automatically. The `publish-crate` and `publish-hex` jobs then wait for
-   approval — approve them in the run's *Review deployments* prompt.
+   approval as two separate `release`-environment deployments — approve both in the run's *Review deployments* prompt (you can select them together).
 5. Once both publishes succeed, the draft release is flipped to published
    automatically.
 
