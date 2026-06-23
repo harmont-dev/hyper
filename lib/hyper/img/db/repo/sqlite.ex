@@ -12,7 +12,5 @@ defmodule Hyper.Img.Db.Repo.Sqlite do
 
   use Ecto.Repo,
     otp_app: :hyper,
-    adapter: Ecto.Adapters.SQLite3,
-    priv: "priv/repo",
-    telemetry_prefix: [:hyper, :img, :db, :repo]
+    adapter: Ecto.Adapters.SQLite3
 end

@@ -42,6 +42,7 @@ config :hyper, Hyper.Img.Db, backend: :postgres
 
 config :hyper, Hyper.Img.Db.Repo.Postgres,
   priv: "priv/repo",
+  telemetry_prefix: [:hyper, :img, :db, :repo],
   database: "hyper_dev",
   username: "postgres",
   password: "postgres",
@@ -50,6 +51,7 @@ config :hyper, Hyper.Img.Db.Repo.Postgres,
 
 config :hyper, Hyper.Img.Db.Repo.Sqlite,
   priv: "priv/repo",
+  telemetry_prefix: [:hyper, :img, :db, :repo],
   database: Path.expand("../priv/sqlite/hyper.db", __DIR__),
   pool_size: 1,
   journal_mode: :wal,

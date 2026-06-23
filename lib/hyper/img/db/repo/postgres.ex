@@ -8,7 +8,5 @@ defmodule Hyper.Img.Db.Repo.Postgres do
 
   use Ecto.Repo,
     otp_app: :hyper,
-    adapter: Ecto.Adapters.Postgres,
-    priv: "priv/repo",
-    telemetry_prefix: [:hyper, :img, :db, :repo]
+    adapter: Ecto.Adapters.Postgres
 end
