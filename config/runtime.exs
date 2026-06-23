@@ -27,4 +27,10 @@ if config_env() != :test do
     otlp_protocol: :http_protobuf,
     otlp_endpoint: endpoint,
     otlp_headers: headers
+
+  config :hyper, Hyper.Grpc,
+    enabled: System.get_env("HYPER_GRPC_ENABLED", "false") == "true",
+    port: String.to_integer(System.get_env("HYPER_GRPC_PORT", "50051")),
+    tls_cert: System.get_env("HYPER_GRPC_TLS_CERT"),
+    tls_key: System.get_env("HYPER_GRPC_TLS_KEY")
 end

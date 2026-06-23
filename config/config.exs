@@ -42,3 +42,7 @@ config :hyper, Hyper.Img.Db.Repo,
   password: "postgres",
   hostname: "localhost",
   pool_size: 10
+
+# The public gRPC interface is opt-in. Disabled in dev/test (no certs, no node
+# infra); enabled per-node in production via runtime.exs.
+config :hyper, Hyper.Grpc, enabled: false
