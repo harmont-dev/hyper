@@ -48,11 +48,29 @@ impl Absoluteness for IsAbsolute {
 
 impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
-        // Only a leading root and plain names; `.`/`..`/prefix are rejected.
-        let ok = path
+        use std::os::unix::ffi::OsStrExt;
+
+        // `Path::components()` keeps `..` (ParentDir) and any platform prefix but
+        // silently normalizes `.` and empty (`//`) segments away -- so it alone
+        // would accept `/a/./b` or `/a//b`. Use it to reject `..`/prefixes, then
+        // scan the raw segments to reject `.` and empty components too, honoring
+        // the no-`.`/`..`/empty guarantee this gate documents.
+        if !path
             .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-        if ok {
+            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
+        {
+            return Err(ValidationError::LooseComponents);
+        }
+
+        let bytes = path.as_os_str().as_bytes();
+        let mut segments = bytes.split(|&b| b == b'/');
+        // An absolute path's leading `/` yields one empty leading segment standing
+        // for the root; that one is allowed. Every remaining segment must be a
+        // plain name: non-empty (no `//` or trailing `/`) and not `.`/`..`.
+        if path.is_absolute() {
+            segments.next();
+        }
+        if segments.all(|s| !s.is_empty() && s != b"." && s != b"..") {
             Ok(())
         } else {
             Err(ValidationError::LooseComponents)
