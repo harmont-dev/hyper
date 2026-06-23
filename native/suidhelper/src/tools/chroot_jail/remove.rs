@@ -2,47 +2,45 @@
 //! `chroot-jail remove`: delete a VM's stale chroot and cgroup leaf before
 //! relaunching the jailer.
 //!
-//! Security: `--chroot` must be EXACTLY two components below `JAIL_BASE`
-//! (`<exec>/<id>`) so a caller cannot pass a shallower/deeper path and nuke an
-//! unrelated tree; `remove_dir_all` does not follow symlinks for deletion (and
-//! the path components are root-owned). `--cgroup` must be at least two
-//! components below `/sys/fs/cgroup`, removed with a non-recursive rmdir (empty
-//! leaf only). Both deletes are idempotent: `ENOENT` (and, for the cgroup,
-//! `ENOTEMPTY`) are treated as success.
+//! Security: each path is validated as a `SafePath` and reached by an
+//! `O_NOFOLLOW` walk from its base (`JAIL_BASE` / `/sys/fs/cgroup`), so a
+//! symlinked component cannot redirect the deletion outside the tree, and removal
+//! is fd-relative (`unlinkat`), never by re-resolved name. `--chroot` must be
+//! exactly `<exec>/<id>` below `JAIL_BASE`; `--cgroup` at least two components
+//! below its base (a non-recursive `rmdir`). Both deletes are idempotent: a
+//! missing target (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
-use crate::safe_dev::{self, JailPath};
+use crate::config::Config;
 use crate::tools::IsTool;
+use crate::util::safe_dir::{self, SafeDir};
+use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
+use nix::errno::Errno;
 use serde::Serialize;
-use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 /// The cgroup virtual filesystem root.
 const CGROUP_BASE: &str = "/sys/fs/cgroup";
 
+type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
+
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("--chroot path is not a valid jail path: {0}")]
-    ChrootPath(#[source] safe_dev::Error),
+    #[error("--chroot path: {0}")]
+    ChrootPath(#[source] safe_path::ValidationError),
     #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0}")]
     ChrootDepth(String),
-    #[error("--cgroup path must be absolute under /sys/fs/cgroup with no . or ..: {0}")]
-    CgroupPath(String),
+    #[error("--cgroup path: {0}")]
+    CgroupPath(#[source] safe_path::ValidationError),
     #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0}")]
     CgroupDepth(String),
-    #[error("remove_dir_all {path}: {source}")]
-    RemoveChroot {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-    #[error("rmdir {path}: {source}")]
-    RemoveCgroup {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
+    #[error("walking: {0}")]
+    Walk(#[source] safe_dir::Error),
+    #[error("removing chroot: {0}")]
+    RemoveChroot(#[source] safe_dir::Error),
+    #[error("removing cgroup: {0}")]
+    RemoveCgroup(#[source] safe_dir::Error),
 }
 
 #[derive(Args)]
@@ -76,31 +74,8 @@ impl IsTool for Remove {
     type RunT = Result<(), Error>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let chroot = validate_chroot(&self.args.chroot)?;
-        let cgroup = validate_cgroup(&self.args.cgroup)?;
-
-        let chroot_path: &Path = chroot.as_ref();
-        match std::fs::remove_dir_all(chroot_path) {
-            Ok(()) => {}
-            // Idempotent: a first boot has no chroot yet.
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(Error::RemoveChroot {
-                    path: chroot_path.to_path_buf(),
-                    source,
-                })
-            }
-        }
-
-        match std::fs::remove_dir(&cgroup) {
-            Ok(()) => {}
-            // Best-effort: the leaf may not exist, or the process may still hold it.
-            Err(e)
-                if e.kind() == io::ErrorKind::NotFound
-                    || e.raw_os_error() == Some(nix::libc::ENOTEMPTY) => {}
-            Err(source) => return Err(Error::RemoveCgroup { path: cgroup, source }),
-        }
-
+        remove_chroot(&self.args.chroot)?;
+        remove_cgroup(&self.args.cgroup)?;
         Ok(())
     }
 
@@ -110,38 +85,61 @@ impl IsTool for Remove {
     }
 }
 
-/// Validate `s` is a per-VM chroot dir: a [`JailPath`] (absolute, under
-/// `JAIL_BASE`, no `.`/`..`) that is EXACTLY two components below `JAIL_BASE`
-/// (`<exec>/<id>`).
-fn validate_chroot(s: &str) -> Result<JailPath, Error> {
-    let jail: JailPath = s.parse().map_err(Error::ChrootPath)?;
-    let (parents, _final) = safe_dev::jail_relative_parts(&jail).map_err(Error::ChrootPath)?;
+/// Recursively remove the per-VM chroot `<JAIL_BASE>/<exec>/<id>`, fd-relative
+/// after an `O_NOFOLLOW` walk from `JAIL_BASE`. Idempotent on a missing target.
+fn remove_chroot(chroot: &str) -> Result<(), Error> {
+    let jail_base = Config::get().jail_base();
+    let path: LexicalPath = PathBuf::from(chroot).try_into().map_err(Error::ChrootPath)?;
+    let (parents, leaf) = path.relative_to(&jail_base).map_err(Error::ChrootPath)?;
+    // Exactly <exec>/<id>: one parent component, one leaf.
     if parents.len() != 1 {
-        return Err(Error::ChrootDepth(s.to_string()));
+        return Err(Error::ChrootDepth(chroot.to_string()));
     }
-    Ok(jail)
+
+    let Some(parent) = walk(jail_base, &parents)? else {
+        return Ok(()); // an ancestor is already gone
+    };
+    match parent.remove_dir_all(&leaf) {
+        Ok(()) => Ok(()),
+        Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
+        Err(e) => Err(Error::RemoveChroot(e)),
+    }
 }
 
-/// Validate `s` is a per-VM cgroup leaf: absolute, under `CGROUP_BASE`, no
-/// `.`/`..`, and at least two components below `CGROUP_BASE`.
-fn validate_cgroup(s: &str) -> Result<PathBuf, Error> {
-    let p = PathBuf::from(s);
-    let ok = p.is_absolute()
-        && p.starts_with(CGROUP_BASE)
-        && p.components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-    if !ok {
-        return Err(Error::CgroupPath(s.to_string()));
+/// Remove the (empty) per-VM cgroup leaf, fd-relative after an `O_NOFOLLOW` walk
+/// from `/sys/fs/cgroup`. Idempotent on `ENOENT`/`ENOTEMPTY`.
+fn remove_cgroup(cgroup: &str) -> Result<(), Error> {
+    let base = PathBuf::from(CGROUP_BASE);
+    let path: LexicalPath = PathBuf::from(cgroup).try_into().map_err(Error::CgroupPath)?;
+    let (parents, leaf) = path.relative_to(&base).map_err(Error::CgroupPath)?;
+    // At least two components below the base: one or more parents, plus the leaf.
+    if parents.is_empty() {
+        return Err(Error::CgroupDepth(cgroup.to_string()));
     }
-    let rel = p
-        .strip_prefix(CGROUP_BASE)
-        .map_err(|_| Error::CgroupPath(s.to_string()))?;
-    let depth = rel
-        .components()
-        .filter(|c| matches!(c, Component::Normal(_)))
-        .count();
-    if depth < 2 {
-        return Err(Error::CgroupDepth(s.to_string()));
+
+    let Some(parent) = walk(base, &parents)? else {
+        return Ok(()); // an ancestor is already gone
+    };
+    match parent.rmdir(&leaf) {
+        Ok(()) => Ok(()),
+        Err(e) if matches!(e.errno(), Some(Errno::ENOENT | Errno::ENOTEMPTY)) => Ok(()),
+        Err(e) => Err(Error::RemoveCgroup(e)),
     }
-    Ok(p)
+}
+
+/// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
+/// `Ok(None)` if `base` or any parent is already gone (`ENOENT`), so callers can
+/// treat removal as idempotent.
+fn walk(base: PathBuf, parents: &[String]) -> Result<Option<SafeDir>, Error> {
+    let base_path: LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
+    let anchor = match SafeDir::open(&base_path) {
+        Ok(dir) => dir,
+        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
+        Err(e) => return Err(Error::Walk(e)),
+    };
+    match anchor.descend(parents) {
+        Ok(dir) => Ok(Some(dir)),
+        Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
+        Err(e) => Err(Error::Walk(e)),
+    }
 }

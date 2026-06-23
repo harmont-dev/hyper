@@ -21,9 +21,6 @@ pub enum ValidationError {
     NonUtf8,
 }
 
-/// The universal "axis off" marker: implements every axis trait as a no-op.
-pub struct Any;
-
 /// Absoluteness axis: require an absolute path.
 pub struct IsAbsolute;
 /// Components axis: reject `.`, `..`, and empty components.
@@ -37,17 +34,6 @@ pub trait Absoluteness {
 /// Components axis.
 pub trait Components {
     fn check(path: &Path) -> Result<(), ValidationError>;
-}
-
-impl Absoluteness for Any {
-    fn check(_: &Path) -> Result<(), ValidationError> {
-        Ok(())
-    }
-}
-impl Components for Any {
-    fn check(_: &Path) -> Result<(), ValidationError> {
-        Ok(())
-    }
 }
 
 impl Absoluteness for IsAbsolute {
@@ -76,17 +62,6 @@ impl Components for StrictComponents {
 
 /// A `PathBuf` proven to satisfy the lexical axes named by its type parameters.
 pub struct SafePath<A, S>(PathBuf, PhantomData<(A, S)>);
-
-impl<A, S> SafePath<A, S>
-where
-    A: Absoluteness,
-    S: Components,
-{
-    /// The validated path.
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-}
 
 impl<A> SafePath<A, StrictComponents> {
     /// Decompose the path, relative to `base`, into its parent components and

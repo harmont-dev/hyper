@@ -43,6 +43,22 @@ pub enum Error {
     Dup(#[source] nix::Error),
 }
 
+impl Error {
+    /// The underlying errno, for callers that treat some failures as success
+    /// (e.g. idempotent removal on `ENOENT`).
+    pub fn errno(&self) -> Option<nix::errno::Errno> {
+        match self {
+            Error::Open { source, .. }
+            | Error::Unlink { source, .. }
+            | Error::Mknod { source, .. }
+            | Error::Chown { source, .. }
+            | Error::Link { source, .. } => Some(*source),
+            Error::ReadDir(source) | Error::Dup(source) => Some(*source),
+            Error::BadName => None,
+        }
+    }
+}
+
 /// Flags every directory open uses: read (to `readdir`), confined to directories,
 /// never follow a symlink, close-on-exec.
 fn dir_flags() -> OFlag {
@@ -98,23 +114,6 @@ impl SafeDir {
         let raw = dup(self.0.as_raw_fd()).map_err(Error::Dup)?;
         // SAFETY: dup just handed us a fresh owned fd.
         Ok(SafeDir(unsafe { OwnedFd::from_raw_fd(raw) }))
-    }
-
-    /// Open file `name` in this directory (`O_NOFOLLOW|O_CLOEXEC` always added).
-    /// Returns an unverified handle; `try_into()` it to assert `fstat` axes.
-    pub fn openat_file(&self, name: &str, flags: OFlag) -> Result<SafeFile<Any, Any, Any>, Error> {
-        let raw = openat(
-            Some(self.0.as_raw_fd()),
-            name,
-            flags | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|source| Error::Open {
-            name: name.to_string(),
-            source,
-        })?;
-        // SAFETY: openat just handed us this fd; nobody else owns it.
-        Ok(unsafe { SafeFile::from_raw_fd(raw) })
     }
 
     /// Create file `name` in this directory, failing if it exists
