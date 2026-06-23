@@ -8,8 +8,9 @@ defmodule Hyper.Application do
     # :opentelemetry starts as its own OTP application (a dependency of :hyper),
     # so it is already running before this supervisor boots.
     #
-    # Bridge Ecto's query telemetry into OpenTelemetry spans. The prefix matches
-    # the repo's default telemetry_prefix (its module path, underscored).
+    # Bridge Ecto's query telemetry into OpenTelemetry spans. Both concrete
+    # repos set telemetry_prefix: [:hyper, :img, :db, :repo] in config, so this
+    # call is valid for whichever backend is active.
     _ = OpentelemetryEcto.setup([:hyper, :img, :db, :repo])
 
     topologies = Application.get_env(:libcluster, :topologies, [])
