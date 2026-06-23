@@ -1,5 +1,5 @@
 use super::Error;
-use crate::safe_dev::LoopDev;
+use crate::util::safe_dev::LoopDev;
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;

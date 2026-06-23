@@ -23,8 +23,6 @@
 //!     target/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
 //! Then: config :hyper, suid_helper: "/usr/local/bin/hyper-suidhelper"
 
-mod safe_bin;
-mod safe_dev;
 mod tools;
 mod util;
 mod config;

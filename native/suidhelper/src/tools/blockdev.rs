@@ -1,5 +1,5 @@
 use super::IsTool;
-use crate::safe_dev::BlockDev;
+use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
 use std::io;

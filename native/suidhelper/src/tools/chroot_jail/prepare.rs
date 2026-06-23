@@ -2,7 +2,7 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
-use crate::safe_dev::BlockDev;
+use crate::util::safe_dev::BlockDev;
 use crate::tools::IsTool;
 use crate::util::chroot_jail::{self, ChrootJail};
 use clap::Args;

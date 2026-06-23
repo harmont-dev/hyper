@@ -1,18 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Declarative builder for a VM's chroot jail contents.
-//!
-//! A jail is described, not imperatively assembled: name the kernel and the
-//! rootfs device, then [`ChrootJail::build`] realizes them. Nothing touches disk
-//! until `build`, which opens the chroot via a confined `O_NOFOLLOW` walk from
-//! `JAIL_BASE` and creates each artifact relative to that directory fd.
-//!
-//! Completeness is enforced by typestate: the kernel and rootfs slots start
-//! `Unset` and carry their value once set, and `build` exists only on
-//! `ChrootJail<Kernel, Rootfs>` - so a jail missing either artifact is a compile
-//! error, not a runtime one.
 
 use crate::config::Config;
-use crate::safe_dev::BlockDev;
+use crate::util::safe_dev::BlockDev;
 use crate::util::safe_dir::{self, SafeDir};
 use crate::util::safe_file::{self, Any, IsBlockDevice, SafeFile};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};

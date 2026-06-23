@@ -1,5 +1,5 @@
 use super::IsTool;
-use crate::safe_dev::LoopDev;
+use crate::util::safe_dev::LoopDev;
 use crate::util::safe_file::{self, Any, IsRegularFile, SafeFile};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::{Args, Subcommand};

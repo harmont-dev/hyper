@@ -5,7 +5,7 @@ mod thin;
 mod thin_pool;
 
 use super::IsTool;
-use crate::safe_dev::{self, DmName};
+use crate::util::safe_dev::{self, DmName};
 use clap::{Args, Subcommand};
 use message::ThinMessage;
 use serde::Serialize;
