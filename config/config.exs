@@ -40,7 +40,8 @@ end
 # (single-node only; enforced at runtime by Hyper.Img.Db.SingleNodeGuard).
 config :hyper, Hyper.Img.Db, backend: :postgres
 
-config :hyper, Hyper.Img.Db.Repo,
+config :hyper, Hyper.Img.Db.Repo.Postgres,
+  priv: "priv/repo",
   database: "hyper_dev",
   username: "postgres",
   password: "postgres",
@@ -48,6 +49,7 @@ config :hyper, Hyper.Img.Db.Repo,
   pool_size: 10
 
 config :hyper, Hyper.Img.Db.Repo.Sqlite,
+  priv: "priv/repo",
   database: Path.expand("../priv/sqlite/hyper.db", __DIR__),
   pool_size: 1,
   journal_mode: :wal,

@@ -17,7 +17,7 @@ defmodule Hyper.Application do
     children = [
       # The image-lineage database. Started first so the rest of the node can
       # query images/leases on boot.
-      Hyper.Img.Db.Repo,
+      Hyper.Img.Db.Backend.repo(),
       # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
       # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
       {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
