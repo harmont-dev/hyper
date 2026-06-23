@@ -52,5 +52,28 @@ defmodule Hyper.Grpc.CodecTest do
     test "an unknown reason maps to INTERNAL" do
       assert %GRPC.RPCError{status: 13} = Codec.rpc_error({:boot_failed, :whatever})
     end
+
+    test "machine_unreachable maps to UNAVAILABLE" do
+      assert %GRPC.RPCError{status: 14} = Codec.rpc_error(:machine_unreachable)
+    end
+  end
+
+  describe "stop_exit_error/1" do
+    test ":noproc (unknown vm_id) maps to NOT_FOUND" do
+      assert %GRPC.RPCError{status: 5} = Codec.stop_exit_error(:noproc)
+
+      assert %GRPC.RPCError{status: 5} =
+               Codec.stop_exit_error({:noproc, {:gen_statem, :call, []}})
+    end
+
+    test ":nodedown (downed host) maps to UNAVAILABLE" do
+      assert %GRPC.RPCError{status: 14} = Codec.stop_exit_error(:nodedown)
+      assert %GRPC.RPCError{status: 14} = Codec.stop_exit_error({:nodedown, :a@host})
+    end
+
+    test "any other exit reason maps to INTERNAL (a real crash is not masked as NOT_FOUND)" do
+      assert %GRPC.RPCError{status: 13} = Codec.stop_exit_error(:killed)
+      assert %GRPC.RPCError{status: 13} = Codec.stop_exit_error({:bad_return, :boom})
+    end
   end
 end

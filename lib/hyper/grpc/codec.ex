@@ -66,8 +66,25 @@ defmodule Hyper.Grpc.Codec do
   def rpc_error(reason) when reason in [:no_capacity, :exhausted],
     do: GRPC.RPCError.exception(:resource_exhausted, "no capacity")
 
+  def rpc_error(:machine_unreachable),
+    do: GRPC.RPCError.exception(:unavailable, "machine's host node is unreachable")
+
   def rpc_error(reason),
     do: GRPC.RPCError.exception(:internal, "internal error: #{inspect(reason)}")
+
+  @doc """
+  Map a `:gen_statem` call exit reason (raised by `Hyper.Node.FireVMM.State.stop/1`
+  when the call cannot complete) to a gRPC status. An unregistered vm_id exits
+  `:noproc` → NOT_FOUND; a downed host exits `:nodedown` → UNAVAILABLE; anything
+  else is a genuine controller failure → INTERNAL (so a real crash is never
+  silently reported as a clean NOT_FOUND).
+  """
+  @spec stop_exit_error(term()) :: GRPC.RPCError.t()
+  def stop_exit_error(:noproc), do: rpc_error(:not_found)
+  def stop_exit_error({:noproc, _}), do: rpc_error(:not_found)
+  def stop_exit_error(:nodedown), do: rpc_error(:machine_unreachable)
+  def stop_exit_error({:nodedown, _}), do: rpc_error(:machine_unreachable)
+  def stop_exit_error(reason), do: rpc_error({:stop_failed, reason})
 
   @spec instance_type(atom()) :: {:ok, Hyper.Vm.Instance.t()} | {:error, term()}
   defp instance_type(enum) when is_map_key(@instance_types, enum),

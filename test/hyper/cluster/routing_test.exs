@@ -33,4 +33,14 @@ defmodule Hyper.Cluster.RoutingTest do
 
     assert Enum.sort(Routing.all()) == [{"vm-1", node()}, {"vm-2", node()}]
   end
+
+  test "Hyper.id/1 resolves a locally-registered supervisor pid to its vm_id" do
+    pid = register({"vm-xyz", :supervisor})
+    # node(pid) is this node, so Hyper.id/1 erpc-calls id_for on the local node.
+    assert Hyper.id(pid) == "vm-xyz"
+  end
+
+  test "Hyper.id/1 returns nil for an unknown pid" do
+    assert Hyper.id(self()) == nil
+  end
 end

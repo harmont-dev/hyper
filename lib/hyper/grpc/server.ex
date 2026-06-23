@@ -29,9 +29,13 @@ defmodule Hyper.Grpc.Server do
           CreateMachineResponse.t()
   def create_machine(%CreateMachineRequest{} = req, _stream) do
     with {:ok, spec} <- Codec.to_spec(req),
-         {:ok, pid} <- Hyper.create_vm(spec) do
-      %CreateMachineResponse{vm_id: Hyper.id(pid), node: to_string(node(pid))}
+         {:ok, pid} <- Hyper.create_vm(spec),
+         vm_id when is_binary(vm_id) <- Hyper.id(pid) do
+      %CreateMachineResponse{vm_id: vm_id, node: to_string(node(pid))}
     else
+      # Hyper.id/1 could not resolve the id: the VM was placed but its host
+      # became unreachable. Surface that rather than returning an empty vm_id.
+      nil -> raise Codec.rpc_error(:machine_unreachable)
       {:error, reason} -> raise Codec.rpc_error(reason)
     end
   end
@@ -40,12 +44,14 @@ defmodule Hyper.Grpc.Server do
           StopMachineResponse.t()
   def stop_machine(%StopMachineRequest{vm_id: vm_id}, _stream) do
     # State.stop/1 issues a gen_statem call to the VM's controller via the
-    # cluster registry; an unknown vm_id has no registered name, so the call
-    # exits with :noproc. Translate that into a clean NOT_FOUND.
+    # cluster registry. An unknown vm_id has no registered name, so the call
+    # exits :noproc (→ NOT_FOUND); a downed host exits :nodedown (→ UNAVAILABLE);
+    # any other exit is a real controller failure (→ INTERNAL). Codec.stop_exit_error/1
+    # makes that distinction so a genuine crash is not masked as NOT_FOUND.
     Hyper.Node.FireVMM.State.stop(vm_id)
     %StopMachineResponse{}
   catch
-    :exit, _ -> raise Codec.rpc_error(:not_found)
+    :exit, reason -> raise Codec.stop_exit_error(reason)
   end
 
   @spec get_machine(GetMachineRequest.t(), GRPC.Server.Stream.t()) ::
