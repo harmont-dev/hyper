@@ -48,7 +48,7 @@ deploying and integrating Hyper.
   [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
   means that fault-tolerance is built into the virtual machine, and allows you
   to interactively debug any issues you run into.
-- gRPC Interface -- although the author exclusively uses Hyper through the
+- **gRPC Interface** -- although the author exclusively uses Hyper through the
   BEAM-native interfaces, we recognize this may not be ideal for all languages
   and existing stacks. For that reason, Hyper has a GRPC interface, so you can
   call it from any language you already use.
