@@ -41,3 +41,54 @@ config :hyper,
   uid_gid_range: {900_000, 999_999},
   layer_dir: "/srv/hyper/layers"
 ```
+
+### Storage backends
+
+`Hyper` keeps its image graph (blobs, images, image-layers, leases) in a
+metadata database via `Hyper.Img.Db.Repo`. Two backends are available, chosen
+in your config:
+
+```elixir
+# cluster-safe default; required for any multi-node deployment
+config :hyper, Hyper.Img.Db, backend: :postgres
+
+# single-node deployments only
+config :hyper, Hyper.Img.Db, backend: :sqlite
+```
+
+Connection settings live under `config :hyper, Hyper.Img.Db.Repo`. For Postgres
+that is the usual `database`/`username`/`password`/`hostname`. For SQLite,
+point it at a file and use the SQLite adapter options, e.g.:
+
+```elixir
+config :hyper, Hyper.Img.Db, backend: :sqlite
+
+config :hyper, Hyper.Img.Db.Repo,
+  database: "/srv/hyper/hyper.db",
+  pool_size: 1,
+  journal_mode: :wal,
+  busy_timeout: 5_000,
+  binary_id_type: :string,
+  datetime_type: :iso8601
+```
+
+The backend is resolved at compile time, so changing it takes effect on the
+next build. Apply migrations the same way for either backend:
+
+```sh
+mix ecto.migrate
+```
+
+> #### SQLite is single-node only
+>
+> SQLite is a single-writer file database and **must not** be shared across
+> cluster nodes. When the SQLite backend is configured, `Hyper` starts
+> `Hyper.SingleNodeGuard`, which refuses to boot if peers are already connected
+> and halts the node (via `System.stop/1`) if a peer joins later -- protecting
+> the file from the concurrent writers that would corrupt it.
+>
+> One behavioural caveat: under SQLite, an `ON CONFLICT DO UPDATE` upsert
+> returns a struct carrying a freshly-generated UUID rather than the stored
+> row's `id`. `Hyper.Img.Db.Lease.bump/3` is the only such upsert and its
+> callers don't read the returned `id`, so there is no live bug -- but use
+> Postgres if you need reliable round-trip identity on bumped leases.

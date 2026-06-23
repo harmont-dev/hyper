@@ -60,6 +60,7 @@ defmodule Hyper.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
+      {:ecto_sqlite3, "~> 0.17"},
       {:horde, "~> 0.9"},
       {:jason, "~> 1.4"},
       {:libcluster, "~> 3.3"},

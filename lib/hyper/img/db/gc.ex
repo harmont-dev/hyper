@@ -100,7 +100,7 @@ defmodule Hyper.Img.Db.Gc do
         rescue
           # Only swallow database unavailability (incl. statement_timeout aborts)
           # and retry; let any other exception crash so a real bug surfaces.
-          e in [Postgrex.Error, DBConnection.ConnectionError] ->
+          e in [Postgrex.Error, Exqlite.Error, DBConnection.ConnectionError] ->
             Logger.warning(
               "layer gc: database unavailable during sweep (#{Exception.message(e)}); retrying"
             )
@@ -139,7 +139,12 @@ defmodule Hyper.Img.Db.Gc do
   @spec scan_one_batch(t()) :: t()
   defp scan_one_batch(%__MODULE__{sweep: sweep} = state) do
     limit = state.config.batch_size
-    batch = with_low_priority(state, fn -> Blob.present_after(sweep.cursor, limit) end)
+
+    batch =
+      Repo.with_low_priority(Unit.Time.as_ms(state.config.statement_timeout), fn ->
+        Blob.present_after(sweep.cursor, limit)
+      end)
+
     {sweep, missing} = Sweep.absorb(sweep, batch, &presence/1)
 
     {pruned, pruned_bytes, dangling} = maybe_prune(state, missing)
@@ -219,7 +224,11 @@ defmodule Hyper.Img.Db.Gc do
             not exists(from il in ImageLayer, where: il.blob_id == parent_as(:b).id),
         select: b.size
 
-    {count, sizes} = with_low_priority(state, fn -> Repo.delete_all(query) end)
+    {count, sizes} =
+      Repo.with_low_priority(Unit.Time.as_ms(state.config.statement_timeout), fn ->
+        Repo.delete_all(query)
+      end)
+
     {count, Enum.sum(sizes)}
   end
 
@@ -242,26 +251,11 @@ defmodule Hyper.Img.Db.Gc do
   @spec referenced_ids(t(), [String.t()]) :: MapSet.t(String.t())
   defp referenced_ids(state, ids) do
     query = from il in ImageLayer, where: il.blob_id in ^ids, distinct: true, select: il.blob_id
-    state |> with_low_priority(fn -> Repo.all(query) end) |> MapSet.new()
-  end
 
-  # Run a DB operation at low priority: in a transaction whose statement_timeout
-  # is capped, so it can never pin a backend and yields under contention.
-  @spec with_low_priority(t(), (-> result)) :: result when result: var
-  defp with_low_priority(state, fun) do
-    timeout = Unit.Time.as_ms(state.config.statement_timeout)
-
-    {:ok, result} =
-      Repo.transaction(fn ->
-        _ =
-          Repo.query!("SELECT set_config('statement_timeout', $1, true)", [
-            Integer.to_string(timeout)
-          ])
-
-        fun.()
-      end)
-
-    result
+    Repo.with_low_priority(Unit.Time.as_ms(state.config.statement_timeout), fn ->
+      Repo.all(query)
+    end)
+    |> MapSet.new()
   end
 
   # Shared-medium presence probe injected into the pure Sweep core. Distinguishes

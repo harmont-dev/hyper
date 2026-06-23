@@ -36,6 +36,13 @@ if config_env() == :test do
   config :libcluster, topologies: []
 end
 
+# Image-graph storage backend. :postgres (default, cluster-safe) or :sqlite
+# (single-node only). See Hyper.Img.Db.Config and docs/cookbook/intro.md.
+config :hyper, Hyper.Img.Db, backend: :postgres
+
+# Connection settings for the configured backend. The block below is for the
+# default Postgres backend; for SQLite, configure this repo for SQLite instead
+# (see docs/cookbook/intro.md).
 config :hyper, Hyper.Img.Db.Repo,
   database: "hyper_dev",
   username: "postgres",
