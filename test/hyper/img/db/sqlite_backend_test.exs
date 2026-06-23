@@ -27,7 +27,8 @@ defmodule Hyper.Img.Db.SqliteBackendTest do
       )
 
     Ecto.Migrator.run(Repo, Path.join([File.cwd!(), "priv", "repo", "migrations"]), :up,
-      all: true
+      all: true,
+      log: false
     )
 
     on_exit(fn ->
@@ -65,12 +66,15 @@ defmodule Hyper.Img.Db.SqliteBackendTest do
     #
     # Note: ecto_sqlite3 builds the returned struct from the changeset rather than
     # reading back the stored row after a conflict update, so `second.id` carries a
-    # freshly-generated UUID instead of the original lease's id.  What matters is
-    # that exactly one row exists and the stored expiry was bumped.
+    # freshly-generated UUID instead of the original lease's id.
+
+    # returned struct carries the new TTL (built from the changeset, not read back)
     assert DateTime.compare(second.expires_at, first.expires_at) == :gt
+
+    # exactly one row exists (proves upsert updated-in-place, not inserted)
     assert Repo.aggregate(Lease, :count) == 1
 
-    # The single stored row must have the higher expiry.
+    # re-read the stored row and verify its expiry was actually bumped (proves DB update persisted)
     stored = Repo.one!(Lease)
     assert DateTime.compare(stored.expires_at, first.expires_at) == :gt
   end

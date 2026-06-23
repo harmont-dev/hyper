@@ -38,7 +38,7 @@ defmodule Hyper.Img.Db.Image do
   def chain_sizes(image_id) do
     image_id
     |> resolve_chain()
-    |> then(&Repo.all/1)
+    |> Repo.all()
     |> Enum.map(fn blob -> {blob.id, Information.bytes(blob.size)} end)
   end
 
