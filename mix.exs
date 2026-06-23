@@ -5,7 +5,7 @@ defmodule Hyper.MixProject do
     [
       app: :hyper,
       version: "0.1.0",
-      elixir: "~> 1.19",
+      elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       name: "Hyper",
       source_url: "https://github.com/harmont-dev/hyper",
@@ -141,6 +141,9 @@ defmodule Hyper.MixProject do
   # Hex package metadata. Required for `mix hex.publish`.
   defp package do
     [
+      # The OTP app is `:hyper`, but `hyper` is already taken on Hex, so the
+      # package publishes as `hypervm`. Package name and app name are independent.
+      name: "hypervm",
       licenses: ["AGPL-3.0-or-later"],
       # priv/firecracker ships the OpenAPI spec so the `:firecracker_gen` compiler
       # can regenerate the bindings in a consumer's build (they are gitignored, so
@@ -201,7 +204,7 @@ defmodule Mix.Tasks.Compile.FirecrackerGen do
       operation_subdirectory: "operations",
       schema_subdirectory: "schemas",
       schema_use: Hyper.Firecracker.Api.Codec,
-      extra_fields: [__info__: :map],
+      extra_fields: [__info__: :any],
       field_casing: :snake,
       types: [specs: :spec]
     ],

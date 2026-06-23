@@ -61,9 +61,7 @@ enum LosetupOp {
     /// Attach a backing file to the next free loop device.
     Attach(AttachArgs),
     /// Detach a loop device.
-    Detach {
-        dev: LoopDev,
-    },
+    Detach { dev: LoopDev },
 }
 
 #[derive(Serialize)]
@@ -107,7 +105,9 @@ impl IsTool for Losetup {
     fn parse(&self, res: Self::RunT) -> Result<LosetupOut, Box<dyn std::error::Error>> {
         let out = res.map_err(Error::Spawn)?;
         if !out.status.success() {
-            return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into());
+            return Err(
+                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
+            );
         }
 
         Ok(match &self.op {

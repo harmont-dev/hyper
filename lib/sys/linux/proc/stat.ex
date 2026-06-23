@@ -58,13 +58,13 @@ defmodule Sys.Linux.Proc.Stat do
     end
 
     @doc "Total jiffies across every state - the denominator of a utilization ratio."
-    @spec total(t()) :: non_neg_integer()
+    @spec total(t()) :: non_neg_integer() | float()
     def total(%__MODULE__{} = times) do
       times |> Map.from_struct() |> Map.values() |> Enum.sum()
     end
 
     @doc "Jiffies spent not doing work: `idle + iowait`."
-    @spec idle(t()) :: non_neg_integer()
+    @spec idle(t()) :: non_neg_integer() | float()
     def idle(%__MODULE__{idle: idle, iowait: iowait}), do: idle + iowait
   end
 

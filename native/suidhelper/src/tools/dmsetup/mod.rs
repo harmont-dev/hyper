@@ -81,7 +81,11 @@ impl IsTool for Dmsetup {
     fn run_privileged(&self) -> Self::RunT {
         let mut cmd = Command::new(&self.bin);
         match &self.op {
-            DmOp::Create { name, readonly, table } => {
+            DmOp::Create {
+                name,
+                readonly,
+                table,
+            } => {
                 cmd.arg("create").arg(name.to_string());
                 if *readonly {
                     cmd.arg("--readonly");
@@ -106,7 +110,9 @@ impl IsTool for Dmsetup {
     fn parse(&self, res: Self::RunT) -> Result<DmsetupOut, Box<dyn std::error::Error>> {
         let out = res.map_err(Error::Spawn)?;
         if !out.status.success() {
-            return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into());
+            return Err(
+                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
+            );
         }
 
         Ok(match &self.op {

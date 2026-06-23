@@ -68,7 +68,7 @@ defmodule Hyper.Node.FireVMM.Client do
     GenServer.start_link(__MODULE__, opts, gen_opts(name))
   end
 
-  @spec via(integer()) :: GenServer.name()
+  @spec via(Hyper.Vm.id()) :: GenServer.name()
   def via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :client})
 
   @doc "Run a generated operation against this VM's daemon, serialized."

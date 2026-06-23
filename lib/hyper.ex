@@ -49,6 +49,6 @@ defmodule Hyper do
   defp resolve_arch(arch), do: {:ok, arch}
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.t()) :: node() | nil
+  @spec whereis(Hyper.Vm.id()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 end

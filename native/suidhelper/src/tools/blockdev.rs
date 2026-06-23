@@ -40,7 +40,10 @@ impl Blockdev {
     pub fn new(bin: PathBuf, args: BlockdevArgs) -> Self {
         // clap required --getsz; the path was validated as a BlockDev.
         let BlockdevArgs { getsz: _, path } = args;
-        Self { bin, path: path.into() }
+        Self {
+            bin,
+            path: path.into(),
+        }
     }
 }
 
@@ -50,16 +53,25 @@ impl IsTool for Blockdev {
     type RunT = io::Result<Output>;
 
     fn run_privileged(&self) -> Self::RunT {
-        Command::new(&self.bin).arg("--getsz").arg(&self.path).env_clear().output()
+        Command::new(&self.bin)
+            .arg("--getsz")
+            .arg(&self.path)
+            .env_clear()
+            .output()
     }
 
     fn parse(&self, res: Self::RunT) -> Result<BlockdevOut, Box<dyn std::error::Error>> {
         let out = res.map_err(Error::Spawn)?;
         if !out.status.success() {
-            return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into());
+            return Err(
+                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
+            );
         }
 
-        let sectors = String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().map_err(Error::ParseSize)?;
+        let sectors = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse::<u64>()
+            .map_err(Error::ParseSize)?;
         Ok(BlockdevOut { sectors })
     }
 }
