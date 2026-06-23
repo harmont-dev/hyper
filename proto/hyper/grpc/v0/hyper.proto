@@ -1,9 +1,12 @@
 syntax = "proto3";
 
-package hyper.grpc.v1;
+package hyper.grpc.v0;
 
-// Hyper microVM orchestration. Every machine is addressed by its `vm_id`, a
-// URL-safe base64 string minted by the server at creation time.
+// Hyper microVM orchestration.
+//
+// v0: unstable. This contract may change without notice during early
+// development. Every machine is addressed by its `vm_id`, a URL-safe base64
+// string minted by the server at creation time.
 service Machines {
   // Create and boot a microVM from an image. Placement is cluster-wide and
   // automatic. Returns the minted vm_id and the node the guest booted on.
@@ -20,34 +23,31 @@ service Machines {
 }
 
 // Fixed (vCPU, memory, disk) sizes, like cloud instance classes.
-// UNSPECIFIED is treated as BASE.
 enum InstanceType {
-  INSTANCE_TYPE_UNSPECIFIED = 0;
-  INSTANCE_TYPE_MICRO = 1;
-  INSTANCE_TYPE_MILLI = 2;
-  INSTANCE_TYPE_CENTI = 3;
-  INSTANCE_TYPE_DECI = 4;
-  INSTANCE_TYPE_BASE = 5;
-  INSTANCE_TYPE_DECA = 6;
-  INSTANCE_TYPE_HECTO = 7;
-  INSTANCE_TYPE_KILO = 8;
-  INSTANCE_TYPE_MEGA = 9;
-  INSTANCE_TYPE_GIGA = 10;
-  INSTANCE_TYPE_TERA = 11;
+  INSTANCE_TYPE_MICRO = 0;
+  INSTANCE_TYPE_MILLI = 1;
+  INSTANCE_TYPE_CENTI = 2;
+  INSTANCE_TYPE_DECI = 3;
+  INSTANCE_TYPE_BASE = 4;
+  INSTANCE_TYPE_DECA = 5;
+  INSTANCE_TYPE_HECTO = 6;
+  INSTANCE_TYPE_KILO = 7;
+  INSTANCE_TYPE_MEGA = 8;
+  INSTANCE_TYPE_GIGA = 9;
+  INSTANCE_TYPE_TERA = 10;
 }
 
-// Guest CPU architecture. UNSPECIFIED resolves to the scheduling node's arch.
+// Guest CPU architecture.
 enum Architecture {
-  ARCHITECTURE_UNSPECIFIED = 0;
-  ARCHITECTURE_X86_64 = 1;
-  ARCHITECTURE_AARCH64 = 2;
+  ARCHITECTURE_X86_64 = 0;
+  ARCHITECTURE_AARCH64 = 1;
 }
 
 message CreateMachineRequest {
-  string img_id = 1;               // required: content-addressed image id
-  InstanceType instance_type = 2;  // optional: defaults to BASE
-  Architecture arch = 3;           // optional: defaults to node arch
-  string boot_args = 4;            // optional: extra kernel cmdline
+  string img_id = 1;                        // required: content-addressed image id
+  optional InstanceType instance_type = 2;  // unset -> server default (base)
+  optional Architecture arch = 3;           // unset -> resolve to the node's arch
+  optional string boot_args = 4;            // unset -> default kernel cmdline
 }
 
 message CreateMachineResponse {

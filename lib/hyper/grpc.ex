@@ -2,40 +2,88 @@ defmodule Hyper.Grpc do
   @moduledoc """
   Public gRPC interface to a Hyper cluster.
 
-  The service contract is `hyper.grpc.v1.Machines` (see
-  `priv/protos/hyper/grpc/v1/machines.proto`). Any gRPC client, in any language,
-  can create, stop, locate, and list microVMs. Off-BEAM clients generate their
-  own stubs from the `.proto`; BEAM clients can use the generated
-  `Hyper.Grpc.V1.Machines.Stub` together with `connect/2`.
+  The service contract is `hyper.grpc.v0.Machines` (see
+  `proto/hyper/grpc/v0/hyper.proto`). Any gRPC client, in any language, can
+  create, stop, locate, and list microVMs. Off-BEAM clients generate their own
+  stubs from the `.proto`; BEAM clients can use the generated
+  `Hyper.Grpc.V0.Machines.Stub` together with `connect/2`.
+
+  > #### v0 {: .warning}
+  >
+  > This interface is unstable and may change without notice during early
+  > development.
 
   ## Serving
 
-  The server is started by `Hyper.Application` when `config :hyper, Hyper.Grpc,
-  enabled: true`. It listens over TLS — set `:tls_cert` and `:tls_key` (PEM
-  paths) and `:port`. It is stateless and runs on every node; placement and
-  routing are cluster-wide.
+  The server is started by `Hyper.Application` when enabled in config. It is
+  stateless and may run on every node; placement and routing are cluster-wide.
+  See `Hyper.Grpc.Config` for configuration — operators own the listener (port,
+  TLS, adapter options) entirely from their own `config/`.
 
   ## Connecting from the BEAM
 
       {:ok, ch} = Hyper.Grpc.connect("hyper.example.com:50051", ca: "/etc/hyper/ca.pem")
       {:ok, reply} =
-        Hyper.Grpc.V1.Machines.Stub.create_machine(
+        Hyper.Grpc.V0.Machines.Stub.create_machine(
           ch,
-          %Hyper.Grpc.V1.CreateMachineRequest{img_id: "img-abc"}
+          %Hyper.Grpc.V0.CreateMachineRequest{img_id: "img-abc"}
         )
   """
 
+  defmodule Config do
+    @moduledoc """
+    gRPC server configuration, read from application env:
+
+        config :hyper, Hyper.Grpc,
+          enabled: true,
+          port: 50_051,
+          # any other GRPC.Server.Supervisor option, e.g. TLS:
+          cred: GRPC.Credential.new(ssl: [certfile: "/path/cert.pem", keyfile: "/path/key.pem"])
+
+    `:enabled` (default `false`) gates whether the server starts. Every other
+    key is passed straight through to `GRPC.Server.Supervisor`, so operators
+    control the listener — port, TLS credentials, adapter options, body limits —
+    entirely from their own config. Hyper prescribes nothing beyond defaulting
+    `:port` and pointing the supervisor at `Hyper.Grpc.Endpoint`.
+
+    Load secrets however you like: put cert/key paths in `config/runtime.exs` and
+    build the credential there, or read them from a vault — Hyper never touches
+    the filesystem on your behalf.
+    """
+
+    @default_port 50_051
+
+    @doc "Whether the gRPC server should start."
+    @spec enabled?() :: boolean()
+    def enabled?, do: Keyword.get(all(), :enabled, false)
+
+    @doc """
+    The options spliced into the `GRPC.Server.Supervisor` child: the operator's
+    config minus `:enabled`, with the endpoint, `start_server`, and a default
+    port filled in if absent.
+    """
+    @spec server_options() :: keyword()
+    def server_options do
+      all()
+      |> Keyword.delete(:enabled)
+      |> Keyword.put_new(:endpoint, Hyper.Grpc.Endpoint)
+      |> Keyword.put_new(:start_server, true)
+      |> Keyword.put_new(:port, @default_port)
+    end
+
+    @spec all() :: keyword()
+    defp all, do: Application.get_env(:hyper, Hyper.Grpc, [])
+  end
+
   @doc """
-  The supervisor children for the gRPC server: empty unless
-  `config :hyper, Hyper.Grpc, enabled: true`. Spliced into the app supervision
-  tree by `Hyper.Application`.
+  The supervisor children for the gRPC server: empty unless the server is
+  enabled (see `Hyper.Grpc.Config`). Spliced into the app supervision tree by
+  `Hyper.Application`.
   """
   @spec server_children() :: [Supervisor.child_spec() | {module(), term()}]
   def server_children do
-    config = Application.get_env(:hyper, __MODULE__, [])
-
-    if Keyword.get(config, :enabled, false) do
-      [grpc_child(config)]
+    if Config.enabled?() do
+      [{GRPC.Server.Supervisor, Config.server_options()}]
     else
       []
     end
@@ -43,11 +91,12 @@ defmodule Hyper.Grpc do
 
   @doc """
   Connect a BEAM client channel to a Hyper gRPC endpoint at `addr`
-  (`"host:port"`). Pass `ca:` (PEM path) to verify the server's TLS certificate;
-  omit it for an insecure (plaintext) connection.
+  (`"host:port"`). Pass `ca:` (a PEM path) to verify the server's TLS
+  certificate; omit it for an insecure (plaintext) connection.
 
   Defaults to `GRPC.Client.Adapters.Mint` (`:gun` is an optional dep not
-  included in this project). Pass `adapter:` in `opts` to override.
+  included in this project). Pass `adapter:` in `opts` to override; any other
+  option is forwarded to `GRPC.Stub.connect/2`.
   """
   @spec connect(String.t(), keyword()) :: {:ok, GRPC.Channel.t()} | {:error, term()}
   def connect(addr, opts \\ []) do
@@ -63,30 +112,6 @@ defmodule Hyper.Grpc do
           addr,
           Keyword.put(stub_opts, :cred, GRPC.Credential.new(ssl: [cacertfile: path]))
         )
-    end
-  end
-
-  @spec grpc_child(keyword()) :: {module(), keyword()}
-  defp grpc_child(config) do
-    port = Keyword.fetch!(config, :port)
-    tls_cert = fetch_tls_key!(config, :tls_cert, "HYPER_GRPC_TLS_CERT")
-    tls_key = fetch_tls_key!(config, :tls_key, "HYPER_GRPC_TLS_KEY")
-
-    cred = GRPC.Credential.new(ssl: [certfile: tls_cert, keyfile: tls_key])
-
-    {GRPC.Server.Supervisor,
-     endpoint: Hyper.Grpc.Endpoint, port: port, start_server: true, adapter_opts: [cred: cred]}
-  end
-
-  @spec fetch_tls_key!(keyword(), atom(), String.t()) :: String.t()
-  defp fetch_tls_key!(config, key, env_var) do
-    case Keyword.get(config, key) do
-      value when is_binary(value) and value != "" ->
-        value
-
-      _ ->
-        raise ArgumentError,
-              "Hyper.Grpc is enabled but :#{key} is not configured (set #{env_var})"
     end
   end
 end

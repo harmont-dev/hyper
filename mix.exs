@@ -13,7 +13,7 @@ defmodule Hyper.MixProject do
       # A Mix compiler (not a `compile` alias) is used because Mix honors a
       # dependency's `:compilers` but NOT its aliases or `config/` -- so this is
       # the only hook that also fires when hyper is compiled AS A DEPENDENCY.
-      compilers: [:firecracker_gen | Mix.compilers()],
+      compilers: [:firecracker_gen, :grpc_gen | Mix.compilers()],
       deps: deps(),
       docs: docs(),
       package: package(),
@@ -83,7 +83,8 @@ defmodule Hyper.MixProject do
       extras: [
         "README.md",
         "docs/cookbook/intro.md",
-        "docs/cookbook/architecture.md"
+        "docs/cookbook/architecture.md",
+        "docs/grpc.md"
       ],
       groups_for_extras: [
         Cookbook: ~r/docs\/cookbook\/.*/
@@ -151,7 +152,9 @@ defmodule Hyper.MixProject do
       # priv/firecracker ships the OpenAPI spec so the `:firecracker_gen` compiler
       # can regenerate the bindings in a consumer's build (they are gitignored, so
       # not in `lib`).
-      files: ~w(lib priv/firecracker config mix.exs README.md LICENSE NOTICE CLA.md),
+      # proto/ ships the gRPC contract so the `:grpc_gen` compiler can regenerate
+      # the bindings in a consumer's build (they are gitignored, not in `lib`).
+      files: ~w(lib priv/firecracker proto config mix.exs README.md LICENSE NOTICE CLA.md),
       links: %{"GitHub" => "https://github.com/harmont-dev/hyper"}
     ]
   end
@@ -168,15 +171,74 @@ defmodule Hyper.MixProject do
       ],
       # Force a regeneration of the Firecracker bindings (ignores staleness).
       "firecracker.gen": ["compile.firecracker_gen --force"],
-      # Regenerate the vendored gRPC bindings in lib/hyper/grpc/v1/ from the
-      # .proto file. Requires protoc + protoc-gen-elixir escript:
-      #   mix escript.install hex protobuf
-      # NOT run in CI; the generated files are committed.
-      "proto.gen": [
-        "cmd protoc --elixir_out=plugins=grpc:./lib " <>
-          "--proto_path=priv/protos priv/protos/hyper/grpc/v1/machines.proto"
-      ]
+      # Force a regeneration of the gRPC bindings (ignores staleness).
+      "grpc.gen": ["compile.grpc_gen --force"]
     ]
+  end
+end
+
+defmodule Mix.Tasks.Compile.GrpcGen do
+  @moduledoc """
+  Mix compiler that generates the gRPC bindings into
+  `lib/hyper/grpc/v0/hyper.pb.ex` from `proto/hyper/grpc/v0/hyper.proto`, just
+  before the Elixir compiler. Like the Firecracker bindings, the output is
+  gitignored and regenerated rather than committed.
+
+  Defined in `mix.exs` (not under `lib/`) so it is loaded before any
+  compilation. Unlike the Firecracker generator (pure-Elixir `oapi_generator`),
+  this shells out to `protoc` with the `protoc-gen-elixir` plugin, so both must
+  be installed in any environment that compiles hyper from a fresh tree:
+
+      sudo apt-get install -y protobuf-compiler   # or: brew install protobuf
+      mix escript.install hex protobuf 0.17.0     # provides protoc-gen-elixir
+
+  The plugin escript lives in `~/.mix/escripts`, which this compiler prepends to
+  `PATH` for the `protoc` invocation. The generated file is `mix format`-ed so it
+  passes the formatting gate.
+  """
+
+  use Mix.Task.Compiler
+
+  @proto "proto/hyper/grpc/v0/hyper.proto"
+  @proto_path "proto/hyper/grpc/v0"
+  @out "lib/hyper/grpc/v0/hyper.pb.ex"
+
+  @impl Mix.Task.Compiler
+  def run(argv) do
+    if "--force" in argv or stale?() do
+      generate()
+    end
+
+    {:ok, []}
+  end
+
+  defp generate do
+    File.mkdir_p!(Path.dirname(@out))
+    escripts = Path.expand("~/.mix/escripts")
+    env = [{"PATH", escripts <> ":" <> System.get_env("PATH", "")}]
+
+    args = ["--proto_path=#{@proto_path}", "--elixir_out=plugins=grpc:lib", "hyper.proto"]
+
+    case System.cmd("protoc", args, env: env, stderr_to_stdout: true) do
+      {_, 0} ->
+        # protoc-gen-elixir mirrors the package path under the output dir, so the
+        # file lands exactly at @out. Format it to satisfy the formatting gate.
+        Mix.Task.run("format", [@out])
+
+      {output, code} ->
+        Mix.raise("""
+        protoc failed (exit #{code}) generating #{@out}:
+
+        #{output}
+        Ensure `protoc` and the `protoc-gen-elixir` escript are installed:
+            sudo apt-get install -y protobuf-compiler
+            mix escript.install hex protobuf 0.17.0
+        """)
+    end
+  end
+
+  defp stale? do
+    not File.exists?(@out) or File.stat!(@proto).mtime > File.stat!(@out).mtime
   end
 end
 

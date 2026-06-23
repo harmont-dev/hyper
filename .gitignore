@@ -40,3 +40,7 @@ docs/superpowers/
 # (priv/firecracker/*.openapi.json) before compile -- see mix.exs gen_firecracker/1.
 /lib/hyper/firecracker/api/operations/
 /lib/hyper/firecracker/api/schemas/
+
+# gRPC bindings are generated from proto/hyper/grpc/v0/hyper.proto before compile
+# -- see the :grpc_gen Mix compiler in mix.exs.
+/lib/hyper/grpc/v0/

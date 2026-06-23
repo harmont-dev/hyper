@@ -56,37 +56,17 @@ deploying and integrating Hyper.
 ## gRPC interface
 
 Hyper exposes a public gRPC API so consumers in any language can drive the
-cluster. The contract lives at `priv/protos/hyper/grpc/v1/machines.proto`
-(`hyper.grpc.v1.Machines`): `CreateMachine`, `StopMachine`, `GetMachine`,
+cluster. The contract lives at `proto/hyper/grpc/v0/hyper.proto`
+(`hyper.grpc.v0.Machines`): `CreateMachine`, `StopMachine`, `GetMachine`,
 `ListMachines`. Machines are addressed by a `vm_id` string minted at creation.
 
-### Serving
+> **v0:** unstable — the contract may change without notice during early
+> development.
 
-The server is opt-in per node and runs over TLS:
-
-    export HYPER_GRPC_ENABLED=true
-    export HYPER_GRPC_PORT=50051
-    export HYPER_GRPC_TLS_CERT=/etc/hyper/tls/server.pem
-    export HYPER_GRPC_TLS_KEY=/etc/hyper/tls/server-key.pem
-
-It is stateless and may run on every node; placement and routing are
-cluster-wide, so any node can serve any request.
-
-### Connecting
-
-Generate a stub from the `.proto` in your language of choice, or, on the BEAM:
-
-    {:ok, ch} = Hyper.Grpc.connect("hyper.example.com:50051", ca: "/etc/hyper/ca.pem")
-    {:ok, reply} =
-      Hyper.Grpc.V1.Machines.Stub.create_machine(
-        ch, %Hyper.Grpc.V1.CreateMachineRequest{img_id: "img-abc"}
-      )
-
-### Regenerating the bindings
-
-The Elixir bindings under `lib/hyper/grpc/v1/` are committed. After editing the
-`.proto`, regenerate them with `mix proto.gen` (needs `protoc` and the
-`protoc-gen-elixir` escript: `mix escript.install hex protobuf`).
+The server is opt-in and configured entirely from your own `config/`; it is
+stateless and may run on every node. See
+[the gRPC guide](docs/grpc.md) for configuration, TLS, connecting from any
+language, and regenerating the bindings.
 
 ## Docs
 

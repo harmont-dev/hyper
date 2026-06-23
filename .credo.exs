@@ -31,7 +31,7 @@
           "apps/*/test/",
           "apps/*/web/"
         ],
-        excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/", "lib/hyper/firecracker/api/operations/", "lib/hyper/firecracker/api/schemas/", "lib/hyper/grpc/v1/"]
+        excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/", "lib/hyper/firecracker/api/operations/", "lib/hyper/firecracker/api/schemas/", "lib/hyper/grpc/v0/"]
       },
       #
       # Load and configure plugins here:

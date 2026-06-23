@@ -65,6 +65,14 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      # protoc + the protoc-gen-elixir escript drive the `:grpc_gen` Mix compiler,
+      # which generates the (gitignored) gRPC bindings before the Elixir compiler.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-elixir
+        run: mix escript.install hex protobuf 0.17.0 --force
+
       - name: Compile (warnings as errors)
         # --force matches the `mix check` alias: re-surfaces warnings even on a
         # cached _build, where an unchanged module would otherwise be skipped.
