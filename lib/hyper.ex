@@ -51,4 +51,14 @@ defmodule Hyper do
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.id()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
+
+  @doc """
+  The vm id for a VM handle — the pid returned by `create_vm/1`. Resolves on the
+  pid's owning node, so a VM just placed on a remote node is found immediately
+  rather than waiting for the routing CRDT to propagate. `nil` if unknown.
+  """
+  @spec id(Hyper.Vm.t()) :: Hyper.Vm.id() | nil
+  def id(pid) when is_pid(pid) do
+    :erpc.call(node(pid), Hyper.Cluster.Routing, :id_for, [pid])
+  end
 end

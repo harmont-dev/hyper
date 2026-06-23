@@ -34,4 +34,29 @@ defmodule Hyper.Cluster.Routing do
       [] -> nil
     end
   end
+
+  @doc """
+  The vm_id whose `:supervisor` process is `pid`, or `nil`. Consults the local
+  replica via a registry match spec; intended to be called on the node that owns
+  `pid` (see `Hyper.id/1`).
+  """
+  @spec id_for(pid()) :: Hyper.Vm.id() | nil
+  def id_for(pid) when is_pid(pid) do
+    case Horde.Registry.select(@name, [
+           {{{:"$1", :supervisor}, :"$2", :_}, [{:==, :"$2", pid}], [:"$1"]}
+         ]) do
+      [vm_id | _] -> vm_id
+      [] -> nil
+    end
+  end
+
+  @doc "Every VM the cluster currently knows about, paired with the node it runs on."
+  @spec all() :: [{Hyper.Vm.id(), node()}]
+  def all do
+    @name
+    |> Horde.Registry.select([
+      {{{:"$1", :supervisor}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}
+    ])
+    |> Enum.map(fn {vm_id, pid} -> {vm_id, node(pid)} end)
+  end
 end
