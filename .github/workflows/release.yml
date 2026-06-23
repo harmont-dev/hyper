@@ -5,7 +5,8 @@ on:
     tags:
       - "v*.*.*"
 
-# Least privilege by default; only the GitHub-release jobs escalate to write.
+# Least privilege by default; jobs that push the version bump or touch the
+# GitHub release escalate to contents: write at the job level.
 permissions:
   contents: read
 
@@ -16,24 +17,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-versions:
-    name: Verify versions match tag
+  prepare-release:
+    name: Bump version from tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
-      version: ${{ steps.v.outputs.version }}
+      # The release version (tag minus its leading "v") and the SHA of the bump
+      # commit. Every downstream job checks out `sha` so it builds/publishes the
+      # bumped tree exactly, regardless of where main moves afterwards.
+      version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.bump.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: main
 
-      - name: Extract version from tag and verify manifests
-        id: v
+      - name: Write tag version into manifests and push to main
+        id: bump
         run: |
           version="${GITHUB_REF_NAME#v}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          bash .github/scripts/check-versions.sh "$version"
+
+          # The tag is the single source of truth: stamp it into both manifests.
+          # Cargo.toml's [package] version is the only line starting with
+          # `version = `; mix.exs has exactly one `version: "..."` (the project
+          # version). `0,/re/` rewrites just the first match.
+          sed -i -E "0,/^version = \"[^\"]*\"/s//version = \"${version}\"/" native/suidhelper/Cargo.toml
+          sed -i -E "0,/version: \"[^\"]*\"/s//version: \"${version}\"/" mix.exs
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/suidhelper/Cargo.toml mix.exs
+
+          # Idempotent: a re-run after the bump already landed has nothing to commit.
+          if git diff --cached --quiet; then
+            echo "manifests already at ${version}; nothing to commit"
+          else
+            git commit -m "release: v${version}"
+            git push origin HEAD:main
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-suidhelper:
     name: Build suidhelper (${{ matrix.target }})
-    needs: verify-versions
+    needs: prepare-release
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -46,6 +75,8 @@ jobs:
         working-directory: native/suidhelper
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
 
       # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
       # call and installs the pinned nightly + both musl targets.
@@ -61,7 +92,7 @@ jobs:
 
       - name: Stage renamed artifact
         run: |
-          v="${{ needs.verify-versions.outputs.version }}"
+          v="${{ needs.prepare-release.outputs.version }}"
           out="hyper-suidhelper-${v}-${{ matrix.target }}"
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hyper-suidhelper" "dist/${out}"
@@ -74,12 +105,14 @@ jobs:
 
   build-hex:
     name: Build Hex package
-    needs: verify-versions
+    needs: prepare-release
     runs-on: ubuntu-latest
     env:
       MIX_ENV: dev
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
 
       - uses: erlef/setup-beam@v1
         id: beam
@@ -101,7 +134,7 @@ jobs:
         run: mix deps.get
 
       - name: Build package tarball
-        run: mix hex.build --output "hypervm-${{ needs.verify-versions.outputs.version }}.tar"
+        run: mix hex.build --output "hypervm-${{ needs.prepare-release.outputs.version }}.tar"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -111,13 +144,11 @@ jobs:
 
   github-release:
     name: Draft GitHub release
-    needs: [verify-versions, build-suidhelper, build-hex]
+    needs: [build-suidhelper, build-hex]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -142,7 +173,7 @@ jobs:
 
   publish-crate:
     name: Publish to crates.io
-    needs: [verify-versions, build-suidhelper, github-release]
+    needs: [prepare-release, build-suidhelper, github-release]
     runs-on: ubuntu-latest
     environment: release
     defaults:
@@ -150,6 +181,8 @@ jobs:
         working-directory: native/suidhelper
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
 
       - name: Show toolchain
         run: rustup show
@@ -165,13 +198,15 @@ jobs:
 
   publish-hex:
     name: Publish to Hex
-    needs: [verify-versions, build-hex, github-release]
+    needs: [prepare-release, build-hex, github-release]
     runs-on: ubuntu-latest
     environment: release
     env:
       MIX_ENV: dev
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
 
       - uses: erlef/setup-beam@v1
         with:
@@ -195,8 +230,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-
       # Flip the draft (created earlier) to live only after both registries
       # have the new version. github.token has the contents:write granted above.
       - name: Mark release as published

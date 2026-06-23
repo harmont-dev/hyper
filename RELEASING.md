@@ -27,34 +27,43 @@ Both are driven by `.github/workflows/release.yml`, triggered by pushing a
    The `publish-crate` and `publish-hex` jobs target this environment, so they
    pause for manual approval before anything reaches a registry.
 
+3. **Let the workflow push to `main`.** The `prepare-release` job commits the
+   version bump and pushes it to `main` using the built-in `GITHUB_TOKEN`. If
+   `main` has a branch-protection rule, allow the GitHub Actions bot to bypass
+   it (Settings → Branches → the `main` rule → *Allow specified actors to
+   bypass required pull requests* → add `github-actions[bot]`), or the push —
+   and the release — will fail.
+
 ## Cutting a release
 
-1. Bump the version **in both manifests** to the same value:
-   - `native/suidhelper/Cargo.toml` → `[package] version = "X.Y.Z"`
-   - `mix.exs` → `version: "X.Y.Z"`
-2. Verify locally before tagging:
-   ```bash
-   bash .github/scripts/check-versions.sh X.Y.Z
-   ```
-3. Commit, then tag and push:
-   ```bash
-   git commit -am "release: vX.Y.Z"
-   git tag vX.Y.Z
-   git push origin main vX.Y.Z
-   ```
-4. The workflow builds both packages and creates a **draft** GitHub Release
-   automatically. The `publish-crate` and `publish-hex` jobs then wait for
-   approval as two separate `release`-environment deployments — approve both in the run's *Review deployments* prompt (you can select them together).
-5. Once both publishes succeed, the draft release is flipped to published
-   automatically.
+The git tag is the **single source of truth** for the version — you do not edit
+the manifests by hand. Just tag and push:
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+What happens next, automatically:
+
+1. **`prepare-release`** writes `X.Y.Z` into `native/suidhelper/Cargo.toml` and
+   `mix.exs`, commits `release: vX.Y.Z`, and pushes it to `main`. Every later
+   job builds from that exact commit.
+2. Both packages are built and a **draft** GitHub Release is created with the
+   binaries, the Hex tarball, and `SHA256SUMS`.
+3. **`publish-crate`** and **`publish-hex`** wait for approval as two separate
+   `release`-environment deployments — approve both in the run's *Review
+   deployments* prompt (you can select them together).
+4. Once both publishes succeed, the draft release is flipped to published.
 
 ## Notes
 
 - A given version can be published to crates.io / Hex exactly once. If a
   publish fails after the other succeeded, fix forward with a new patch version
-  rather than retrying the same tag.
-- The version guard (`check-versions.sh`) fails the whole run if the tag and the
-  two manifests disagree, so a typo never reaches a registry.
+  (a new tag) rather than retrying the same one.
+- The committed manifest versions are only bookkeeping — the tag always wins.
+  `prepare-release` is idempotent: re-running a tag whose bump already landed
+  simply skips the commit.
 
 [crates.io]: https://crates.io/crates/hyper-suidhelper
 [Hex]: https://hex.pm/packages/hypervm
