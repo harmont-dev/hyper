@@ -102,7 +102,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: cover/excoveralls.json
           flags: elixir
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Dialyzer
         run: mix dialyzer
@@ -146,4 +146,4 @@ jobs:
           # working-directory only applies to `run:` steps, not actions.
           files: native/suidhelper/lcov.info
           flags: rust
-          fail_ci_if_error: false
+          fail_ci_if_error: true
