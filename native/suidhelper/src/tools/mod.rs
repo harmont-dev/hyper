@@ -7,8 +7,6 @@ mod blockdev;
 mod chroot_jail;
 mod dmsetup;
 mod losetup;
-pub(crate) mod mknod;
-pub(crate) mod stage;
 
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;

@@ -1,42 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
-//! inside a VM chroot.
-//!
-//! Security: `--chroot` is validated as a `SafePath` and reached by an
-//! `O_NOFOLLOW` walk from `JAIL_BASE` (`SafeDir::descend`), which proves
-//! confinement - a symlinked component anywhere aborts. The kernel
-//! (`stage_into`) and the rootfs node (`make_block_node`) are then created
-//! relative to that verified chroot directory fd.
+//! inside a VM chroot, via the [`ChrootJail`] builder.
 
-use crate::config::Config;
 use crate::safe_dev::BlockDev;
-use crate::tools::{mknod, stage, IsTool};
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::tools::IsTool;
+use crate::util::chroot_jail::{self, ChrootJail};
 use clap::Args;
 use serde::Serialize;
-use std::path::PathBuf;
-use thiserror::Error as ThisError;
-
-/// Fixed in-jail filename for the host kernel image. The Elixir side
-/// (`Hyper.Node.FireVMM.ChrootJail`) MUST agree with this name.
-const KERNEL_NAME: &str = "vmlinux";
-
-/// Fixed in-jail filename for the rootfs block device node. The Elixir side MUST
-/// agree with this name.
-const ROOT_NAME: &str = "rootfs";
-
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("invalid --chroot path: {0}")]
-    ChrootPath(#[from] safe_path::ValidationError),
-    #[error("walking chroot: {0}")]
-    Walk(#[from] safe_dir::Error),
-    #[error("stage kernel: {0}")]
-    Stage(#[from] stage::Error),
-    #[error("mknod rootfs: {0}")]
-    Mknod(#[from] mknod::Error),
-}
 
 #[derive(Args)]
 pub struct PrepareArgs {
@@ -76,27 +46,14 @@ struct Prepare {
 impl IsTool for Prepare {
     type Args = PrepareArgs;
     type Output = PrepareOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), chroot_jail::Error>;
 
     fn run_privileged(&self) -> Self::RunT {
         let args = &self.args;
-        let jail_base = Config::get().jail_base();
-
-        // Open the chroot dir by walking it from JAIL_BASE with O_NOFOLLOW, so a
-        // symlinked component cannot redirect outside the jail.
-        let chroot: SafePath<IsAbsolute, StrictComponents> =
-            PathBuf::from(&args.chroot).try_into()?;
-        let (parents, leaf) = chroot.relative_to(&jail_base)?;
-        let anchor_path: SafePath<IsAbsolute, StrictComponents> = jail_base.clone().try_into()?;
-
-        let mut components = parents;
-        components.push(leaf);
-        let chroot_dir = SafeDir::open(&anchor_path)?.descend(&components)?;
-
-        stage::stage_into(&chroot_dir, KERNEL_NAME, &args.kernel, args.uid, args.gid)?;
-        mknod::make_block_node(&chroot_dir, ROOT_NAME, &args.device, args.uid, args.gid)?;
-
-        Ok(())
+        ChrootJail::new(&args.chroot, args.uid, args.gid)
+            .with_kernel(&args.kernel)
+            .with_rootfs(args.device.clone())
+            .build()
     }
 
     fn parse(&self, res: Self::RunT) -> Result<PrepareOut, Box<dyn std::error::Error>> {
