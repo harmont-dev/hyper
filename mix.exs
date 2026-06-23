@@ -141,6 +141,7 @@ defmodule Hyper.MixProject do
   # Hex package metadata. Required for `mix hex.publish`.
   defp package do
     [
+      description: "A distributed orchestrator for Firecracker microVMs.",
       # The OTP app is `:hyper`, but `hyper` is already taken on Hex, so the
       # package publishes as `hypervm`. Package name and app name are independent.
       name: "hypervm",

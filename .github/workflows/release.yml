@@ -71,3 +71,40 @@ jobs:
           name: suidhelper-${{ matrix.target }}
           path: native/suidhelper/dist/*
           if-no-files-found: error
+
+  build-hex:
+    name: Build Hex package
+    needs: verify-versions
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          elixir-version: "1.20"
+          otp-version: "28"
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-release-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-release-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Build package tarball
+        run: mix hex.build --output "hypervm-${{ needs.verify-versions.outputs.version }}.tar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hex-package
+          path: hypervm-*.tar
+          if-no-files-found: error
