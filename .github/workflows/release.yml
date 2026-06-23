@@ -185,3 +185,19 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: mix hex.publish --yes
+
+  finalize-release:
+    name: Publish GitHub release
+    needs: [publish-crate, publish-hex]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Flip the draft (created earlier) to live only after both registries
+      # have the new version. github.token has the contents:write granted above.
+      - name: Mark release as published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false
