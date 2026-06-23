@@ -3,6 +3,8 @@ name = "hyper-suidhelper"
 version = "0.1.0"
 edition = "2021"
 description = "Tiny setuid-root helper that runs a whitelisted set of device commands for the unprivileged Hyper node."
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/harmont-dev/hyper"
 
 [[bin]]
 name = "hyper-suidhelper"
