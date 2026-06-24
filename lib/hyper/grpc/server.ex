@@ -1,6 +1,6 @@
 defmodule Hyper.Grpc.Server do
   @moduledoc """
-  gRPC handler for `hyper.grpc.v0.Machines`. A thin translation layer: each RPC
+  gRPC handler for `hyper.grpc.v0.Hyper`. A thin translation layer: each RPC
   maps its request to a domain value via `Hyper.Grpc.Codec.from_grpc/1`, calls
   the existing `Hyper` BEAM API, and maps the result back with
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
@@ -10,24 +10,23 @@ defmodule Hyper.Grpc.Server do
   so a call landing on any node is correct.
   """
 
-  use GRPC.Server, service: Hyper.Grpc.V0.Machines.Service
+  use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
 
   alias Hyper.Grpc.Codec
 
   alias Hyper.Grpc.V0.{
-    CreateMachineRequest,
-    CreateMachineResponse,
-    GetMachineRequest,
-    GetMachineResponse,
-    ListMachinesRequest,
-    ListMachinesResponse,
-    StopMachineRequest,
-    StopMachineResponse
+    CreateVmRequest,
+    CreateVmResponse,
+    GetVmRequest,
+    GetVmResponse,
+    ListVmsRequest,
+    ListVmsResponse,
+    StopVmRequest,
+    StopVmResponse
   }
 
-  @spec create_machine(CreateMachineRequest.t(), GRPC.Server.Stream.t()) ::
-          CreateMachineResponse.t()
-  def create_machine(%CreateMachineRequest{} = req, _stream) do
+  @spec create_vm(CreateVmRequest.t(), GRPC.Server.Stream.t()) :: CreateVmResponse.t()
+  def create_vm(%CreateVmRequest{} = req, _stream) do
     with {:ok, spec} <- Codec.from_grpc(req),
          {:ok, pid} <- Hyper.create_vm(spec),
          vm_id when is_binary(vm_id) <- Hyper.id(pid) do
@@ -40,27 +39,24 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec stop_machine(StopMachineRequest.t(), GRPC.Server.Stream.t()) ::
-          StopMachineResponse.t()
-  def stop_machine(%StopMachineRequest{vm_id: vm_id}, _stream) do
+  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: StopVmResponse.t()
+  def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     Hyper.Node.FireVMM.State.stop(vm_id)
     Codec.to_grpc(:stopped)
   catch
     :exit, reason -> raise Codec.to_grpc({:exit, reason})
   end
 
-  @spec get_machine(GetMachineRequest.t(), GRPC.Server.Stream.t()) ::
-          GetMachineResponse.t()
-  def get_machine(%GetMachineRequest{vm_id: vm_id}, _stream) do
+  @spec get_vm(GetVmRequest.t(), GRPC.Server.Stream.t()) :: GetVmResponse.t()
+  def get_vm(%GetVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.whereis(vm_id) do
       nil -> raise Codec.to_grpc({:error, :not_found})
       node -> Codec.to_grpc({:located, vm_id, node})
     end
   end
 
-  @spec list_machines(ListMachinesRequest.t(), GRPC.Server.Stream.t()) ::
-          ListMachinesResponse.t()
-  def list_machines(%ListMachinesRequest{}, _stream) do
-    Codec.to_grpc({:machines, Hyper.Cluster.Routing.all()})
+  @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  def list_vms(%ListVmsRequest{}, _stream) do
+    Codec.to_grpc({:vms, Hyper.Cluster.Routing.all()})
   end
 end

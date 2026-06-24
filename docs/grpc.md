@@ -10,15 +10,15 @@ create, stop, locate, and list microVMs.
 
 ## The contract
 
-The service is `hyper.grpc.v0.Machines`, defined in
+The service is `hyper.grpc.v0.Hyper`, defined in
 [`proto/hyper/grpc/v0/hyper.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v0/hyper.proto):
 
 | RPC            | Purpose                                            | Errors |
 | -------------- | -------------------------------------------------- | ------ |
-| `CreateMachine`| Boot a microVM from an image; returns its `vm_id`. | `INVALID_ARGUMENT` (bad/missing image or enum), `RESOURCE_EXHAUSTED` (no capacity), `UNAVAILABLE` (host lost mid-create) |
-| `StopMachine`  | Tear down a running microVM.                       | `NOT_FOUND` (unknown id), `UNAVAILABLE` (host down) |
-| `GetMachine`   | Which node a microVM runs on.                      | `NOT_FOUND` |
-| `ListMachines` | Every microVM known to the cluster.                | — |
+| `CreateVm`| Boot a microVM from an image; returns its `vm_id`. | `INVALID_ARGUMENT` (bad/missing image or enum), `RESOURCE_EXHAUSTED` (no capacity), `UNAVAILABLE` (host lost mid-create) |
+| `StopVm`  | Tear down a running microVM.                       | `NOT_FOUND` (unknown id), `UNAVAILABLE` (host down) |
+| `GetVm`   | Which node a microVM runs on.                      | `NOT_FOUND` |
+| `ListVms` | Every microVM known to the cluster.                | — |
 
 A machine is addressed by its **`vm_id`** — a URL-safe base64 string the server
 mints at creation. The server is stateless and identical on every node;
@@ -78,7 +78,7 @@ in config.
 ### From any language
 
 Generate a client stub from `proto/hyper/grpc/v0/hyper.proto` with your
-language's gRPC tooling (`protoc`, `buf`, etc.) and call the `Machines` service.
+language's gRPC tooling (`protoc`, `buf`, etc.) and call the `Hyper` service.
 The `.proto` ships in the published package as well as the repo.
 
 ### From the BEAM
@@ -93,18 +93,18 @@ adapter):
 # TLS, verifying the server against a CA bundle
 {:ok, ch} = Hyper.Grpc.connect("hyper.example.com:50051", ca: "/etc/hyper/ca.pem")
 
-{:ok, %Hyper.Grpc.V0.CreateMachineResponse{vm_id: vm_id, node: node}} =
-  Hyper.Grpc.V0.Machines.Stub.create_machine(
+{:ok, %Hyper.Grpc.V0.CreateVmResponse{vm_id: vm_id, node: node}} =
+  Hyper.Grpc.V0.Hyper.Stub.create_vm(
     ch,
-    %Hyper.Grpc.V0.CreateMachineRequest{
+    %Hyper.Grpc.V0.CreateVmRequest{
       img_id: "img-abc",
       instance_type: :INSTANCE_TYPE_DECI
     }
   )
 
 {:ok, _} =
-  Hyper.Grpc.V0.Machines.Stub.stop_machine(
+  Hyper.Grpc.V0.Hyper.Stub.stop_vm(
     ch,
-    %Hyper.Grpc.V0.StopMachineRequest{vm_id: vm_id}
+    %Hyper.Grpc.V0.StopVmRequest{vm_id: vm_id}
   )
 ```

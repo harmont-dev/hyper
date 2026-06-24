@@ -5,21 +5,21 @@ package hyper.grpc.v0;
 // Hyper microVM orchestration.
 //
 // v0: unstable. This contract may change without notice during early
-// development. Every machine is addressed by its `vm_id`, a URL-safe base64
+// development. Every VM is addressed by its `vm_id`, a URL-safe base64
 // string minted by the server at creation time.
-service Machines {
+service Hyper {
   // Create and boot a microVM from an image. Placement is cluster-wide and
   // automatic. Returns the minted vm_id and the node the guest booted on.
-  rpc CreateMachine(CreateMachineRequest) returns (CreateMachineResponse);
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
 
   // Stop and tear down a running microVM. NOT_FOUND if no such vm_id runs.
-  rpc StopMachine(StopMachineRequest) returns (StopMachineResponse);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
 
   // Locate a microVM: the node it currently runs on. NOT_FOUND if unknown.
-  rpc GetMachine(GetMachineRequest) returns (GetMachineResponse);
+  rpc GetVm(GetVmRequest) returns (GetVmResponse);
 
   // List every microVM currently known to the cluster.
-  rpc ListMachines(ListMachinesRequest) returns (ListMachinesResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
 }
 
 // Fixed (vCPU, memory, disk) sizes, like cloud instance classes.
@@ -43,40 +43,40 @@ enum Architecture {
   ARCHITECTURE_AARCH64 = 1;
 }
 
-message CreateMachineRequest {
+message CreateVmRequest {
   string img_id = 1;                        // required: content-addressed image id
   optional InstanceType instance_type = 2;  // unset -> server default (base)
   optional Architecture arch = 3;           // unset -> resolve to the node's arch
   optional string boot_args = 4;            // unset -> default kernel cmdline
 }
 
-message CreateMachineResponse {
+message CreateVmResponse {
   string vm_id = 1;
   string node = 2;  // erlang node the guest booted on
 }
 
-message StopMachineRequest {
+message StopVmRequest {
   string vm_id = 1;
 }
 
-message StopMachineResponse {}
+message StopVmResponse {}
 
-message GetMachineRequest {
+message GetVmRequest {
   string vm_id = 1;
 }
 
-message GetMachineResponse {
+message GetVmResponse {
   string vm_id = 1;
   string node = 2;
 }
 
-message ListMachinesRequest {}
+message ListVmsRequest {}
 
-message ListMachinesResponse {
-  repeated Machine machines = 1;
+message ListVmsResponse {
+  repeated Vm vms = 1;
 }
 
-message Machine {
+message Vm {
   string vm_id = 1;
   string node = 2;
 }
