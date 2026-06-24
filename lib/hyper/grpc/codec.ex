@@ -103,15 +103,9 @@ defmodule Hyper.Grpc.Codec do
   @spec vm({Hyper.Vm.id(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
-  @spec instance_type(nil) :: {:ok, :base}
-  defp instance_type(nil), do: {:ok, :base}
-
   @spec instance_type(instance_enum()) :: {:ok, Hyper.Vm.Instance.t()}
   defp instance_type(enum) when is_map_key(@instance_types, enum),
     do: {:ok, @instance_types[enum]}
-
-  @spec arch(nil) :: {:ok, nil}
-  defp arch(nil), do: {:ok, nil}
 
   @spec arch(arch_enum()) :: {:ok, Hyper.Vm.Instance.arch()}
   defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
