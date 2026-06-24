@@ -52,4 +52,11 @@ defmodule Sys.Linux.Cgroup.V2PropertiesTest do
       assert linux == %{"cpu.max": "#{q2} #{p2}"}
     end
   end
+
+  property "the last memory_max write wins" do
+    check all(b1 <- pos(), b2 <- pos()) do
+      linux = Config.new() |> Config.memory_max(b1) |> Config.memory_max(b2) |> Config.as_linux()
+      assert linux == %{"memory.max": "#{b2}"}
+    end
+  end
 end

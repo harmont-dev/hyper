@@ -52,6 +52,8 @@ defmodule Sys.Linux.FstabPropertiesTest do
       line = "   #{device}   #{mount_point}  #{fs_type}   #{o}   "
       assert {:ok, spec} = Fstab.parse(line)
       assert spec.device == device
+      assert spec.mount_point == mount_point
+      assert spec.fs_type == fs_type
       assert spec.mount_opts == [o]
     end
   end
@@ -61,7 +63,7 @@ defmodule Sys.Linux.FstabPropertiesTest do
             ws <- string([?\s, ?\t], max_length: 4),
             rest <- string(:printable, max_length: 20)
           ) do
-      assert Fstab.parse(ws) == {:error, :invalid_format} or String.trim(ws) != ""
+      assert Fstab.parse(ws) == {:error, :invalid_format}
       assert Fstab.parse("#" <> rest) == {:error, :invalid_format}
     end
   end

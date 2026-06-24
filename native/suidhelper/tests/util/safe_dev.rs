@@ -78,7 +78,7 @@ proptest! {
 
     // DmName rejects a name not starting with `hyper-`.
     #[test]
-    fn dmname_rejects_non_hyper_prefix(s in "[a-z][a-zA-Z0-9._-]{0,12}") {
+    fn dmname_rejects_non_hyper_prefix(s in "[a-zA-Z][a-zA-Z0-9._-]{0,12}") {
         prop_assume!(!s.starts_with("hyper-"));
         prop_assert!(s.parse::<DmName>().is_err());
     }
