@@ -30,9 +30,17 @@ defmodule Hyper.Img.OciLoader do
 
   alias Hyper.Config
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
-  alias Hyper.Img.OciLoader.Params
 
-  @hash_chunk 2 * 1024 * 1024
+  @mib 1024 * 1024
+  @hash_chunk 2 * @mib
+
+  # ext4 metadata (inode tables, journal, reserved blocks) plus slack so the
+  # rootfs always fits. Overhead scales with content -- a flat constant is far
+  # too small for large images -- as 25% of content plus an 8 MiB base, never
+  # below a 16 MiB floor. The base is a read-only dm-snapshot origin (guest
+  # writes land in the COW layer, never here), so generous slack is cheap.
+  @base_overhead_bytes 8 * @mib
+  @floor_bytes 16 * @mib
 
   @doc "Load `ref` into the store and DB. See the module doc. Label defaults to `ref`."
   @spec load(String.t()) :: {:ok, Hyper.Img.id()} | {:error, term()}
@@ -46,12 +54,12 @@ defmodule Hyper.Img.OciLoader do
   def load(ref, opts) when is_binary(ref) and is_list(opts) do
     label = Keyword.get(opts, :label, ref)
 
-    with {:ok, source} <- Params.source(ref),
+    with {:ok, source} <- source(ref),
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
-        with {:ok, rootfs} <- pull_and_unpack(source, Params.goarch(arch), tmp),
+        with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
              {:ok, content} <- dir_bytes(rootfs),
-             bytes = Params.ext4_bytes(content),
+             bytes = ext4_bytes(content),
              {:ok, staged} <- build_ext4(rootfs, bytes),
              {:ok, id} <- finalize(staged, bytes, label) do
           {:ok, id}
@@ -72,6 +80,36 @@ defmodule Hyper.Img.OciLoader do
       |> Enum.reject(&System.find_executable/1)
 
     if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
+  end
+
+  # --- pure derivations (no I/O; the unit-tested core) ----------------------
+
+  # Validate `ref` and return the `skopeo` source `"docker://" <> ref`. A ref must
+  # be non-empty and contain no whitespace (refs never do; rejecting whitespace
+  # also closes the door on accidental arg-splitting surprises).
+  @doc false
+  @spec source(String.t()) :: {:ok, String.t()} | {:error, :invalid_ref}
+  def source(ref) when is_binary(ref) do
+    if ref != "" and not String.match?(ref, ~r/\s/),
+      do: {:ok, "docker://" <> ref},
+      else: {:error, :invalid_ref}
+  end
+
+  # Map a Hyper architecture to the Go/OCI arch name `skopeo --override-arch` wants.
+  @doc false
+  @spec goarch(Sys.Arch.t()) :: String.t()
+  def goarch(:x86_64), do: "amd64"
+  def goarch(:aarch64), do: "arm64"
+
+  # ext4 image size (bytes) for a rootfs whose contents total `content_bytes`:
+  # content + scaled overhead (25% of content + 8 MiB base), rounded up to a whole
+  # MiB, never below 16 MiB.
+  @doc false
+  @spec ext4_bytes(non_neg_integer()) :: pos_integer()
+  def ext4_bytes(content_bytes) when is_integer(content_bytes) and content_bytes >= 0 do
+    raw = content_bytes + div(content_bytes, 4) + @base_overhead_bytes
+    rounded = div(raw + @mib - 1, @mib) * @mib
+    max(rounded, @floor_bytes)
   end
 
   # --- pull + flatten -------------------------------------------------------
