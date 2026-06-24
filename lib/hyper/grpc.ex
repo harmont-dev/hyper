@@ -60,10 +60,10 @@ defmodule Hyper.Grpc do
     @default_port 50_051
 
     @doc """
-    Whether the gRPC server should start. Defaults to `true`.
+    Whether the gRPC server should start. Defaults to `false`.
     """
     @spec enabled?() :: boolean()
-    def enabled?, do: Keyword.get(all(), :enabled, true)
+    def enabled?, do: Keyword.get(all(), :enabled, false)
 
     @doc """
     The options spliced into the `GRPC.Server.Supervisor` child: the operator's
