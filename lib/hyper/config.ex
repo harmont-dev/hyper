@@ -19,6 +19,9 @@ defmodule Hyper.Config do
   @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
   @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
+  @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
+  @umoci_path Application.compile_env(:hyper, :umoci_path, "umoci")
+  @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
   @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
   @doc """
@@ -109,6 +112,15 @@ defmodule Hyper.Config do
 
   @doc "Path to the blockdev binary."
   def blockdev_path, do: @blockdev_path
+
+  @doc "Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images)."
+  def skopeo_path, do: @skopeo_path
+
+  @doc "Path to the umoci binary (used by `Hyper.Img.OciLoader` to flatten OCI layers)."
+  def umoci_path, do: @umoci_path
+
+  @doc "Path to the mke2fs binary (used by `Hyper.Img.OciLoader` to build the ext4 rootfs)."
+  def mke2fs_path, do: @mke2fs_path
 
   @doc """
   Path to the setuid-root device helper (`hyper-suidhelper`). Required: the node
