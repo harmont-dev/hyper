@@ -27,15 +27,21 @@ defmodule Sys.Linux.Nss do
                {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
       with {:ok, output} <- Sys.Linux.Nss.getent(@getent_db) do
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
-          case parse(line) do
-            {:ok, spec} -> {:cont, {:ok, [spec | acc]}}
-            {:error, _} = error -> {:halt, error}
-          end
-        end)
+        from_output(output)
       end
+    end
+
+    @doc "Parse raw `getent passwd` output into specs, halting on the first bad line."
+    @spec from_output(binary()) :: {:ok, [Spec.t()]} | {:error, :invalid_format}
+    def from_output(output) do
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
+        case parse(line) do
+          {:ok, spec} -> {:cont, {:ok, [spec | acc]}}
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
     end
 
     # passwd line: name:password:uid:gid:gecos:home_dir:shell
@@ -83,15 +89,21 @@ defmodule Sys.Linux.Nss do
                {:getent_failed, non_neg_integer()} | :getent_unavailable | :invalid_format}
     def entries do
       with {:ok, output} <- Sys.Linux.Nss.getent(@getent_db) do
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
-          case parse(line) do
-            {:ok, spec} -> {:cont, {:ok, [spec | acc]}}
-            {:error, _} = error -> {:halt, error}
-          end
-        end)
+        from_output(output)
       end
+    end
+
+    @doc "Parse raw `getent group` output into specs, halting on the first bad line."
+    @spec from_output(binary()) :: {:ok, [Spec.t()]} | {:error, :invalid_format}
+    def from_output(output) do
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
+        case parse(line) do
+          {:ok, spec} -> {:cont, {:ok, [spec | acc]}}
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
     end
 
     # group line: name:password:gid:member1,member2,...
