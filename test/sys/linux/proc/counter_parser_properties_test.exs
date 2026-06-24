@@ -39,7 +39,7 @@ defmodule Sys.Linux.Proc.CounterParserPropertiesTest do
             ) do
         body =
           Enum.map_join(rows, "\n", fn {name, c} ->
-            "  #{name}: " <> Enum.join(Enum.map(c, &Integer.to_string/1), " ")
+            "  #{name}: " <> Enum.map_join(c, " ", &Integer.to_string/1)
           end)
 
         content = "Inter-|   Receive ...\n face |bytes ... |bytes ...\n" <> body
@@ -76,7 +76,7 @@ defmodule Sys.Linux.Proc.CounterParserPropertiesTest do
             ) do
         body =
           Enum.map_join(rows, "\n", fn {name, maj, min, stats} ->
-            "  #{maj}  #{min} #{name} " <> Enum.join(Enum.map(stats, &Integer.to_string/1), " ")
+            "  #{maj}  #{min} #{name} " <> Enum.map_join(stats, " ", &Integer.to_string/1)
           end)
 
         parsed = Diskstats.parse(body)

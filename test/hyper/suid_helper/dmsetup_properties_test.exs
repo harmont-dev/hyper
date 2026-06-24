@@ -67,8 +67,7 @@ defmodule Hyper.SuidHelper.DmsetupPropertiesTest do
       # Render each as a `dmsetup targets` row: "<name> vM.m.p" plus blank lines.
       out =
         targets
-        |> Enum.map(fn t -> "#{t}        v1.2.3" end)
-        |> Enum.join("\n")
+        |> Enum.map_join("\n", fn t -> "#{t}        v1.2.3" end)
         |> Kernel.<>("\n\n")
 
       assert Dmsetup.parse_targets(out) == MapSet.new(targets)

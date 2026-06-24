@@ -16,7 +16,7 @@ defmodule Sys.Linux.Cgroup.V2PropertiesTest do
     assert Config.as_linux(Config.new()) == %{}
   end
 
-  property "cpu_max renders as \"<quota> <period>\" under :\"cpu.max\"" do
+  property "cpu_max renders quota and period under the cpu.max key" do
     check all(quota <- pos(), period <- pos()) do
       linux = Config.new() |> Config.cpu_max(quota, period) |> Config.as_linux()
       assert linux == %{"cpu.max": "#{quota} #{period}"}

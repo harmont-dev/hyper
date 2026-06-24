@@ -71,6 +71,9 @@ defmodule Unit.QuantityPropertiesTest do
     check all({a, b} <- same_dim_pair()) do
       zero = Quantity.with_value(a, 0)
       assert zero + a == a
+      # `a - a` is exactly the subtraction-inverse law under test; the "always 0"
+      # warning is the point here, not a mistake.
+      # credo:disable-for-next-line Credo.Check.Warning.OperationOnSameValues
       assert a - a == zero
       assert a + b - b == a
     end
