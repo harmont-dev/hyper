@@ -13,35 +13,67 @@ create, stop, locate, and list microVMs.
 With `Hyper` running, you can create a new `gRPC` client:
 
 ```python
+import asyncio
+import grpc
+from google.protobuf import empty_pb2
+from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
+
+# Plaintext. For TLS, pass grpc.ssl_channel_credentials(ca_pem) to
+# grpc.aio.secure_channel(...) instead.
+channel = grpc.aio.insecure_channel("localhost:50051")
+client = hyper_pb2_grpc.HyperStub(channel)
 ```
+
+The RPC calls below are awaited, so they run inside an `async def` (e.g. driven
+by `asyncio.run(main())`).
 
 ### Creating VMs
 
-You can create new VMs with the `CreateVm` RPC:
+You can create new VMs with the `CreateVm` RPC. `instance_type` and `arch` are
+required by the contract; set them explicitly (an unset enum field decodes to
+its zero value):
 
 ```python
+created = await client.CreateVm(
+    hyper_pb2.CreateVmRequest(
+        img_id="img-abc",
+        instance_type=hyper_pb2.INSTANCE_TYPE_DECI,
+        arch=hyper_pb2.ARCHITECTURE_X86_64,
+        # boot_args is optional; omit it for the default kernel cmdline.
+    )
+)
+print(created.vm_id, created.node)
 ```
 
 ### Listing VMs
 
-You can list running virtual machines with:
+You can list running virtual machines with `ListVms`, which takes a
+`google.protobuf.Empty`:
 
 ```python
+listed = await client.ListVms(empty_pb2.Empty())
+for vm in listed.vms:
+    print(vm.vm_id, vm.node)
 ```
 
 
 ### Getting VM Info
 
-You can query the current status of any VM with:
+You can query a VM with `GetVm`, which returns the node it runs on (and raises
+`NOT_FOUND` if the id is unknown):
 
 ```python
+info = await client.GetVm(hyper_pb2.GetVmRequest(vm_id=created.vm_id))
+print(info.vm_id, info.node)
 ```
 
 ### Stopping a VM
 
-You can stop a running VM with:
+You can stop a running VM with `StopVm`, which returns a
+`google.protobuf.Empty`:
 
 ```python
+await client.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
 ```
 
 
@@ -101,70 +133,6 @@ in config.
 Generate a client stub from `proto/hyper/grpc/v0/hyper.proto` with your
 language's gRPC tooling (`protoc`, `buf`, etc.) and call the `Hyper` service.
 The `.proto` ships in the published package as well as the repo.
-
-### From Python (grpcio)
-
-Generate the bindings with `grpcio-tools`:
-
-```sh
-pip install grpcio grpcio-tools
-python -m grpc_tools.protoc -I proto \
-  --python_out=. --grpc_python_out=. --pyi_out=. \
-  proto/hyper/grpc/v0/hyper.proto
-```
-
-That writes `hyper/grpc/v0/hyper_pb2.py`, `hyper_pb2_grpc.py`, and the
-`hyper_pb2.pyi` type stubs. Then drive the cluster:
-
-```python
-import grpc
-from google.protobuf import empty_pb2
-from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
-
-# Plaintext:
-channel = grpc.insecure_channel("localhost:50051")
-
-# Or TLS, verifying the server against a CA bundle:
-#   with open("/etc/hyper/ca.pem", "rb") as f:
-#       creds = grpc.ssl_channel_credentials(f.read())
-#   channel = grpc.secure_channel("hyper.example.com:50051", creds)
-
-stub = hyper_pb2_grpc.HyperStub(channel)
-
-# Create and boot a VM. instance_type and arch are required by the contract;
-# set them explicitly (an unset enum field decodes to its zero value).
-created = stub.CreateVm(
-    hyper_pb2.CreateVmRequest(
-        img_id="img-abc",
-        instance_type=hyper_pb2.INSTANCE_TYPE_DECI,
-        arch=hyper_pb2.ARCHITECTURE_X86_64,
-    )
-)
-print(created.vm_id, created.node)
-
-# Locate it.
-located = stub.GetVm(hyper_pb2.GetVmRequest(vm_id=created.vm_id))
-print(located.node)
-
-# List every VM. ListVms takes google.protobuf.Empty.
-for vm in stub.ListVms(empty_pb2.Empty()).vms:
-    print(vm.vm_id, vm.node)
-
-# Stop it. StopVm returns google.protobuf.Empty.
-stub.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
-
-channel.close()
-```
-
-Errors arrive as `grpc.RpcError` carrying a status code:
-
-```python
-try:
-    stub.GetVm(hyper_pb2.GetVmRequest(vm_id="does-not-exist"))
-except grpc.RpcError as err:
-    assert err.code() == grpc.StatusCode.NOT_FOUND
-    print(err.details())  # "no such VM"
-```
 
 ### From the BEAM
 
