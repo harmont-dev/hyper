@@ -49,12 +49,17 @@ defmodule Hyper.Img.OciLoader do
   @doc """
   Load `ref`. `opts[:label]` sets the human-readable `images.label` (defaults to
   `ref`).
+
+  Returns `{:error, {:missing_tools, names}}` when the node lacks a required
+  external tool (`skopeo`/`umoci`/`mke2fs`); the check runs up front so the load
+  fails fast before the multi-minute pull.
   """
   @spec load(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
   def load(ref, opts) when is_binary(ref) and is_list(opts) do
     label = Keyword.get(opts, :label, ref)
 
     with {:ok, source} <- source(ref),
+         :ok <- test_system(),
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
