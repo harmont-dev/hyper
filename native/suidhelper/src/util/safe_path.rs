@@ -50,27 +50,18 @@ impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
         use std::os::unix::ffi::OsStrExt;
 
-        // `Path::components()` keeps `..` (ParentDir) and any platform prefix but
-        // silently normalizes `.` and empty (`//`) segments away -- so it alone
-        // would accept `/a/./b` or `/a//b`. Use it to reject `..`/prefixes, then
-        // scan the raw segments to reject `.` and empty components too, honoring
-        // the no-`.`/`..`/empty guarantee this gate documents.
-        if !path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
-        {
-            return Err(ValidationError::LooseComponents);
-        }
+        // `Path::components()` normalizes `.` and empty (`//`, trailing `/`)
+        // segments away before they can be inspected, so it cannot enforce the
+        // "no `.`/`..`/empty components" rule this gate documents. Validate the
+        // raw bytes instead (this is a Linux-only crate). The IsAbsolute axis
+        // guarantees the leading `/`; strip it, then require every `/`-separated
+        // segment to be a plain name: non-empty, and neither `.` nor `..` -- which
+        // is how the `..` traversal vector is rejected here.
+        let raw = path.as_os_str().as_bytes();
+        let body = raw.strip_prefix(b"/").unwrap_or(raw);
 
-        let bytes = path.as_os_str().as_bytes();
-        let mut segments = bytes.split(|&b| b == b'/');
-        // An absolute path's leading `/` yields one empty leading segment standing
-        // for the root; that one is allowed. Every remaining segment must be a
-        // plain name: non-empty (no `//` or trailing `/`) and not `.`/`..`.
-        if path.is_absolute() {
-            segments.next();
-        }
-        if segments.all(|s| !s.is_empty() && s != b"." && s != b"..") {
+        let is_plain_name = |seg: &[u8]| !seg.is_empty() && seg != b"." && seg != b"..";
+        if body.split(|&b| b == b'/').all(is_plain_name) {
             Ok(())
         } else {
             Err(ValidationError::LooseComponents)
