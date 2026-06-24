@@ -8,6 +8,13 @@ description = "Tiny setuid-root helper that runs a whitelisted set of device com
 name = "hyper-suidhelper"
 path = "src/main.rs"
 
+# Integration tests mirror the `src/` module tree under `tests/`. Cargo only
+# auto-discovers test files at the top level of `tests/`, so each nested file
+# needs an explicit target pointing at its path.
+[[test]]
+name = "safe_path"
+path = "tests/util/safe_path.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.29", features = ["user", "fs", "dir"] }
