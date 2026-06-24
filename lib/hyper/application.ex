@@ -14,19 +14,20 @@ defmodule Hyper.Application do
 
     topologies = Application.get_env(:libcluster, :topologies, [])
 
-    children = [
-      # The image-lineage database. Started first so the rest of the node can
-      # query images/leases on boot.
-      Hyper.Img.Db.Repo,
-      # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
-      # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
-      {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
-      # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
-      # Hyper.Node so VM registrations and budget advertisements have their
-      # registries on boot.
-      Hyper.Cluster,
-      Hyper.Node
-    ]
+    children =
+      [
+        # The image-lineage database. Started first so the rest of the node can
+        # query images/leases on boot.
+        Hyper.Img.Db.Repo,
+        # Form the BEAM cluster (Distributed Erlang) so Horde's `members: :auto`
+        # can discover peer nodes. Gossip strategy in dev - see config/config.exs.
+        {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
+        # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
+        # Hyper.Node so VM registrations and budget advertisements have their
+        # registries on boot.
+        Hyper.Cluster,
+        Hyper.Node
+      ] ++ Hyper.Grpc.server_children()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
   end

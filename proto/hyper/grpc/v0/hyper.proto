@@ -1,0 +1,144 @@
+// Hyper -- public gRPC interface to a Hyper cluster.
+//
+// Hyper is a distributed orchestrator for Firecracker microVMs. This file is
+// the language-agnostic contract for driving it: creating, stopping, locating,
+// and listing microVMs ("VMs") from any gRPC client.
+//
+// A VM is addressed by its `vm_id` -- a URL-safe base64 string the server mints
+// at creation. Placement across the cluster is automatic; the server is
+// stateless and identical on every node, so any node can serve any request.
+//
+// Versioning: this is `v0` and UNSTABLE. The contract may change without notice
+// during early development. Pin to a specific commit if you depend on it.
+syntax = "proto3";
+
+package hyper.grpc.v0;
+
+import "google/protobuf/empty.proto";
+
+// The VM lifecycle service.
+//
+// Errors are returned as standard gRPC statuses (see each RPC). Beyond the ones
+// listed, any RPC may return INTERNAL for an unexpected server-side failure.
+service Hyper {
+  // Create and boot a microVM from an image.
+  //
+  // The image is scheduled onto the most available node in the cluster
+  // (preferring nodes that already hold the image's layers); a per-VM writable
+  // root filesystem is built over it and the guest is booted. Returns the
+  // minted `vm_id` and the node the guest booted on.
+  //
+  // Errors:
+  //   INVALID_ARGUMENT  -- `img_id` is empty, or an enum field holds an
+  //                       unrecognised value.
+  //   RESOURCE_EXHAUSTED -- no node in the cluster has spare capacity.
+  //   UNAVAILABLE       -- the VM was placed but its host became unreachable
+  //                       before its id could be confirmed.
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+
+  // Stop and tear down a running microVM. Idempotent in effect: tearing down a
+  // VM that is already stopping is not an error.
+  //
+  // Errors:
+  //   NOT_FOUND   -- no VM with this `vm_id` is running in the cluster.
+  //   UNAVAILABLE -- the VM's host node is unreachable.
+  rpc StopVm(StopVmRequest) returns (google.protobuf.Empty);
+
+  // Locate a microVM: report the cluster node it currently runs on.
+  //
+  // Errors:
+  //   NOT_FOUND -- no VM with this `vm_id` is known to the cluster.
+  rpc GetVm(GetVmRequest) returns (GetVmResponse);
+
+  // List every microVM currently known to the cluster, across all nodes.
+  rpc ListVms(google.protobuf.Empty) returns (ListVmsResponse);
+}
+
+// A fixed (vCPU, memory, disk) size, like a cloud instance class. Each step up
+// is roughly a doubling. The vCPU/memory annotations below are the headline
+// figures; disk and bandwidth scale alongside them.
+enum InstanceType {
+  INSTANCE_TYPE_MICRO = 0;  // 0.25 vCPU, 128 MiB  -- also the zero/default value
+  INSTANCE_TYPE_MILLI = 1;  // 0.5 vCPU,  256 MiB
+  INSTANCE_TYPE_CENTI = 2;  // 1 vCPU,    512 MiB
+  INSTANCE_TYPE_DECI = 3;   // 2 vCPU,    1 GiB
+  INSTANCE_TYPE_BASE = 4;   // 4 vCPU,    2 GiB
+  INSTANCE_TYPE_DECA = 5;   // 8 vCPU,    4 GiB
+  INSTANCE_TYPE_HECTO = 6;  // 16 vCPU,   8 GiB
+  INSTANCE_TYPE_KILO = 7;   // 32 vCPU,   16 GiB
+  INSTANCE_TYPE_MEGA = 8;   // 64 vCPU,   32 GiB
+  INSTANCE_TYPE_GIGA = 9;   // 128 vCPU,  64 GiB
+  INSTANCE_TYPE_TERA = 10;  // 256 vCPU,  128 GiB
+}
+
+// Guest CPU architecture. Must match the architecture the image was built for.
+enum Architecture {
+  ARCHITECTURE_X86_64 = 0;    // x86-64 / amd64 -- also the zero/default value
+  ARCHITECTURE_AARCH64 = 1;   // arm64
+}
+
+// Request to create and boot a VM.
+//
+// `instance_type` and `arch` are required by the contract. Note that proto3
+// does not enforce field presence: an omitted field decodes to its enum's zero
+// value (INSTANCE_TYPE_MICRO / ARCHITECTURE_X86_64), so clients should always
+// set them explicitly.
+message CreateVmRequest {
+  // Required. The content-addressed id of the image to boot.
+  string img_id = 1;
+
+  // Required. The instance size to allocate.
+  InstanceType instance_type = 2;
+
+  // Required. The guest CPU architecture; must match the image.
+  Architecture arch = 3;
+
+  // Optional. Extra kernel command-line arguments. If unset, the server's
+  // standard serial-console cmdline is used.
+  optional string boot_args = 4;
+}
+
+// Result of a successful CreateVm.
+message CreateVmResponse {
+  // The server-minted id for the new VM; use it in all later RPCs.
+  string vm_id = 1;
+
+  // The cluster node (Erlang node name) the guest booted on.
+  string node = 2;
+}
+
+// Request to stop a VM.
+message StopVmRequest {
+  // The id of the VM to tear down.
+  string vm_id = 1;
+}
+
+// Request to locate a VM.
+message GetVmRequest {
+  // The id of the VM to look up.
+  string vm_id = 1;
+}
+
+// Result of a successful GetVm.
+message GetVmResponse {
+  // Echoes the requested id.
+  string vm_id = 1;
+
+  // The cluster node (Erlang node name) the VM currently runs on.
+  string node = 2;
+}
+
+// Result of ListVms.
+message ListVmsResponse {
+  // Every VM known to the cluster, in no particular order.
+  repeated Vm vms = 1;
+}
+
+// A VM and where it runs. Returned by ListVms.
+message Vm {
+  // The VM's id.
+  string vm_id = 1;
+
+  // The cluster node (Erlang node name) the VM runs on.
+  string node = 2;
+}
