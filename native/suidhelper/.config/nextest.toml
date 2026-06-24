@@ -1,0 +1,12 @@
+# nextest CI profile. The [profile.ci.junit] table makes `--profile ci` write
+# JUnit XML to target/nextest/ci/junit.xml, which Codecov Test Analytics ingests.
+# store-success-output/-failure-output keep captured stdio in the report so a
+# failing test's output is visible in Codecov.
+[profile.ci]
+# Retry once to dampen rare flakes without masking genuine failures.
+retries = 1
+
+[profile.ci.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
