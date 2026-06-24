@@ -15,21 +15,35 @@ With `Hyper` running, you can create a new `gRPC` client:
 ```python
 ```
 
-## The contract
+### Creating VMs
 
-The service is `hyper.grpc.v0.Hyper`, defined in
-[`proto/hyper/grpc/v0/hyper.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v0/hyper.proto):
+You can create new VMs with the `CreateVm` RPC:
 
-| RPC            | Purpose                                            | Errors |
-| -------------- | -------------------------------------------------- | ------ |
-| `CreateVm`| Boot a microVM from an image; returns its `vm_id`. | `INVALID_ARGUMENT` (bad/missing image or enum), `RESOURCE_EXHAUSTED` (no capacity), `UNAVAILABLE` (host lost mid-create) |
-| `StopVm`  | Tear down a running microVM.                       | `NOT_FOUND` (unknown id), `UNAVAILABLE` (host down) |
-| `GetVm`   | Which node a microVM runs on.                      | `NOT_FOUND` |
-| `ListVms` | Every microVM known to the cluster.                | -- |
+```python
+```
 
-A machine is addressed by its **`vm_id`** -- a URL-safe base64 string the server
-mints at creation. The server is stateless and identical on every node;
-placement and routing are cluster-wide, so any node can serve any request.
+### Listing VMs
+
+You can list running virtual machines with:
+
+```python
+```
+
+
+### Getting VM Info
+
+You can query the current status of any VM with:
+
+```python
+```
+
+### Stopping a VM
+
+You can stop a running VM with:
+
+```python
+```
+
 
 ## Configuring the server
 
@@ -87,6 +101,70 @@ in config.
 Generate a client stub from `proto/hyper/grpc/v0/hyper.proto` with your
 language's gRPC tooling (`protoc`, `buf`, etc.) and call the `Hyper` service.
 The `.proto` ships in the published package as well as the repo.
+
+### From Python (grpcio)
+
+Generate the bindings with `grpcio-tools`:
+
+```sh
+pip install grpcio grpcio-tools
+python -m grpc_tools.protoc -I proto \
+  --python_out=. --grpc_python_out=. --pyi_out=. \
+  proto/hyper/grpc/v0/hyper.proto
+```
+
+That writes `hyper/grpc/v0/hyper_pb2.py`, `hyper_pb2_grpc.py`, and the
+`hyper_pb2.pyi` type stubs. Then drive the cluster:
+
+```python
+import grpc
+from google.protobuf import empty_pb2
+from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
+
+# Plaintext:
+channel = grpc.insecure_channel("localhost:50051")
+
+# Or TLS, verifying the server against a CA bundle:
+#   with open("/etc/hyper/ca.pem", "rb") as f:
+#       creds = grpc.ssl_channel_credentials(f.read())
+#   channel = grpc.secure_channel("hyper.example.com:50051", creds)
+
+stub = hyper_pb2_grpc.HyperStub(channel)
+
+# Create and boot a VM. instance_type and arch are required by the contract;
+# set them explicitly (an unset enum field decodes to its zero value).
+created = stub.CreateVm(
+    hyper_pb2.CreateVmRequest(
+        img_id="img-abc",
+        instance_type=hyper_pb2.INSTANCE_TYPE_DECI,
+        arch=hyper_pb2.ARCHITECTURE_X86_64,
+    )
+)
+print(created.vm_id, created.node)
+
+# Locate it.
+located = stub.GetVm(hyper_pb2.GetVmRequest(vm_id=created.vm_id))
+print(located.node)
+
+# List every VM. ListVms takes google.protobuf.Empty.
+for vm in stub.ListVms(empty_pb2.Empty()).vms:
+    print(vm.vm_id, vm.node)
+
+# Stop it. StopVm returns google.protobuf.Empty.
+stub.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
+
+channel.close()
+```
+
+Errors arrive as `grpc.RpcError` carrying a status code:
+
+```python
+try:
+    stub.GetVm(hyper_pb2.GetVmRequest(vm_id="does-not-exist"))
+except grpc.RpcError as err:
+    assert err.code() == grpc.StatusCode.NOT_FOUND
+    print(err.details())  # "no such VM"
+```
 
 ### From the BEAM
 
