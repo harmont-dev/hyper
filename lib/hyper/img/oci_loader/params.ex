@@ -8,9 +8,11 @@ defmodule Hyper.Img.OciLoader.Params do
 
   @mib 1024 * 1024
   # ext4 metadata (inode tables, journal, reserved blocks) plus slack so the
-  # rootfs always fits. The base is a read-only dm-snapshot origin -- guest
-  # writes land in the COW layer, never here -- so modest headroom is plenty.
-  @overhead_bytes 4 * @mib
+  # rootfs always fits. Overhead scales with content -- a flat constant is far
+  # too small for large images -- as 25% of content plus an 8 MiB base, never
+  # below a 16 MiB floor. The base is a read-only dm-snapshot origin (guest
+  # writes land in the COW layer, never here), so generous slack is cheap.
+  @base_overhead_bytes 8 * @mib
   @floor_bytes 16 * @mib
 
   @doc """
@@ -33,11 +35,12 @@ defmodule Hyper.Img.OciLoader.Params do
 
   @doc """
   ext4 image size (bytes) for a rootfs whose contents total `content_bytes`:
-  content + fixed overhead, rounded up to a whole MiB, never below 16 MiB.
+  content + scaled overhead (25% of content + 8 MiB base), rounded up to a whole
+  MiB, never below 16 MiB.
   """
   @spec ext4_bytes(non_neg_integer()) :: pos_integer()
   def ext4_bytes(content_bytes) when is_integer(content_bytes) and content_bytes >= 0 do
-    raw = content_bytes + @overhead_bytes
+    raw = content_bytes + div(content_bytes, 4) + @base_overhead_bytes
     rounded = div(raw + @mib - 1, @mib) * @mib
     max(rounded, @floor_bytes)
   end

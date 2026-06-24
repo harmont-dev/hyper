@@ -42,6 +42,13 @@ defmodule Hyper.Img.OciLoader.ParamsTest do
       assert rem(size, @mib) == 0
     end
 
+    test "scales overhead with content above the floor crossover" do
+      # content small enough that 1.25x + 8 MiB stays under the 16 MiB floor
+      assert Params.ext4_bytes(4 * @mib) == 16 * @mib
+      # content past the crossover gets proportional slack, not the floor
+      assert Params.ext4_bytes(64 * @mib) == 88 * @mib
+    end
+
     property "always a whole-MiB size that fits the content and clears the floor" do
       check all content <- integer(0..(8 * 1024 * @mib)) do
         size = Params.ext4_bytes(content)
