@@ -18,9 +18,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot", include: [:name])
   def create_snapshot(name, origin_dev, cow_dev, sectors) do
-    table =
-      "0 #{sectors} snapshot #{origin_dev} #{cow_dev} P #{Hyper.Node.Config.Img.chunk_sectors()}"
-
+    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Node.Config.Img.chunk_sectors())
     create(name, table, ["--readonly"])
   end
 
@@ -40,7 +38,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
         ) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_pool", include: [:name])
   def create_thin_pool(name, meta_dev, data_dev, sectors, block_sectors, low_water) do
-    table = "0 #{sectors} thin-pool #{meta_dev} #{data_dev} #{block_sectors} #{low_water}"
+    table = thin_pool_table(meta_dev, data_dev, sectors, block_sectors, low_water)
     create(name, table, [])
   end
 
@@ -53,7 +51,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_external", include: [:name])
   def create_thin_external(name, pool_dev, dev_id, sectors, origin_dev) do
-    table = "0 #{sectors} thin #{pool_dev} #{dev_id} #{origin_dev}"
+    table = thin_external_table(pool_dev, dev_id, sectors, origin_dev)
     create(name, table, [])
   end
 
@@ -120,6 +118,25 @@ defmodule Hyper.SuidHelper.Dmsetup do
     |> Enum.map(&(&1 |> String.split() |> List.first()))
     |> Enum.reject(&is_nil/1)
     |> MapSet.new()
+  end
+
+  @doc false
+  @spec snapshot_table(Path.t(), Path.t(), pos_integer(), pos_integer()) :: String.t()
+  def snapshot_table(origin_dev, cow_dev, sectors, chunk_sectors) do
+    "0 #{sectors} snapshot #{origin_dev} #{cow_dev} P #{chunk_sectors}"
+  end
+
+  @doc false
+  @spec thin_pool_table(Path.t(), Path.t(), pos_integer(), pos_integer(), non_neg_integer()) ::
+          String.t()
+  def thin_pool_table(meta_dev, data_dev, sectors, block_sectors, low_water) do
+    "0 #{sectors} thin-pool #{meta_dev} #{data_dev} #{block_sectors} #{low_water}"
+  end
+
+  @doc false
+  @spec thin_external_table(Path.t(), non_neg_integer(), pos_integer(), Path.t()) :: String.t()
+  def thin_external_table(pool_dev, dev_id, sectors, origin_dev) do
+    "0 #{sectors} thin #{pool_dev} #{dev_id} #{origin_dev}"
   end
 
   # Create a dm device named `name` from a reconstructed `table`, with any extra
