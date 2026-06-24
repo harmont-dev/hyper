@@ -28,6 +28,10 @@ defmodule Sys.Linux.NssTest do
     test "a non-integer uid is rejected" do
       assert Passwd.from_output("root:x:NaN:0:root:/root:/bin/bash\n") == {:error, :invalid_format}
     end
+
+    test "empty output yields an empty list" do
+      assert Passwd.from_output("") == {:ok, []}
+    end
   end
 
   describe "Group.from_output/1" do
@@ -49,6 +53,10 @@ defmodule Sys.Linux.NssTest do
 
     test "a non-integer gid is rejected" do
       assert Group.from_output("wheel:x:xx:alice\n") == {:error, :invalid_format}
+    end
+
+    test "empty output yields an empty list" do
+      assert Group.from_output("") == {:ok, []}
     end
   end
 end
