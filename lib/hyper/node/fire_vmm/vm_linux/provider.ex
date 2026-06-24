@@ -32,7 +32,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
     end
   end
 
-  @doc "Absolute path to the installed kernel for build `name` (e.g. \"x86_64-6.1\")."
+  @doc "Absolute path to the installed kernel for build `name` (e.g. \"x86_64-6.1\"). The returned path is only guaranteed to exist for the node's current architecture (the one `ensure_installed/0` installs)."
   @spec path(String.t()) :: {:ok, Path.t()} | {:error, {:unknown_build, String.t()}}
   def path(name) do
     case Manifest.fetch(name) do
@@ -41,7 +41,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
     end
   end
 
-  @doc "Absolute path to the default (highest-version) kernel for `arch`."
+  @doc "Absolute path to the default (highest-version) kernel for `arch`. The returned path is only guaranteed to exist for the node's current architecture (the one `ensure_installed/0` installs)."
   @spec default_path(Sys.Arch.t()) :: {:ok, Path.t()} | {:error, {:no_kernel, Sys.Arch.t()}}
   def default_path(arch) do
     case Manifest.default_for(arch) do
@@ -81,6 +81,8 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
     end)
   end
 
+  # Safe to wipe wholesale: install_dir/0 is Hyper's own redist cache
+  # (<work_dir>/redist/vmlinux), never operator data.
   defp reinstall(builds) do
     _ = File.rm_rf!(install_dir())
     install_all(builds)

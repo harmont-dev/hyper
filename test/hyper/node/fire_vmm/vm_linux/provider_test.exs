@@ -27,6 +27,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
     dir: dir,
     builds: builds
   } do
+    assert length(builds) > 1
     [first | _] = builds
     File.write!(Path.join(dir, first.asset), "kernel")
     assert Provider.install_state(dir, builds) == {:error, :bad_install}
