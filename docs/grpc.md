@@ -2,10 +2,10 @@
 
 Hyper's native API is BEAM-native (Elixir/Erlang processes calling `Hyper.*`).
 The gRPC interface puts that same machine lifecycle behind a language-agnostic
-contract, so consumers in **any** language — and off-BEAM services — can
+contract, so consumers in **any** language -- and off-BEAM services -- can
 create, stop, locate, and list microVMs.
 
-> **v0 — unstable.** The contract may change without notice during early
+> **v0 -- unstable.** The contract may change without notice during early
 > development. Pin to a commit if you depend on it.
 
 ## The contract
@@ -18,15 +18,15 @@ The service is `hyper.grpc.v0.Hyper`, defined in
 | `CreateVm`| Boot a microVM from an image; returns its `vm_id`. | `INVALID_ARGUMENT` (bad/missing image or enum), `RESOURCE_EXHAUSTED` (no capacity), `UNAVAILABLE` (host lost mid-create) |
 | `StopVm`  | Tear down a running microVM.                       | `NOT_FOUND` (unknown id), `UNAVAILABLE` (host down) |
 | `GetVm`   | Which node a microVM runs on.                      | `NOT_FOUND` |
-| `ListVms` | Every microVM known to the cluster.                | — |
+| `ListVms` | Every microVM known to the cluster.                | -- |
 
-A machine is addressed by its **`vm_id`** — a URL-safe base64 string the server
+A machine is addressed by its **`vm_id`** -- a URL-safe base64 string the server
 mints at creation. The server is stateless and identical on every node;
 placement and routing are cluster-wide, so any node can serve any request.
 
 ## Configuring the server
 
-The server **always runs** — it is a core interface, not an opt-in add-on, and
+The server **always runs** -- it is a core interface, not an opt-in add-on, and
 an idle listener costs next to nothing. With no config it serves plaintext on
 port `50051`. Tune the listener from your own application config under
 `config :hyper, Hyper.Grpc`; every key is passed straight through to
@@ -62,9 +62,9 @@ if config_env() == :prod do
 end
 ```
 
-Hyper never reads the filesystem on your behalf — load secrets from env, a
+Hyper never reads the filesystem on your behalf -- load secrets from env, a
 vault, or anywhere else, and hand the supervisor a finished `:cred`. Any other
-supervisor option works too (`adapter_opts:`, `max_body_size:`, …).
+supervisor option works too (`adapter_opts:`, `max_body_size:`, ...).
 
 ### How it starts
 

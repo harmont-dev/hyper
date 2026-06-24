@@ -3,8 +3,8 @@ defmodule Hyper.Grpc.Codec do
   Translation between the gRPC wire types (`Hyper.Grpc.V0.*`) and Hyper's domain
   types. Two entry points, each dispatching by pattern match on the value's type:
 
-    * `from_grpc/1` — an inbound request message → a domain value.
-    * `to_grpc/1`   — a domain result (or error) → an outbound response message,
+    * `from_grpc/1` -- an inbound request message -> a domain value.
+    * `to_grpc/1`   -- a domain result (or error) -> an outbound response message,
       or a `GRPC.RPCError` for the server to raise.
   """
 
@@ -90,9 +90,9 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
   def to_grpc({:error, reason}), do: rpc_error(reason)
 
-  # A :gen_statem call exit from State.stop/1: :noproc (unknown vm_id) → NOT_FOUND,
-  # :nodedown (downed host) → UNAVAILABLE, anything else is a real controller
-  # failure → INTERNAL, so a genuine crash is never masked as a clean NOT_FOUND.
+  # A :gen_statem call exit from State.stop/1: :noproc (unknown vm_id) -> NOT_FOUND,
+  # :nodedown (downed host) -> UNAVAILABLE, anything else is a real controller
+  # failure -> INTERNAL, so a genuine crash is never masked as a clean NOT_FOUND.
   @spec to_grpc({:exit, term()}) :: GRPC.RPCError.t()
   def to_grpc({:exit, :noproc}), do: rpc_error(:not_found)
   def to_grpc({:exit, {:noproc, _}}), do: rpc_error(:not_found)

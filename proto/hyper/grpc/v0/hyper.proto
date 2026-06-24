@@ -1,10 +1,10 @@
-// Hyper — public gRPC interface to a Hyper cluster.
+// Hyper -- public gRPC interface to a Hyper cluster.
 //
 // Hyper is a distributed orchestrator for Firecracker microVMs. This file is
 // the language-agnostic contract for driving it: creating, stopping, locating,
 // and listing microVMs ("VMs") from any gRPC client.
 //
-// A VM is addressed by its `vm_id` — a URL-safe base64 string the server mints
+// A VM is addressed by its `vm_id` -- a URL-safe base64 string the server mints
 // at creation. Placement across the cluster is automatic; the server is
 // stateless and identical on every node, so any node can serve any request.
 //
@@ -27,10 +27,10 @@ service Hyper {
   // minted `vm_id` and the node the guest booted on.
   //
   // Errors:
-  //   INVALID_ARGUMENT  — `img_id` is empty, or an enum field holds an
+  //   INVALID_ARGUMENT  -- `img_id` is empty, or an enum field holds an
   //                       unrecognised value.
-  //   RESOURCE_EXHAUSTED — no node in the cluster has spare capacity.
-  //   UNAVAILABLE       — the VM was placed but its host became unreachable
+  //   RESOURCE_EXHAUSTED -- no node in the cluster has spare capacity.
+  //   UNAVAILABLE       -- the VM was placed but its host became unreachable
   //                       before its id could be confirmed.
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
 
@@ -38,14 +38,14 @@ service Hyper {
   // VM that is already stopping is not an error.
   //
   // Errors:
-  //   NOT_FOUND   — no VM with this `vm_id` is running in the cluster.
-  //   UNAVAILABLE — the VM's host node is unreachable.
+  //   NOT_FOUND   -- no VM with this `vm_id` is running in the cluster.
+  //   UNAVAILABLE -- the VM's host node is unreachable.
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
 
   // Locate a microVM: report the cluster node it currently runs on.
   //
   // Errors:
-  //   NOT_FOUND — no VM with this `vm_id` is known to the cluster.
+  //   NOT_FOUND -- no VM with this `vm_id` is known to the cluster.
   rpc GetVm(GetVmRequest) returns (GetVmResponse);
 
   // List every microVM currently known to the cluster, across all nodes.
@@ -56,7 +56,7 @@ service Hyper {
 // is roughly a doubling. The vCPU/memory annotations below are the headline
 // figures; disk and bandwidth scale alongside them.
 enum InstanceType {
-  INSTANCE_TYPE_MICRO = 0;  // 0.25 vCPU, 128 MiB  — also the zero/default value
+  INSTANCE_TYPE_MICRO = 0;  // 0.25 vCPU, 128 MiB  -- also the zero/default value
   INSTANCE_TYPE_MILLI = 1;  // 0.5 vCPU,  256 MiB
   INSTANCE_TYPE_CENTI = 2;  // 1 vCPU,    512 MiB
   INSTANCE_TYPE_DECI = 3;   // 2 vCPU,    1 GiB
@@ -71,7 +71,7 @@ enum InstanceType {
 
 // Guest CPU architecture. Must match the architecture the image was built for.
 enum Architecture {
-  ARCHITECTURE_X86_64 = 0;    // x86-64 / amd64 — also the zero/default value
+  ARCHITECTURE_X86_64 = 0;    // x86-64 / amd64 -- also the zero/default value
   ARCHITECTURE_AARCH64 = 1;   // arm64
 }
 

@@ -5,7 +5,7 @@ defmodule Hyper.Grpc.Server do
   the existing `Hyper` BEAM API, and maps the result back with
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
 
-  The handler is stateless and identical on every node — placement and routing
+  The handler is stateless and identical on every node -- placement and routing
   are already cluster-wide (`Hyper.Cluster.Scheduler`, `Hyper.Cluster.Routing`),
   so a call landing on any node is correct.
   """

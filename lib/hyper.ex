@@ -53,12 +53,12 @@ defmodule Hyper do
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 
   @doc """
-  The vm id for a VM handle — the pid returned by `create_vm/1`. Resolves on the
+  The vm id for a VM handle -- the pid returned by `create_vm/1`. Resolves on the
   pid's owning node, so a VM just placed on a remote node is found immediately
   rather than waiting for the routing CRDT to propagate. `nil` if unknown.
 
   Returns `nil` (rather than crashing the caller) if the owning node is
-  unreachable — e.g. it died with a VM just placed on it. In that case the VM
+  unreachable -- e.g. it died with a VM just placed on it. In that case the VM
   died with its host, so "unknown" is the truthful answer. Only `:erpc`'s own
   transport failures are swallowed; a genuine fault in the lookup still raises.
   """

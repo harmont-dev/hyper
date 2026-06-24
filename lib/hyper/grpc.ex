@@ -15,10 +15,10 @@ defmodule Hyper.Grpc do
 
   ## Serving
 
-  The server is always started by `Hyper.Application` — it is a core interface,
+  The server is always started by `Hyper.Application` -- it is a core interface,
   not an add-on, and an idle listener costs next to nothing. It is stateless and
   runs on every node; placement and routing are cluster-wide. See
-  `Hyper.Grpc.Config` for configuration — operators own the listener (port, TLS,
+  `Hyper.Grpc.Config` for configuration -- operators own the listener (port, TLS,
   adapter options) entirely from their own `config/`.
 
   ## Connecting from the BEAM
@@ -48,7 +48,7 @@ defmodule Hyper.Grpc do
     `Hyper.Grpc.Endpoint`.
 
     Load secrets however you like: put cert/key paths in `config/runtime.exs` and
-    build the credential there, or read them from a vault — Hyper never touches
+    build the credential there, or read them from a vault -- Hyper never touches
     the filesystem on your behalf.
 
     > #### Co-located nodes {: .info}
@@ -84,7 +84,7 @@ defmodule Hyper.Grpc do
   end
 
   @doc """
-  The gRPC server's supervisor child. Always present — the server is a core
+  The gRPC server's supervisor child. Always present -- the server is a core
   interface, started unconditionally by `Hyper.Application`.
   """
   @spec server_children() :: [{module(), keyword()}]
