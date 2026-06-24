@@ -7,28 +7,6 @@ defmodule Hyper.Grpc do
   create, stop, locate, and list microVMs. Off-BEAM clients generate their own
   stubs from the `.proto`; BEAM clients can use the generated
   `Hyper.Grpc.V0.Hyper.Stub` together with `connect/2`.
-
-  > #### v0 {: .warning}
-  >
-  > This interface is unstable and may change without notice during early
-  > development.
-
-  ## Serving
-
-  The server is always started by `Hyper.Application` -- it is a core interface,
-  not an add-on, and an idle listener costs next to nothing. It is stateless and
-  runs on every node; placement and routing are cluster-wide. See
-  `Hyper.Grpc.Config` for configuration -- operators own the listener (port, TLS,
-  adapter options) entirely from their own `config/`.
-
-  ## Connecting from the BEAM
-
-      {:ok, ch} = Hyper.Grpc.connect("hyper.example.com:50051", ca: "/etc/hyper/ca.pem")
-      {:ok, reply} =
-        Hyper.Grpc.V0.Hyper.Stub.create_vm(
-          ch,
-          %Hyper.Grpc.V0.CreateVmRequest{img_id: "img-abc"}
-        )
   """
 
   defmodule Config do
@@ -101,32 +79,6 @@ defmodule Hyper.Grpc do
       [{GRPC.Server.Supervisor, Config.server_options(config)}]
     else
       []
-    end
-  end
-
-  @doc """
-  Connect a BEAM client channel to a Hyper gRPC endpoint at `addr`
-  (`"host:port"`). Pass `ca:` (a PEM path) to verify the server's TLS
-  certificate; omit it for an insecure (plaintext) connection.
-
-  Defaults to `GRPC.Client.Adapters.Mint` (`:gun` is an optional dep not
-  included in this project). Pass `adapter:` in `opts` to override; any other
-  option is forwarded to `GRPC.Stub.connect/2`.
-  """
-  @spec connect(String.t(), keyword()) :: {:ok, GRPC.Channel.t()} | {:error, term()}
-  def connect(addr, opts \\ []) do
-    {ca, rest} = Keyword.pop(opts, :ca)
-    stub_opts = Keyword.put_new(rest, :adapter, GRPC.Client.Adapters.Mint)
-
-    case ca do
-      nil ->
-        GRPC.Stub.connect(addr, stub_opts)
-
-      path ->
-        GRPC.Stub.connect(
-          addr,
-          Keyword.put(stub_opts, :cred, GRPC.Credential.new(ssl: [cacertfile: path]))
-        )
     end
   end
 end
