@@ -15,6 +15,8 @@ defmodule Hyper.Grpc.Codec do
     CreateVmResponse,
     GetVmResponse,
     ListVmsResponse,
+    LoadImageRequest,
+    LoadImageResponse,
     Vm
   }
 
@@ -72,6 +74,16 @@ defmodule Hyper.Grpc.Codec do
     end
   end
 
+  @spec from_grpc(LoadImageRequest.t()) ::
+          {:ok, {String.t(), keyword()}} | {:error, :missing_image_ref}
+  def from_grpc(%LoadImageRequest{image_ref: ref}) when ref in [nil, ""],
+    do: {:error, :missing_image_ref}
+
+  def from_grpc(%LoadImageRequest{image_ref: ref, label: label}) do
+    opts = if label in [nil, ""], do: [], else: [label: label]
+    {:ok, {ref, opts}}
+  end
+
   @doc "Convert a domain result to an outbound response message, or an error to `GRPC.RPCError`."
   @spec to_grpc({:created, Hyper.Vm.id(), node()}) :: CreateVmResponse.t()
   def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
@@ -84,6 +96,10 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc({:vms, [{Hyper.Vm.id(), node()}]}) :: ListVmsResponse.t()
   def to_grpc({:vms, vms}),
     do: %ListVmsResponse{vms: Enum.map(vms, &vm/1)}
+
+  @spec to_grpc({:loaded, Hyper.Img.id()}) :: LoadImageResponse.t()
+  def to_grpc({:loaded, img_id}) when is_binary(img_id),
+    do: %LoadImageResponse{img_id: img_id}
 
   @spec to_grpc(:stopped) :: Empty.t()
   def to_grpc(:stopped), do: %Empty{}
@@ -123,6 +139,19 @@ defmodule Hyper.Grpc.Codec do
 
   defp rpc_error(reason) when reason in [:no_capacity, :exhausted],
     do: GRPC.RPCError.exception(:resource_exhausted, "no capacity")
+
+  defp rpc_error(:missing_image_ref),
+    do: GRPC.RPCError.exception(:invalid_argument, "image_ref is required")
+
+  defp rpc_error(:invalid_ref),
+    do: GRPC.RPCError.exception(:invalid_argument, "image_ref is malformed")
+
+  defp rpc_error({:missing_tools, tools}),
+    do:
+      GRPC.RPCError.exception(
+        :failed_precondition,
+        "node is missing required image tools: #{Enum.join(tools, ", ")}"
+      )
 
   defp rpc_error(reason),
     do: GRPC.RPCError.exception(:internal, "internal error: #{inspect(reason)}")
