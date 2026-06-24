@@ -21,7 +21,7 @@ The absolute best way to get started with `Hyper` is to play with it.
 
 Hyper requires the following software be installed on each node running it:
 
-  - [`skopeo`](https://github.com/podman-container-tools/skopeo)
+  - [`skopeo`](https://github.com/containers/skopeo)
   - [`e2fsprogs`](https://github.com/tytso/e2fsprogs)
 
 Hyper has more runtime dependencies, but they are automatically redistributed
