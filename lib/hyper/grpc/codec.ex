@@ -6,9 +6,6 @@ defmodule Hyper.Grpc.Codec do
     * `from_grpc/1` — an inbound request message → a domain value.
     * `to_grpc/1`   — a domain result (or error) → an outbound response message,
       or a `GRPC.RPCError` for the server to raise.
-
-  Keeping all wire knowledge here lets `Hyper.Grpc.Server` stay a thin dispatch
-  layer.
   """
 
   alias Hyper.Grpc.V0.{
@@ -41,13 +38,22 @@ defmodule Hyper.Grpc.Codec do
     ARCHITECTURE_AARCH64: :aarch64
   }
 
-  @doc """
-  Convert an inbound request message to a domain value.
+  @typep instance_enum ::
+           :INSTANCE_TYPE_MICRO
+           | :INSTANCE_TYPE_MILLI
+           | :INSTANCE_TYPE_CENTI
+           | :INSTANCE_TYPE_DECI
+           | :INSTANCE_TYPE_BASE
+           | :INSTANCE_TYPE_DECA
+           | :INSTANCE_TYPE_HECTO
+           | :INSTANCE_TYPE_KILO
+           | :INSTANCE_TYPE_MEGA
+           | :INSTANCE_TYPE_GIGA
+           | :INSTANCE_TYPE_TERA
 
-  A `CreateMachineRequest` becomes a `Hyper.Vm.Spec`. Unset optional fields
-  (`nil`) take Hyper's defaults: instance type → `:base`, architecture →
-  resolved at create time, boot args → the standard cmdline.
-  """
+  @typep arch_enum :: :ARCHITECTURE_X86_64 | :ARCHITECTURE_AARCH64
+
+  @doc "Convert an inbound request message to a domain value."
   @spec from_grpc(CreateMachineRequest.t()) :: {:ok, Spec.t()} | {:error, term()}
   def from_grpc(%CreateMachineRequest{img_id: img_id}) when img_id in [nil, ""],
     do: {:error, :missing_img_id}
@@ -60,16 +66,12 @@ defmodule Hyper.Grpc.Codec do
          img_id: req.img_id,
          type: type,
          arch: arch,
-         boot_args: blank_to_nil(req.boot_args)
+         boot_args: req.boot_args
        }}
     end
   end
 
-  @doc """
-  Convert a domain result to an outbound response message, or an error to a
-  `GRPC.RPCError` (which the server raises). Dispatches on the result's shape;
-  each shape carries its own precise return type below.
-  """
+  @doc "Convert a domain result to an outbound response message, or an error to `GRPC.RPCError`."
   @spec to_grpc({:created, Hyper.Vm.id(), node()}) :: CreateMachineResponse.t()
   def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
     do: %CreateMachineResponse{vm_id: vm_id, node: to_string(node)}
@@ -101,32 +103,22 @@ defmodule Hyper.Grpc.Codec do
   @spec machine({Hyper.Vm.id(), node()}) :: Machine.t()
   defp machine({vm_id, node}), do: %Machine{vm_id: vm_id, node: to_string(node)}
 
-  @spec instance_type(atom() | nil) :: {:ok, Hyper.Vm.Instance.t()} | {:error, term()}
+  @spec instance_type(nil) :: {:ok, :base}
   defp instance_type(nil), do: {:ok, :base}
 
+  @spec instance_type(instance_enum()) :: {:ok, Hyper.Vm.Instance.t()}
   defp instance_type(enum) when is_map_key(@instance_types, enum),
     do: {:ok, @instance_types[enum]}
 
-  defp instance_type(enum), do: {:error, {:invalid_instance_type, enum}}
-
-  @spec arch(atom() | nil) :: {:ok, Hyper.Vm.Instance.arch() | nil} | {:error, term()}
+  @spec arch(nil) :: {:ok, nil}
   defp arch(nil), do: {:ok, nil}
-  defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
-  defp arch(enum), do: {:error, {:invalid_arch, enum}}
 
-  @spec blank_to_nil(String.t() | nil) :: String.t() | nil
-  defp blank_to_nil(s) when s in [nil, ""], do: nil
-  defp blank_to_nil(s), do: s
+  @spec arch(arch_enum()) :: {:ok, Hyper.Vm.Instance.arch()}
+  defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
-
-  defp rpc_error({:invalid_instance_type, _}),
-    do: GRPC.RPCError.exception(:invalid_argument, "unknown instance_type")
-
-  defp rpc_error({:invalid_arch, _}),
-    do: GRPC.RPCError.exception(:invalid_argument, "unknown arch")
 
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such machine")
