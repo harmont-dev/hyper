@@ -12,16 +12,19 @@ defmodule Sys.Linux.Cgroup do
   @spec versions :: {:ok, MapSet.t(:cgroup | :cgroup2)} | {:error, atom()}
   def versions do
     case Mounts.list() do
-      {:ok, mounts} ->
-        versions =
-          for %{fs_type: fs} <- mounts, fs in ~w(cgroup cgroup2), into: MapSet.new() do
-            String.to_existing_atom(fs)
-          end
+      {:ok, mounts} -> {:ok, versions_from_mounts(mounts)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-        {:ok, versions}
-
-      {:error, reason} ->
-        {:error, reason}
+  @doc """
+  Reduce a list of mounts to the set of cgroup versions present, keyed by
+  filesystem type. Pure; `versions/0` is this applied to `/proc/mounts`.
+  """
+  @spec versions_from_mounts([Sys.Linux.Fstab.Spec.t()]) :: MapSet.t(:cgroup | :cgroup2)
+  def versions_from_mounts(mounts) do
+    for %{fs_type: fs} <- mounts, fs in ~w(cgroup cgroup2), into: MapSet.new() do
+      String.to_existing_atom(fs)
     end
   end
 end
