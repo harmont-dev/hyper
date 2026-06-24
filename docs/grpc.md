@@ -42,6 +42,7 @@ With `Hyper` running, you can create a new `gRPC` client in your favorite
 language. We will be using _Python_ here:
 
 ```python
+import grpc
 from google.protobuf import empty_pb2
 from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
 
@@ -95,5 +96,6 @@ You can stop a running VM with `StopVm`, which returns a
 await client.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
 ```
 
-For full documentation, please read the documentation in the [`.proto`](TODO)
+For full documentation, please read the documentation in the
+[`.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v0/hyper.proto)
 file.
