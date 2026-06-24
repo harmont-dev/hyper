@@ -22,8 +22,7 @@ defmodule Hyper.Img.OciLoaderTest do
     # DB row exists and is a base blob.
     assert %Blob{kind: :base} = Repo.get(Blob, id)
 
-    # Idempotent: re-publishing the identical file is a no-op that returns the
-    # same id (the bytes are already present, so the hash matches).
-    assert File.exists?(path)
+    # The recorded blob size matches the published file exactly.
+    assert Repo.get(Blob, id).size == File.stat!(path).size
   end
 end

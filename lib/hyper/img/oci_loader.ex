@@ -51,10 +51,9 @@ defmodule Hyper.Img.OciLoader do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, Params.goarch(arch), tmp),
              {:ok, content} <- dir_bytes(rootfs),
-             {:ok, staged} <- build_ext4(rootfs, Params.ext4_bytes(content), tmp),
-             {:ok, id} <- sha256_file(staged),
-             {:ok, _path} <- publish_file(staged, id),
-             :ok <- record(id, label, File.stat!(final_path(id)).size) do
+             bytes = Params.ext4_bytes(content),
+             {:ok, staged} <- build_ext4(rootfs, bytes),
+             {:ok, id} <- finalize(staged, bytes, label) do
           {:ok, id}
         end
       end)
@@ -119,19 +118,43 @@ defmodule Hyper.Img.OciLoader do
     end
   end
 
-  # Build an ext4 image of `rootfs` sized to `bytes` (a whole-MiB multiple).
-  # `mke2fs` creates the file at the given size and populates it from the
-  # directory in one rootless step. Returns the staged image path.
-  @spec build_ext4(Path.t(), pos_integer(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
-  defp build_ext4(rootfs, bytes, tmp) do
-    staged = Path.join(tmp, "rootfs.img")
+  # Build an ext4 image of `rootfs` sized to `bytes` (a whole-MiB multiple),
+  # staged *inside `layer_dir`* so the later publish is an atomic
+  # same-filesystem rename. `mke2fs` creates the file at the given size and
+  # populates it from the directory in one rootless step. Returns the staged
+  # image path; the staged file is removed if mke2fs fails.
+  @spec build_ext4(Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, term()}
+  defp build_ext4(rootfs, bytes) do
+    File.mkdir_p!(Config.layer_dir())
+    staged = Path.join(Config.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
     size_arg = "#{div(bytes, 1024 * 1024)}M"
-
     args = ["-t", "ext4", "-F", "-q", "-d", rootfs, staged, size_arg]
 
     case tag(cmd(Config.mke2fs_path(), args), :mke2fs) do
-      :ok -> {:ok, staged}
-      {:error, _} = err -> err
+      :ok ->
+        {:ok, staged}
+
+      {:error, _} = err ->
+        _ = File.rm(staged)
+        err
+    end
+  end
+
+  # Hash the staged image (its sha256 is the content-addressed id), publish it
+  # into the store, then record the base image. If anything fails before the
+  # file is published, remove the staged file so a partial build never lingers
+  # in the shared store. `bytes` (the mke2fs size) is exactly the file size, so
+  # it is the recorded blob size -- no extra stat.
+  @spec finalize(Path.t(), pos_integer(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp finalize(staged, bytes, label) do
+    with {:ok, id} <- sha256_file(staged),
+         {:ok, _final} <- publish_file(staged, id),
+         :ok <- record(id, label, bytes) do
+      {:ok, id}
+    else
+      {:error, _} = err ->
+        _ = File.rm(staged)
+        err
     end
   end
 
