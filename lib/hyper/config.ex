@@ -61,6 +61,10 @@ defmodule Hyper.Config do
   @spec firecracker_install_dir :: Path.t()
   def firecracker_install_dir, do: Path.join(redist_dir(), "firecracker")
 
+  @doc "Directory where `Hyper.Node.FireVMM.VmLinux.Provider` installs guest kernels."
+  @spec vmlinux_install_dir :: Path.t()
+  def vmlinux_install_dir, do: Path.join(redist_dir(), "vmlinux")
+
   @doc """
   Path to the directory where all VM chroot's are created (`<work_dir>/jails`).
 
