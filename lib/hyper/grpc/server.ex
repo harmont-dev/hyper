@@ -4,10 +4,6 @@ defmodule Hyper.Grpc.Server do
   maps its request to a domain value via `Hyper.Grpc.Codec.from_grpc/1`, calls
   the existing `Hyper` BEAM API, and maps the result back with
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
-
-  The handler is stateless and identical on every node -- placement and routing
-  are already cluster-wide (`Hyper.Cluster.Scheduler`, `Hyper.Cluster.Routing`),
-  so a call landing on any node is correct.
   """
 
   use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
