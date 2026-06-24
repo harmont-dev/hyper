@@ -55,7 +55,7 @@ proptest! {
     // BlockDev rejects a non-hyper dm device (e.g. `/dev/mapper/cryptroot`) —
     // any mapper name not starting with `hyper-`.
     #[test]
-    fn blockdev_rejects_non_hyper_dm(name in "[a-z][a-z0-9]{0,12}") {
+    fn blockdev_rejects_non_hyper_dm(name in "[a-z][a-z0-9._-]{0,12}") {
         prop_assume!(!name.starts_with("hyper-"));
         let s = format!("/dev/mapper/{name}");
         prop_assert!(s.parse::<BlockDev>().is_err());
