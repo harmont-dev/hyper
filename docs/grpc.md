@@ -8,6 +8,13 @@ create, stop, locate, and list microVMs.
 > **v0 -- unstable.** The contract may change without notice during early
 > development. Pin to a commit if you depend on it.
 
+## VMs
+
+With `Hyper` running, you can create a new `gRPC` client:
+
+```python
+```
+
 ## The contract
 
 The service is `hyper.grpc.v0.Hyper`, defined in

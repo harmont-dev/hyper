@@ -12,6 +12,7 @@ defmodule Hyper.Grpc.Server do
 
   use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
 
+  alias Google.Protobuf.Empty
   alias Hyper.Grpc.Codec
 
   alias Hyper.Grpc.V0.{
@@ -19,10 +20,8 @@ defmodule Hyper.Grpc.Server do
     CreateVmResponse,
     GetVmRequest,
     GetVmResponse,
-    ListVmsRequest,
     ListVmsResponse,
-    StopVmRequest,
-    StopVmResponse
+    StopVmRequest
   }
 
   @spec create_vm(CreateVmRequest.t(), GRPC.Server.Stream.t()) :: CreateVmResponse.t()
@@ -39,7 +38,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: StopVmResponse.t()
+  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: Empty.t()
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     Hyper.Node.FireVMM.State.stop(vm_id)
     Codec.to_grpc(:stopped)
@@ -55,8 +54,8 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
-  def list_vms(%ListVmsRequest{}, _stream) do
+  @spec list_vms(Empty.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  def list_vms(%Empty{}, _stream) do
     Codec.to_grpc({:vms, Hyper.Cluster.Routing.all()})
   end
 end
