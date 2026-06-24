@@ -107,14 +107,17 @@ jobs:
       # !cancelled() (not always()) uploads results on test PASS or FAIL -- the
       # point of Test Analytics is failure/flake history -- while still skipping
       # if the workflow was cancelled. junit_formatter writes the XML at end of
-      # run regardless of pass/fail.
+      # run regardless of pass/fail. report_type: test_results sends JUnit to
+      # Test Analytics via codecov-action (the standalone test-results-action is
+      # deprecated and pinned to Node 20).
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: _build/test/junit.xml
           flags: elixir
+          report_type: test_results
 
       # The artifact feeds the workflow_run publisher (test-results.yml), which
       # runs EnricoMi with a write token -- so the GitHub Check works even on
@@ -174,14 +177,16 @@ jobs:
 
       # !cancelled() uploads on pass OR fail (see elixir job). The action runs at
       # repo root, so the path is fully qualified -- working-directory only
-      # affects `run:` steps, not `uses:` actions.
+      # affects `run:` steps, not `uses:` actions. report_type: test_results
+      # sends JUnit via codecov-action (test-results-action is deprecated/Node 20).
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: native/suidhelper/target/nextest/ci/junit.xml
           flags: rust
+          report_type: test_results
 
       # Repo-relative path: upload-artifact is an action, so the rust job's
       # `working-directory: native/suidhelper` default does NOT apply.
