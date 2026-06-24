@@ -26,7 +26,8 @@ defmodule Sys.Linux.NssTest do
     end
 
     test "a non-integer uid is rejected" do
-      assert Passwd.from_output("root:x:NaN:0:root:/root:/bin/bash\n") == {:error, :invalid_format}
+      assert Passwd.from_output("root:x:NaN:0:root:/root:/bin/bash\n") ==
+               {:error, :invalid_format}
     end
 
     test "empty output yields an empty list" do

@@ -26,6 +26,7 @@ defmodule Sys.Linux.CgroupTest do
   end
 
   test "duplicate cgroup mounts collapse into the set" do
-    assert Cgroup.versions_from_mounts([mount("cgroup"), mount("cgroup")]) == MapSet.new([:cgroup])
+    assert Cgroup.versions_from_mounts([mount("cgroup"), mount("cgroup")]) ==
+             MapSet.new([:cgroup])
   end
 end

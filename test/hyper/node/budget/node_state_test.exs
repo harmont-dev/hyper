@@ -9,7 +9,7 @@ defmodule Hyper.Node.Budget.NodeStateTest do
   defp roomy_state(overrides \\ %{}) do
     struct!(
       %NodeState{
-        node: :"node@host",
+        node: :node@host,
         mem_free: Information.gib(8),
         disk_free: Information.gib(100),
         cpu_load: 0.0,
