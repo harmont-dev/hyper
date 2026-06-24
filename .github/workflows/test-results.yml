@@ -1,0 +1,52 @@
+# Publishes a unified GitHub Check + PR comment from the JUnit XML produced by
+# the CI workflow. Runs via workflow_run (not in CI itself) so it executes in
+# the base-repo context with a write token -- making test annotations work on
+# fork PRs and Dependabot branches, where CI's own token is read-only.
+name: Test Results
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+# Least privilege: only this workflow gets write scopes, and it never checks
+# out untrusted PR code -- it only reads artifacts the CI run produced.
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish test results
+    runs-on: ubuntu-latest
+    # Publish on success OR failure (failing tests are the whole point); skip
+    # when CI was cancelled or skipped.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+      actions: read
+    steps:
+      # download-artifact@v8 fetches artifacts from ANOTHER run via run-id +
+      # github-token (no third-party action needed). Each artifact lands in its
+      # own subdir: artifacts/<name>/...
+      - name: Download CI artifacts
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: artifacts
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          # head_sha attaches the check to the PR's commit (not the default
+          # branch). event_file/event_name let the action resolve the PR for
+          # commenting -- both come from the workflow_run payload.
+          commit: ${{ github.event.workflow_run.head_sha }}
+          event_file: artifacts/Event File/event.json
+          event_name: ${{ github.event.workflow_run.event }}
+          files: "artifacts/**/*.xml"
+          check_name: Test Results

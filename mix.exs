@@ -58,6 +58,7 @@ defmodule Hyper.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test, runtime: false},
+      {:junit_formatter, "~> 3.4", only: :test, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},

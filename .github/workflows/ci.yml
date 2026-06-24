@@ -104,6 +104,31 @@ jobs:
         # under /srv/hyper, unavailable on a CI runner.
         run: mix coveralls.json --no-start --warnings-as-errors
 
+      # !cancelled() (not always()) uploads results on test PASS or FAIL -- the
+      # point of Test Analytics is failure/flake history -- while still skipping
+      # if the workflow was cancelled. junit_formatter writes the XML at end of
+      # run regardless of pass/fail. report_type: test_results sends JUnit to
+      # Test Analytics via codecov-action (the standalone test-results-action is
+      # deprecated and pinned to Node 20).
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: _build/test/junit.xml
+          flags: elixir
+          report_type: test_results
+
+      # The artifact feeds the workflow_run publisher (test-results.yml), which
+      # runs EnricoMi with a write token -- so the GitHub Check works even on
+      # fork PRs, where this job's token is read-only.
+      - name: Upload Elixir test results artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: elixir-test-results
+          path: _build/test/junit.xml
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -139,13 +164,38 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Install cargo-llvm-cov
+      - name: Install cargo-llvm-cov and nextest
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,nextest
 
       - name: test + coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        # `nextest` runs the suite while llvm-cov collects coverage AND nextest
+        # writes target/nextest/ci/junit.xml (see .config/nextest.toml). One run,
+        # two artifacts: lcov.info for coverage, junit.xml for Test Analytics.
+        run: cargo llvm-cov nextest --profile ci --all-features --lcov --output-path lcov.info
+
+      # !cancelled() uploads on pass OR fail (see elixir job). The action runs at
+      # repo root, so the path is fully qualified -- working-directory only
+      # affects `run:` steps, not `uses:` actions. report_type: test_results
+      # sends JUnit via codecov-action (test-results-action is deprecated/Node 20).
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: native/suidhelper/target/nextest/ci/junit.xml
+          flags: rust
+          report_type: test_results
+
+      # Repo-relative path: upload-artifact is an action, so the rust job's
+      # `working-directory: native/suidhelper` default does NOT apply.
+      - name: Upload Rust test results artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-test-results
+          path: native/suidhelper/target/nextest/ci/junit.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -155,3 +205,16 @@ jobs:
           files: native/suidhelper/lcov.info
           flags: rust
           fail_ci_if_error: true
+
+  # Uploads the triggering event payload so the workflow_run publisher
+  # (test-results.yml) can map results back to the originating PR -- required
+  # for PR comments on fork PRs. Tiny job, always runs.
+  event_file:
+    name: Upload event file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: Event File
+          path: ${{ github.event_path }}
