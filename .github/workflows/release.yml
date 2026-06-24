@@ -97,7 +97,7 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hyper-suidhelper" "dist/${out}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: suidhelper-${{ matrix.target }}
           path: native/suidhelper/dist/*
@@ -121,7 +121,7 @@ jobs:
           otp-version: "28"
 
       - name: Cache deps and _build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -136,7 +136,7 @@ jobs:
       - name: Build package tarball
         run: mix hex.build --output "hypervm-${{ needs.prepare-release.outputs.version }}.tar"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hex-package
           path: hypervm-*.tar
@@ -150,7 +150,7 @@ jobs:
       contents: write
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -163,7 +163,7 @@ jobs:
           ls -la release
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           tag_name: ${{ github.ref_name }}
