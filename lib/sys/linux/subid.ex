@@ -35,7 +35,7 @@ defmodule Sys.Linux.Subid do
       content
       |> String.split("\n", trim: true)
       |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
-        case parse_subid_line(line) do
+        case parse(line) do
           {:ok, spec} -> {:cont, {:ok, [spec | acc]}}
           {:error, _} = error -> {:halt, error}
         end
@@ -43,8 +43,14 @@ defmodule Sys.Linux.Subid do
     end
   end
 
-  @spec parse_subid_line(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
-  defp parse_subid_line(line) do
+  @doc """
+  Parse one `/etc/subuid`/`/etc/subgid` line (`name:start:count`) into a `Spec`,
+  where `min_id` is `start` and `max_id` is `start + count`. A line that is not
+  exactly three colon-separated fields, or whose start/count are not integers,
+  yields `{:error, :invalid_format}`.
+  """
+  @spec parse(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
+  def parse(line) do
     with [name, start_str, count_str] <- String.split(line, ":"),
          {start, ""} <- Integer.parse(start_str),
          {count, ""} <- Integer.parse(count_str) do

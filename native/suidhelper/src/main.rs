@@ -1,21 +1,11 @@
-// `&'static str` const generics (`SafeBin<"losetup">`) are nightly-only.
-#![feature(adt_const_params)]
-#![feature(unsized_const_params)]
-#![allow(incomplete_features)]
-
-//! Tiny setuid-root helper for the unprivileged Hyper node.
-//!
-//! Hyper runs as a normal user but needs to attach loop devices and build
-//! device-mapper tables (losetup / dmsetup / blockdev), which require root. This
-//! helper is installed setuid root and exposes ONLY those operations, as a tree
-//! of typed subcommands (one per tool, see `src/tools`), each taking its `--bin`,
-//! plus a `sys-test` command to check installation.
+//! Tiny setuid-root helper for the unprivileged Hyper node — thin binary entry
+//! point. The privilege model and command tree live in the `hyper_suidhelper`
+//! library crate (`src/lib.rs`); this file only parses args and renders output.
 //!
 //! Privilege model: at startup we drop to the real uid; root is only ever held
 //! inside a `Privileged` scope (see `setuid_privileged`), which wraps just the
-//! tool's `run` (the `Command` call). Parsing the result happens after privileges
-//! are dropped. Each subcommand prints its result as JSON on stdout; errors go to
-//! stderr with a non-zero exit.
+//! tool's `run`. Each subcommand prints its result as JSON on stdout; errors go
+//! to stderr with a non-zero exit.
 //!
 //! Build & install:
 //!   cargo build --release
@@ -23,15 +13,12 @@
 //!     target/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
 //! Then: config :hyper, suid_helper: "/usr/local/bin/hyper-suidhelper"
 
-mod config;
-mod tools;
-mod util;
-
 use clap::{Parser, Subcommand};
+use hyper_suidhelper::config;
+use hyper_suidhelper::tools::Tool;
+use hyper_suidhelper::util::setuid_privileged::{self, Privileged};
 use serde::Serialize;
 use std::path::PathBuf;
-use tools::Tool;
-use util::setuid_privileged::{self, Privileged};
 
 #[derive(Parser)]
 #[command(
@@ -73,7 +60,7 @@ impl SysTest {
         Privileged::smoke_test()?;
         Ok(Self {
             sys_test: "ok",
-            hyper_base: crate::config::Config::get().hyper_base().to_path_buf(),
+            hyper_base: config::Config::get().hyper_base().to_path_buf(),
         })
     }
 }

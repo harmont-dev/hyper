@@ -48,11 +48,20 @@ impl Absoluteness for IsAbsolute {
 
 impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
-        // Only a leading root and plain names; `.`/`..`/prefix are rejected.
-        let ok = path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-        if ok {
+        use std::os::unix::ffi::OsStrExt;
+
+        // `Path::components()` normalizes `.` and empty (`//`, trailing `/`)
+        // segments away before they can be inspected, so it cannot enforce the
+        // "no `.`/`..`/empty components" rule this gate documents. Validate the
+        // raw bytes instead (this is a Linux-only crate). The IsAbsolute axis
+        // guarantees the leading `/`; strip it, then require every `/`-separated
+        // segment to be a plain name: non-empty, and neither `.` nor `..` -- which
+        // is how the `..` traversal vector is rejected here.
+        let raw = path.as_os_str().as_bytes();
+        let body = raw.strip_prefix(b"/").unwrap_or(raw);
+
+        let is_plain_name = |seg: &[u8]| !seg.is_empty() && seg != b"." && seg != b"..";
+        if body.split(|&b| b == b'/').all(is_plain_name) {
             Ok(())
         } else {
             Err(ValidationError::LooseComponents)
