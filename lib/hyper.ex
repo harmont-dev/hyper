@@ -36,7 +36,7 @@ defmodule Hyper do
 
   @doc "Generate a fresh VM id (url-safe base64, dm-name compatible)."
   @spec gen_vm_id() :: Hyper.Vm.id()
-  def gen_vm_id, do: Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+  def gen_vm_id, do: "v" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
 
   @spec resolve_arch(Hyper.Vm.Instance.arch() | nil) ::
           {:ok, Hyper.Vm.Instance.arch()} | {:error, term()}

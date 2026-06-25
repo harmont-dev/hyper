@@ -1,27 +1,26 @@
 defmodule Hyper.Node.FireVMM.Jailer do
   @moduledoc """
-  Builds the firecracker
-  [jailer](https://github.com/firecracker-microvm/firecracker/blob/main/docs/jailer.md)
-  command for one VM.
+  Builds the `hyper-suidhelper jailer` command for one VM.
 
-  The jailer sets up the chroot, namespaces, cgroup (via `Hyper.Vm.Instance`
-  flags) and drops privileges, then exec's firecracker. We run the jailer (not
-  firecracker directly) under `MuonTrap.Daemon`; MuonTrap only supervises the OS
-  process, the jailer owns isolation.
+  The BEAM does not invoke the jailer directly. Instead it calls the setuid helper
+  with the `jailer` subcommand; the helper reads the firecracker binary path, chroot
+  base, parent cgroup, and cgroup version from its trusted `/etc/hyper/config.toml`,
+  re-acquires root, and `execve`s the jailer (same pid, so `MuonTrap.Daemon` keeps
+  supervising it).
+
+  This means the BEAM passes only untrusted-origin values: `--id`, `--uid`, `--gid`,
+  repeated `--cgroup KEY=VALUE`, and `--api-sock`. The helper derives and validates
+  everything else; it also inserts the `--` separator between its own flags and
+  firecracker's flags.
 
   Because firecracker is chrooted to `<chroot_base>/<exec>/<id>/root`, the API
-  socket it opens at `/api.socket` lives at `host_socket` on the host - that's the
+  socket it opens at `/api.socket` lives at `host_socket` on the host — that's the
   path the controller connects to.
-
-  Host config: paths are derived from `config :hyper, work_dir: ...`. The
-  firecracker + jailer binaries are installed under `<work_dir>/redist/firecracker`
-  by `Hyper.Node.FireVMM.Provider`; the chroot base is `<work_dir>/jails`.
   """
 
   use OpenTelemetryDecorator
 
   alias Hyper.Node.FireVMM
-  alias Hyper.Node.FireVMM.Provider
   alias Hyper.Vm.Instance
 
   # firecracker's API socket path *inside* the chroot.
@@ -94,26 +93,11 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @spec command(FireVMM.Opts.t()) :: t()
   def command(opts) do
     args =
-      [
-        "--id",
-        opts.vm_id,
-        "--exec-file",
-        Provider.firecracker_bin(),
-        "--uid",
-        to_string(opts.uid),
-        "--gid",
-        to_string(opts.gid),
-        "--chroot-base-dir",
-        Hyper.Config.chroot_base(),
-        "--cgroup-version",
-        "2",
-        "--parent-cgroup",
-        Hyper.Config.parent_cgroup()
-      ] ++
+      ["jailer", "--id", opts.vm_id, "--uid", to_string(opts.uid), "--gid", to_string(opts.gid)] ++
         cgroup_flags(opts.type) ++
-        ["--", "--api-sock", "/" <> @jail_socket]
+        ["--api-sock", "/" <> @jail_socket]
 
-    %{binary: Provider.jailer_bin(), args: args, host_socket: host_socket(opts.vm_id)}
+    %{binary: Hyper.Config.suid_helper(), args: args, host_socket: host_socket(opts.vm_id)}
   end
 
   # Find the appropriate jailer cgroup flags for the given instance type.
@@ -166,5 +150,5 @@ defmodule Hyper.Node.FireVMM.Jailer do
     ])
   end
 
-  defp exec_name, do: Path.basename(Provider.firecracker_bin())
+  defp exec_name, do: Path.basename(Hyper.Config.firecracker_bin())
 end

@@ -2,10 +2,10 @@ defmodule Hyper.Config do
   @moduledoc """
   Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
 
-  `work_dir` is the one value shared with the setuid helper
-  (`native/suidhelper`); both sides read it from `/etc/hyper/config.toml` so the
-  data root has a single source of truth (see `work_dir/0`). Everything else is
-  compile-time.
+  Runtime values shared with the setuid helper (`native/suidhelper`) — `work_dir`,
+  `firecracker_bin`, `jailer_bin` — are read from `/etc/hyper/config.toml` (the
+  single source of truth for both sides) the first time they are needed, then
+  cached in `:persistent_term`. Everything else is compile-time.
   """
 
   # The shared data-root config file, read by both this node and the setuid
@@ -24,38 +24,65 @@ defmodule Hyper.Config do
   Root work directory for this node. All firecracker paths derive from it.
 
   Read from `#{@config_path}` (the single source of truth shared with the setuid
-  helper) the first time it is needed, then cached in `:persistent_term`. Falls
-  back to `#{@dev_work_dir}` when the file is absent (local dev / CI, where the
-  helper is not installed anyway).
+  helper) the first time it is needed, then cached via `config_toml/0`. Falls back
+  to `#{@dev_work_dir}` when the file is absent (local dev / CI, where the helper
+  is not installed anyway).
   """
   @spec work_dir :: Path.t()
-  def work_dir do
-    case :persistent_term.get({__MODULE__, :work_dir}, nil) do
-      nil ->
-        work_dir = load_work_dir()
-        :persistent_term.put({__MODULE__, :work_dir}, work_dir)
-        work_dir
-
-      work_dir ->
-        work_dir
-    end
-  end
-
-  @spec load_work_dir :: Path.t()
-  defp load_work_dir do
-    case File.read(@config_path) do
-      {:ok, body} -> body |> Toml.decode!() |> Map.fetch!("work_dir")
-      {:error, _} -> @dev_work_dir
-    end
-  end
+  def work_dir, do: Map.get(config_toml(), "work_dir", @dev_work_dir)
 
   @doc "Directory holding redistributable binaries downloaded by the node."
   @spec redist_dir :: Path.t()
   def redist_dir, do: Path.join(work_dir(), "redist")
 
-  @doc "Directory where `Hyper.Node.FireVMM.Provider` installs the firecracker release."
-  @spec firecracker_install_dir :: Path.t()
-  def firecracker_install_dir, do: Path.join(redist_dir(), "firecracker")
+  @doc """
+  Absolute path to the firecracker binary, as set in `#{@config_path}` under the
+  `firecracker_bin` key. Raises if the key is absent — the operator must configure
+  it; there is no default.
+  """
+  @spec firecracker_bin :: Path.t()
+  def firecracker_bin, do: fetch_bin!("firecracker_bin")
+
+  @doc """
+  Absolute path to the jailer binary, as set in `#{@config_path}` under the
+  `jailer_bin` key. Raises if the key is absent — the operator must configure it;
+  there is no default.
+  """
+  @spec jailer_bin :: Path.t()
+  def jailer_bin, do: fetch_bin!("jailer_bin")
+
+  @spec fetch_bin!(String.t()) :: Path.t()
+  defp fetch_bin!(key) do
+    case Map.fetch(config_toml(), key) do
+      {:ok, path} ->
+        path
+
+      :error ->
+        raise "#{@config_path}: key #{inspect(key)} is not set; " <>
+                "operator must configure it before starting the node"
+    end
+  end
+
+  @spec config_toml :: map()
+  defp config_toml do
+    case :persistent_term.get({__MODULE__, :config_toml}, nil) do
+      nil ->
+        cfg = load_config_toml()
+        :persistent_term.put({__MODULE__, :config_toml}, cfg)
+        cfg
+
+      cfg ->
+        cfg
+    end
+  end
+
+  @spec load_config_toml :: map()
+  defp load_config_toml do
+    case File.read(@config_path) do
+      {:ok, body} -> Toml.decode!(body)
+      {:error, _} -> %{}
+    end
+  end
 
   @doc "Directory where `Hyper.Node.FireVMM.VmLinux.Provider` installs guest kernels."
   @spec vmlinux_install_dir :: Path.t()

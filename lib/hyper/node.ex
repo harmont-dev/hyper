@@ -153,7 +153,7 @@ defmodule Hyper.Node do
   @spec test_system :: :ok | {:error, term()}
   def test_system do
     with {:ok, _} <- Hyper.Node.Config.Budget.load(),
-         :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
+         :ok <- check_firecracker_bins(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Img.OciLoader.Umoci.ensure_installed(),
@@ -164,6 +164,19 @@ defmodule Hyper.Node do
          {:ok, base} <- Hyper.SuidHelper.sys_test(),
          :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
+    end
+  end
+
+  @spec check_firecracker_bins ::
+          :ok | {:error, {:firecracker_bin_missing | :jailer_bin_missing, Path.t()}}
+  defp check_firecracker_bins do
+    fc = Hyper.Config.firecracker_bin()
+    jail = Hyper.Config.jailer_bin()
+
+    cond do
+      not Sys.Posix.executable?(fc) -> {:error, {:firecracker_bin_missing, fc}}
+      not Sys.Posix.executable?(jail) -> {:error, {:jailer_bin_missing, jail}}
+      true -> :ok
     end
   end
 

@@ -4,15 +4,17 @@ defmodule Hyper.Node.FireVMM.Daemon do
   `Hyper.Node.FireVMM.Core`.
 
   Lifecycle is supervisor-owned. On every (re)start it first resets any stale
-  jail left by a prior incarnation - the firecracker jailer refuses to reuse an
-  existing chroot - then builds the jailer command and runs it under
+  jail left by a prior incarnation — the firecracker jailer refuses to reuse an
+  existing chroot — then builds the jailer command and runs it under
   `MuonTrap.Daemon`, which kills the OS process when its port closes (controller
   crash, container teardown, or BEAM death). So no firecracker process outlives
   the supervisor, and `Core`'s `:one_for_all` restarting this child (e.g. after a
   firecracker crash) cleanly cold-boots against a fresh jail.
 
-  The supervised process *is* the `MuonTrap.Daemon` - `start_link/1` does the
-  reset, then delegates and returns that pid.
+  The supervised process is `hyper-suidhelper jailer ...`, which `execve`s into
+  the jailer (same pid) so MuonTrap owns the firecracker lifetime without needing
+  to know the jailer path. `start_link/1` does the reset, then delegates and
+  returns that pid.
   """
 
   alias Hyper.Node.FireVMM.{Jailer, Opts}
