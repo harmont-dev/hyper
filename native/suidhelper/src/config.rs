@@ -5,26 +5,40 @@ use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, S
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::fcntl::OFlag;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use thiserror::Error;
 
-#[derive(Debug, Copy, Clone, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum LoadingError {
     #[error(transparent)]
     Path(#[from] safe_path::ValidationError),
     #[error(transparent)]
     File(#[from] safe_file::ValidationError),
     #[error("{0:?} could not be read")]
-    Unreadable(&'static Path),
+    Unreadable(PathBuf),
     #[error("{0:?} is not valid TOML")]
-    Malformed(&'static Path),
+    Malformed(PathBuf),
     #[error("work_dir in {0:?} must be an absolute path")]
-    Relative(&'static Path),
+    Relative(PathBuf),
 }
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
-static CONFIG_PATH: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from(CONFIG_PATHSTR));
+const INSECURE_CONFIG_PATH_ENV: &str = "HYPER_SETUIDHELPER_CONFIG_PATH";
+
+/// The config file path. In production this is the fixed `/etc/hyper/config.toml`.
+/// Only in INSECURE TEST MODE (both gates open) may an env var redirect it — the
+/// secure arm is always the hardcoded path, so a release build cannot be steered.
+fn config_path() -> PathBuf {
+    crate::security_gate::split(
+        || PathBuf::from(CONFIG_PATHSTR),
+        || {
+            std::env::var(INSECURE_CONFIG_PATH_ENV)
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(CONFIG_PATHSTR))
+        },
+    )
+}
 
 /// Hyper's /etc/hyper/config.toml file format.
 #[derive(Debug, Clone, Deserialize)]
@@ -51,7 +65,7 @@ impl Config {
     }
 
     /// Hyper's data root.
-    pub fn hyper_base(&self) -> &Path {
+    pub fn hyper_base(&self) -> &std::path::Path {
         self.work_dir.as_path()
     }
 
@@ -63,17 +77,25 @@ impl Config {
     /// Read, ownership-check, parse, and validate the config file. See the module
     /// docs for the trust model.
     pub fn safe_load() -> Result<Self, LoadingError> {
-        let path = CONFIG_PATH.as_path();
+        let path = config_path();
 
-        let safe_path: SafePath<IsAbsolute, StrictComponents> =
-            PathBuf::from(CONFIG_PATHSTR).try_into()?;
+        let body = crate::security_gate::split(
+            || -> Result<String, LoadingError> {
+                let safe_path: SafePath<IsAbsolute, StrictComponents> =
+                    path.clone().try_into()?;
+                let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
+                    SafeFile::open(&safe_path, OFlag::O_RDONLY)?;
+                std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
+                    .map_err(|_| LoadingError::Unreadable(path.clone()))
+            },
+            || -> Result<String, LoadingError> {
+                std::fs::read_to_string(&path)
+                    .map_err(|_| LoadingError::Unreadable(path.clone()))
+            },
+        )?;
 
-        let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-            SafeFile::open(&safe_path, OFlag::O_RDONLY)?;
-
-        let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
-            .map_err(|_| LoadingError::Unreadable(path))?;
-        let config: Config = toml::from_str(&body).map_err(|_| LoadingError::Malformed(path))?;
+        let config: Config =
+            toml::from_str(&body).map_err(|_| LoadingError::Malformed(path.clone()))?;
 
         if !config.work_dir.is_absolute() {
             return Err(LoadingError::Relative(path));

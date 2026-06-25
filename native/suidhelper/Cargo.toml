@@ -30,6 +30,10 @@ path = "tests/util/safe_dev.rs"
 name = "security_gate"
 path = "tests/security_gate.rs"
 
+[[test]]
+name = "config_seam"
+path = "tests/config_seam.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.29", features = ["user", "fs", "dir"] }
