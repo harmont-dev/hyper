@@ -105,9 +105,13 @@ fn valid_config_and_setuid_yields_sys_test_ok() {
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
     let out = run_with_config(&p, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    let json: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("stdout is JSON");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
     assert_eq!(json["sys_test"], "ok");
     assert_eq!(json["hyper_base"], "/srv/hyper");
 }

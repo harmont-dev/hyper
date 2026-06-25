@@ -15,7 +15,9 @@ fn accepts_canonical_tables_and_round_trips() {
         "0 100 thin /dev/mapper/hyper-pool 0",
         "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
     ] {
-        let t = s.parse::<DmTable>().unwrap_or_else(|_| panic!("rejected {s:?}"));
+        let t = s
+            .parse::<DmTable>()
+            .unwrap_or_else(|_| panic!("rejected {s:?}"));
         assert_eq!(t.to_string(), s, "round-trip changed {s:?}");
     }
 }
@@ -24,7 +26,9 @@ fn accepts_canonical_tables_and_round_trips() {
 fn normalizes_inner_whitespace_on_render() {
     let weird = "0   100  snapshot  /dev/loop0   /dev/loop1 P 8";
     let canonical = "0 100 snapshot /dev/loop0 /dev/loop1 P 8";
-    let t = weird.parse::<DmTable>().expect("weird spacing must still parse");
+    let t = weird
+        .parse::<DmTable>()
+        .expect("weird spacing must still parse");
     assert_eq!(t.to_string(), canonical);
 }
 
@@ -54,7 +58,9 @@ fn thinmessage_accepts_whitelisted_and_normalizes() {
         ("create_thin   7", "create_thin 7"),
         ("delete 3", "delete 3"),
     ] {
-        let m = s.parse::<ThinMessage>().unwrap_or_else(|_| panic!("rejected {s:?}"));
+        let m = s
+            .parse::<ThinMessage>()
+            .unwrap_or_else(|_| panic!("rejected {s:?}"));
         assert_eq!(m.to_string(), canon, "round-trip changed {s:?}");
     }
 }
@@ -62,9 +68,17 @@ fn thinmessage_accepts_whitelisted_and_normalizes() {
 #[test]
 fn thinmessage_rejects_non_whitelisted() {
     for bad in [
-        "resize 10", "create_thin", "delete", "delete x",
-        "create_thin 1 2", "", "create_thin -1",
+        "resize 10",
+        "create_thin",
+        "delete",
+        "delete x",
+        "create_thin 1 2",
+        "",
+        "create_thin -1",
     ] {
-        assert!(bad.parse::<ThinMessage>().is_err(), "ThinMessage accepted {bad:?}");
+        assert!(
+            bad.parse::<ThinMessage>().is_err(),
+            "ThinMessage accepted {bad:?}"
+        );
     }
 }

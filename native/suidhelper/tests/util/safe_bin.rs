@@ -32,7 +32,11 @@ fn rejects_symlink_with_correct_basename() {
     let link = dir.path().join("losetup");
     symlink(&target, &link).unwrap();
     // Symlink is checked before ownership, so this holds regardless of who runs it.
-    assert!(link.to_str().unwrap().parse::<SafeBin<"losetup">>().is_err());
+    assert!(link
+        .to_str()
+        .unwrap()
+        .parse::<SafeBin<"losetup">>()
+        .is_err());
 }
 
 #[test]

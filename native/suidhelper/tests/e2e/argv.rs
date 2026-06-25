@@ -78,7 +78,12 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table() {
             "0   100  snapshot  /dev/loop0   /dev/loop1 P 8",
         ],
     );
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let argv = recorded_argv(&rec);
     assert_eq!(
@@ -107,7 +112,14 @@ fn dmsetup_remove_retry_toggle() {
 
     let out = run(
         &cfg,
-        &["dmsetup", "--bin", bin.to_str().unwrap(), "remove", "--retry", "hyper-vm1"],
+        &[
+            "dmsetup",
+            "--bin",
+            bin.to_str().unwrap(),
+            "remove",
+            "--retry",
+            "hyper-vm1",
+        ],
     );
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(recorded_argv(&rec), vec!["remove", "--retry", "hyper-vm1"]);
@@ -126,11 +138,22 @@ fn dmsetup_message_create_thin() {
 
     let out = run(
         &cfg,
-        &["dmsetup", "--bin", bin.to_str().unwrap(), "message", "hyper-pool", "--message", "create_thin 7"],
+        &[
+            "dmsetup",
+            "--bin",
+            bin.to_str().unwrap(),
+            "message",
+            "hyper-pool",
+            "--message",
+            "create_thin 7",
+        ],
     );
     assert_eq!(out.status.code(), Some(0));
     // the helper passes the whole message as a single argv element (dmsetup re-joins remaining args)
-    assert_eq!(recorded_argv(&rec), vec!["message", "hyper-pool", "0", "create_thin 7"]);
+    assert_eq!(
+        recorded_argv(&rec),
+        vec!["message", "hyper-pool", "0", "create_thin 7"]
+    );
 }
 
 #[test]
@@ -147,9 +170,20 @@ fn blockdev_getsz_argv_and_parse() {
 
     let out = run(
         &cfg,
-        &["blockdev", "--bin", bin.to_str().unwrap(), "--getsz", "/dev/loop0"],
+        &[
+            "blockdev",
+            "--bin",
+            bin.to_str().unwrap(),
+            "--getsz",
+            "/dev/loop0",
+        ],
     );
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(recorded_argv(&rec), vec!["--getsz", "/dev/loop0"]);
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["sectors"], 2048);

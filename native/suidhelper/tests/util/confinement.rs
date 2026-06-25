@@ -16,7 +16,9 @@ use std::path::{Path, PathBuf};
 type Strict = SafePath<IsAbsolute, StrictComponents>;
 
 fn safe(p: &Path) -> Strict {
-    p.to_path_buf().try_into().expect("test path must be strict-absolute")
+    p.to_path_buf()
+        .try_into()
+        .expect("test path must be strict-absolute")
 }
 
 // remove_dir_all must unlink a symlinked entry, never follow it: a symlink
@@ -42,7 +44,10 @@ fn remove_dir_all_does_not_follow_symlinks_out_of_tree() {
 
     assert!(!tree.exists(), "tree must be gone");
     assert!(sentinel.exists(), "sentinel dir must survive");
-    assert!(sentinel.join("keep.txt").exists(), "sentinel contents must survive");
+    assert!(
+        sentinel.join("keep.txt").exists(),
+        "sentinel contents must survive"
+    );
 }
 
 // descend refuses a symlinked path component (O_NOFOLLOW).
