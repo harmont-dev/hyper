@@ -23,28 +23,18 @@ static INSECURE: AtomicBool = AtomicBool::new(false);
 /// the very first thing in `main`, before any seam (e.g. the config load) runs.
 /// Idempotent.
 pub fn init() {
-    let insecure = cfg!(feature = "insecure_test_seams") && env_opts_in();
+    let insecure = cfg!(feature = "insecure_test_seams")
+        && std::env::var(INSECURE_MODE_ENV).as_deref() == Ok("1");
     if insecure {
         eprintln!(
             "hyper-suidhelper: WARNING: running in INSECURE TEST MODE \
              ({INSECURE_MODE_ENV}=1); never do this on a real host"
         );
     }
-    // Relaxed is sufficient: a standalone flag, written once at startup before
-    // any concurrency, and it publishes no other memory — so there is no
-    // acquire/release (let alone total-order) relationship to enforce.
     INSECURE.store(insecure, Ordering::Relaxed);
 }
 
-fn env_opts_in() -> bool {
-    std::env::var(INSECURE_MODE_ENV).as_deref() == Ok("1")
-}
-
-/// Run `secure` in production; run `insecure` only when BOTH gates are open.
-///
-/// The `cfg!(feature = ...)` is a compile-time constant: in any build without
-/// the feature it folds to `false`, so the whole condition is constant-false and
-/// the optimizer drops the `insecure` branch entirely.
+/// Run `secure` in production; run `insecure` in testing.
 pub fn split<T>(secure: impl FnOnce() -> T, insecure: impl FnOnce() -> T) -> T {
     if cfg!(feature = "insecure_test_seams") && INSECURE.load(Ordering::Relaxed) {
         insecure()
