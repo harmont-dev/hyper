@@ -52,8 +52,10 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec bin() :: Path.t()
   def bin do
-    if Config.umoci_path() != nil do
-      Config.umoci_path()
+    configured = Config.umoci_path()
+
+    if configured != nil do
+      configured
     else
       {:ok, arch} = Sys.Arch.current()
       default_path(arch)
