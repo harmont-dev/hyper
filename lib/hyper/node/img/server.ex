@@ -132,6 +132,12 @@ defmodule Hyper.Node.Img.Server do
   end
 
   @impl true
+  # Each privileged command runs through `System.cmd`, which links a transient
+  # port to this process; because we trap exits (for `terminate/2` teardown),
+  # the port's normal close is delivered here. Ignore it.
+  def handle_info({:EXIT, _port, :normal}, state), do: {:noreply, state}
+
+  @impl true
   def terminate(_reason, %State{dm_names: dm_names}) do
     # Remove top-down (a snapshot's origin is the device below it). Layers are
     # released automatically when this process exits (Layer.Server monitors us).

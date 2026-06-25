@@ -123,6 +123,12 @@ defmodule Hyper.Node.Layer.Server do
   end
 
   @impl true
+  # Each privileged command runs through `System.cmd`, which links a transient
+  # port to this process; because we trap exits (for `terminate/2` teardown),
+  # the port's normal close is delivered here. Ignore it.
+  def handle_info({:EXIT, _port, :normal}, state), do: {:noreply, state}
+
+  @impl true
   def terminate(_reason, %State{blk_path: blk_path}) do
     case SuidHelper.Losetup.detach(blk_path) do
       :ok ->
