@@ -50,11 +50,12 @@ defmodule Hyper.Node.FireVMM do
     Supervisor.start_link(__MODULE__, opts, name: via(opts.vm_id))
   end
 
+  @spec child_spec(Opts.t()) :: Supervisor.child_spec()
   def child_spec(opts) do
     # Keyed by VM id and :transient so a cleanly-stopped VM is not rebooted by
     # the node-level DynamicSupervisor.
     %{
-      vm_id: {__MODULE__, opts.vm_id},
+      id: {__MODULE__, opts.vm_id},
       start: {__MODULE__, :start_link, [opts]},
       type: :supervisor,
       restart: :transient
