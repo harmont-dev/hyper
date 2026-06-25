@@ -54,7 +54,7 @@ fn recorded_argv(record: &Path) -> Vec<String> {
 }
 
 #[test]
-fn dmsetup_create_snapshot_reconstructs_canonical_table() {
+fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_create: needs root to acquire + own the fake bin");
         return;
@@ -100,7 +100,7 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table() {
 }
 
 #[test]
-fn dmsetup_remove_retry_toggle() {
+fn dmsetup_remove_retry_toggle_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_remove: needs root");
         return;
@@ -126,7 +126,7 @@ fn dmsetup_remove_retry_toggle() {
 }
 
 #[test]
-fn dmsetup_message_create_thin() {
+fn dmsetup_message_create_thin_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_message: needs root");
         return;
@@ -157,7 +157,7 @@ fn dmsetup_message_create_thin() {
 }
 
 #[test]
-fn blockdev_getsz_argv_and_parse() {
+fn blockdev_getsz_argv_and_parse_as_root() {
     if !is_root() {
         eprintln!("SKIP blockdev: needs root");
         return;

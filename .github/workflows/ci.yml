@@ -229,16 +229,18 @@ jobs:
         with:
           tool: nextest
 
-      # The feature-gated E2E suites self-skip without root. Run ONLY these two as
-      # root (via sudo -E so the runner's cargo/rustup home and PATH are kept) so
-      # the root-only cases -- sys-test ok, fake-bin argv capture -- actually run.
-      # The rest of the suite (owner-axis tests assume a non-root uid) stays in the
-      # non-root `rust` job above.
-      - name: Gated E2E suites as root
+      # Root-gated cases are tagged by name: every test that needs root ends in
+      # `_as_root` and self-skips when run unprivileged. We select them by that
+      # suffix (via sudo -E so the runner's cargo/rustup home and PATH are kept)
+      # so the root-only paths -- sys-test ok, fake-bin argv capture, mknod/chown
+      # jail build -- actually run. A new root test is picked up automatically by
+      # following the naming convention; no test-binary enumeration to maintain.
+      # The rest of the suite (owner-axis tests assume a non-root uid) stays in
+      # the non-root `rust` job above.
+      - name: Gated tests as root
         run: |
           sudo -E env "PATH=$PATH" \
-            cargo nextest run --features insecure_test_seams \
-              --test e2e_config --test e2e_argv --test util_chroot_jail --test e2e_chroot_jail
+            cargo nextest run --features insecure_test_seams -E 'test(/_as_root$/)'
 
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required

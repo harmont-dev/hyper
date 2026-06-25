@@ -42,8 +42,6 @@ fn own_ids() -> (u32, u32) {
     )
 }
 
-// --- open_chroot_under confinement ----------------------------------------
-
 // A valid <exec>/<id> tree under the jail base opens successfully.
 #[test]
 fn open_chroot_descends_valid_tree() {
@@ -86,8 +84,6 @@ fn open_chroot_rejects_path_outside_base() {
         "got {err:?}",
     );
 }
-
-// --- stage_kernel_under source confinement --------------------------------
 
 // A source that lives entirely outside hyper_base is refused.
 #[test]
@@ -144,8 +140,6 @@ fn stage_kernel_missing_source_errors() {
     assert!(matches!(err, Error::Source { .. }), "got {err:?}");
 }
 
-// --- stage_kernel_under success + refusal ---------------------------------
-
 // A confined source is staged byte-identically as `vmlinux`; re-staging into the
 // now-occupied slot is refused (O_EXCL / link EEXIST).
 #[test]
@@ -177,8 +171,6 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
     );
 }
 
-// --- root-gated: full build against a real loop device --------------------
-
 /// Attach a fresh loop device backed by a 1 MiB temp file. Returns the device
 /// path, or None if losetup is unavailable / fails (test self-skips).
 fn setup_loop(tmp: &Path) -> Option<PathBuf> {
@@ -207,7 +199,7 @@ fn teardown_loop(dev: &Path) {
 // A full build stages the kernel AND creates a `rootfs` block node mirroring the
 // loop device's major:minor, both owned by the requested uid:gid.
 #[test]
-fn build_under_stages_kernel_and_mirrors_device() {
+fn build_under_stages_kernel_and_mirrors_device_as_root() {
     if !is_root() {
         eprintln!("SKIP build_under_stages_kernel_and_mirrors_device: needs root for mknod/chown");
         return;

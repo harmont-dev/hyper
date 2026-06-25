@@ -62,7 +62,7 @@ fn teardown_loop(dev: &Path) {
 // `chroot-jail prepare` stages the kernel and creates the rootfs node, exiting 0
 // with {"result":"prepared"}.
 #[test]
-fn prepare_succeeds_and_builds_jail() {
+fn prepare_succeeds_and_builds_jail_as_root() {
     if !is_root() {
         eprintln!("SKIP prepare_succeeds_and_builds_jail: needs root");
         return;
@@ -146,7 +146,7 @@ fn prepare_rejects_system_device_operand() {
 // `chroot-jail remove` of a real chroot succeeds; the cgroup leaf is given as a
 // missing path so removal is idempotent and touches nothing on the host.
 #[test]
-fn remove_succeeds_and_is_idempotent() {
+fn remove_succeeds_and_is_idempotent_as_root() {
     if !is_root() {
         eprintln!("SKIP remove_succeeds_and_is_idempotent: needs root");
         return;
