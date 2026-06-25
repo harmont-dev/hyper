@@ -52,12 +52,14 @@ defmodule Hyper.SuidHelper do
 
   @doc """
   Check that the setuid helper and every tool it execs are usable on this
-  machine: the helper binary itself, then each tool submodule's own check.
+  machine: the helper binary is present, is the build this release expects
+  (`verify/0`), then each tool submodule's own check.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.test_system")
   def test_system do
     with :ok <- helper_present(),
+         :ok <- verify(),
          :ok <- Losetup.test_system(),
          :ok <- Dmsetup.test_system() do
       Blockdev.test_system()
