@@ -63,9 +63,9 @@ defmodule Hyper.Img.OciLoader do
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
-             {:ok, content} <- dir_size(rootfs),
-             size = ext4_size(content),
-             {:ok, staged} <- build_ext4(rootfs, size) do
+             {:ok, {content, files}} <- dir_usage(rootfs),
+             params = ext4_params(content, files),
+             {:ok, staged} <- build_ext4(rootfs, params) do
           Hyper.Img.create(staged, label: label)
         end
       end)
@@ -77,17 +77,19 @@ defmodule Hyper.Img.OciLoader do
   resolvable on this host. Returns `{:error, {:missing_tools, names}}` listing
   any that are absent.
   """
-  @spec test_system() :: :ok | {:error, {:missing_tools, [String.t()]}}
+  @spec test_system() :: :ok | {:error, term()}
   def test_system do
-    tools = [
-      {"skopeo", Config.skopeo_path()},
-      {"umoci", Umoci.bin()},
-      {"mke2fs", Config.mke2fs_path()}
-    ]
+    with {:ok, _arch} <- Sys.Arch.current() do
+      tools = [
+        {"skopeo", Config.skopeo_path()},
+        {"umoci", Umoci.bin()},
+        {"mke2fs", Config.mke2fs_path()}
+      ]
 
-    missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
+      missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
 
-    if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
+      if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
+    end
   end
 
   # Validate `ref` and return the `skopeo` source `"docker://" <> ref`. A ref must
@@ -107,13 +109,16 @@ defmodule Hyper.Img.OciLoader do
   def goarch(:x86_64), do: "amd64"
   def goarch(:aarch64), do: "arm64"
 
+  # `du` apparent bytes undercount ext4 block usage and the default inode ratio
+  # starves file-dense trees, so the size carries the inode table plus slack and
+  # the inode count is the file count with headroom.
   @doc false
-  @spec ext4_size(Information.t()) :: Information.t()
-  def ext4_size(content) do
-    overhead = Information.bytes(div(Information.as_bytes(content), 4)) + Information.mib(8)
-    size = ceil_mib(content + overhead)
-    floor = Information.mib(16)
-    if size >= floor, do: size, else: floor
+  @spec ext4_params(Information.t(), non_neg_integer()) :: {Information.t(), pos_integer()}
+  def ext4_params(content, files) do
+    inodes = files + div(files, 10) + 256
+    metadata = Information.bytes(inodes * 256) + Information.mib(16)
+    size = ceil_mib(content + Information.bytes(div(Information.as_bytes(content), 4)) + metadata)
+    {size, inodes}
   end
 
   @spec ceil_mib(Information.t()) :: Information.t()
@@ -142,19 +147,29 @@ defmodule Hyper.Img.OciLoader do
         "oci:#{oci}:img"
       ])
 
+    umoci = cmd(Umoci.bin(), ["unpack", "--rootless", "--image", "#{oci}:img", bundle])
+
     with :ok <- tag(skopeo, :skopeo),
-         :ok <- tag(cmd(Umoci.bin(), ["unpack", "--image", "#{oci}:img", bundle]), :umoci) do
+         :ok <- tag(umoci, :umoci) do
       {:ok, Path.join(bundle, "rootfs")}
     end
   end
 
-  # Apparent size of the rootfs tree (`du -sb`), parsed from the first field.
-  @spec dir_size(Path.t()) :: {:ok, Information.t()} | {:error, term()}
-  defp dir_size(rootfs) do
-    case System.cmd("du", ["-sb", rootfs], stderr_to_stdout: true) do
+  # Block-aware actual usage (`du -sB1`) and the file count (`du -s --inodes`).
+  @spec dir_usage(Path.t()) :: {:ok, {Information.t(), non_neg_integer()}} | {:error, term()}
+  defp dir_usage(rootfs) do
+    with {:ok, bytes} <- du(rootfs, ["-sB1"]),
+         {:ok, files} <- du(rootfs, ["-s", "--inodes"]) do
+      {:ok, {Information.bytes(bytes), files}}
+    end
+  end
+
+  @spec du(Path.t(), [String.t()]) :: {:ok, non_neg_integer()} | {:error, term()}
+  defp du(rootfs, flags) do
+    case System.cmd("du", flags ++ [rootfs], stderr_to_stdout: true) do
       {out, 0} ->
         case Integer.parse(out) do
-          {bytes, _rest} -> {:ok, Information.bytes(bytes)}
+          {n, _rest} -> {:ok, n}
           :error -> {:error, {:du_unparsable, out}}
         end
 
@@ -163,18 +178,19 @@ defmodule Hyper.Img.OciLoader do
     end
   end
 
-  # Build an ext4 image of `rootfs` sized to `bytes` (a whole-MiB multiple),
-  # staged *inside `layer_dir`* so the later publish is an atomic
-  # same-filesystem rename. `mke2fs` creates the file at the given size and
-  # populates it from the directory in one rootless step. Returns the staged
-  # image path; the staged file is removed if mke2fs fails.
-  @spec build_ext4(Path.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
-  defp build_ext4(rootfs, size) do
-    Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs")
+  # Staged inside `layer_dir` so the later publish is an atomic same-filesystem
+  # rename. `-N` pins the inode count (the default ratio starves file-dense
+  # trees); the staged file is removed if mke2fs fails.
+  @spec build_ext4(Path.t(), {Information.t(), pos_integer()}) ::
+          {:ok, Path.t()} | {:error, term()}
+  defp build_ext4(rootfs, {size, inodes}) do
+    Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs (#{inodes} inodes)")
     File.mkdir_p!(Config.layer_dir())
     staged = Path.join(Config.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
-    size_arg = "#{Information.as_mib(size)}M"
-    args = ["-t", "ext4", "-F", "-q", "-d", rootfs, staged, size_arg]
+
+    args =
+      ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
+        ["#{Information.as_mib(size)}M"]
 
     case tag(cmd(Config.mke2fs_path(), args), :mke2fs) do
       :ok ->

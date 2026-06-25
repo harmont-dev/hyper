@@ -7,24 +7,23 @@ defmodule Hyper.Img.OciLoaderTest do
   alias Hyper.Img.OciLoader
   alias Unit.Information
 
-  describe "ext4_size/1" do
-    test "floors small inputs at 16 MiB" do
-      assert OciLoader.ext4_size(Information.bytes(0)) == Information.mib(16)
-      assert OciLoader.ext4_size(Information.bytes(1)) == Information.mib(16)
+  describe "ext4_params/2" do
+    test "provisions inode headroom above the file count" do
+      {_size, inodes} = OciLoader.ext4_params(Information.mib(100), 10_000)
+      assert inodes > 10_000
     end
 
-    test "scales overhead with content above the floor crossover" do
-      assert OciLoader.ext4_size(Information.mib(4)) == Information.mib(16)
-      assert OciLoader.ext4_size(Information.mib(64)) == Information.mib(88)
-    end
+    property "size is a whole MiB that holds the content and the inode table" do
+      check all(
+              bytes <- integer(0..Information.as_bytes(Information.gib(8))),
+              files <- integer(0..500_000)
+            ) do
+        {size, inodes} = OciLoader.ext4_params(Information.bytes(bytes), files)
+        size_b = Information.as_bytes(size)
 
-    property "always a whole-MiB size that fits the content and clears the floor" do
-      check all(bytes <- integer(0..Information.as_bytes(Information.gib(8)))) do
-        size = Information.as_bytes(OciLoader.ext4_size(Information.bytes(bytes)))
-
-        assert rem(size, Information.as_bytes(Information.mib(1))) == 0
-        assert size >= bytes
-        assert size >= Information.as_bytes(Information.mib(16))
+        assert inodes >= files
+        assert rem(size_b, Information.as_bytes(Information.mib(1))) == 0
+        assert size_b >= bytes + inodes * 256
       end
     end
   end

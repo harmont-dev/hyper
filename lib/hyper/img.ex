@@ -46,12 +46,27 @@ defmodule Hyper.Img do
 
     with {:ok, %File.Stat{size: size}} <- File.stat(path),
          {:ok, id} <- content_id(path),
-         {:ok, _final} <- publish(path, id),
-         :ok <- record(id, label, size) do
+         {:ok, final, origin} <- publish(path, id),
+         :ok <- record_or_rollback(id, label, size, final, origin) do
       {:ok, id}
     else
       {:error, _} = err ->
         _ = File.rm(path)
+        err
+    end
+  end
+
+  # Record the image; if the DB write fails, roll back a file we just created (a
+  # reused file pre-existed and may back another image, so leave it).
+  @spec record_or_rollback(id(), String.t(), non_neg_integer(), Path.t(), :created | :reused) ::
+          :ok | {:error, term()}
+  defp record_or_rollback(id, label, size, final, origin) do
+    case record(id, label, size) do
+      :ok ->
+        :ok
+
+      {:error, _} = err ->
+        _ = if origin == :created, do: File.rm(final), else: :ok
         err
     end
   end
@@ -67,7 +82,7 @@ defmodule Hyper.Img do
 
   # Move `src` into the store at its content-addressed path. If the destination
   # already exists (identical bytes already published), drop `src` and reuse it.
-  @spec publish(Path.t(), id()) :: {:ok, Path.t()} | {:error, term()}
+  @spec publish(Path.t(), id()) :: {:ok, Path.t(), :created | :reused} | {:error, term()}
   @decorate with_span("Hyper.Img.publish", include: [:id])
   defp publish(src, id) do
     File.mkdir_p!(Config.layer_dir())
@@ -76,9 +91,12 @@ defmodule Hyper.Img do
     if File.exists?(final) do
       Logger.info("image #{id} already present in store; reusing")
       _ = File.rm(src)
-      {:ok, final}
+      {:ok, final, :reused}
     else
-      place(src, final)
+      case place(src, final) do
+        {:ok, ^final} -> {:ok, final, :created}
+        {:error, _} = err -> err
+      end
     end
   end
 
@@ -97,6 +115,7 @@ defmodule Hyper.Img do
             {:ok, final}
 
           {:error, reason} ->
+            _ = File.rm(final)
             {:error, {:publish_failed, reason}}
         end
 
