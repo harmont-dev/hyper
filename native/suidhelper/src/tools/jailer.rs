@@ -285,12 +285,13 @@ fn build_argv(
 /// Close every inherited fd above stdio so a compromised BEAM cannot smuggle an
 /// open fd into the root jailer. Keep 0/1/2: MuonTrap supervises the jailer
 /// through stdio, and stderr carries our exec-failure message. `close_range(2)`
-/// needs Linux 5.9+; on ENOSYS we fall back to closing each fd up to the limit.
+/// needs Linux 5.9+; on any failure (ENOSYS or otherwise) we fall back to
+/// closing each fd individually — fail closed before handing root to the jailer.
 fn close_inherited_fds() {
     const FIRST: u32 = 3;
     // SAFETY: raw syscall with no memory operands; closing fds has no UB.
     let rc = unsafe { nix::libc::close_range(FIRST, u32::MAX, 0) };
-    if rc == 0 || Errno::last() != Errno::ENOSYS {
+    if rc == 0 {
         return;
     }
 

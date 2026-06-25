@@ -116,7 +116,9 @@ fn main() {
         Command::Jailer(args) => {
             let e = jailer::run(args).expect_err("jailer::run only returns on error");
             eprintln!("{e}");
-            std::process::exit(2);
+            // _exit bypasses atexit handlers; safe because we are permanently root
+            // at this point and must not run any cleanup registered before escalation.
+            unsafe { nix::libc::_exit(2) }
         }
         Command::Version => unreachable!("handled above"),
     };
