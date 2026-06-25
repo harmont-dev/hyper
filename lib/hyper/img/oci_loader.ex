@@ -21,6 +21,8 @@ defmodule Hyper.Img.OciLoader do
   alias Hyper.Config
   alias Hyper.Img.OciLoader.Umoci
 
+  require Logger
+
   @mib 1024 * 1024
 
   # ext4 metadata (inode tables, journal, reserved blocks) plus slack so the
@@ -45,6 +47,21 @@ defmodule Hyper.Img.OciLoader do
   """
   @spec load(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
   def load(ref, opts) when is_binary(ref) and is_list(opts) do
+    Logger.info("oci: loading image #{ref}")
+
+    case do_load(ref, opts) do
+      {:ok, id} = ok ->
+        Logger.info("oci: loaded #{ref} as image #{id}")
+        ok
+
+      {:error, reason} = err ->
+        Logger.warning("oci: failed to load #{ref}: #{inspect(reason)}")
+        err
+    end
+  end
+
+  @spec do_load(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
+  defp do_load(ref, opts) do
     label = Keyword.get(opts, :label, ref)
 
     with {:ok, source} <- source(ref),
@@ -117,6 +134,7 @@ defmodule Hyper.Img.OciLoader do
   @spec pull_and_unpack(String.t(), String.t(), Path.t()) ::
           {:ok, Path.t()} | {:error, term()}
   defp pull_and_unpack(source, goarch, tmp) do
+    Logger.debug("oci: pulling and flattening #{source}")
     oci = Path.join(tmp, "oci")
     bundle = Path.join(tmp, "bundle")
 
@@ -161,6 +179,7 @@ defmodule Hyper.Img.OciLoader do
   # image path; the staged file is removed if mke2fs fails.
   @spec build_ext4(Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, term()}
   defp build_ext4(rootfs, bytes) do
+    Logger.debug("oci: building #{div(bytes, @mib)} MiB ext4 rootfs")
     File.mkdir_p!(Config.layer_dir())
     staged = Path.join(Config.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
     size_arg = "#{div(bytes, 1024 * 1024)}M"

@@ -15,6 +15,8 @@ defmodule Hyper.Img.OciLoader.Umoci do
   alias Hyper.Config
   alias Hyper.Redist
 
+  require Logger
+
   # Pinned umoci release per architecture: the static binary's filename, its
   # download URL, and its SHA-256 (verified on download). umoci ships one raw
   # binary per arch -- https://github.com/opencontainers/umoci/releases.
@@ -74,6 +76,7 @@ defmodule Hyper.Img.OciLoader.Umoci do
   @spec install(Sys.Arch.t(), Path.t()) :: :ok | {:error, term()}
   defp install(arch, path) do
     dl = Map.fetch!(@downloads, arch)
+    Logger.info("umoci: downloading #{dl.url}")
 
     with :ok <- Redist.File.install(dl.url, dl.sha256, path) do
       File.chmod(path, 0o755)
