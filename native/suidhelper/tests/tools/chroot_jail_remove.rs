@@ -20,8 +20,6 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-// --- depth contracts -------------------------------------------------------
-
 // `--chroot` must be exactly <exec>/<id>: a single component below the base is
 // too shallow.
 #[test]
@@ -54,8 +52,6 @@ fn cgroup_too_shallow_is_depth_error() {
     assert!(matches!(err, Error::CgroupDepth(_)), "got {err:?}");
 }
 
-// --- lexical contracts -----------------------------------------------------
-
 // A `..` component is rejected by the real SafePath gate, before any FS access.
 #[test]
 fn chroot_with_dotdot_is_rejected() {
@@ -79,8 +75,6 @@ fn relative_chroot_is_rejected() {
         "got {err:?}",
     );
 }
-
-// --- idempotency contracts -------------------------------------------------
 
 // Removing a chroot whose target does not exist (correct depth) is success.
 #[test]
@@ -113,8 +107,6 @@ fn nonempty_cgroup_leaf_is_ok() {
     assert!(leaf.exists(), "non-empty leaf must survive");
 }
 
-// --- removal contracts -----------------------------------------------------
-
 // A real <exec>/<id> tree with contents is fully removed; a sibling id survives.
 #[test]
 fn removes_chroot_tree_and_spares_siblings() {
@@ -145,8 +137,6 @@ fn removes_cgroup_leaf_and_spares_parent() {
     assert!(parent.exists(), "cgroup parent must survive");
 }
 
-// --- confinement contract (the security-critical one) ----------------------
-
 // A symlinked <exec> component must NOT be followed: removal must fail (or no-op)
 // without deleting through the symlink. A sentinel outside the jail must survive.
 #[test]
@@ -173,8 +163,6 @@ fn symlinked_chroot_component_does_not_escape() {
         "removal escaped through a symlinked component",
     );
 }
-
-// --- property: depth classification ---------------------------------------
 
 proptest! {
     // For a chroot `depth` components below the jail base (target never created),

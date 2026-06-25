@@ -132,13 +132,25 @@ Coverage is a side effect of good tests, never the target.
 
 ## Other conventions
 
-- **Comments earn their place.** No section-divider banners (`# --- foo ---`),
-  no comment that just restates what the next line does. A comment explains a
-  non-obvious *why* a reader cannot recover from the code — a workaround, an
-  invariant, a deliberate trade-off. Prefer self-documenting code: a named
-  function, a `Unit.*` quantity instead of a bare `1024 * 1024`, a descriptive
-  variable — over a comment narrating the mechanics. If you reach for a comment
-  to explain *what*, rename the thing instead.
+- **NEVER write section-divider banners** — comments like `// --- foo ---`,
+  `# === bar ===`, `// ---- Tests ----`, or any comment whose job is to label a
+  region of a file. They are a code smell: reaching for one is a signal that
+  the file is doing too many things at once. When you feel the urge, do NOT
+  write the banner — make the underlying decision instead:
+    1. **Split it out.** If the regions are genuinely distinct
+       responsibilities, they belong in separate modules/files (or, for tests,
+       separate test files or submodules). Extract them.
+    2. **Or drop the comment entirely.** If the code is already cohesive, the
+       banner adds nothing a reader can't see from the names — delete it. A
+       blank line is sufficient separation.
+  There is no third option where the banner stays.
+- **Comments earn their place.** No comment that just restates what the next
+  line does. A comment explains a non-obvious *why* a reader cannot recover
+  from the code — a workaround, an invariant, a deliberate trade-off. Prefer
+  self-documenting code: a named function, a `Unit.*` quantity instead of a
+  bare `1024 * 1024`, a descriptive variable — over a comment narrating the
+  mechanics. If you reach for a comment to explain *what*, rename the thing
+  instead.
 - Don't hand-roll magic numbers for sizes/durations/bandwidth: use the
   `Unit.*` types (`Unit.Information.mib(8)`, not `8 * 1024 * 1024`) and
   `use Unit.Operators` for unit-aware arithmetic.
