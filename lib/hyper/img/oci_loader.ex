@@ -97,8 +97,6 @@ defmodule Hyper.Img.OciLoader do
     if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
   end
 
-  # --- pure derivations (no I/O; the unit-tested core) ----------------------
-
   # Validate `ref` and return the `skopeo` source `"docker://" <> ref`. A ref must
   # be non-empty and contain no whitespace (refs never do; rejecting whitespace
   # also closes the door on accidental arg-splitting surprises).
@@ -127,8 +125,6 @@ defmodule Hyper.Img.OciLoader do
     max(rounded, @floor_bytes)
   end
 
-  # --- pull + flatten -------------------------------------------------------
-
   # `skopeo copy` into a local OCI layout, then `umoci unpack` into a bundle.
   # Returns the path to the flattened rootfs directory.
   @spec pull_and_unpack(String.t(), String.t(), Path.t()) ::
@@ -154,8 +150,6 @@ defmodule Hyper.Img.OciLoader do
       {:ok, Path.join(bundle, "rootfs")}
     end
   end
-
-  # --- size + build ---------------------------------------------------------
 
   # Apparent byte total of the rootfs tree (`du -sb`), parsed from the first field.
   @spec dir_bytes(Path.t()) :: {:ok, non_neg_integer()} | {:error, term()}
@@ -194,8 +188,6 @@ defmodule Hyper.Img.OciLoader do
         err
     end
   end
-
-  # --- external-command plumbing -------------------------------------------
 
   # Run `bin` with `args`, no shell (System.cmd takes an arg list), merging
   # stderr so failures carry diagnostics. Returns `{output, exit_status}`.
