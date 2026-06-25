@@ -30,6 +30,7 @@ defmodule Hyper.Img.OciLoader do
 
   alias Hyper.Config
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
+  alias Hyper.Img.OciLoader.Umoci
 
   @mib 1024 * 1024
   @hash_chunk 2 * @mib
@@ -59,6 +60,7 @@ defmodule Hyper.Img.OciLoader do
     label = Keyword.get(opts, :label, ref)
 
     with {:ok, source} <- source(ref),
+         :ok <- Umoci.ensure_installed(),
          :ok <- test_system(),
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
@@ -81,7 +83,7 @@ defmodule Hyper.Img.OciLoader do
   @spec test_system() :: :ok | {:error, {:missing_tools, [String.t()]}}
   def test_system do
     missing =
-      [Config.skopeo_path(), Config.umoci_path(), Config.mke2fs_path()]
+      [Config.skopeo_path(), Umoci.bin(), Config.mke2fs_path()]
       |> Enum.reject(&System.find_executable/1)
 
     if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
@@ -139,7 +141,7 @@ defmodule Hyper.Img.OciLoader do
       ])
 
     with :ok <- tag(skopeo, :skopeo),
-         :ok <- tag(cmd(Config.umoci_path(), ["unpack", "--image", "#{oci}:img", bundle]), :umoci) do
+         :ok <- tag(cmd(Umoci.bin(), ["unpack", "--image", "#{oci}:img", bundle]), :umoci) do
       {:ok, Path.join(bundle, "rootfs")}
     end
   end

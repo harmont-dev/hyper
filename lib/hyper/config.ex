@@ -20,7 +20,7 @@ defmodule Hyper.Config do
   @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
   @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
   @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
-  @umoci_path Application.compile_env(:hyper, :umoci_path, "umoci")
+  @umoci_path Application.compile_env(:hyper, :umoci_path, nil)
   @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
   @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
@@ -64,6 +64,10 @@ defmodule Hyper.Config do
   @doc "Directory where `Hyper.Node.FireVMM.VmLinux.Provider` installs guest kernels."
   @spec vmlinux_install_dir :: Path.t()
   def vmlinux_install_dir, do: Path.join(redist_dir(), "vmlinux")
+
+  @doc "Directory where `Hyper.Img.OciLoader.Umoci` installs the default umoci binary."
+  @spec umoci_install_dir :: Path.t()
+  def umoci_install_dir, do: Path.join(redist_dir(), "umoci")
 
   @doc """
   Path to the directory where all VM chroot's are created (`<work_dir>/jails`).
@@ -120,7 +124,10 @@ defmodule Hyper.Config do
   @doc "Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images)."
   def skopeo_path, do: @skopeo_path
 
-  @doc "Path to the umoci binary (used by `Hyper.Img.OciLoader` to flatten OCI layers)."
+  @doc """
+  Operator-configured path to the umoci binary, or `nil` (the default) to let
+  `Hyper.Img.OciLoader.Umoci` download and manage a pinned default.
+  """
   def umoci_path, do: @umoci_path
 
   @doc "Path to the mke2fs binary (used by `Hyper.Img.OciLoader` to build the ext4 rootfs)."
