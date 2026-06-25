@@ -90,6 +90,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   use (snapshot, thin, thin-pool).
   """
   @spec test_system() :: :ok | {:error, term()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.test_system")
   def test_system do
     if System.find_executable(Hyper.Config.dmsetup_path()),
       do: test_targets(),
@@ -98,6 +99,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
 
   @doc "Verify the kernel exposes the dm targets we use (snapshot, thin, thin-pool)."
   @spec test_targets() :: :ok | {:error, term()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.test_targets")
   def test_targets do
     case System.cmd(Hyper.Config.dmsetup_path(), ["targets"], stderr_to_stdout: true) do
       {out, 0} ->
