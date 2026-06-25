@@ -51,6 +51,10 @@ name = "tools_chroot_jail_remove"
 path = "tests/tools/chroot_jail_remove.rs"
 
 [[test]]
+name = "util_chroot_jail"
+path = "tests/util/chroot_jail.rs"
+
+[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 
