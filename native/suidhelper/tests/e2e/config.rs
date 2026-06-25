@@ -3,6 +3,8 @@
 //! tempfile instead of /etc/hyper, so tests never touch the real host.
 #![cfg(feature = "insecure_test_seams")]
 
+use hyper_suidhelper::config::{BinError, Config};
+use hyper_suidhelper::util::safe_bin;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -125,4 +127,96 @@ fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
     assert_eq!(json["sys_test"], "ok");
     assert_eq!(json["hyper_base"], "/srv/hyper");
+}
+
+#[test]
+fn firecracker_unconfigured_when_absent() {
+    // Config::default() has firecracker == None; the accessor must signal this
+    // distinctly so callers can report a missing-configuration error rather than
+    // a safe_bin validation error.
+    let err = Config::default()
+        .firecracker()
+        .expect_err("absent firecracker must return Unconfigured");
+    assert!(
+        matches!(err, BinError::Unconfigured("firecracker")),
+        "expected Unconfigured(\"firecracker\"), got {err:?}",
+    );
+}
+
+#[test]
+fn jailer_unconfigured_when_absent() {
+    let err = Config::default()
+        .jailer()
+        .expect_err("absent jailer must return Unconfigured");
+    assert!(
+        matches!(err, BinError::Unconfigured("jailer")),
+        "expected Unconfigured(\"jailer\"), got {err:?}",
+    );
+}
+
+#[test]
+fn jailer_basename_mismatch_rejected() {
+    // The basename check in SafeBin::from_path precedes the stat, so we do not
+    // need a real file — any absolute path with the wrong leaf name is enough.
+    let body = "work_dir = \"/srv/hyper\"\njailer = \"/usr/local/bin/not-jailer\"\n";
+    let config: Config = toml::from_str(body).unwrap();
+    let err = config
+        .jailer()
+        .expect_err("wrong-basename jailer path must be rejected");
+    assert!(
+        matches!(err, BinError::Bin(safe_bin::Error::Name { .. })),
+        "expected a Name error, got {err:?}",
+    );
+}
+
+#[test]
+fn firecracker_and_jailer_return_ok_when_root_owned_as_root() {
+    if !is_root() {
+        eprintln!("SKIP firecracker_jailer_configured: needs root to create root-owned binaries");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let fc = tmp.path().join("firecracker");
+    let jr = tmp.path().join("jailer");
+    // 0o755: root-owned, not group/other-writable — satisfies SafeBin's checks.
+    for p in [&fc, &jr] {
+        fs::write(p, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let body = format!(
+        "work_dir = \"/srv/hyper\"\nfirecracker = \"{}\"\njailer = \"{}\"\n",
+        fc.display(),
+        jr.display(),
+    );
+    let config: Config = toml::from_str(&body).unwrap();
+    assert!(
+        config.firecracker().is_ok(),
+        "root-owned firecracker with correct basename must be accepted"
+    );
+    assert!(
+        config.jailer().is_ok(),
+        "root-owned jailer with correct basename must be accepted"
+    );
+}
+
+#[test]
+fn bad_uid_gid_range_exits_2_as_root() {
+    if !is_root() {
+        eprintln!("SKIP bad_uid_gid_range: needs root to own the config file");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    // min = 0 is the clearest violation: uid 0 is root, which the jailer must
+    // never receive because it skips its privilege drop when uid == 0.
+    let p = write_root_config(
+        tmp.path(),
+        "work_dir = \"/srv/hyper\"\n[uid_gid_range]\nmin = 0\nmax = 100\n",
+    );
+    let out = run_with_config(&p, &["sys-test"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("uid_gid_range"),
+        "expected a uid_gid_range error in stderr, got: {err}",
+    );
 }

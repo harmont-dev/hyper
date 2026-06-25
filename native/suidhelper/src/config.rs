@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Runtime host configuration, read from a single root-owned TOML file.
+//!
+//! ## UID/GID range divergence
+//!
+//! Elixir keeps `compile_env` default `{900_000, 999_999}` that governs which
+//! UIDs the node hands *out*; this helper reads `[uid_gid_range]` from
+//! config.toml to decide which UIDs it *accepts* (default `{900_000, 999_999}`
+//! when the key is absent). Operators narrowing the range must set **both**.
 
 use crate::util::safe_bin::{self, SafeBin};
 use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
@@ -22,10 +29,47 @@ pub enum LoadingError {
     Malformed(PathBuf),
     #[error("work_dir in {0:?} must be an absolute path")]
     Relative(PathBuf),
+    #[error("uid_gid_range.min must be >= 1 and <= max (got min={min}, max={max})")]
+    BadUidGidRange { min: u32, max: u32 },
+}
+
+/// Error returned by config accessors for tool binaries derived from config.
+#[derive(Debug, Error)]
+pub enum BinError {
+    #[error("required binary `{0}` is not configured in /etc/hyper/config.toml")]
+    Unconfigured(&'static str),
+    #[error(transparent)]
+    Bin(#[from] safe_bin::Error),
 }
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
 const INSECURE_CONFIG_PATH_ENV: &str = "HYPER_SETUIDHELPER_CONFIG_PATH";
+
+/// UID/GID allocation band, read from `[uid_gid_range]` in config.toml.
+/// Controls which UIDs the helper *accepts* from the BEAM — see module docs.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct UidGidRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+// Band defaults match Elixir's `compile_env` allocation defaults so that an
+// unconfigured helper and an unconfigured node agree out of the box.
+const DEFAULT_UID_GID: (u32, u32) = (900_000, 999_999);
+
+/// Validate a uid_gid_range value. A present range where min==0 or min>max is
+/// treated as a config trust violation — fatal at load, consistent with the
+/// "present but untrusted" model. Exposed so tests can verify the contract
+/// without touching the file system.
+pub fn validate_uid_gid_range(r: &UidGidRange) -> Result<(), LoadingError> {
+    if r.min == 0 || r.min > r.max {
+        return Err(LoadingError::BadUidGidRange {
+            min: r.min,
+            max: r.max,
+        });
+    }
+    Ok(())
+}
 
 /// The config file path. In production this is the fixed `/etc/hyper/config.toml`.
 /// Only in INSECURE TEST MODE (both gates open) may an env var redirect it — the
@@ -51,6 +95,14 @@ pub struct Config {
     losetup: PathBuf,
     #[serde(default = "default_blockdev")]
     blockdev: PathBuf,
+    #[serde(default)]
+    firecracker: Option<PathBuf>,
+    #[serde(default)]
+    jailer: Option<PathBuf>,
+    #[serde(default = "default_parent_cgroup")]
+    parent_cgroup: String,
+    #[serde(default)]
+    uid_gid_range: Option<UidGidRange>,
 }
 
 // The default data root. Must match the Elixir node's `@dev_work_dir`, which it
@@ -72,6 +124,11 @@ fn default_blockdev() -> PathBuf {
     PathBuf::from("/usr/sbin/blockdev")
 }
 
+fn default_parent_cgroup() -> String {
+    // Must match Elixir node's `@parent_cgroup`; operators need to keep them in sync.
+    "hyper".into()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -79,6 +136,10 @@ impl Default for Config {
             dmsetup: default_dmsetup(),
             losetup: default_losetup(),
             blockdev: default_blockdev(),
+            firecracker: None,
+            jailer: None,
+            parent_cgroup: default_parent_cgroup(),
+            uid_gid_range: None,
         }
     }
 }
@@ -86,7 +147,7 @@ impl Default for Config {
 impl Config {
     /// The process-wide config, loaded once (and forced unprivileged by
     /// [`Config::init`]). An absent file yields the built-in defaults; a
-    /// *present but untrusted* file (wrong owner/mode, malformed) is fatal -
+    /// *present but untrusted* file (wrong owner/mode, malformed) is fatal —
     /// the helper prints the error and exits rather than trusting it.
     pub fn get() -> &'static Config {
         LazyLock::force(&CONFIG)
@@ -95,7 +156,7 @@ impl Config {
     /// Force the config to load now. Call this once at the very start of `main`,
     /// after privileges have already been dropped (the `.preinit_array` entry in
     /// `setuid_privileged` runs before `main`), so the file is never first read
-    /// lazily from inside a `Privileged` scope - i.e. it is guaranteed to be read
+    /// lazily from inside a `Privileged` scope — i.e. it is guaranteed to be read
     /// as the real uid, not as root.
     pub fn init() {
         let _ = Self::get();
@@ -126,6 +187,42 @@ impl Config {
         SafeBin::from_path(&self.blockdev)
     }
 
+    /// The Firecracker VMM binary, validated as root-owned and correctly named.
+    /// Errors [`BinError::Unconfigured`] when absent from config — an operator
+    /// must set this key before any VM can be launched.
+    pub fn firecracker(&self) -> Result<SafeBin<"firecracker">, BinError> {
+        self.firecracker
+            .as_deref()
+            .ok_or(BinError::Unconfigured("firecracker"))
+            .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
+    }
+
+    /// The Firecracker jailer binary, validated as root-owned and correctly named.
+    /// Errors [`BinError::Unconfigured`] when absent from config — an operator
+    /// must set this key before any VM can be launched.
+    pub fn jailer(&self) -> Result<SafeBin<"jailer">, BinError> {
+        self.jailer
+            .as_deref()
+            .ok_or(BinError::Unconfigured("jailer"))
+            .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
+    }
+
+    /// The jailer `--parent-cgroup` value. Defaults to `"hyper"`, matching the
+    /// Elixir node's `@parent_cgroup`.
+    pub fn parent_cgroup(&self) -> &str {
+        &self.parent_cgroup
+    }
+
+    /// The UID/GID band the helper accepts from the BEAM. Defaults to
+    /// `(900_000, 999_999)` when the key is absent (matching Elixir's defaults).
+    /// A present range with min==0 or min>max is rejected at load time by
+    /// [`Config::safe_load`], so this accessor is always total.
+    pub fn uid_gid_range(&self) -> (u32, u32) {
+        self.uid_gid_range
+            .map(|r| (r.min, r.max))
+            .unwrap_or(DEFAULT_UID_GID)
+    }
+
     /// Read, ownership-check, parse, and validate the config file. See the module
     /// docs for the trust model.
     pub fn safe_load() -> Result<Self, LoadingError> {
@@ -138,7 +235,7 @@ impl Config {
                 Ok(file) => file,
                 // A genuinely-absent file means "use the built-in defaults": those
                 // are compiled into this root-owned binary, so they are trusted. Any
-                // OTHER failure - a present but wrong-owner/mode file, an I/O error -
+                // OTHER failure — a present but wrong-owner/mode file, an I/O error —
                 // stays fatal, because it is a signal (someone put an untrusted file
                 // there), not an absence.
                 Err(safe_file::ValidationError::Open(nix::errno::Errno::ENOENT)) => {
@@ -155,6 +252,11 @@ impl Config {
         if !config.work_dir.is_absolute() {
             return Err(LoadingError::Relative(path));
         }
+
+        if let Some(r) = &config.uid_gid_range {
+            validate_uid_gid_range(r)?;
+        }
+
         Ok(config)
     }
 }

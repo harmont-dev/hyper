@@ -72,6 +72,10 @@ path = "tests/e2e/argv.rs"
 name = "e2e_chroot_jail"
 path = "tests/e2e/chroot_jail.rs"
 
+[[test]]
+name = "config_uid_gid_range"
+path = "tests/config_uid_gid_range.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
@@ -84,6 +88,7 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [profile.release]
 strip = true
