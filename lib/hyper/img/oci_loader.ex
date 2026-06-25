@@ -83,9 +83,13 @@ defmodule Hyper.Img.OciLoader do
   """
   @spec test_system() :: :ok | {:error, {:missing_tools, [String.t()]}}
   def test_system do
-    missing =
-      [Config.skopeo_path(), Umoci.bin(), Config.mke2fs_path()]
-      |> Enum.reject(&System.find_executable/1)
+    tools = [
+      {"skopeo", Config.skopeo_path()},
+      {"umoci", Umoci.bin()},
+      {"mke2fs", Config.mke2fs_path()}
+    ]
+
+    missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
 
     if missing == [], do: :ok, else: {:error, {:missing_tools, missing}}
   end
