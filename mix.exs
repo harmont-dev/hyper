@@ -24,6 +24,10 @@ defmodule Hyper.MixProject do
         # Cache the PLTs in a stable, gitignored dir so CI can cache them.
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
+        # `:mix` is needed so the Mix tasks under `lib/mix/tasks` (which call
+        # `Mix.raise/1`, `Mix.shell/0`, and implement the `Mix.Task` behaviour)
+        # resolve instead of tripping `unknown_function`.
+        plt_add_apps: [:mix],
         # Verify @specs against actual returns, and flag ignored return values.
         flags: [:unmatched_returns, :extra_return, :missing_return]
       ]

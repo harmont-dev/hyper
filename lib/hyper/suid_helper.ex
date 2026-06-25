@@ -16,7 +16,7 @@ defmodule Hyper.SuidHelper do
   self-test and reports the base path it was compiled against.
   """
 
-  alias Hyper.SuidHelper.{Blockdev, Dmsetup, Expected, Losetup}
+  alias Hyper.SuidHelper.{Dmsetup, Expected}
 
   use OpenTelemetryDecorator
 
@@ -51,18 +51,20 @@ defmodule Hyper.SuidHelper do
   end
 
   @doc """
-  Check that the setuid helper and every tool it execs are usable on this
-  machine: the helper binary is present, is the build this release expects
-  (`verify_version/0`), then each tool submodule's own check.
+  Check that the setuid helper is usable on this machine: the helper binary is
+  present, is the build this release expects (`verify_version/0`), and the kernel
+  exposes the device-mapper targets we need (`Dmsetup.test_system/0`, which also
+  exercises the helper's configured `dmsetup` binary).
+
+  The `losetup`/`blockdev` binaries are validated by the helper the first time
+  each is used; their paths live in the helper's own config, not here.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.test_system")
   def test_system do
     with :ok <- helper_present(),
-         :ok <- verify_version(),
-         :ok <- Losetup.test_system(),
-         :ok <- Dmsetup.test_system() do
-      Blockdev.test_system()
+         :ok <- verify_version() do
+      Dmsetup.test_system()
     end
   end
 

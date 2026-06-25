@@ -11,7 +11,7 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec attach_ro(Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Losetup.attach_ro", include: [:path])
   def attach_ro(path) do
-    case SuidHelper.exec(["losetup", "--bin", Hyper.Config.losetup_path(), "attach", path]) do
+    case SuidHelper.exec(["losetup", "attach", path]) do
       {:ok, %{"device" => dev}} -> {:ok, dev}
       {:error, _} = err -> err
     end
@@ -21,14 +21,7 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec attach_rw(Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Losetup.attach_rw", include: [:path])
   def attach_rw(path) do
-    case SuidHelper.exec([
-           "losetup",
-           "--bin",
-           Hyper.Config.losetup_path(),
-           "attach",
-           "--rw",
-           path
-         ]) do
+    case SuidHelper.exec(["losetup", "attach", "--rw", path]) do
       {:ok, %{"device" => dev}} -> {:ok, dev}
       {:error, _} = err -> err
     end
@@ -38,18 +31,9 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec detach(Path.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Losetup.detach", include: [:dev])
   def detach(dev) do
-    case SuidHelper.exec(["losetup", "--bin", Hyper.Config.losetup_path(), "detach", dev]) do
+    case SuidHelper.exec(["losetup", "detach", dev]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
-  end
-
-  @doc "Check the losetup binary is present."
-  @spec test_system() :: :ok | {:error, :losetup_not_found}
-  @decorate with_span("Hyper.SuidHelper.Losetup.test_system")
-  def test_system do
-    if System.find_executable(Hyper.Config.losetup_path()),
-      do: :ok,
-      else: {:error, :losetup_not_found}
   end
 end

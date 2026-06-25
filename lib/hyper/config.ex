@@ -16,9 +16,6 @@ defmodule Hyper.Config do
   @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
   @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
   @layer_dir Application.compile_env!(:hyper, :layer_dir)
-  @losetup_path Application.compile_env(:hyper, :losetup_path, "losetup")
-  @dmsetup_path Application.compile_env(:hyper, :dmsetup_path, "dmsetup")
-  @blockdev_path Application.compile_env(:hyper, :blockdev_path, "blockdev")
   @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
   @umoci_path Application.compile_env(:hyper, :umoci_path, nil)
   @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
@@ -111,15 +108,6 @@ defmodule Hyper.Config do
   @spec layer_dir :: Path.t()
   def layer_dir, do: @layer_dir
 
-  @doc "Path to the losetup binary."
-  def losetup_path, do: @losetup_path
-
-  @doc "Path to the dmsetup binary."
-  def dmsetup_path, do: @dmsetup_path
-
-  @doc "Path to the blockdev binary."
-  def blockdev_path, do: @blockdev_path
-
   @doc "Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images)."
   def skopeo_path, do: @skopeo_path
 
@@ -132,15 +120,20 @@ defmodule Hyper.Config do
   @doc "Path to the mke2fs binary (used by `Hyper.Img.OciLoader` to build the ext4 rootfs)."
   def mke2fs_path, do: @mke2fs_path
 
-  @doc """
-  Path to the setuid-root device helper (`hyper-suidhelper`). Required: the node
-  runs unprivileged and routes every `losetup`/`dmsetup`/`blockdev` operation
-  through it.
+  # Where `cargo xtask install` (via `mix suidhelper.install`) drops the helper.
+  @default_suid_helper "/usr/local/bin/hyper-suidhelper"
 
-  Runtime config (host-specific), so it can be set per node without recompiling.
+  @doc """
+  Path to the setuid-root device helper (`hyper-suidhelper`). The node runs
+  unprivileged and routes every `losetup`/`dmsetup`/`blockdev` operation through
+  it.
+
+  Defaults to `#{@default_suid_helper}`, the install path used by `mix
+  suidhelper.install`. Runtime config (host-specific), so an operator who
+  installs it elsewhere can override per node without recompiling.
   """
   @spec suid_helper :: Path.t()
-  def suid_helper, do: Application.fetch_env!(:hyper, :suid_helper)
+  def suid_helper, do: Application.get_env(:hyper, :suid_helper, @default_suid_helper)
 
   @doc """
   Directory for per-VM scratch (writable-layer COW) files. Must be node-local and

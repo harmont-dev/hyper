@@ -52,6 +52,9 @@ enum DmOp {
         #[arg(long)]
         message: ThinMessage,
     },
+    /// List the target types the kernel device-mapper exposes. Read-only, but
+    /// still needs root: it opens `/dev/mapper/control`.
+    Targets,
 }
 
 #[derive(Serialize)]
@@ -60,6 +63,7 @@ pub enum DmsetupOut {
     Created { device: PathBuf },
     Removed,
     Messaged,
+    Targets { output: String },
 }
 
 pub struct Dmsetup {
@@ -105,6 +109,9 @@ impl IsTool for Dmsetup {
                     .arg("0")
                     .arg(message.to_string());
             }
+            DmOp::Targets => {
+                cmd.arg("targets");
+            }
         }
 
         cmd.env_clear().output()
@@ -124,6 +131,9 @@ impl IsTool for Dmsetup {
             },
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
+            DmOp::Targets => DmsetupOut::Targets {
+                output: String::from_utf8_lossy(&out.stdout).into_owned(),
+            },
         })
     }
 }
