@@ -31,10 +31,7 @@ config :hyper,
   }
 
 if config_env() == :test do
-  # Synchronous span processor so finished spans export immediately to whatever
-  # exporter a test installs (see Hyper.OtelCase); :none keeps spans from leaving
-  # the box when a test has not opted in.
-  config :opentelemetry, span_processor: :simple, traces_exporter: :none
+  config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
   config :libcluster, topologies: []
 
