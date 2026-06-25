@@ -6,6 +6,11 @@ description = "Tiny setuid-root helper that runs a whitelisted set of device com
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/harmont-dev/hyper"
 
+[features]
+# TEST ONLY. Compiles the security_gate insecure arms. Never enable for a real
+# (setuid) build — build.rs refuses to compile a release binary with this on.
+insecure_test_seams = []
+
 [[bin]]
 name = "hyper-suidhelper"
 path = "src/main.rs"
@@ -20,6 +25,10 @@ path = "tests/util/safe_path.rs"
 [[test]]
 name = "safe_dev"
 path = "tests/util/safe_dev.rs"
+
+[[test]]
+name = "security_gate"
+path = "tests/security_gate.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
