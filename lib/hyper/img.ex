@@ -11,6 +11,8 @@ defmodule Hyper.Img do
   files stay decoupled from the store and DB: they hand a path to `create/2`.
   """
 
+  use OpenTelemetryDecorator
+
   alias Hyper.Config
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
 
@@ -34,13 +36,9 @@ defmodule Hyper.Img do
   of `path`).
 
   Idempotent: creating identical bytes again is a no-op that returns the same id.
-
-  Publish-before-record is deliberate -- the layer GC prunes a `blobs` row whose
-  file is missing, so a row must never exist before its file. The publish (an
-  atomic rename when `path` shares a filesystem with the store) is the commit
-  point.
   """
   @spec create(Path.t(), keyword()) :: {:ok, id()} | {:error, term()}
+  @decorate with_span("Hyper.Img.create", include: [:path, :label])
   def create(path, opts \\ []) do
     label = Keyword.get(opts, :label, Path.basename(path))
 
@@ -58,6 +56,7 @@ defmodule Hyper.Img do
 
   # Streaming sha256 of `path`, lowercase hex -- the content address.
   @spec content_id(Path.t()) :: {:ok, id()} | {:error, term()}
+  @decorate with_span("Hyper.Img.content_id", include: [:path])
   defp content_id(path) do
     {:ok, Hyper.Redist.Sha256.file(path)}
   rescue
@@ -67,6 +66,7 @@ defmodule Hyper.Img do
   # Move `src` into the store at its content-addressed path. If the destination
   # already exists (identical bytes already published), drop `src` and reuse it.
   @spec publish(Path.t(), id()) :: {:ok, Path.t()} | {:error, term()}
+  @decorate with_span("Hyper.Img.publish", include: [:id])
   defp publish(src, id) do
     File.mkdir_p!(Config.layer_dir())
     final = final_path(id)
