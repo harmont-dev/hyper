@@ -8,7 +8,8 @@ defmodule Hyper.Img.OciLoader do
     1. **pulls** it with `skopeo`, selecting the manifest entry matching this
        node's architecture, into a local OCI layout;
     2. **flattens** it with `umoci unpack`, which applies OCI whiteouts/opaque
-       dirs correctly, yielding a merged rootfs directory;
+       dirs correctly, yielding a merged rootfs directory (`umoci` is
+       auto-downloaded by `Hyper.Img.OciLoader.Umoci` when not operator-provided);
     3. **builds** an ext4 image of that rootfs with `mke2fs -d` (no loopback, no
        privilege, no setuid helper);
     4. **content-addresses** the image by the sha256 of its bytes -- that hash is

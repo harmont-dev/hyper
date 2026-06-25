@@ -147,6 +147,8 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),
+         :ok <- Hyper.Img.OciLoader.Umoci.ensure_installed(),
+         :ok <- Hyper.Img.OciLoader.Umoci.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
