@@ -2,7 +2,7 @@
 //! `chroot-jail`: per-VM chroot/jail lifecycle.
 
 mod prepare;
-mod remove;
+pub mod remove;
 
 pub use prepare::PrepareArgs;
 pub use remove::RemoveArgs;

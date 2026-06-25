@@ -74,8 +74,8 @@ impl IsTool for Remove {
     type RunT = Result<(), Error>;
 
     fn run_privileged(&self) -> Self::RunT {
-        remove_chroot(&self.args.chroot)?;
-        remove_cgroup(&self.args.cgroup)?;
+        remove_chroot_under(&Config::get().jail_base(), &self.args.chroot)?;
+        remove_cgroup_under(Path::new(CGROUP_BASE), &self.args.cgroup)?;
         Ok(())
     }
 
@@ -85,18 +85,17 @@ impl IsTool for Remove {
     }
 }
 
-/// Recursively remove the per-VM chroot `<JAIL_BASE>/<exec>/<id>`, fd-relative
-/// after an `O_NOFOLLOW` walk from `JAIL_BASE`. Idempotent on a missing target.
-fn remove_chroot(chroot: &Path) -> Result<(), Error> {
-    let jail_base = Config::get().jail_base();
+/// Recursively remove the per-VM chroot `<jail_base>/<exec>/<id>`, fd-relative
+/// after an `O_NOFOLLOW` walk from `jail_base`. Idempotent on a missing target.
+/// `--chroot` must be exactly `<exec>/<id>` (one parent component, one leaf).
+pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error> {
     let path: LexicalPath = chroot.to_path_buf().try_into().map_err(Error::ChrootPath)?;
-    let (parents, leaf) = path.relative_to(&jail_base).map_err(Error::ChrootPath)?;
-    // Exactly <exec>/<id>: one parent component, one leaf.
+    let (parents, leaf) = path.relative_to(jail_base).map_err(Error::ChrootPath)?;
     if parents.len() != 1 {
         return Err(Error::ChrootDepth(chroot.to_path_buf()));
     }
 
-    let Some(parent) = walk(jail_base, &parents)? else {
+    let Some(parent) = walk(jail_base.to_path_buf(), &parents)? else {
         return Ok(()); // an ancestor is already gone
     };
     match parent.remove_dir_all(&leaf) {
@@ -107,17 +106,16 @@ fn remove_chroot(chroot: &Path) -> Result<(), Error> {
 }
 
 /// Remove the (empty) per-VM cgroup leaf, fd-relative after an `O_NOFOLLOW` walk
-/// from `/sys/fs/cgroup`. Idempotent on `ENOENT`/`ENOTEMPTY`.
-fn remove_cgroup(cgroup: &Path) -> Result<(), Error> {
-    let base = PathBuf::from(CGROUP_BASE);
+/// from `base`. `--cgroup` must be at least two components below `base` (one or
+/// more parents, plus the leaf). Idempotent on `ENOENT`/`ENOTEMPTY`.
+pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
     let path: LexicalPath = cgroup.to_path_buf().try_into().map_err(Error::CgroupPath)?;
-    let (parents, leaf) = path.relative_to(&base).map_err(Error::CgroupPath)?;
-    // At least two components below the base: one or more parents, plus the leaf.
+    let (parents, leaf) = path.relative_to(base).map_err(Error::CgroupPath)?;
     if parents.is_empty() {
         return Err(Error::CgroupDepth(cgroup.to_path_buf()));
     }
 
-    let Some(parent) = walk(base, &parents)? else {
+    let Some(parent) = walk(base.to_path_buf(), &parents)? else {
         return Ok(()); // an ancestor is already gone
     };
     match parent.rmdir(&leaf) {
