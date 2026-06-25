@@ -129,6 +129,20 @@ defmodule Hyper.Node.Img.Server do
   end
 
   @impl true
+  # Each privileged command runs through `System.cmd`, which links a transient
+  # port to this process and returns only once that command has finished. Because
+  # we trap exits (for `terminate/2` teardown), the now-defunct port's exit lands
+  # here afterwards -- stale by construction, whatever its reason -- so ignore it.
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
+
+  @impl true
+  # No process is deliberately linked here beyond those transient command ports,
+  # so a linked *process* EXIT is a genuine fault: propagate its reason (so
+  # terminate/2 still runs teardown) rather than crash opaquely on an unmatched
+  # message.
+  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
+
+  @impl true
   def terminate(_reason, %State{dm_names: dm_names}) do
     # Remove top-down (a snapshot's origin is the device below it). Layers are
     # released automatically when this process exits (Layer.Server monitors us).
