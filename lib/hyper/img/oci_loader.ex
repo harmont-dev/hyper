@@ -5,13 +5,11 @@ defmodule Hyper.Img.OciLoader do
   `load/1` takes a registry reference (e.g. `"docker.io/library/alpine:3.19"`)
   and, end to end:
 
-    1. **pulls** it with `skopeo`, selecting the manifest entry matching this
-       node's architecture, into a local OCI layout;
-    2. **flattens** it with `umoci unpack`, which applies OCI whiteouts/opaque
-       dirs correctly, yielding a merged rootfs directory (`umoci` is
-       auto-downloaded by `Hyper.Img.OciLoader.Umoci` when not operator-provided);
-    3. **builds** an ext4 image of that rootfs with `mke2fs -d` (no loopback, no
-       privilege, no setuid helper);
+    1. **pulls** it with `skopeo`, selecting the manifest entry matching this node's
+       architecture, into a local OCI layout.
+    2. **flattens** it with `umoci unpack`, which applies OCI whiteouts/opaque dirs correctly,
+       yielding a merged rootfs directory.
+    3. **builds** an ext4 image of that rootfs with `mke2fs -d`.
     4. **content-addresses** the image by the sha256 of its bytes -- that hash is
        the blob id and the filename stem (`layer_<id>.img`);
     5. **publishes** it into `Hyper.Config.layer_dir/0` via an atomic

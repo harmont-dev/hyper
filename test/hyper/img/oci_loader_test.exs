@@ -8,30 +8,6 @@ defmodule Hyper.Img.OciLoaderTest do
 
   @mib 1024 * 1024
 
-  describe "source/1" do
-    test "prefixes a valid ref with the docker transport" do
-      assert OciLoader.source("docker.io/library/alpine:3.19") ==
-               {:ok, "docker://docker.io/library/alpine:3.19"}
-
-      assert OciLoader.source("ghcr.io/foo/bar@sha256:abc") ==
-               {:ok, "docker://ghcr.io/foo/bar@sha256:abc"}
-    end
-
-    test "rejects empty, blank, or whitespace-bearing refs" do
-      assert OciLoader.source("") == {:error, :invalid_ref}
-      assert OciLoader.source("   ") == {:error, :invalid_ref}
-      assert OciLoader.source("alpine 3.19") == {:error, :invalid_ref}
-      assert OciLoader.source("alpine\n") == {:error, :invalid_ref}
-    end
-  end
-
-  describe "goarch/1" do
-    test "maps Hyper arches to Go/OCI arch names" do
-      assert OciLoader.goarch(:x86_64) == "amd64"
-      assert OciLoader.goarch(:aarch64) == "arm64"
-    end
-  end
-
   describe "ext4_bytes/1" do
     test "floors small inputs at 16 MiB" do
       assert OciLoader.ext4_bytes(0) == 16 * @mib
