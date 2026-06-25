@@ -19,6 +19,8 @@ defmodule Hyper.Node.Img.Server do
   alias Hyper.Node.Layer
   alias Hyper.SuidHelper
 
+  use OpenTelemetryDecorator
+
   # Grace period after the last holder leaves before the image is torn down.
   @idle_timeout_ms :timer.seconds(30)
 
@@ -73,6 +75,7 @@ defmodule Hyper.Node.Img.Server do
   end
 
   @impl true
+  @decorate with_span("Hyper.Node.Img.Server.init", include: [:img_id])
   def init(%Opts{img_id: img_id}) do
     Process.flag(:trap_exit, true)
     layer_ids = resolve_layers(img_id)

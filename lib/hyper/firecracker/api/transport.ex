@@ -16,12 +16,15 @@ defmodule Hyper.Firecracker.Api.Transport do
   `{:error, {:transport, reason}}` (socket/connection failure).
   """
 
+  use OpenTelemetryDecorator
+
   @type result ::
           :ok
           | {:ok, term()}
           | {:error, {:api, pos_integer(), String.t() | nil} | {:transport, term()}}
 
   @spec request(map()) :: result()
+  @decorate with_span("Hyper.Firecracker.Api.Transport.request", include: [:method, :url])
   def request(%{method: method, url: url, opts: opts} = info) do
     socket_path = Keyword.fetch!(opts, :socket_path)
 

@@ -8,6 +8,8 @@ defmodule Hyper.Node.Budget do
   alias Hyper.Node.Budget.Hard
   alias Hyper.Vm.Instance.Spec
 
+  use OpenTelemetryDecorator
+
   @doc "Can this node run the given vm spec? `:ok` if yes, `{:error, reason}` otherwise."
   @spec can_run(Hyper.Vm.Instance.Spec.t()) :: :ok | {:error, term()}
   defdelegate can_run(vm_spec), to: Hard
@@ -22,6 +24,7 @@ defmodule Hyper.Node.Budget do
   lifetime of `owner`. Live soft-load check first, then an atomic hard reserve.
   """
   @spec admit(Spec.t(), pid()) :: :ok | {:error, term()}
+  @decorate with_span("Hyper.Node.Budget.admit", include: [:spec])
   def admit(spec, owner) do
     with :ok <- Hyper.Node.Budget.Soft.can_run(spec) do
       Hard.reserve(spec, owner)

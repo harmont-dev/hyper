@@ -46,6 +46,7 @@ defmodule Hyper.SuidHelper.Losetup do
 
   @doc "Check the losetup binary is present."
   @spec test_system() :: :ok | {:error, :losetup_not_found}
+  @decorate with_span("Hyper.SuidHelper.Losetup.test_system")
   def test_system do
     if System.find_executable(Hyper.Config.losetup_path()),
       do: :ok,

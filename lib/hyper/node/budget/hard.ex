@@ -13,6 +13,7 @@ defmodule Hyper.Node.Budget.Hard do
 
   use GenServer
   use Unit.Operators
+  use OpenTelemetryDecorator
 
   alias Hyper.Node.Config.Budget, as: Config
   alias Hyper.Vm.Instance
@@ -79,6 +80,7 @@ defmodule Hyper.Node.Budget.Hard do
 
   @doc "Can this node run the given vm spec? `:ok` if yes, `{:error, reason}` otherwise."
   @spec can_run(Instance.Spec.t()) :: :ok | {:error, term()}
+  @decorate with_span("Hyper.Node.Budget.Hard.can_run", include: [:vm_spec])
   def can_run(vm_spec) do
     GenServer.call(__MODULE__, {:can_run, vm_spec})
   end
@@ -92,6 +94,7 @@ defmodule Hyper.Node.Budget.Hard do
   """
   @spec with_budget(Instance.Spec.t(), (-> result)) :: result | {:error, term()}
         when result: var
+  @decorate with_span("Hyper.Node.Budget.Hard.with_budget", include: [:vm_spec])
   def with_budget(vm_spec, callable) do
     with :ok <- GenServer.call(__MODULE__, {:ingest, vm_spec}) do
       try do
@@ -109,10 +112,12 @@ defmodule Hyper.Node.Budget.Hard do
   On success the reservation releases automatically when `owner` dies.
   """
   @spec reserve(Instance.Spec.t(), pid()) :: :ok | {:error, term()}
+  @decorate with_span("Hyper.Node.Budget.Hard.reserve", include: [:spec])
   def reserve(spec, owner), do: GenServer.call(__MODULE__, {:reserve, spec, owner})
 
   @doc "Configured caps minus what is currently reserved."
   @spec headroom() :: %{mem: Unit.Information.t(), disk: Unit.Information.t()}
+  @decorate with_span("Hyper.Node.Budget.Hard.headroom")
   def headroom, do: GenServer.call(__MODULE__, :headroom)
 
   # Server callbacks

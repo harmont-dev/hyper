@@ -17,6 +17,8 @@ defmodule Hyper.Img.Db.Lease do
 
   alias Hyper.Img.Db.{Image, Repo}
 
+  use OpenTelemetryDecorator
+
   def default_ttl, do: Unit.Time.s(60)
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -49,6 +51,7 @@ defmodule Hyper.Img.Db.Lease do
   """
   @spec bump(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::
           {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t()}
+  @decorate with_span("Hyper.Img.Db.Lease.bump", include: [:image_id, :vm_id])
   def bump(image_id, vm_id, ttl) do
     expires_at = DateTime.add(DateTime.utc_now(), Unit.Time.as_s(ttl), :second)
 
@@ -70,6 +73,7 @@ defmodule Hyper.Img.Db.Lease do
   one image, it is not necessary to specify the image id.
   """
   @spec release(Hyper.Vm.id()) :: :ok
+  @decorate with_span("Hyper.Img.Db.Lease.release", include: [:vm_id])
   def release(vm_id) do
     query = from(l in __MODULE__, where: l.node_id == ^to_string(node()) and l.vm_id == ^vm_id)
     {_count, _} = Repo.delete_all(query)
@@ -80,6 +84,7 @@ defmodule Hyper.Img.Db.Lease do
   Reap the expired leases. This is mostly implemented to clean up the database, but does nothing
   outside of that. Returns the number of leases removed.
   """
+  @decorate with_span("Hyper.Img.Db.Lease.reap_expired")
   def reap_expired do
     query = from(l in __MODULE__, where: l.expires_at < ^DateTime.utc_now())
     {count, _} = Repo.delete_all(query)

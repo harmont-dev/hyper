@@ -7,6 +7,7 @@ defmodule Hyper.Grpc.Server do
   """
 
   use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
+  use OpenTelemetryDecorator
 
   alias Google.Protobuf.Empty
   alias Hyper.Grpc.Codec
@@ -21,6 +22,7 @@ defmodule Hyper.Grpc.Server do
   }
 
   @spec create_vm(CreateVmRequest.t(), GRPC.Server.Stream.t()) :: CreateVmResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.create_vm")
   def create_vm(%CreateVmRequest{} = req, _stream) do
     with {:ok, spec} <- Codec.from_grpc(req),
          {:ok, pid} <- Hyper.create_vm(spec),
@@ -35,6 +37,7 @@ defmodule Hyper.Grpc.Server do
   end
 
   @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: Empty.t()
+  @decorate with_span("Hyper.Grpc.Server.stop_vm", include: [:vm_id])
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     Hyper.Node.FireVMM.State.stop(vm_id)
     Codec.to_grpc(:stopped)
@@ -43,6 +46,7 @@ defmodule Hyper.Grpc.Server do
   end
 
   @spec get_vm(GetVmRequest.t(), GRPC.Server.Stream.t()) :: GetVmResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.get_vm", include: [:vm_id])
   def get_vm(%GetVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.whereis(vm_id) do
       nil -> raise Codec.to_grpc({:error, :not_found})
@@ -51,6 +55,7 @@ defmodule Hyper.Grpc.Server do
   end
 
   @spec list_vms(Empty.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.list_vms")
   def list_vms(%Empty{}, _stream) do
     Codec.to_grpc({:vms, Hyper.Cluster.Routing.all()})
   end

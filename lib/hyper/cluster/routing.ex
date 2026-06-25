@@ -10,6 +10,8 @@ defmodule Hyper.Cluster.Routing do
   domain.
   """
 
+  use OpenTelemetryDecorator
+
   @name __MODULE__
 
   @doc "The registry name."
@@ -28,6 +30,7 @@ defmodule Hyper.Cluster.Routing do
 
   @doc "Which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.id()) :: node() | nil
+  @decorate with_span("Hyper.Cluster.Routing.whereis", include: [:vm_id])
   def whereis(vm_id) do
     case Horde.Registry.lookup(@name, {vm_id, :supervisor}) do
       [{pid, _}] -> node(pid)
@@ -41,6 +44,7 @@ defmodule Hyper.Cluster.Routing do
   `pid` (see `Hyper.id/1`).
   """
   @spec id_for(pid()) :: Hyper.Vm.id() | nil
+  @decorate with_span("Hyper.Cluster.Routing.id_for")
   def id_for(pid) when is_pid(pid) do
     case Horde.Registry.select(@name, [
            {{{:"$1", :supervisor}, :"$2", :_}, [{:==, :"$2", pid}], [:"$1"]}
@@ -52,6 +56,7 @@ defmodule Hyper.Cluster.Routing do
 
   @doc "Every VM the cluster currently knows about, paired with the node it runs on."
   @spec all() :: [{Hyper.Vm.id(), node()}]
+  @decorate with_span("Hyper.Cluster.Routing.all")
   def all do
     @name
     |> Horde.Registry.select([

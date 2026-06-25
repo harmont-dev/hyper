@@ -140,6 +140,8 @@ defmodule Hyper.Node.FireVMM.State do
   defmodule Configuring do
     @moduledoc "Stage the kernel + rootfs device into the jail chroot. Enter `:running` after."
 
+    use OpenTelemetryDecorator
+
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
     alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
 
@@ -173,6 +175,7 @@ defmodule Hyper.Node.FireVMM.State do
     # Cold boot, issued through the Client and aborting at the first error:
     # machine-config -> boot-source -> each drive -> each NIC -> InstanceStart.
     @spec apply_spec(Hyper.Vm.id(), BootSpec.Cold.t()) :: :ok | {:error, term()}
+    @decorate with_span("Hyper.Node.FireVMM.State.Configuring.apply_spec", include: [:id])
     defp apply_spec(id, %BootSpec.Cold{} = cold) do
       via = Client.via(id)
 

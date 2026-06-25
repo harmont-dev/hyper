@@ -19,6 +19,7 @@ defmodule Hyper.SuidHelper.Blockdev do
 
   @doc "Check the blockdev binary is present."
   @spec test_system() :: :ok | {:error, :blockdev_not_found}
+  @decorate with_span("Hyper.SuidHelper.Blockdev.test_system")
   def test_system do
     if System.find_executable(Hyper.Config.blockdev_path()),
       do: :ok,

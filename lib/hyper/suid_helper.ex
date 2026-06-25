@@ -18,6 +18,8 @@ defmodule Hyper.SuidHelper do
 
   alias Hyper.SuidHelper.{Blockdev, Dmsetup, Losetup}
 
+  use OpenTelemetryDecorator
+
   @typedoc "Error tuple: exit code + trimmed stderr/stdout from the helper."
   @type err :: {non_neg_integer(), String.t()}
 
@@ -26,6 +28,7 @@ defmodule Hyper.SuidHelper do
   # `{:error, {code, message}}` otherwise. Shared transport for the tool
   # submodules; not part of the public API.
   @spec exec([String.t()]) :: {:ok, map()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.exec", include: [:argv])
   def exec(argv) do
     case System.cmd(Hyper.Config.suid_helper(), argv, stderr_to_stdout: true) do
       {out, 0} -> {:ok, Jason.decode!(out)}
@@ -39,6 +42,7 @@ defmodule Hyper.SuidHelper do
   against.
   """
   @spec sys_test() :: {:ok, Path.t()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.sys_test")
   def sys_test do
     case exec(["sys-test"]) do
       {:ok, %{"hyper_base" => base}} -> {:ok, base}
@@ -51,6 +55,7 @@ defmodule Hyper.SuidHelper do
   machine: the helper binary itself, then each tool submodule's own check.
   """
   @spec test_system() :: :ok | {:error, term()}
+  @decorate with_span("Hyper.SuidHelper.test_system")
   def test_system do
     with :ok <- helper_present(),
          :ok <- Losetup.test_system(),

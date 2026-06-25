@@ -11,6 +11,8 @@ defmodule Hyper.Img.Db.Image do
   alias Hyper.Img.Db.{Blob, ImageLayer, Lease, Repo}
   alias Unit.Information
 
+  use OpenTelemetryDecorator
+
   @primary_key {:id, :string, autogenerate: false}
   schema "images" do
     field :label, :string
@@ -43,6 +45,7 @@ defmodule Hyper.Img.Db.Image do
 
   @doc "Ordered blobs needed to assemble `image_id`, base (position 0) first."
   @spec resolve_chain(String.t()) :: [Blob.t()]
+  @decorate with_span("Hyper.Img.Db.Image.resolve_chain", include: [:image_id])
   def resolve_chain(image_id) do
     Repo.all(
       from l in ImageLayer,

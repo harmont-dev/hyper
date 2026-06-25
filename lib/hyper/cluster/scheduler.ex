@@ -16,10 +16,13 @@ defmodule Hyper.Cluster.Scheduler do
   alias Hyper.Vm.Instance.Spec
   alias Unit.Information
 
+  use OpenTelemetryDecorator
+
   @type layer_sizes :: [{Hyper.Layer.id(), Unit.Information.t()}]
 
   @doc "Fitting nodes for `spec`, most colocated bytes first."
   @spec candidates(Spec.t(), layer_sizes()) :: [node()]
+  @decorate with_span("Hyper.Cluster.Scheduler.candidates", include: [:spec])
   def candidates(spec, layers \\ []) do
     Budget.all_states()
     |> Enum.filter(&NodeState.fits?(&1, spec))
@@ -36,6 +39,7 @@ defmodule Hyper.Cluster.Scheduler do
   """
   @spec place(Spec.t(), layer_sizes(), (node() -> {:ok, term()} | {:error, term()})) ::
           {:ok, {node(), term()}} | {:error, :no_capacity}
+  @decorate with_span("Hyper.Cluster.Scheduler.place", include: [:spec])
   def place(spec, layers, attempt) do
     spec
     |> candidates(layers)
@@ -60,6 +64,7 @@ defmodule Hyper.Cluster.Scheduler do
           (-> {:ok, pid()} | {:error, term()}),
           (pid() -> :ok)
         ) :: {:ok, {node(), pid()}} | {:error, :no_capacity}
+  @decorate with_span("Hyper.Cluster.Scheduler.run", include: [:spec])
   def run(spec, layers, start_fun, stop_fun) do
     attempt = fn target ->
       :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
