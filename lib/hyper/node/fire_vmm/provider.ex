@@ -6,13 +6,13 @@ defmodule Hyper.Node.FireVMM.Provider do
   `ensure_installed/0` is idempotent: if the binaries are already present and
   executable it returns `:ok` without touching the network. Otherwise it fetches
   the official firecracker release tarball for the detected architecture via
-  `Hyper.Redist.Targz` (download, SHA-256 verify, extract). The archive is
+  `Redist.Targz` (download, SHA-256 verify, extract). The archive is
   extracted as-is - the binaries live under `release-v<ver>-<arch>/` exactly as
   firecracker ships them, and `firecracker_bin/0` / `jailer_bin/0` resolve those
   paths.
   """
 
-  alias Hyper.Redist.Targz
+  alias Redist.Targz
 
   @downloads %{
     x86_64: %{

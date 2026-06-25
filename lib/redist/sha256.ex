@@ -1,4 +1,4 @@
-defmodule Hyper.Redist.Sha256 do
+defmodule Redist.Sha256 do
   @moduledoc "Streaming SHA-256 of a file, returned as lowercase hex."
 
   @doc "Streaming SHA-256 of the file at `path`, as lowercase hex."

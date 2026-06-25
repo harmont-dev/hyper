@@ -1,10 +1,20 @@
-defmodule Hyper.Redist.Targz do
+defmodule Redist.Targz do
   @moduledoc """
   Fetches a gzipped tarball from a URL, verifies its SHA-256, and extracts it
   into a directory.
+
+  Refusal behaviour:
+
+  * A wrong checksum returns `{:error, {:checksum_mismatch, …}}` before
+    `dest_dir` is created.
+  * A non-200 HTTP response returns `{:error, {:download_failed, status}}`
+    before `dest_dir` is created.
+  * A path-traversal (`../`) tar entry causes `:erl_tar` to refuse the
+    archive before writing any entry; nothing escapes `dest_dir`. An empty
+    `dest_dir` may be created as a side-effect, but no content is extracted.
   """
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   @doc """
   Download `url`, verify its SHA-256 equals `sha256` (lowercase hex), and extract

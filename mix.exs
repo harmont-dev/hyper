@@ -6,6 +6,7 @@ defmodule Hyper.MixProject do
       app: :hyper,
       version: "0.1.0",
       elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       name: "Hyper",
       source_url: "https://github.com/harmont-dev/hyper",
@@ -51,6 +52,11 @@ defmodule Hyper.MixProject do
       env: [ecto_repos: [Hyper.Img.Db.Repo]]
     ]
   end
+
+  # `test/support` holds test-only helpers (e.g. the Redist HTTP test server);
+  # compile it only in :test so it never ships in dev/prod builds.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do

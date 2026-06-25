@@ -75,7 +75,7 @@ defmodule Hyper.Img do
   @spec content_id(Path.t()) :: {:ok, id()} | {:error, term()}
   @decorate with_span("Hyper.Img.content_id", include: [:path])
   defp content_id(path) do
-    {:ok, Hyper.Redist.Sha256.file(path)}
+    {:ok, Redist.Sha256.file(path)}
   rescue
     e -> {:error, {:hash_failed, Exception.message(e)}}
   end

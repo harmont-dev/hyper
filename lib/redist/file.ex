@@ -1,11 +1,11 @@
-defmodule Hyper.Redist.File do
+defmodule Redist.File do
   @moduledoc """
   Fetches a single raw file from a URL, verifies its SHA-256, and installs it at
-  a destination path. The raw-file analogue of `Hyper.Redist.Targz` (used for
+  a destination path. The raw-file analogue of `Redist.Targz` (used for
   assets that ship as plain files rather than tarballs, e.g. vmlinux images).
   """
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   @doc """
   Download `url`, verify its SHA-256 equals `sha256` (lowercase hex), and install
