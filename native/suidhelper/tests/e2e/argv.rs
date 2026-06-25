@@ -175,6 +175,71 @@ fn dmsetup_targets_argv_and_parse_as_root() {
 }
 
 #[test]
+fn dmsetup_ls_argv_and_parse_as_root() {
+    if !is_root() {
+        eprintln!("SKIP dmsetup_ls: needs root");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let rec = tmp.path().join("argv.json");
+    let bin = install_fake(tmp.path(), "dmsetup", &rec, "hyper-thinpool\\nhyper-rw-abc");
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
+
+    let out = run(&cfg, &["dmsetup", "ls"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(recorded_argv(&rec), vec!["ls"]);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["result"], "listed");
+    assert_eq!(json["output"], "hyper-thinpool\nhyper-rw-abc\n");
+}
+
+#[test]
+fn losetup_list_argv_and_parse_as_root() {
+    if !is_root() {
+        eprintln!("SKIP losetup_list: needs root");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let rec = tmp.path().join("argv.json");
+    let bin = install_fake(
+        tmp.path(),
+        "losetup",
+        &rec,
+        "/dev/loop0 /srv/hyper/scratch/thinpool.meta",
+    );
+    let cfg = write_root_config(tmp.path(), &[("losetup", &bin)]);
+
+    let out = run(&cfg, &["losetup", "list"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        recorded_argv(&rec),
+        vec![
+            "--list",
+            "--noheadings",
+            "--raw",
+            "--output",
+            "NAME,BACK-FILE"
+        ]
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["result"], "listed");
+    assert_eq!(
+        json["output"],
+        "/dev/loop0 /srv/hyper/scratch/thinpool.meta\n"
+    );
+}
+
+#[test]
 fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_rejects_bin: needs root to own the config file");

@@ -107,6 +107,32 @@ defmodule Hyper.SuidHelper.Dmsetup do
     |> MapSet.new()
   end
 
+  @doc "Names of every device-mapper device currently present on this host."
+  @spec list() :: {:ok, [String.t()]} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.list")
+  def list do
+    case SuidHelper.exec(["dmsetup", "ls"]) do
+      {:ok, %{"output" => out}} -> {:ok, parse_names(out)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc false
+  @spec parse_names(String.t()) :: [String.t()]
+  def parse_names(out) do
+    case String.trim(out) do
+      # `dmsetup ls` prints this sentinel (not a device row) when there are none.
+      "No devices found" ->
+        []
+
+      _ ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.map(&(&1 |> String.split() |> List.first()))
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
   @doc false
   @spec snapshot_table(Path.t(), Path.t(), pos_integer(), pos_integer()) :: String.t()
   def snapshot_table(origin_dev, cow_dev, sectors, chunk_sectors) do

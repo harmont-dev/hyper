@@ -55,6 +55,8 @@ enum DmOp {
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
+    /// List the names of existing dm devices (for stale-device reclaim).
+    Ls,
 }
 
 #[derive(Serialize)]
@@ -64,6 +66,7 @@ pub enum DmsetupOut {
     Removed,
     Messaged,
     Targets { output: String },
+    Listed { output: String },
 }
 
 pub struct Dmsetup {
@@ -112,6 +115,9 @@ impl IsTool for Dmsetup {
             DmOp::Targets => {
                 cmd.arg("targets");
             }
+            DmOp::Ls => {
+                cmd.arg("ls");
+            }
         }
 
         cmd.env_clear().output()
@@ -132,6 +138,9 @@ impl IsTool for Dmsetup {
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
             DmOp::Targets => DmsetupOut::Targets {
+                output: String::from_utf8_lossy(&out.stdout).into_owned(),
+            },
+            DmOp::Ls => DmsetupOut::Listed {
                 output: String::from_utf8_lossy(&out.stdout).into_owned(),
             },
         })
