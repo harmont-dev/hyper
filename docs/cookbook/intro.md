@@ -96,11 +96,34 @@ The host kernel must provide:
     the `uid_gid_range` configuration).
   - **cgroup v2** - the unified hierarchy mounted at `/sys/fs/cgroup`. v1-only
     hosts are not supported.
-  - **device-mapper targets** `snapshot`, `thin`, and `thin-pool` - load the
-    `dm_snapshot` and `dm_thin_pool` modules (`modprobe dm_snapshot
-    dm_thin_pool`). Hyper refuses to start its device helper without them.
+  - **device-mapper targets** `snapshot`, `thin`, and `thin-pool` - from the
+    `dm_snapshot` (provides `snapshot`) and `dm_thin_pool` (provides `thin` and
+    `thin-pool`) modules. Hyper refuses to start without all three; on boot it
+    fails with `{:missing_dm_targets, [...]}` listing whichever are absent.
   - **loop devices** - the `loop` module, used to attach layer images as block
     devices.
+
+Load the modules and confirm the targets are present:
+
+```sh
+sudo modprobe dm_snapshot dm_thin_pool loop
+sudo dmsetup targets        # must list snapshot, thin, and thin-pool
+```
+
+If `modprobe` reports the module is missing, the running kernel lacks it -
+minimal cloud images often strip device-mapper. On Debian/Ubuntu, install the
+extra modules for the running kernel, then load them:
+
+```sh
+sudo apt-get install -y linux-modules-extra-$(uname -r)
+sudo modprobe dm_snapshot dm_thin_pool loop
+```
+
+Make the modules load on every boot:
+
+```sh
+printf 'dm_snapshot\ndm_thin_pool\nloop\n' | sudo tee /etc/modules-load.d/hyper.conf
+```
 
 #### Privileged setup
 
