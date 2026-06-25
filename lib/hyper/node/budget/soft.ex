@@ -17,6 +17,7 @@ defmodule Hyper.Node.Budget.Soft do
   """
 
   use Unit.Operators
+  use OpenTelemetryDecorator
 
   alias Hyper.Node.Config.Budget, as: Config
   alias Hyper.Vm.Instance
@@ -31,6 +32,7 @@ defmodule Hyper.Node.Budget.Soft do
   added, otherwise `{:error, reason}` naming the first saturated metric.
   """
   @spec can_run(Instance.Spec.t()) :: :ok | {:error, term()}
+  @decorate with_span("Hyper.Node.Budget.Soft.can_run", include: [:spec])
   def can_run(spec) do
     readings = Mon.readings()
     config = Config.get()
