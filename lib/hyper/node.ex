@@ -55,9 +55,12 @@ defmodule Hyper.Node do
   def init(_opts) do
     children = [
       Hyper.Node.Users,
+      # Layer owns Hyper.Node.Layer.Registry, which Budget.Advertiser queries
+      # (via Hyper.Node.Layer.active/0) as it advertises on init - so Layer must
+      # be up first.
+      Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
-      Hyper.Node.Layer,
       Hyper.Node.Img
     ]
 
