@@ -18,20 +18,13 @@ defmodule Hyper.Img.OciLoader do
   file into the store and database is `Hyper.Img`'s job.
   """
 
+  use Unit.Operators
+
   alias Hyper.Config
   alias Hyper.Img.OciLoader.Umoci
+  alias Unit.Information
 
   require Logger
-
-  @mib 1024 * 1024
-
-  # ext4 metadata (inode tables, journal, reserved blocks) plus slack so the
-  # rootfs always fits. Overhead scales with content -- a flat constant is far
-  # too small for large images -- as 25% of content plus an 8 MiB base, never
-  # below a 16 MiB floor. The base is a read-only dm-snapshot origin (guest
-  # writes land in the COW layer, never here), so generous slack is cheap.
-  @base_overhead_bytes 8 * @mib
-  @floor_bytes 16 * @mib
 
   @doc "Load `ref` into the store and DB. See the module doc. Label defaults to `ref`."
   @spec load(String.t()) :: {:ok, Hyper.Img.id()} | {:error, term()}
@@ -70,9 +63,9 @@ defmodule Hyper.Img.OciLoader do
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
-             {:ok, content} <- dir_bytes(rootfs),
-             bytes = ext4_bytes(content),
-             {:ok, staged} <- build_ext4(rootfs, bytes) do
+             {:ok, content} <- dir_size(rootfs),
+             size = ext4_size(content),
+             {:ok, staged} <- build_ext4(rootfs, size) do
           Hyper.Img.create(staged, label: label)
         end
       end)
@@ -114,15 +107,19 @@ defmodule Hyper.Img.OciLoader do
   def goarch(:x86_64), do: "amd64"
   def goarch(:aarch64), do: "arm64"
 
-  # ext4 image size (bytes) for a rootfs whose contents total `content_bytes`:
-  # content + scaled overhead (25% of content + 8 MiB base), rounded up to a whole
-  # MiB, never below 16 MiB.
   @doc false
-  @spec ext4_bytes(non_neg_integer()) :: pos_integer()
-  def ext4_bytes(content_bytes) when is_integer(content_bytes) and content_bytes >= 0 do
-    raw = content_bytes + div(content_bytes, 4) + @base_overhead_bytes
-    rounded = div(raw + @mib - 1, @mib) * @mib
-    max(rounded, @floor_bytes)
+  @spec ext4_size(Information.t()) :: Information.t()
+  def ext4_size(content) do
+    overhead = Information.bytes(div(Information.as_bytes(content), 4)) + Information.mib(8)
+    size = ceil_mib(content + overhead)
+    floor = Information.mib(16)
+    if size >= floor, do: size, else: floor
+  end
+
+  @spec ceil_mib(Information.t()) :: Information.t()
+  defp ceil_mib(size) do
+    mib = Information.as_bytes(Information.mib(1))
+    Information.mib(div(Information.as_bytes(size) + mib - 1, mib))
   end
 
   # `skopeo copy` into a local OCI layout, then `umoci unpack` into a bundle.
@@ -151,13 +148,13 @@ defmodule Hyper.Img.OciLoader do
     end
   end
 
-  # Apparent byte total of the rootfs tree (`du -sb`), parsed from the first field.
-  @spec dir_bytes(Path.t()) :: {:ok, non_neg_integer()} | {:error, term()}
-  defp dir_bytes(rootfs) do
+  # Apparent size of the rootfs tree (`du -sb`), parsed from the first field.
+  @spec dir_size(Path.t()) :: {:ok, Information.t()} | {:error, term()}
+  defp dir_size(rootfs) do
     case System.cmd("du", ["-sb", rootfs], stderr_to_stdout: true) do
       {out, 0} ->
         case Integer.parse(out) do
-          {bytes, _rest} -> {:ok, bytes}
+          {bytes, _rest} -> {:ok, Information.bytes(bytes)}
           :error -> {:error, {:du_unparsable, out}}
         end
 
@@ -171,12 +168,12 @@ defmodule Hyper.Img.OciLoader do
   # same-filesystem rename. `mke2fs` creates the file at the given size and
   # populates it from the directory in one rootless step. Returns the staged
   # image path; the staged file is removed if mke2fs fails.
-  @spec build_ext4(Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, term()}
-  defp build_ext4(rootfs, bytes) do
-    Logger.debug("oci: building #{div(bytes, @mib)} MiB ext4 rootfs")
+  @spec build_ext4(Path.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
+  defp build_ext4(rootfs, size) do
+    Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs")
     File.mkdir_p!(Config.layer_dir())
     staged = Path.join(Config.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
-    size_arg = "#{div(bytes, 1024 * 1024)}M"
+    size_arg = "#{Information.as_mib(size)}M"
     args = ["-t", "ext4", "-F", "-q", "-d", rootfs, staged, size_arg]
 
     case tag(cmd(Config.mke2fs_path(), args), :mke2fs) do
