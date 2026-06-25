@@ -41,7 +41,7 @@ defmodule Sys.Mon.Cpu do
       {:ok, snapshot} ->
         case prev_snapshot do
           nil -> {:skip, snapshot}
-          prev -> {:ok, utilization(prev, snapshot), snapshot}
+          %Stat.Snapshot{cpu: prev} -> {:ok, utilization(prev, snapshot.cpu), snapshot}
         end
 
       {:error, reason} ->
@@ -49,11 +49,13 @@ defmodule Sys.Mon.Cpu do
     end
   end
 
-  # Busy fraction (`0.0..1.0`) between an earlier and a later `/proc/stat`
-  # snapshot, computed from the aggregate CPU times. A non-positive interval (no
-  # elapsed jiffies) yields `0.0`.
-  @spec utilization(Stat.Snapshot.t(), Stat.Snapshot.t()) :: float()
-  defp utilization(%Stat.Snapshot{cpu: earlier}, %Stat.Snapshot{cpu: later}) do
+  @doc false
+  # Busy fraction (`0.0..1.0`) between an earlier and a later aggregate-CPU
+  # `CpuTimes`. A non-positive interval (no elapsed jiffies, or counters that
+  # did not advance) yields `0.0`; the ratio is clamped into `0.0..1.0` so a
+  # transient counter quirk can never produce an out-of-range reading.
+  @spec utilization(Stat.CpuTimes.t(), Stat.CpuTimes.t()) :: float()
+  def utilization(earlier, later) do
     dt = Stat.CpuTimes.total(later) - Stat.CpuTimes.total(earlier)
     di = Stat.CpuTimes.idle(later) - Stat.CpuTimes.idle(earlier)
 
