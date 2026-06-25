@@ -5,7 +5,7 @@ defmodule Hyper.Redist.File do
   assets that ship as plain files rather than tarballs, e.g. vmlinux images).
   """
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   @doc """
   Download `url`, verify its SHA-256 equals `sha256` (lowercase hex), and install

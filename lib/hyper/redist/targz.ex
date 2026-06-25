@@ -4,7 +4,7 @@ defmodule Hyper.Redist.Targz do
   into a directory.
   """
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   @doc """
   Download `url`, verify its SHA-256 equals `sha256` (lowercase hex), and extract

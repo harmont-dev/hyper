@@ -1,7 +1,7 @@
-defmodule Hyper.Redist.Sha256Test do
+defmodule Redist.Sha256Test do
   use ExUnit.Case, async: true
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   test "file/1 returns the lowercase-hex streaming SHA-256 of the file" do
     dir = System.tmp_dir!()

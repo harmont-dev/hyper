@@ -1,4 +1,4 @@
-defmodule Hyper.Redist.Sha256PropertiesTest do
+defmodule Redist.Sha256PropertiesTest do
   @moduledoc """
   `Sha256.file/1` folds a file through `:crypto` in 2 MiB chunks. The contract it
   must uphold for EVERY input: the streamed digest equals the one-shot
@@ -11,7 +11,7 @@ defmodule Hyper.Redist.Sha256PropertiesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Hyper.Redist.Sha256
+  alias Redist.Sha256
 
   # The streaming digest must equal a hash computed in one shot over the same
   # bytes - this is the only thing `file/1` promises, and it is exactly what a
