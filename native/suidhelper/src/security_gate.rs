@@ -30,7 +30,10 @@ pub fn init() {
              ({INSECURE_MODE_ENV}=1); never do this on a real host"
         );
     }
-    INSECURE.store(insecure, Ordering::SeqCst);
+    // Relaxed is sufficient: a standalone flag, written once at startup before
+    // any concurrency, and it publishes no other memory — so there is no
+    // acquire/release (let alone total-order) relationship to enforce.
+    INSECURE.store(insecure, Ordering::Relaxed);
 }
 
 fn env_opts_in() -> bool {
@@ -43,7 +46,7 @@ fn env_opts_in() -> bool {
 /// the feature it folds to `false`, so the whole condition is constant-false and
 /// the optimizer drops the `insecure` branch entirely.
 pub fn split<T>(secure: impl FnOnce() -> T, insecure: impl FnOnce() -> T) -> T {
-    if cfg!(feature = "insecure_test_seams") && INSECURE.load(Ordering::SeqCst) {
+    if cfg!(feature = "insecure_test_seams") && INSECURE.load(Ordering::Relaxed) {
         insecure()
     } else {
         secure()
