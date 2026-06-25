@@ -4,7 +4,7 @@
 //! privilege boundary.
 
 mod blockdev;
-mod chroot_jail;
+pub mod chroot_jail;
 mod dmsetup;
 mod losetup;
 

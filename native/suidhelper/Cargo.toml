@@ -47,12 +47,24 @@ name = "util_confinement"
 path = "tests/util/confinement.rs"
 
 [[test]]
+name = "tools_chroot_jail_remove"
+path = "tests/tools/chroot_jail_remove.rs"
+
+[[test]]
+name = "util_chroot_jail"
+path = "tests/util/chroot_jail.rs"
+
+[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 
 [[test]]
 name = "e2e_argv"
 path = "tests/e2e/argv.rs"
+
+[[test]]
+name = "e2e_chroot_jail"
+path = "tests/e2e/chroot_jail.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

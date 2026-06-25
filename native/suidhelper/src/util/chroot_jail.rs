@@ -34,7 +34,7 @@ pub enum Error {
         source: io::Error,
     },
     #[error("kernel source must be under {}: {path}", .base.display())]
-    OutsideBase { base: &'static Path, path: PathBuf },
+    OutsideBase { base: PathBuf, path: PathBuf },
     #[error("open kernel source {path}: {source}")]
     OpenSrc {
         path: PathBuf,
@@ -103,23 +103,29 @@ impl<K> ChrootJail<K, Unset> {
 }
 
 impl ChrootJail<Kernel, Rootfs> {
-    /// Realize the jail on disk: confined walk to the chroot dir, then stage the
-    /// kernel and create the rootfs node relative to that fd.
+    /// Realize the jail on disk under the configured `JAIL_BASE`/`HYPER_BASE`.
     pub fn build(self) -> Result<(), Error> {
-        let chroot = open_chroot(&self.chroot)?;
-        stage_kernel(&chroot, &self.kernel.0, self.uid, self.gid)?;
+        let cfg = Config::get();
+        self.build_under(&cfg.jail_base(), cfg.hyper_base())
+    }
+
+    /// Realize the jail relative to explicit base directories: confined walk to
+    /// the chroot dir, then stage the kernel and create the rootfs node relative
+    /// to that fd. The public [`build`](Self::build) wires `Config` into this.
+    pub fn build_under(self, jail_base: &Path, hyper_base: &Path) -> Result<(), Error> {
+        let chroot = open_chroot_under(jail_base, &self.chroot)?;
+        stage_kernel_under(&chroot, &self.kernel.0, hyper_base, self.uid, self.gid)?;
         make_rootfs(&chroot, &self.rootfs.0, self.uid, self.gid)?;
         Ok(())
     }
 }
 
-/// Open the chroot directory by walking it from `JAIL_BASE` with `O_NOFOLLOW`, so
+/// Open the chroot directory by walking it from `jail_base` with `O_NOFOLLOW`, so
 /// a symlinked component cannot redirect outside the jail.
-fn open_chroot(chroot: &Path) -> Result<SafeDir, Error> {
-    let jail_base = Config::get().jail_base();
+pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Error> {
     let path: SafePath<IsAbsolute, StrictComponents> = chroot.to_path_buf().try_into()?;
-    let (parents, leaf) = path.relative_to(&jail_base)?;
-    let anchor: SafePath<IsAbsolute, StrictComponents> = jail_base.try_into()?;
+    let (parents, leaf) = path.relative_to(jail_base)?;
+    let anchor: SafePath<IsAbsolute, StrictComponents> = jail_base.to_path_buf().try_into()?;
 
     let mut components = parents;
     components.push(leaf);
@@ -127,17 +133,23 @@ fn open_chroot(chroot: &Path) -> Result<SafeDir, Error> {
 }
 
 /// Stage host file `src` into `chroot` as `vmlinux`: confine the source under
-/// `HYPER_BASE`, hard-link it (copy across filesystems), then chown to `uid:gid`.
-fn stage_kernel(chroot: &SafeDir, src: &Path, uid: u32, gid: u32) -> Result<(), Error> {
+/// `hyper_base` (after canonicalization), hard-link it (copy across filesystems),
+/// then chown to `uid:gid`.
+pub fn stage_kernel_under(
+    chroot: &SafeDir,
+    src: &Path,
+    hyper_base: &Path,
+    uid: u32,
+    gid: u32,
+) -> Result<(), Error> {
     let kernel = Path::new(KERNEL_NAME);
     let src_canon = std::fs::canonicalize(src).map_err(|source| Error::Source {
         path: src.to_path_buf(),
         source,
     })?;
-    let base = Config::get().hyper_base();
-    if !src_canon.starts_with(base) {
+    if !src_canon.starts_with(hyper_base) {
         return Err(Error::OutsideBase {
-            base,
+            base: hyper_base.to_path_buf(),
             path: src_canon,
         });
     }

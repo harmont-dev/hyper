@@ -71,7 +71,7 @@ fn non_root_owned_config_is_rejected() {
 }
 
 #[test]
-fn malformed_config_exits_2_malformed() {
+fn malformed_config_exits_2_malformed_as_root() {
     if !is_root() {
         eprintln!("SKIP malformed_config: needs root to own the config file");
         return;
@@ -84,7 +84,7 @@ fn malformed_config_exits_2_malformed() {
 }
 
 #[test]
-fn relative_work_dir_exits_2_relative() {
+fn relative_work_dir_exits_2_relative_as_root() {
     if !is_root() {
         eprintln!("SKIP relative_work_dir: needs root to own the config file");
         return;
@@ -97,7 +97,7 @@ fn relative_work_dir_exits_2_relative() {
 }
 
 #[test]
-fn valid_config_and_setuid_yields_sys_test_ok() {
+fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
     if !is_root() {
         eprintln!("SKIP valid_config sys-test: needs root to acquire privileges");
         return;
