@@ -6,6 +6,7 @@ defmodule Hyper.MixProject do
       app: :hyper,
       version: "0.1.0",
       elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       name: "Hyper",
       source_url: "https://github.com/harmont-dev/hyper",
@@ -28,6 +29,10 @@ defmodule Hyper.MixProject do
       ]
     ]
   end
+
+  # Compile the ExUnit support helpers (test/support) only in the test env.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run the coverage tasks in :test so test-only deps (excoveralls) load and the
   # Repo-backed tests see the test database. Mirrors how `mix test` selects :test.
