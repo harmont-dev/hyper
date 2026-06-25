@@ -238,7 +238,7 @@ jobs:
         run: |
           sudo -E env "PATH=$PATH" \
             cargo nextest run --features insecure_test_seams \
-              --test e2e_config --test e2e_argv --test util_chroot_jail
+              --test e2e_config --test e2e_argv --test util_chroot_jail --test e2e_chroot_jail
 
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required
