@@ -10,7 +10,7 @@ mod losetup;
 
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
-pub use dmsetup::{Dmsetup, DmsetupArgs};
+pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
 pub use losetup::{Losetup, LosetupArgs};
 
 use crate::util::safe_bin::SafeBin;

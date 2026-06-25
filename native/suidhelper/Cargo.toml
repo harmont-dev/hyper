@@ -34,6 +34,14 @@ path = "tests/security_gate.rs"
 name = "config_seam"
 path = "tests/config_seam.rs"
 
+[[test]]
+name = "util_safe_bin"
+path = "tests/util/safe_bin.rs"
+
+[[test]]
+name = "tools_dmsetup_parsers"
+path = "tests/tools/dmsetup_parsers.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.29", features = ["user", "fs", "dir"] }
@@ -44,6 +52,7 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"
 
 [profile.release]
 strip = true
