@@ -52,6 +52,20 @@ service Hyper {
 
   // List every microVM currently known to the cluster, across all nodes.
   rpc ListVms(google.protobuf.Empty) returns (ListVmsResponse);
+
+  // Load an OCI image into the cluster's shared media store and image database.
+  //
+  // Pulls the referenced image for this node's architecture, flattens it, builds
+  // an ext4 rootfs, content-addresses it, and records a base image. Runs on the
+  // node that receives the call; the result is visible cluster-wide. Blocks until
+  // the load completes -- this can take minutes -- so set a generous deadline.
+  // Returns the content-addressed `img_id` to pass to CreateVm.
+  //
+  // Errors:
+  //   INVALID_ARGUMENT    -- `image_ref` is empty or malformed.
+  //   FAILED_PRECONDITION -- the node lacks the required tools (skopeo/umoci/mke2fs).
+  //   INTERNAL            -- the pull, unpack, build, publish, or DB record failed.
+  rpc LoadImage(LoadImageRequest) returns (LoadImageResponse);
 }
 
 // A fixed (vCPU, memory, disk) size, like a cloud instance class. Each step up
@@ -141,4 +155,19 @@ message Vm {
 
   // The cluster node (Erlang node name) the VM runs on.
   string node = 2;
+}
+
+// Request to load an OCI image.
+message LoadImageRequest {
+  // Required. An OCI image reference, e.g. "docker.io/library/alpine:3.19".
+  string image_ref = 1;
+
+  // Optional. A human-readable label stored with the image (defaults to image_ref).
+  optional string label = 2;
+}
+
+// Result of a successful LoadImage.
+message LoadImageResponse {
+  // The content-addressed image id; pass it to CreateVm.
+  string img_id = 1;
 }

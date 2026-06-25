@@ -51,6 +51,23 @@ from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
 client = hyper_pb2_grpc.HyperStub(grpc.aio.insecure_channel("localhost:50051"))
 ```
 
+### Loading Images
+
+Before you can create a VM you need an image in the cluster. `LoadImage` pulls an
+OCI image, builds its rootfs, and records it -- returning the `img_id` you pass to
+`CreateVm`. It blocks until the load finishes (this can take minutes), so set a
+generous deadline.
+
+```python
+loaded = await client.LoadImage(
+    hyper_pb2.LoadImageRequest(
+        image_ref="docker.io/library/alpine:3.19",
+        # label is optional; defaults to image_ref.
+    )
+)
+print(loaded.img_id)  # pass this to CreateVm
+```
+
 ### Creating VMs
 
 You can create new VMs with the `CreateVm` RPC.
@@ -58,7 +75,7 @@ You can create new VMs with the `CreateVm` RPC.
 ```python
 created = await client.CreateVm(
     hyper_pb2.CreateVmRequest(
-        img_id="img-abc",
+        img_id=loaded.img_id,
         instance_type=hyper_pb2.INSTANCE_TYPE_DECI,
         arch=hyper_pb2.ARCHITECTURE_X86_64,
         # boot_args is optional; omit it for the default kernel cmdline.

@@ -132,6 +132,16 @@ Coverage is a side effect of good tests, never the target.
 
 ## Other conventions
 
+- **Comments earn their place.** No section-divider banners (`# --- foo ---`),
+  no comment that just restates what the next line does. A comment explains a
+  non-obvious *why* a reader cannot recover from the code — a workaround, an
+  invariant, a deliberate trade-off. Prefer self-documenting code: a named
+  function, a `Unit.*` quantity instead of a bare `1024 * 1024`, a descriptive
+  variable — over a comment narrating the mechanics. If you reach for a comment
+  to explain *what*, rename the thing instead.
+- Don't hand-roll magic numbers for sizes/durations/bandwidth: use the
+  `Unit.*` types (`Unit.Information.mib(8)`, not `8 * 1024 * 1024`) and
+  `use Unit.Operators` for unit-aware arithmetic.
 - Add `@spec` to public functions. Dialyzer runs with `:unmatched_returns`,
   `:extra_return`, `:missing_return` and will fail the gate on a missing/wrong
   spec.

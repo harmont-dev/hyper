@@ -18,8 +18,20 @@ defmodule Hyper.Grpc.Server do
     GetVmRequest,
     GetVmResponse,
     ListVmsResponse,
+    LoadImageRequest,
+    LoadImageResponse,
     StopVmRequest
   }
+
+  @spec load_image(LoadImageRequest.t(), GRPC.Server.Stream.t()) :: LoadImageResponse.t()
+  def load_image(%LoadImageRequest{} = req, _stream) do
+    with {:ok, {ref, opts}} <- Codec.from_grpc(req),
+         {:ok, img_id} <- Hyper.Img.OciLoader.load(ref, opts) do
+      Codec.to_grpc({:loaded, img_id})
+    else
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
+  end
 
   @spec create_vm(CreateVmRequest.t(), GRPC.Server.Stream.t()) :: CreateVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.create_vm")
