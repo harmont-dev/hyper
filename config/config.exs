@@ -24,11 +24,7 @@ config :libcluster,
 config :hyper,
   cgroup_parent: "hyper",
   uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers",
-  vmlinux: %{
-    x86_64: "/srv/hyper/vmlinux/vmlinux-x86_64",
-    aarch64: "/srv/hyper/vmlinux/vmlinux-aarch64"
-  }
+  layer_dir: "/srv/hyper/layers"
 
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
