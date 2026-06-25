@@ -44,7 +44,9 @@ defmodule Hyper.Grpc.CodecTest do
 
     test "tool/build/db failures -> INTERNAL" do
       assert Codec.to_grpc({:error, {:skopeo_failed, 1, "boom"}}).status == GRPC.Status.internal()
-      assert Codec.to_grpc({:error, {:record_failed, :blob, :db}}).status == GRPC.Status.internal()
+
+      assert Codec.to_grpc({:error, {:record_failed, :blob, :db}}).status ==
+               GRPC.Status.internal()
     end
   end
 end

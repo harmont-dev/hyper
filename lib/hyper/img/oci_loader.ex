@@ -33,8 +33,12 @@ defmodule Hyper.Img.OciLoader do
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
   alias Hyper.Img.OciLoader.Umoci
 
+  # `Ecto.Multi` is an opaque struct; building it through the pipe trips
+  # dialyzer's opacity check (a known Ecto false positive), so silence it for the
+  # one function that assembles a Multi.
+  @dialyzer {:no_opaque, record: 3}
+
   @mib 1024 * 1024
-  @hash_chunk 2 * @mib
 
   # ext4 metadata (inode tables, journal, reserved blocks) plus slack so the
   # rootfs always fits. Overhead scales with content -- a flat constant is far
@@ -68,9 +72,8 @@ defmodule Hyper.Img.OciLoader do
         with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
              {:ok, content} <- dir_bytes(rootfs),
              bytes = ext4_bytes(content),
-             {:ok, staged} <- build_ext4(rootfs, bytes),
-             {:ok, id} <- finalize(staged, bytes, label) do
-          {:ok, id}
+             {:ok, staged} <- build_ext4(rootfs, bytes) do
+          finalize(staged, bytes, label)
         end
       end)
     end
@@ -210,17 +213,10 @@ defmodule Hyper.Img.OciLoader do
 
   # --- hash + publish -------------------------------------------------------
 
-  # Streaming sha256 of `path`, lowercase hex.
+  # Streaming sha256 of `path`, lowercase hex (reuses the shared redist helper).
   @spec sha256_file(Path.t()) :: {:ok, String.t()} | {:error, term()}
   defp sha256_file(path) do
-    digest =
-      path
-      |> File.stream!([:read, :binary, :raw], @hash_chunk)
-      |> Enum.reduce(:crypto.hash_init(:sha256), &:crypto.hash_update(&2, &1))
-      |> :crypto.hash_final()
-      |> Base.encode16(case: :lower)
-
-    {:ok, digest}
+    {:ok, Hyper.Redist.Sha256.file(path)}
   rescue
     e -> {:error, {:hash_failed, Exception.message(e)}}
   end
@@ -233,16 +229,14 @@ defmodule Hyper.Img.OciLoader do
     File.mkdir_p!(Config.layer_dir())
     final = final_path(id)
 
-    cond do
-      File.exists?(final) ->
-        _ = File.rm(staged)
-        {:ok, final}
-
-      true ->
-        case File.rename(staged, final) do
-          :ok -> {:ok, final}
-          {:error, reason} -> {:error, {:publish_failed, reason}}
-        end
+    if File.exists?(final) do
+      _ = File.rm(staged)
+      {:ok, final}
+    else
+      case File.rename(staged, final) do
+        :ok -> {:ok, final}
+        {:error, reason} -> {:error, {:publish_failed, reason}}
+      end
     end
   end
 

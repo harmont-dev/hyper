@@ -52,7 +52,7 @@ defmodule Hyper.Img.OciLoaderTest do
     end
 
     property "always a whole-MiB size that fits the content and clears the floor" do
-      check all content <- integer(0..(8 * 1024 * @mib)) do
+      check all(content <- integer(0..(8 * 1024 * @mib))) do
         size = OciLoader.ext4_bytes(content)
         assert rem(size, @mib) == 0
         assert size >= content
