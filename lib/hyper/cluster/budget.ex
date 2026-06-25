@@ -9,6 +9,8 @@ defmodule Hyper.Cluster.Budget do
   partition-tolerant.
   """
 
+  use OpenTelemetryDecorator
+
   @name __MODULE__
 
   @doc "The registry name."
@@ -27,6 +29,7 @@ defmodule Hyper.Cluster.Budget do
 
   @doc "Every node's published `NodeState` from this node's local replica."
   @spec all_states() :: [Hyper.Node.Budget.NodeState.t()]
+  @decorate with_span("Hyper.Cluster.Budget.all_states")
   def all_states do
     # Entries are {key, pid, value}; match only {:node, _} keys and take the value.
     Horde.Registry.select(@name, [{{{:node, :"$1"}, :_, :"$2"}, [], [:"$2"]}])
