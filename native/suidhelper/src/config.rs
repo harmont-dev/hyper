@@ -42,11 +42,6 @@ fn config_path() -> PathBuf {
 }
 
 /// Hyper's /etc/hyper/config.toml file format.
-///
-/// The device-tool paths are read from here (never from the unprivileged
-/// caller, which is why there is no `--bin` argument): the helper alone decides
-/// which binary it escalates to run. Each defaults to its usual location and is
-/// validated as a [`SafeBin`] before use.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     work_dir: PathBuf,
