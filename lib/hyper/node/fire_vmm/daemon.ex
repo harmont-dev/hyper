@@ -19,6 +19,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
   alias Hyper.SuidHelper
   alias Unit.Time
 
+  use OpenTelemetryDecorator
+
   @shutdown_timeout Time.s(5)
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
@@ -37,6 +39,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   return its pid. Fails (so the supervisor retries) if the reset cannot run.
   """
   @spec start_link(Opts.t()) :: {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.FireVMM.Daemon.start_link", include: [:id])
   def start_link(%Opts{vm_id: id} = opts) do
     with :ok <- SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id)) do
       cmd = Jailer.command(opts)
