@@ -206,6 +206,40 @@ jobs:
           flags: rust
           fail_ci_if_error: true
 
+  suidhelper-privileged:
+    name: Rust suidhelper (privileged E2E)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/suidhelper
+    steps:
+      - uses: actions/checkout@v7
+
+      # rustup reads native/suidhelper/rust-toolchain.toml and installs the pinned
+      # nightly on the first cargo call.
+      - name: Show toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/suidhelper
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      # The feature-gated E2E suites self-skip without root. Run ONLY these two as
+      # root (via sudo -E so the runner's cargo/rustup home and PATH are kept) so
+      # the root-only cases -- sys-test ok, fake-bin argv capture -- actually run.
+      # The rest of the suite (owner-axis tests assume a non-root uid) stays in the
+      # non-root `rust` job above.
+      - name: Gated E2E suites as root
+        run: |
+          sudo -E env "PATH=$PATH" \
+            cargo nextest run --features insecure_test_seams \
+              --test e2e_config --test e2e_argv
+
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required
   # for PR comments on fork PRs. Tiny job, always runs.

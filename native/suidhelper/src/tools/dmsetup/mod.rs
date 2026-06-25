@@ -7,12 +7,12 @@ mod thin_pool;
 use super::IsTool;
 use crate::util::safe_dev::{self, DmName};
 use clap::{Args, Subcommand};
-use message::ThinMessage;
+pub use message::ThinMessage;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use table::DmTable;
+pub use table::DmTable;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]

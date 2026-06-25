@@ -8,5 +8,6 @@
 //! point over these modules.
 
 pub mod config;
+pub mod security_gate;
 pub mod tools;
 pub mod util;

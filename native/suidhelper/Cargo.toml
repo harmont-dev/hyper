@@ -6,6 +6,11 @@ description = "Tiny setuid-root helper that runs a whitelisted set of device com
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/harmont-dev/hyper"
 
+[features]
+# TEST ONLY. Compiles the security_gate insecure arms. Never enable for a real
+# (setuid) build — build.rs refuses to compile a release binary with this on.
+insecure_test_seams = []
+
 [[bin]]
 name = "hyper-suidhelper"
 path = "src/main.rs"
@@ -21,6 +26,34 @@ path = "tests/util/safe_path.rs"
 name = "safe_dev"
 path = "tests/util/safe_dev.rs"
 
+[[test]]
+name = "security_gate"
+path = "tests/security_gate.rs"
+
+[[test]]
+name = "config_seam"
+path = "tests/config_seam.rs"
+
+[[test]]
+name = "util_safe_bin"
+path = "tests/util/safe_bin.rs"
+
+[[test]]
+name = "tools_dmsetup_parsers"
+path = "tests/tools/dmsetup_parsers.rs"
+
+[[test]]
+name = "util_confinement"
+path = "tests/util/confinement.rs"
+
+[[test]]
+name = "e2e_config"
+path = "tests/e2e/config.rs"
+
+[[test]]
+name = "e2e_argv"
+path = "tests/e2e/argv.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.29", features = ["user", "fs", "dir"] }
@@ -31,6 +64,7 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"
 
 [profile.release]
 strip = true

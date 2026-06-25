@@ -66,10 +66,12 @@ impl SysTest {
 }
 
 fn main() {
+    // Resolve the security gate before anything else reads it (the config load
+    // below consults it). In release this is a no-op: the gate stays secure.
+    hyper_suidhelper::security_gate::init();
+
     // Privileges are already dropped to the real uid by a pre-main constructor
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
-    // Load the config now - we are post-drop (real uid) and before any
-    // `Privileged` scope, so the file is read unprivileged, never as root.
     config::Config::init();
 
     // Each command yields a serializable value (errors stringified to unify); we
