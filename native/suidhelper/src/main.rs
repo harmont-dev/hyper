@@ -37,6 +37,8 @@ enum Command {
     Tool(Tool),
     /// Check the helper is correctly installed (can promote to root).
     SysTest,
+    /// Print the build version and BLAKE3 checksum of this binary.
+    Version,
 }
 
 /// The serializable result of a command, emitted as the JSON line on stdout.
@@ -47,6 +49,21 @@ enum Command {
 enum Output {
     Tool(serde_json::Value),
     SysTest(SysTest),
+}
+
+#[derive(Serialize)]
+struct Version {
+    version: &'static str,
+    checksum_blake3: String,
+}
+
+impl Version {
+    fn render() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            checksum_blake3: hyper_suidhelper::checksum::hex(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -66,6 +83,15 @@ impl SysTest {
 }
 
 fn main() {
+    let command = Cli::parse().command;
+
+    // `version` is a pure self-report: it touches neither config nor privileges,
+    // so render it before any setup that could fail (e.g. a missing config file).
+    if let Command::Version = command {
+        println!("{}", serde_json::to_string(&Version::render()).unwrap());
+        return;
+    }
+
     // Resolve the security gate before anything else reads it (the config load
     // below consults it). In release this is a no-op: the gate stays secure.
     hyper_suidhelper::security_gate::init();
@@ -76,11 +102,12 @@ fn main() {
 
     // Each command yields a serializable value (errors stringified to unify); we
     // render the final JSON line here.
-    let output = match Cli::parse().command {
+    let output = match command {
         Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
         Command::SysTest => SysTest::perform()
             .map(Output::SysTest)
             .map_err(|e| e.to_string()),
+        Command::Version => unreachable!("handled above"),
     };
 
     match output.and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())) {

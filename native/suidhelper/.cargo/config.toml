@@ -4,3 +4,6 @@
 # the host `cc`, so it's left at the default.
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
+
+[alias]
+xtask = "run --package xtask --"
