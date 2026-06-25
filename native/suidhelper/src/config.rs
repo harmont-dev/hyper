@@ -79,21 +79,13 @@ impl Config {
     pub fn safe_load() -> Result<Self, LoadingError> {
         let path = config_path();
 
-        let body = crate::security_gate::split(
-            || -> Result<String, LoadingError> {
-                let safe_path: SafePath<IsAbsolute, StrictComponents> =
-                    path.clone().try_into()?;
-                let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-                    SafeFile::open(&safe_path, OFlag::O_RDONLY)?;
-                std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
-                    .map_err(|_| LoadingError::Unreadable(path.clone()))
-            },
-            || -> Result<String, LoadingError> {
-                std::fs::read_to_string(&path)
-                    .map_err(|_| LoadingError::Unreadable(path.clone()))
-            },
-        )?;
+        let safe_path: SafePath<IsAbsolute, StrictComponents> = path.clone().try_into()?;
 
+        let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
+            SafeFile::open(&safe_path, OFlag::O_RDONLY)?;
+
+        let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
+            .map_err(|_| LoadingError::Unreadable(path.clone()))?;
         let config: Config =
             toml::from_str(&body).map_err(|_| LoadingError::Malformed(path.clone()))?;
 
