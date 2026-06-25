@@ -53,13 +53,13 @@ defmodule Hyper.SuidHelper do
   @doc """
   Check that the setuid helper and every tool it execs are usable on this
   machine: the helper binary is present, is the build this release expects
-  (`verify/0`), then each tool submodule's own check.
+  (`verify_version/0`), then each tool submodule's own check.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.test_system")
   def test_system do
     with :ok <- helper_present(),
-         :ok <- verify(),
+         :ok <- verify_version(),
          :ok <- Losetup.test_system(),
          :ok <- Dmsetup.test_system() do
       Blockdev.test_system()
@@ -75,9 +75,9 @@ defmodule Hyper.SuidHelper do
   check, not an adversarial tamper proof -- a malicious binary could report any
   value.
   """
-  @spec verify() :: :ok | {:error, :version_mismatch | err()}
-  @decorate with_span("Hyper.SuidHelper.verify")
-  def verify do
+  @spec verify_version() :: :ok | {:error, :version_mismatch | err()}
+  @decorate with_span("Hyper.SuidHelper.verify_version")
+  def verify_version do
     case exec(["version"]) do
       {:ok, %{"version" => v, "checksum_blake3" => c}} ->
         if v == Expected.version() and c == Expected.checksum_blake3(),
