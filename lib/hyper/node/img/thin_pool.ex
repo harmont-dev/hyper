@@ -53,6 +53,7 @@ defmodule Hyper.Node.Img.ThinPool do
     with :ok <- File.mkdir_p(Hyper.Config.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
+         :ok <- reclaim_stale_pool(),
          :ok <- zero_metadata(meta),
          {:ok, meta_loop} <- SuidHelper.Losetup.attach_rw(meta),
          {:ok, data_loop} <- SuidHelper.Losetup.attach_rw(data),
@@ -117,6 +118,17 @@ defmodule Hyper.Node.Img.ThinPool do
   @doc false
   @spec id_free(map(), non_neg_integer()) :: map()
   def id_free(%{freed: freed} = s, id), do: %{s | freed: [id | freed]}
+
+  # A run that did not shut down cleanly (e.g. SIGKILL, so `terminate/2` never
+  # ran) leaves the dm pool behind, and recreating it fails with "Device or
+  # resource busy". Best-effort remove any stale pool of our name so this boot
+  # can build a fresh one. Runs before `zero_metadata`, which would otherwise
+  # corrupt a still-live pool.
+  @spec reclaim_stale_pool() :: :ok
+  defp reclaim_stale_pool do
+    _ = SuidHelper.Dmsetup.remove(@pool_name)
+    :ok
+  end
 
   # Create a sparse file of `size` if absent; reuse it if already present.
   @spec ensure_backing(String.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
