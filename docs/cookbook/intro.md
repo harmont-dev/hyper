@@ -24,22 +24,69 @@ The absolute best way to get started with `Hyper` is to play with it.
 Hyper needs a **PostgreSQL** server reachable from every node - it is the image
 database and the only stateful external dependency.
 
+For local development the quickest path is Docker. The connection details below
+match the defaults in `config/config.exs` (`Hyper.Img.Db.Repo`):
+
+```sh
+docker run -d --name hyper-pg \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=hyper_dev \
+  -p 5432:5432 \
+  postgres:16
+```
+
+Once it is up, create and migrate the schema (the repo is not in `ecto_repos`,
+so pass it with `-r`):
+
+```sh
+mix ecto.create -r Hyper.Img.Db.Repo
+mix ecto.migrate -r Hyper.Img.Db.Repo
+```
+
+The container is ephemeral; `docker start hyper-pg` brings it back after a
+reboot. To point Hyper at an existing server instead, override the
+`Hyper.Img.Db.Repo` block in your `config.exs`.
+
 #### System binaries
 
-The following must be on each node's `PATH` (the bracketed override is the
-`config :hyper` key you can set if the binary lives elsewhere):
+These are used by the unprivileged node directly; each must be on the node's
+`PATH` (the bracketed override is the `config :hyper` key you can set if the
+binary lives elsewhere):
 
   - [`skopeo`](https://github.com/containers/skopeo) - pulls OCI images
     (`skopeo_path`)
   - [`e2fsprogs`](https://github.com/tytso/e2fsprogs) - provides `mke2fs`, which
     builds the ext4 rootfs (`mke2fs_path`)
-  - `losetup`, `blockdev` (from **util-linux**) - loop-device setup
-    (`losetup_path`, `blockdev_path`)
-  - `dmsetup` (from **lvm2** / device-mapper) - dm-snapshot and thin-pool
-    layering (`dmsetup_path`). Frequently *not* installed by default - check
-    this one first.
   - `du`, `getent` (from **coreutils** and **glibc**) - rootfs sizing and user
     resolution. Present on essentially every distro.
+
+The privileged device binaries - `losetup`, `blockdev` (from **util-linux**)
+and `dmsetup` (from **lvm2** / device-mapper) - are run only by the setuid
+helper, never named by the unprivileged caller. Their paths therefore live in
+the helper's own config, `/etc/hyper/config.toml`, and default to
+`/usr/sbin/{losetup,blockdev,dmsetup}`.
+
+**The config file is optional.** If it is absent the helper uses the built-in
+defaults below (and `work_dir = "/srv/hyper"`, matching the node's own
+fallback). Create one only to override a default - and if you do, it must be
+root-owned and not group/other-writable, or the helper refuses to start (a
+present-but-untrusted file is treated as an attack signal, unlike a missing
+one):
+
+```toml
+# /etc/hyper/config.toml (root-owned, mode 0644) - every line optional
+work_dir = "/srv/hyper"
+
+# Each must be an absolute path to a root-owned, non-world-writable binary;
+# the helper validates this before it will exec the tool.
+dmsetup  = "/usr/sbin/dmsetup"
+losetup  = "/usr/sbin/losetup"
+blockdev = "/usr/sbin/blockdev"
+```
+
+`dmsetup` (lvm2) is frequently *not* installed by default - check that one
+first.
 
 #### Kernel features
 
@@ -61,6 +108,17 @@ The host kernel must provide:
     Run `mix suidhelper.install`, which builds, stamps, and places it
     setuid-root on `PATH`. Every privileged operation (losetup, dmsetup, mknod,
     chroot jails) routes through it; the BEAM itself runs unprivileged.
+
+    The final `sudo install` step runs without a controlling terminal (Mix
+    captures the nested `cargo` output), so on a typical `tty_tickets` sudo
+    setup it cannot prompt for a password. If it fails, the build has already
+    stamped the binary -- just run the copy yourself:
+
+    ```sh
+    sudo install -o root -g root -m 4755 \
+      native/suidhelper/target/release/hyper-suidhelper \
+      /usr/local/bin/hyper-suidhelper
+    ```
   - A **parent cgroup** named by `cgroup_parent` (default `hyper`) must exist
     under `/sys/fs/cgroup`; Hyper creates each VM's cgroup beneath it.
   - The host UID/GID range given by `uid_gid_range` must be free for Hyper to
