@@ -67,15 +67,14 @@ and have built on their shoulders), but here is the rough overview of why I did
 not enjoy existing products:
 
 - [Daytona](http://daytona.io/) (the best overall, in my experience) was a
-  container-first SAAS. Their recent additions of VMs have been unreliable and
-  buggy for me -- between snapshots not getting committed and their VM feature
-  not being available open-source, I was ultimately dissatisfied and decided to
-  write my own. **Daytona has much better support than Hyper ever will. If you
-  do not want to maintain your code and want a Slack channel with really awesome
-  people, go with Daytona.** Hyper is a technical-first product, and
-  consequently we do not offer guaranteed support, SLAs, or polished SDKs. There
-  is a [community Discord](https://discord.gg/hm-dev) where you can ask
-  questions, but please do not expect dedicated support.
+  container-first SAAS. I was ultimately, however, dissatisfied with VMs being
+  closed source and decided to write my own. **Daytona has much better support
+  than Hyper ever will. If you do not want to maintain your code and want a
+  Slack channel with really awesome people, go with Daytona.** Hyper is a
+  technical-first product, and consequently we do not offer guaranteed support,
+  SLAs, or polished SDKs. There is a [community
+  Discord](https://discord.gg/hm-dev) where you can ask questions, but please
+  do not expect dedicated support as you would from _Daytona_.
 - [Freestyle.sh](https://www.freestyle.sh/) is amazing in terms of performance,
   and probably beats Hyper on performance alone, however, the incredible
   unreliability has caused me to churn. **If you need raw performance, esp.
