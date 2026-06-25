@@ -13,7 +13,6 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
 
   alias Hyper.Config
-  alias Hyper.Redist
 
   require Logger
 

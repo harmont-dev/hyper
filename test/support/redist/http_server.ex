@@ -43,7 +43,11 @@ defmodule Redist.Support.HttpServer do
     %{base_url: "http://127.0.0.1:#{port}", docroot: docroot}
   end
 
-  @spec put_file(%{required(:base_url) => String.t(), required(:docroot) => Path.t()}, String.t(), binary()) ::
+  @spec put_file(
+          %{required(:base_url) => String.t(), required(:docroot) => Path.t()},
+          String.t(),
+          binary()
+        ) ::
           String.t()
   def put_file(%{base_url: base, docroot: docroot}, name, contents) do
     path = Path.join(docroot, name)

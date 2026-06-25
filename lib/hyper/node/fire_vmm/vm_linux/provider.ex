@@ -7,7 +7,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   `Hyper.Node.FireVMM.VmLinux.Manifest`. `ensure_installed/0` installs *every*
   build for this node's architecture and is idempotent: if all the expected
   images are already present it returns `:ok` without touching the network.
-  Otherwise it fetches each missing image via `Hyper.Redist.File` (download,
+  Otherwise it fetches each missing image via `Redist.File` (download,
   SHA-256 verify, install).
 
   This is the download-side counterpart to operator-provided kernels; see
@@ -16,7 +16,6 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   """
 
   alias Hyper.Node.FireVMM.VmLinux.Manifest
-  alias Hyper.Redist
 
   @doc "Ensure every kernel for this node's architecture is installed."
   @spec ensure_installed() :: :ok | {:error, term()}
@@ -53,7 +52,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   @doc """
   Install state of `builds` under `dir`: `:ok` if every asset file is present;
   `{:error, :not_installed}` if none are; `{:error, :bad_install}` if only some
-  are (a partial/corrupt install - `Hyper.Redist.File` keeps existing files, so
+  are (a partial/corrupt install - `Redist.File` keeps existing files, so
   the remedy is to wipe and reinstall).
   """
   @spec install_state(Path.t(), [Manifest.Build.t()]) ::

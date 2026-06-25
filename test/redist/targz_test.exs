@@ -35,7 +35,10 @@ defmodule Redist.TargzTest do
 
   @archives [
     %{name: "single file", files: %{"a.txt" => "alpha"}},
-    %{name: "nested directories", files: %{"a.txt" => "alpha", "sub/b.txt" => "beta", "sub/deep/c.bin" => <<0, 1, 2, 3, 255>>}},
+    %{
+      name: "nested directories",
+      files: %{"a.txt" => "alpha", "sub/b.txt" => "beta", "sub/deep/c.bin" => <<0, 1, 2, 3, 255>>}
+    },
     %{name: "empty file content", files: %{"only.txt" => ""}}
   ]
 
@@ -53,7 +56,10 @@ defmodule Redist.TargzTest do
     end
   end
 
-  test "install/3 rejects a checksum mismatch and leaves dest untouched", %{server: server, dest: dest} do
+  test "install/3 rejects a checksum mismatch and leaves dest untouched", %{
+    server: server,
+    dest: dest
+  } do
     bytes = targz(%{"a.txt" => "alpha"})
     url = HttpServer.put_file(server, "archive.tar.gz", bytes)
     wrong = String.duplicate("0", 64)
@@ -63,7 +69,10 @@ defmodule Redist.TargzTest do
     refute File.exists?(dest)
   end
 
-  test "install/3 returns {:download_failed, 404} for a missing URL", %{server: server, dest: dest} do
+  test "install/3 returns {:download_failed, 404} for a missing URL", %{
+    server: server,
+    dest: dest
+  } do
     url = HttpServer.missing_url(server, "nope.tar.gz")
     sha = String.duplicate("0", 64)
 
@@ -75,7 +84,9 @@ defmodule Redist.TargzTest do
     bytes = evil_targz()
     url = HttpServer.put_file(server, "evil.tar.gz", bytes)
 
-    assert {:error, {:unsafe_tar_entry, "../escape.txt"}} = Targz.install(url, sha256(bytes), dest)
+    assert {:error, {:unsafe_tar_entry, "../escape.txt"}} =
+             Targz.install(url, sha256(bytes), dest)
+
     refute File.exists?(Path.join(Path.dirname(dest), "escape.txt"))
     assert File.ls(dest) in [{:error, :enoent}, {:ok, []}]
   end
