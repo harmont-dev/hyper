@@ -47,6 +47,10 @@ name = "util_confinement"
 path = "tests/util/confinement.rs"
 
 [[test]]
+name = "tools_chroot_jail_remove"
+path = "tests/tools/chroot_jail_remove.rs"
+
+[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 
