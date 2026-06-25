@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+hyper-suidhelper-meta = { path = "../meta" }
+object = "0.36"

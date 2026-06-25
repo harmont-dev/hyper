@@ -22,7 +22,6 @@ defmodule Hyper.Config do
   @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
   @umoci_path Application.compile_env(:hyper, :umoci_path, nil)
   @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
-  @vmlinux Application.compile_env(:hyper, :vmlinux, %{})
 
   @doc """
   Root work directory for this node. All firecracker paths derive from it.
@@ -156,5 +155,7 @@ defmodule Hyper.Config do
   `Hyper.Node.Vmlinux` resolves and validates them per node.
   """
   @spec vmlinux :: %{optional(Sys.Arch.t()) => Path.t()}
-  def vmlinux, do: @vmlinux
+  # Runtime read, not `compile_env`: an unset map would inline a literal `%{}`,
+  # which the type checker proves makes every `Map.fetch/2` on it return `:error`.
+  def vmlinux, do: Application.get_env(:hyper, :vmlinux, %{})
 end

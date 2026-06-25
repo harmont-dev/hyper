@@ -1,3 +1,9 @@
+[workspace]
+members = ["meta", "xtask"]
+# Plain `cargo build`/`cargo test` only touch the helper itself; xtask is a
+# build tool, built on demand via the `cargo xtask` alias.
+default-members = ["."]
+
 [package]
 name = "hyper-suidhelper"
 version = "0.1.0"
@@ -68,6 +74,7 @@ path = "tests/e2e/chroot_jail.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

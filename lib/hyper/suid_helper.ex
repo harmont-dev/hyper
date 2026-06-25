@@ -16,7 +16,7 @@ defmodule Hyper.SuidHelper do
   self-test and reports the base path it was compiled against.
   """
 
-  alias Hyper.SuidHelper.{Blockdev, Dmsetup, Losetup}
+  alias Hyper.SuidHelper.{Blockdev, Dmsetup, Expected, Losetup}
 
   use OpenTelemetryDecorator
 
@@ -52,15 +52,40 @@ defmodule Hyper.SuidHelper do
 
   @doc """
   Check that the setuid helper and every tool it execs are usable on this
-  machine: the helper binary itself, then each tool submodule's own check.
+  machine: the helper binary is present, is the build this release expects
+  (`verify_version/0`), then each tool submodule's own check.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.test_system")
   def test_system do
     with :ok <- helper_present(),
+         :ok <- verify_version(),
          :ok <- Losetup.test_system(),
          :ok <- Dmsetup.test_system() do
       Blockdev.test_system()
+    end
+  end
+
+  @doc """
+  Check the deployed helper is the one this build produced: its `version` output
+  must match `Hyper.SuidHelper.Expected` (the identity captured from the stamped
+  binary at compile time). Catches a stale or wrong binary at the configured path.
+
+  This compares the helper's *self-reported* identity, so it is a build-provenance
+  check, not an adversarial tamper proof -- a malicious binary could report any
+  value.
+  """
+  @spec verify_version() :: :ok | {:error, :version_mismatch | err()}
+  @decorate with_span("Hyper.SuidHelper.verify_version")
+  def verify_version do
+    case exec(["version"]) do
+      {:ok, %{"version" => v, "checksum_blake3" => c}} ->
+        if v == Expected.version() and c == Expected.checksum_blake3(),
+          do: :ok,
+          else: {:error, :version_mismatch}
+
+      {:error, _} = err ->
+        err
     end
   end
 
