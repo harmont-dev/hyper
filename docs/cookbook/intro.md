@@ -143,7 +143,31 @@ printf 'dm_snapshot\ndm_thin_pool\nloop\n' | sudo tee /etc/modules-load.d/hyper.
       /usr/local/bin/hyper-suidhelper
     ```
   - A **parent cgroup** named by `cgroup_parent` (default `hyper`) must exist
-    under `/sys/fs/cgroup`; Hyper creates each VM's cgroup beneath it.
+    under the cgroup-v2 hierarchy; Hyper creates each VM's cgroup beneath it and
+    fails to boot with `:missing_parent_cgroup` if it is absent. Create it and
+    delegate the `cpu` and `memory` controllers so the per-VM cgroups can set
+    `cpu.max` / `memory.max`:
+
+    ```sh
+    sudo mkdir -p /sys/fs/cgroup/hyper
+    echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control
+    ```
+
+    If that last write errors, the root hierarchy is not delegating those
+    controllers down yet - enable them there first, then retry the line above:
+
+    ```sh
+    echo '+cpu +memory' | sudo tee /sys/fs/cgroup/cgroup.subtree_control
+    ```
+
+    The cgroup hierarchy is memory-backed, so `/sys/fs/cgroup/hyper` does **not**
+    survive a reboot. Re-create it each boot, or persist it with
+    `systemd-tmpfiles`:
+
+    ```sh
+    echo 'd /sys/fs/cgroup/hyper 0755 root root -' \
+      | sudo tee /etc/tmpfiles.d/hyper-cgroup.conf
+    ```
   - The host UID/GID range given by `uid_gid_range` must be free for Hyper to
     allocate per-VM users from.
 
