@@ -58,17 +58,28 @@ defmodule Sys.Mon.NetBw do
   defp physical_bytes(interfaces) do
     interfaces
     |> Enum.filter(&physical?(&1.name))
-    |> Enum.reduce(0, fn i, acc -> acc + i.rx_bytes + i.tx_bytes end)
+    |> sum_bytes()
   end
 
   @spec physical?(String.t()) :: boolean()
   defp physical?(name), do: File.exists?("/sys/class/net/#{name}/device")
 
-  # Project the raw bytes/sec rate into a `Unit.Bandwidth` reading.
+  @doc false
+  # Total rx+tx bytes across the given interfaces. Pure: the physical-interface
+  # filtering happens upstream, so this is exactly the cumulative-counter
+  # denominator handed to `Rate`.
+  @spec sum_bytes([NetDev.Interface.t()]) :: non_neg_integer()
+  def sum_bytes(interfaces) do
+    Enum.reduce(interfaces, 0, fn i, acc -> acc + i.rx_bytes + i.tx_bytes end)
+  end
+
+  @doc false
+  # Project the raw bytes/sec rate into a `Unit.Bandwidth` reading; `:skip`
+  # (no baseline yet) passes through untouched.
   @spec as_bandwidth({:ok, float(), Rate.state()} | {:skip, Rate.state()}) ::
           {:ok, Bandwidth.t(), Rate.state()} | {:skip, Rate.state()}
-  defp as_bandwidth({:ok, bytes_per_sec, state}),
+  def as_bandwidth({:ok, bytes_per_sec, state}),
     do: {:ok, Bandwidth.bps(round(bytes_per_sec)), state}
 
-  defp as_bandwidth({:skip, state}), do: {:skip, state}
+  def as_bandwidth({:skip, state}), do: {:skip, state}
 end

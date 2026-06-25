@@ -38,12 +38,18 @@ defmodule Sys.Mon.Mem do
   @impl true
   def sample(_state) do
     case Meminfo.read() do
-      {:ok, %Meminfo.Snapshot{total: total, available: available}} ->
-        used = Information.as_bytes(total) - Information.as_bytes(available)
-        {:ok, Information.bytes(used), nil}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:ok, snapshot} -> {:ok, used(snapshot), nil}
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc false
+  # Used memory: `MemTotal - MemAvailable`. On any sane reading `available <=
+  # total`, so the result is non-negative; the subtraction is not clamped, so a
+  # nonsensical `available > total` reading would surface as a negative figure
+  # rather than being silently hidden.
+  @spec used(Meminfo.Snapshot.t()) :: Information.t()
+  def used(%Meminfo.Snapshot{total: total, available: available}) do
+    Information.bytes(Information.as_bytes(total) - Information.as_bytes(available))
   end
 end
