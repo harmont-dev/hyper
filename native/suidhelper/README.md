@@ -75,3 +75,24 @@ elsewhere via dm-thin), so there is no read-write attach.
   must be **snapshot** targets only (no `linear`/`crypt`/… that could map
   arbitrary devices). The device path checks reject `..` traversal. Anything
   else exits non-zero without running.
+
+## Testing
+
+- `cargo nextest run` — pure layers (parser matrix, confinement primitives, gate
+  defaults). No root, no config, no Docker.
+- `cargo nextest run --features insecure_test_seams` — adds the config-seam and
+  subprocess suites. Cases needing root self-skip with a loud `SKIP` line.
+- As root (`sudo -E env "PATH=$PATH" cargo nextest run --features
+  insecure_test_seams --test e2e_config --test e2e_argv`) — runs every case,
+  including `sys-test ok` and the fake-bin argv-capture assertions. CI does this
+  in the `suidhelper-privileged` job.
+
+### The insecure test seam
+
+`security_gate` is the single decision point for INSECURE TEST MODE. The insecure
+code path (the `HYPER_SETUIDHELPER_CONFIG_PATH` config override) activates only
+when BOTH gates are open: the `insecure_test_seams` Cargo feature (compile-time)
+AND `HYPER_SETUIDHELPER_IS_INSECURE_MODE=1` (runtime). Release builds never enable
+the feature — `build.rs` refuses to compile a release binary with it — so the
+installed setuid binary always takes the secure arm regardless of the
+environment.
