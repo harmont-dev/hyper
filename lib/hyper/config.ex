@@ -152,14 +152,10 @@ defmodule Hyper.Config do
   @doc """
   Per-architecture vmlinux (guest kernel) image paths, keyed by `Sys.Arch.t()`.
   The operator places the kernels on the host and points these at them;
-  `Hyper.Node.Vmlinux` resolves and validates them per node, falling back to the
-  Provider's default kernel when unset (the empty-config case).
-
-  Read at runtime rather than via `compile_env`: with no configured map the
-  compile-time default collapses to a literal empty map, which the type checker
-  then proves makes every `Map.fetch/2` on it return `:error` -- a false
-  dead-branch warning in `Hyper.Node.Vmlinux`. A runtime read keeps the type open.
+  `Hyper.Node.Vmlinux` resolves and validates them per node.
   """
   @spec vmlinux :: %{optional(Sys.Arch.t()) => Path.t()}
+  # Runtime read, not `compile_env`: an unset map would inline a literal `%{}`,
+  # which the type checker proves makes every `Map.fetch/2` on it return `:error`.
   def vmlinux, do: Application.get_env(:hyper, :vmlinux, %{})
 end
