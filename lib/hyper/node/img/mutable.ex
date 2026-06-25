@@ -22,6 +22,8 @@ defmodule Hyper.Node.Img.Mutable do
   alias Hyper.Node.Img.{Server, ThinPool}
   alias Hyper.SuidHelper
 
+  use OpenTelemetryDecorator
+
   @idle_timeout_ms :timer.seconds(30)
 
   defmodule Opts do
@@ -67,6 +69,7 @@ defmodule Hyper.Node.Img.Mutable do
   def release(server), do: GenServer.call(server, {:release, self()})
 
   @impl true
+  @decorate with_span("Hyper.Node.Img.Mutable.init", include: [:img_id, :vm_id])
   def init(%Opts{img_id: img_id, vm_id: vm_id}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)

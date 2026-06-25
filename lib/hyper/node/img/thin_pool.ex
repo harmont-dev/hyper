@@ -17,6 +17,8 @@ defmodule Hyper.Node.Img.ThinPool do
   alias Hyper.SuidHelper
   alias Unit.Information
 
+  use OpenTelemetryDecorator
+
   @pool_name "hyper-thinpool"
   @data_file "thinpool.data"
   @meta_file "thinpool.meta"
@@ -33,15 +35,18 @@ defmodule Hyper.Node.Img.ThinPool do
   @doc "Provision a thin volume of `sectors` over read-only `origin_dev`."
   @spec create_external(String.t(), Path.t(), pos_integer()) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
+  @decorate with_span("Hyper.Node.Img.ThinPool.create_external", include: [:name])
   def create_external(name, origin_dev, sectors) do
     GenServer.call(__MODULE__, {:create_external, name, origin_dev, sectors})
   end
 
   @doc "Remove thin volume `name` and free its thin device `id`."
   @spec destroy(String.t(), non_neg_integer()) :: :ok
+  @decorate with_span("Hyper.Node.Img.ThinPool.destroy", include: [:name, :id])
   def destroy(name, id), do: GenServer.call(__MODULE__, {:destroy, name, id})
 
   @impl true
+  @decorate with_span("Hyper.Node.Img.ThinPool.init")
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
