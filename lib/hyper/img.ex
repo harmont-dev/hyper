@@ -13,6 +13,8 @@ defmodule Hyper.Img do
 
   use OpenTelemetryDecorator
 
+  require Logger
+
   alias Hyper.Config
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
 
@@ -72,6 +74,7 @@ defmodule Hyper.Img do
     final = final_path(id)
 
     if File.exists?(final) do
+      Logger.info("image #{id} already present in store; reusing")
       _ = File.rm(src)
       {:ok, final}
     else
