@@ -19,13 +19,58 @@ The absolute best way to get started with `Hyper` is to play with it.
 
 ### Requirements
 
-Hyper requires the following software be installed on each node running it:
+#### External services
 
-  - [`skopeo`](https://github.com/containers/skopeo)
-  - [`e2fsprogs`](https://github.com/tytso/e2fsprogs)
+Hyper needs a **PostgreSQL** server reachable from every node — it is the image
+database and the only stateful external dependency.
 
-Hyper has more runtime dependencies, but they are automatically redistributed
-by Hyper.
+#### System binaries
+
+The following must be on each node's `PATH` (the bracketed override is the
+`config :hyper` key you can set if the binary lives elsewhere):
+
+  - [`skopeo`](https://github.com/containers/skopeo) — pulls OCI images
+    (`skopeo_path`)
+  - [`e2fsprogs`](https://github.com/tytso/e2fsprogs) — provides `mke2fs`, which
+    builds the ext4 rootfs (`mke2fs_path`)
+  - `losetup`, `blockdev` (from **util-linux**) — loop-device setup
+    (`losetup_path`, `blockdev_path`)
+  - `dmsetup` (from **lvm2** / device-mapper) — dm-snapshot and thin-pool
+    layering (`dmsetup_path`). Frequently *not* installed by default — check
+    this one first.
+  - `du`, `getent` (from **coreutils** and **glibc**) — rootfs sizing and user
+    resolution. Present on essentially every distro.
+
+#### Kernel features
+
+The host kernel must provide:
+
+  - **KVM** — `/dev/kvm` must exist and be accessible to the per-VM users (see
+    the `uid_gid_range` configuration).
+  - **cgroup v2** — the unified hierarchy mounted at `/sys/fs/cgroup`. v1-only
+    hosts are not supported.
+  - **device-mapper targets** `snapshot`, `thin`, and `thin-pool` — load the
+    `dm_snapshot` and `dm_thin_pool` modules (`modprobe dm_snapshot
+    dm_thin_pool`). Hyper refuses to start its device helper without them.
+  - **loop devices** — the `loop` module, used to attach layer images as block
+    devices.
+
+#### Privileged setup
+
+  - The **setuid-root device helper** (`hyper-suidhelper`) must be installed.
+    Run `mix suidhelper.install`, which builds, stamps, and places it
+    setuid-root on `PATH`. Every privileged operation (losetup, dmsetup, mknod,
+    chroot jails) routes through it; the BEAM itself runs unprivileged.
+  - A **parent cgroup** named by `cgroup_parent` (default `hyper`) must exist
+    under `/sys/fs/cgroup`; Hyper creates each VM's cgroup beneath it.
+  - The host UID/GID range given by `uid_gid_range` must be free for Hyper to
+    allocate per-VM users from.
+
+#### Auto-redistributed
+
+The remaining runtime dependencies — `firecracker`, `jailer`, `umoci`, and the
+guest `vmlinux` kernels — are downloaded, checksum-verified, and managed by
+Hyper itself; you do not install them.
 
 ### Installation
 
