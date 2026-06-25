@@ -8,11 +8,6 @@ defmodule Hyper do
     @type id :: String.t()
   end
 
-  defmodule Img do
-    @moduledoc "A content-addressed image: an ordered stack of layers."
-    @type id :: String.t()
-  end
-
   @doc """
   Create a new virtual machine from an image.
 
