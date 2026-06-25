@@ -27,6 +27,7 @@ defmodule Hyper.Img.Db.Gc do
   """
 
   use GenServer
+  use OpenTelemetryDecorator
   require Logger
   import Ecto.Query
 
@@ -137,6 +138,7 @@ defmodule Hyper.Img.Db.Gc do
   end
 
   @spec scan_one_batch(t()) :: t()
+  @decorate with_span("Hyper.Img.Db.Gc.scan_one_batch")
   defp scan_one_batch(%__MODULE__{sweep: sweep} = state) do
     limit = state.config.batch_size
     batch = with_low_priority(state, fn -> Blob.present_after(sweep.cursor, limit) end)
