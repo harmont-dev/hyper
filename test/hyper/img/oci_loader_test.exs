@@ -2,7 +2,7 @@ defmodule Hyper.Img.OciLoaderTest do
   use ExUnit.Case, async: false
   use ExUnitProperties
 
-  alias Hyper.Config
+  alias Hyper.Cfg.Dirs
   alias Hyper.Img.Db.{Blob, Repo}
   alias Hyper.Img.OciLoader
   alias Unit.Information
@@ -35,7 +35,7 @@ defmodule Hyper.Img.OciLoaderTest do
 
     assert {:ok, id} = OciLoader.load("docker.io/library/busybox:1.36")
 
-    path = Path.join(Config.layer_dir(), "layer_#{id}.img")
+    path = Path.join(Dirs.layer_dir(), "layer_#{id}.img")
     assert File.exists?(path)
     assert File.stat!(path).size > 0
 
