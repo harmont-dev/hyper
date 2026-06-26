@@ -43,6 +43,12 @@ pub enum Error {
     },
     #[error("copy kernel: {0}")]
     Copy(#[source] io::Error),
+    #[error("resolving block device {path}: {source}")]
+    ResolveDev {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// An unfilled artifact slot.
@@ -190,8 +196,18 @@ pub fn stage_kernel_under(
 /// `uid:gid`. The device is opened as a verified `SafeFile<IsBlockDevice>`, so the
 /// number comes from a real device node, never a caller-supplied value.
 fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Result<(), Error> {
-    let dev_path: SafePath<IsAbsolute, StrictComponents> =
-        device.as_ref().to_path_buf().try_into()?;
+    // `device` is lexically validated as `/dev/loopN` or `/dev/mapper/hyper-*`.
+    // The dm form is a symlink under `/dev/mapper` — a root-owned `0755` dir an
+    // unprivileged caller cannot write — so resolving it to its real `/dev/dm-N`
+    // node cannot be redirected by the caller. We must resolve first: `SafeFile`
+    // opens `O_NOFOLLOW` (it must never follow an attacker-supplied symlink) and
+    // would otherwise reject the dm symlink itself. Loop nodes resolve to
+    // themselves. The re-opened target is still verified `IsBlockDevice`.
+    let real = std::fs::canonicalize(device.as_ref()).map_err(|source| Error::ResolveDev {
+        path: device.as_ref().to_path_buf(),
+        source,
+    })?;
+    let dev_path: SafePath<IsAbsolute, StrictComponents> = real.try_into()?;
     let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
     chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;
