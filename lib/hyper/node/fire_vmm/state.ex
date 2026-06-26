@@ -208,8 +208,12 @@ defmodule Hyper.Node.FireVMM.State do
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
     alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
 
+    require Logger
+
     # Stage boot artifacts into the chroot, then issue the pre-boot config and
-    # start the guest.
+    # start the guest. Both failure paths end the boot via a supervisor restart,
+    # so log the reason here - otherwise it vanishes into the `:one_for_all`
+    # cycle and the VM just appears to relaunch for no visible cause.
     def handle(
           :state_timeout,
           :configure,
@@ -218,11 +222,17 @@ defmodule Hyper.Node.FireVMM.State do
       case ChrootJail.stage(id, uid, gid, spec) do
         {:ok, jailed_spec} ->
           case apply_spec(id, jailed_spec) do
-            :ok -> {:next_state, :running, data}
-            {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
+            :ok ->
+              Logger.info("vm #{id}: configured, guest starting")
+              {:next_state, :running, data}
+
+            {:error, reason} ->
+              Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
+              {:stop, {:shutdown, {:boot_failed, reason}}, data}
           end
 
         {:error, reason} ->
+          Logger.error("vm #{id}: boot failed staging jail: #{inspect(reason)}")
           {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
       end
     end
