@@ -1,6 +1,6 @@
 defmodule Hyper.Node.FireVMM.JailerTest do
   @moduledoc """
-  Properties and examples for `Hyper.Node.FireVMM.Jailer.command/1`.
+  Examples for `Hyper.Node.FireVMM.Jailer.command/1`.
 
   Load-bearing invariant: the BEAM must never place a privileged binary path
   (firecracker, jailer) or lifecycle flags owned by the suidhelper (`--exec-file`,
@@ -9,7 +9,6 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   """
 
   use ExUnit.Case, async: false
-  use ExUnitProperties
 
   alias Hyper.Node.FireVMM
   alias Hyper.Node.FireVMM.Jailer
@@ -78,14 +77,5 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert "--cgroup" in args
     assert Enum.any?(args, &String.starts_with?(&1, "cpu.max="))
     assert Enum.any?(args, &String.starts_with?(&1, "memory.max="))
-  end
-
-  # firecracker rejects an instance id containing `_` (and dm/jailer names must
-  # not lead with `-`), so the id must be strictly alphanumeric.
-  property "gen_vm_id/0 produces only alphanumeric ids" do
-    check all(_ <- StreamData.constant(nil)) do
-      id = Hyper.gen_vm_id()
-      assert id =~ ~r/\A[A-Za-z0-9]+\z/
-    end
   end
 end

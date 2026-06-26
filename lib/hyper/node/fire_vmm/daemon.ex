@@ -89,10 +89,10 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  @spec reset_stale_jail(Hyper.Vm.id()) :: :ok | {:error, term()}
+  @spec reset_stale_jail(Hyper.Vm.Id.t()) :: :ok | {:error, term()}
   defp reset_stale_jail(id), do: clear_jail(id)
 
-  @spec clear_jail(Hyper.Vm.id()) :: :ok | {:error, term()}
+  @spec clear_jail(Hyper.Vm.Id.t()) :: :ok | {:error, term()}
   defp clear_jail(id) do
     SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
   end

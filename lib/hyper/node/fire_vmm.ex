@@ -34,7 +34,7 @@ defmodule Hyper.Node.FireVMM do
     defstruct [:vm_id, :uid, :gid, :type, :arch, :mutable, :kernel, :boot_args]
 
     @type t :: %__MODULE__{
-            vm_id: Hyper.Vm.id(),
+            vm_id: Hyper.Vm.Id.t(),
             uid: Hyper.Node.Users.id(),
             gid: Hyper.Node.Users.id(),
             type: Hyper.Vm.Instance.t(),

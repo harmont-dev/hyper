@@ -49,7 +49,7 @@ defmodule Hyper.Cluster.Routing do
   end
 
   @doc "Which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.id()) :: node() | nil
+  @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   @decorate with_span("Hyper.Cluster.Routing.whereis", include: [:vm_id])
   def whereis(vm_id) do
     case Horde.Registry.lookup(@name, {vm_id, :supervisor}) do
@@ -63,7 +63,7 @@ defmodule Hyper.Cluster.Routing do
   replica via a registry match spec; intended to be called on the node that owns
   `pid` (see `Hyper.id/1`).
   """
-  @spec id_for(pid()) :: Hyper.Vm.id() | nil
+  @spec id_for(pid()) :: Hyper.Vm.Id.t() | nil
   @decorate with_span("Hyper.Cluster.Routing.id_for")
   def id_for(pid) when is_pid(pid) do
     case Horde.Registry.select(@name, [
@@ -75,7 +75,7 @@ defmodule Hyper.Cluster.Routing do
   end
 
   @doc "Every VM the cluster currently knows about, paired with the node it runs on."
-  @spec all() :: [{Hyper.Vm.id(), node()}]
+  @spec all() :: [{Hyper.Vm.Id.t(), node()}]
   @decorate with_span("Hyper.Cluster.Routing.all")
   def all do
     @name

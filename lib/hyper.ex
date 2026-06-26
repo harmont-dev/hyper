@@ -18,7 +18,7 @@ defmodule Hyper do
   @spec create_vm(Hyper.Vm.Spec.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%Hyper.Vm.Spec{} = spec) do
     with {:ok, arch} <- resolve_arch(spec.arch) do
-      vm_id = gen_vm_id()
+      vm_id = Hyper.Vm.Id.generate()
       spec = %{spec | arch: arch}
       instance_spec = Hyper.Vm.Instance.spec(spec.type)
 
@@ -34,32 +34,13 @@ defmodule Hyper do
     end
   end
 
-  @doc """
-  Generate a fresh VM id: a `v` prefix followed by lowercase base32 of 10 random
-  bytes, charset `[a-z2-7]`.
-
-  Alphanumeric only - no `-`, `_`, or other punctuation. That is the intersection
-  of three independent constraints the id must satisfy at once:
-
-    * firecracker rejects `_` in an instance id (`InvalidInstanceId`);
-    * dm/jailer names must not start with `-`;
-    * registry keys and chroot path components stay trivially safe.
-
-  The previous base64url encoding emitted `-` and `_`, so it could produce ids
-  firecracker refused at boot (`Invalid char (_)`).
-  """
-  @spec gen_vm_id() :: Hyper.Vm.id()
-  def gen_vm_id do
-    "v" <> Base.encode32(:crypto.strong_rand_bytes(10), padding: false, case: :lower)
-  end
-
   @spec resolve_arch(Hyper.Vm.Instance.arch() | nil) ::
           {:ok, Hyper.Vm.Instance.arch()} | {:error, term()}
   defp resolve_arch(nil), do: Sys.Arch.current()
   defp resolve_arch(arch), do: {:ok, arch}
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.id()) :: node() | nil
+  @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 
   @doc """
@@ -72,7 +53,7 @@ defmodule Hyper do
   died with its host, so "unknown" is the truthful answer. Only `:erpc`'s own
   transport failures are swallowed; a genuine fault in the lookup still raises.
   """
-  @spec id(Hyper.Vm.t()) :: Hyper.Vm.id() | nil
+  @spec id(Hyper.Vm.t()) :: Hyper.Vm.Id.t() | nil
   def id(pid) when is_pid(pid) do
     :erpc.call(node(pid), Hyper.Cluster.Routing, :id_for, [pid])
   catch

@@ -62,7 +62,7 @@ defmodule Hyper.Node.FireVMM.State do
     :gen_statem.start_link(__MODULE__, opts, [])
   end
 
-  @spec stop(Hyper.Vm.id()) :: :ok
+  @spec stop(Hyper.Vm.Id.t()) :: :ok
   def stop(id) do
     :gen_statem.call(via(id), :stop)
   end
@@ -162,7 +162,7 @@ defmodule Hyper.Node.FireVMM.State do
     # `:socket_pending` means firecracker has not created the socket yet, so we
     # keep waiting; a hard error is logged but also tolerated until the deadline
     # (the probe that follows would fail with EACCES anyway and drive the stop).
-    @spec ensure_api_granted(Hyper.Vm.id(), State.t()) ::
+    @spec ensure_api_granted(Hyper.Vm.Id.t(), State.t()) ::
             {:cont, State.t()} | {:wait, State.t(), term()}
     defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
 
@@ -184,7 +184,7 @@ defmodule Hyper.Node.FireVMM.State do
     # has lapsed - then fail the boot, surfacing `reason` rather than swallowing
     # it into a bare `:daemon_unready`. A persistent failure here points at the
     # host->jail socket (path or, more often, the grant/permission step above).
-    @spec keep_probing(Hyper.Vm.id(), State.t(), term()) ::
+    @spec keep_probing(Hyper.Vm.Id.t(), State.t(), term()) ::
             {:keep_state, State.t(), list()} | {:stop, term(), State.t()}
     defp keep_probing(id, data, reason) do
       if System.monotonic_time(:millisecond) >= data.boot_deadline do
@@ -247,7 +247,7 @@ defmodule Hyper.Node.FireVMM.State do
 
     # Cold boot, issued through the Client and aborting at the first error:
     # machine-config -> boot-source -> each drive -> each NIC -> InstanceStart.
-    @spec apply_spec(Hyper.Vm.id(), BootSpec.Cold.t()) :: :ok | {:error, term()}
+    @spec apply_spec(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
     @decorate with_span("Hyper.Node.FireVMM.State.Configuring.apply_spec", include: [:id])
     defp apply_spec(id, %BootSpec.Cold{} = cold) do
       via = Client.via(id)

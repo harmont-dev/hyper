@@ -10,7 +10,6 @@ defmodule Hyper.Vm do
   @dialyzer {:nowarn_function, [fast_fork: 1, fork: 1]}
 
   @type t :: pid()
-  @type id :: String.t()
 
   @typedoc """
   What a VM boots from: explicit, already-jail-visible artifact paths for a cold
