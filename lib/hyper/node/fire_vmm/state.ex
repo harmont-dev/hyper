@@ -55,8 +55,11 @@ defmodule Hyper.Node.FireVMM.State do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
   end
 
-  def start_link(%Opts{vm_id: id} = opts) do
-    :gen_statem.start_link(via(id), __MODULE__, opts, [])
+  # Started unnamed; the controller self-registers under `{id, :state}` from
+  # `init` (see `Hyper.Cluster.Routing.register_self/1`). `stop/1` still resolves
+  # it cluster-wide through `via/1`.
+  def start_link(%Opts{} = opts) do
+    :gen_statem.start_link(__MODULE__, opts, [])
   end
 
   @spec stop(Hyper.Vm.id()) :: :ok
@@ -73,12 +76,21 @@ defmodule Hyper.Node.FireVMM.State do
   # The daemon is already (being) started by `Core` as our sibling. Read the root
   # device off the per-VM mutable layer, resolve the boot spec, set the readiness
   # deadline, and start probing the API.
-  def init(%Opts{mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} = opts) do
-    spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
-    deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
-    data = %State{opts: opts, spec: spec, boot_deadline: deadline}
+  def init(
+        %Opts{vm_id: id, mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} =
+          opts
+      ) do
+    case Hyper.Cluster.Routing.register_self({id, :state}) do
+      :ok ->
+        spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
+        deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
+        data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 
-    {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
+        {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +

@@ -28,9 +28,12 @@ defmodule Hyper.Node.FireVMM.Core do
   alias Hyper.Node.FireVMM.Daemon
   alias Hyper.Node.FireVMM.State
 
+  # Started unnamed: nothing resolves the core by name (it is addressed as a
+  # child of `Hyper.Node.FireVMM`), so it needs no registry entry - and avoids a
+  # needless racy Horde registration at startup.
   @spec start_link(FireVMM.Opts.t()) :: Supervisor.on_start()
   def start_link(opts) do
-    Supervisor.start_link(__MODULE__, opts, name: Hyper.Cluster.Routing.via({opts.vm_id, :core}))
+    Supervisor.start_link(__MODULE__, opts)
   end
 
   @impl true

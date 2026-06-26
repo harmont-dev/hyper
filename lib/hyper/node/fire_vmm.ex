@@ -47,7 +47,7 @@ defmodule Hyper.Node.FireVMM do
 
   @spec start_link(Opts.t()) :: Supervisor.on_start()
   def start_link(opts) do
-    Supervisor.start_link(__MODULE__, opts, name: via(opts.vm_id))
+    Supervisor.start_link(__MODULE__, opts)
   end
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
@@ -64,18 +64,26 @@ defmodule Hyper.Node.FireVMM do
 
   @impl true
   def init(opts) do
-    children = [
-      # Client must be registered before Core: Core starts the State machine,
-      # which calls Client.run while waiting for the daemon's API. Client depends
-      # only on vm_id (an independent peer), so it has no reverse dependency.
-      {Client, %Client.Opts{vm_id: opts.vm_id}},
-      {Core, opts}
-    ]
+    # Self-register the cluster routing entry here rather than via a start name;
+    # see `Hyper.Cluster.Routing.register_self/1`. A fresh random vm_id never
+    # collides, so `:already_registered` only happens against a stale dead
+    # incarnation - decline the start and let the supervisor retry clean.
+    case Hyper.Cluster.Routing.register_self({opts.vm_id, :supervisor}) do
+      :ok ->
+        children = [
+          # Client must be registered before Core: Core starts the State machine,
+          # which calls Client.run while waiting for the daemon's API. Client
+          # depends only on vm_id (an independent peer), so no reverse dependency.
+          {Client, %Client.Opts{vm_id: opts.vm_id}},
+          {Core, opts}
+        ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+        Supervisor.init(children, strategy: :one_for_one)
+
+      {:error, _} ->
+        :ignore
+    end
   end
-
-  defp via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :supervisor})
 
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}
