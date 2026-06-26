@@ -7,10 +7,12 @@ defmodule Hyper.Cfg.BudgetTest do
   setup do
     Application.delete_env(:hyper, Budget)
     Toml.put_cache(%{})
+
     on_exit(fn ->
       Application.delete_env(:hyper, Budget)
       Toml.reload()
     end)
+
     :ok
   end
 

@@ -7,10 +7,12 @@ defmodule Hyper.Cfg.GrpcTest do
   setup do
     Application.delete_env(:hyper, Grpc)
     Toml.put_cache(%{})
+
     on_exit(fn ->
       Application.delete_env(:hyper, Grpc)
       Toml.reload()
     end)
+
     :ok
   end
 

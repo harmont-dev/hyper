@@ -50,8 +50,11 @@ defmodule Unit.Information do
   @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
   def parse(s) when is_binary(s) do
     case Regex.run(~r/^\s*(\d+)\s*(B|KiB|MiB|GiB|TiB)\s*$/, s) do
-      [_, n, suffix] -> {:ok, %__MODULE__{bytes: String.to_integer(n) * Map.fetch!(@units, suffix)}}
-      _ -> {:error, {:bad_unit, s}}
+      [_, n, suffix] ->
+        {:ok, %__MODULE__{bytes: String.to_integer(n) * Map.fetch!(@units, suffix)}}
+
+      _ ->
+        {:error, {:bad_unit, s}}
     end
   end
 

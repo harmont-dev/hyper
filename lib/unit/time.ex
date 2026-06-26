@@ -52,7 +52,7 @@ defmodule Unit.Time do
     "h" => 3600 * @s
   }
 
-  @doc "Parse a duration string like `\"60s\"`/`\"100ms\"`/`\"1h\"`. Suffixes: ns/us/ms/s/m/h."
+  @doc ~s(Parse a duration string like `"60s"`/`"100ms"`/`"1h"`. Suffixes: ns/us/ms/s/m/h.)
   @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
   def parse(s) when is_binary(s) do
     case Regex.run(~r/^\s*(\d+)\s*(ns|us|ms|s|m|h)\s*$/, s) do

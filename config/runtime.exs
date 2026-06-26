@@ -6,6 +6,7 @@ config :hyper, Hyper.Cfg.Budget,
   mem_max: Unit.Information.gib(4),
   disk_max: Unit.Information.gib(4),
   cpu_max_load: 0.8,
+  cpu_max_cap: 4.0,
   disk_bw_cap: Unit.Bandwidth.gibps(1),
   disk_bw_max_load: 0.8,
   net_bw_cap: Unit.Bandwidth.gibps(1),
@@ -24,7 +25,9 @@ if config_env() != :test do
   hyper_config = System.get_env("HYPER_CONFIG") || "/etc/hyper/config.exs"
 
   operator =
-    if File.exists?(hyper_config), do: Config.Reader.read!(hyper_config, env: config_env()), else: []
+    if File.exists?(hyper_config),
+      do: Config.Reader.read!(hyper_config, env: config_env()),
+      else: []
 
   otel_exs = get_in(operator, [:hyper, Hyper.Cfg.Otel]) || []
 

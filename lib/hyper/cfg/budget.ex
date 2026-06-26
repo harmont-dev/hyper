@@ -100,6 +100,7 @@ defmodule Hyper.Cfg.Budget do
   @spec coerce(term(), (String.t() -> {:ok, struct()} | {:error, term()}), module(), atom()) ::
           {:ok, struct()} | {:error, term()}
   defp coerce(%mod{} = v, _parse, mod, _key), do: {:ok, v}
+
   defp coerce(s, parse, _mod, key) when is_binary(s) do
     case parse.(s) do
       {:ok, v} -> {:ok, v}

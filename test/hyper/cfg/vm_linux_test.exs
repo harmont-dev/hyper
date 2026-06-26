@@ -1,16 +1,18 @@
 defmodule Hyper.Cfg.VmLinuxTest do
   use ExUnit.Case, async: false
 
-  alias Hyper.Cfg.VmLinux
   alias Hyper.Cfg.Toml
+  alias Hyper.Cfg.VmLinux
 
   setup do
     Application.delete_env(:hyper, VmLinux)
     Toml.put_cache(%{})
+
     on_exit(fn ->
       Application.delete_env(:hyper, VmLinux)
       Toml.reload()
     end)
+
     :ok
   end
 

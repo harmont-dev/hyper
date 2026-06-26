@@ -33,7 +33,8 @@ defmodule Hyper.Cfg.Gc do
   def load do
     struct!(__MODULE__, [
       {:enabled, get_cfg(runtime: {__MODULE__, :enabled}, toml: "img.gc.enabled", default: true)},
-      {:batch_size, get_cfg(runtime: {__MODULE__, :batch_size}, toml: "img.gc.batch_size", default: 200)},
+      {:batch_size,
+       get_cfg(runtime: {__MODULE__, :batch_size}, toml: "img.gc.batch_size", default: 200)},
       {:batch_pause, duration(:batch_pause, "img.gc.batch_pause", Unit.Time.ms(100))},
       {:sweep_interval, duration(:sweep_interval, "img.gc.sweep_interval", Unit.Time.s(60))},
       {:acquire_interval, duration(:acquire_interval, "img.gc.acquire_interval", Unit.Time.s(5))},

@@ -22,7 +22,7 @@ defmodule Unit.InformationParseTest do
   end
 
   property "parse! inverts the gib constructor" do
-    check all n <- integer(0..4096) do
+    check all(n <- integer(0..4096)) do
       assert Information.parse!("#{n}GiB") == Information.gib(n)
     end
   end

@@ -24,7 +24,10 @@ defmodule Hyper.Cfg.OtelTest do
   end
 
   test "reads [otel] toml when config.exs is empty" do
-    Toml.put_cache(%{"otel" => %{"proto" => "http_protobuf", "endpoint" => "http://collector:4318"}})
+    Toml.put_cache(%{
+      "otel" => %{"proto" => "http_protobuf", "endpoint" => "http://collector:4318"}
+    })
+
     {:ok, opts} = Otel.exporter_options([])
     assert opts[:otlp_protocol] == :http_protobuf
     assert opts[:otlp_endpoint] == "http://collector:4318"

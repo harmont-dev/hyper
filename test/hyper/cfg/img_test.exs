@@ -1,17 +1,19 @@
 defmodule Hyper.Cfg.ImgTest do
   use ExUnit.Case, async: false
 
-  alias Hyper.Cfg.Img
   alias Hyper.Cfg.Dirs
+  alias Hyper.Cfg.Img
   alias Hyper.Cfg.Toml
 
   setup do
     Application.delete_env(:hyper, Img)
     Toml.put_cache(%{})
+
     on_exit(fn ->
       Application.delete_env(:hyper, Img)
       Toml.reload()
     end)
+
     :ok
   end
 

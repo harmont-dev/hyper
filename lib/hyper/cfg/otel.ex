@@ -33,8 +33,15 @@ defmodule Hyper.Cfg.Otel do
   @spec pick(keyword(), atom(), String.t()) :: term() | nil
   defp pick(exs, key, toml) do
     case Keyword.fetch(exs, key) do
-      {:ok, v} -> v
-      :error -> case fetch_cfg(toml: toml), do: ({:ok, v} -> v; :error -> nil)
+      {:ok, v} ->
+        v
+
+      :error ->
+        case fetch_cfg(toml: toml),
+          do: (
+            {:ok, v} -> v
+            :error -> nil
+          )
     end
   end
 

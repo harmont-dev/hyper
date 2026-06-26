@@ -18,7 +18,7 @@ defmodule Unit.BandwidthParseTest do
   end
 
   property "parse! inverts gibps" do
-    check all n <- integer(0..1024) do
+    check all(n <- integer(0..1024)) do
       assert Bandwidth.parse!("#{n}GiBps") == Bandwidth.gibps(n)
     end
   end

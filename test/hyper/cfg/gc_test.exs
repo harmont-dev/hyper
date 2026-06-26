@@ -7,10 +7,12 @@ defmodule Hyper.Cfg.GcTest do
   setup do
     Application.delete_env(:hyper, Gc)
     Toml.put_cache(%{})
+
     on_exit(fn ->
       Application.delete_env(:hyper, Gc)
       Toml.reload()
     end)
+
     :ok
   end
 
@@ -24,7 +26,10 @@ defmodule Hyper.Cfg.GcTest do
   end
 
   test "reads durations from [img.gc] toml as strings" do
-    Toml.put_cache(%{"img" => %{"gc" => %{"sweep_interval" => "30s", "grace_period" => "1h", "batch_size" => 50}}})
+    Toml.put_cache(%{
+      "img" => %{"gc" => %{"sweep_interval" => "30s", "grace_period" => "1h", "batch_size" => 50}}
+    })
+
     cfg = Gc.load()
     assert cfg.sweep_interval == Unit.Time.s(30)
     assert cfg.grace_period == Unit.Time.s(3600)

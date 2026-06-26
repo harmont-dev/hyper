@@ -21,7 +21,7 @@ defmodule Unit.TimeParseTest do
   end
 
   property "parse! inverts s" do
-    check all n <- integer(0..100_000) do
+    check all(n <- integer(0..100_000)) do
       assert Time.parse!("#{n}s") == Time.s(n)
     end
   end
