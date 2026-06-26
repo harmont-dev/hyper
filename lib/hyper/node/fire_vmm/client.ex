@@ -33,8 +33,6 @@ defmodule Hyper.Node.FireVMM.Client do
 
   alias Hyper.Node.FireVMM.Jailer
 
-  @call_timeout 35_000
-
   defmodule Opts do
     @moduledoc """
     Start options for `Hyper.Node.FireVMM.Client`. Only `:vm_id` is required;
@@ -74,7 +72,7 @@ defmodule Hyper.Node.FireVMM.Client do
   @doc "Run a generated operation against this VM's daemon, serialized."
   @spec run(GenServer.server(), (keyword() -> result)) :: result when result: var
   def run(server, op_fun) when is_function(op_fun, 1) do
-    GenServer.call(server, {:run, op_fun}, @call_timeout)
+    GenServer.call(server, {:run, op_fun}, Hyper.Cfg.Timeouts.fire_call_ms())
   end
 
   @impl true

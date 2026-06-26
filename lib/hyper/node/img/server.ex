@@ -21,9 +21,6 @@ defmodule Hyper.Node.Img.Server do
 
   use OpenTelemetryDecorator
 
-  # Grace period after the last holder leaves before the image is torn down.
-  @idle_timeout_ms :timer.seconds(30)
-
   defmodule State do
     @moduledoc false
 
@@ -228,7 +225,7 @@ defmodule Hyper.Node.Img.Server do
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_timeout_ms)}
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:img))}
   end
 
   @spec cancel_idle(State.t()) :: State.t()

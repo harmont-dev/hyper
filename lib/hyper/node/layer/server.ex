@@ -15,10 +15,6 @@ defmodule Hyper.Node.Layer.Server do
   alias Hyper.Node.Layer.Repo
   alias Hyper.SuidHelper
 
-  # Grace period after the last holder leaves before the layer is unmounted. Keeps
-  # bursty acquire/release cycles from thrashing the mount.
-  @idle_timeout_ms :timer.seconds(30)
-
   defmodule State do
     @moduledoc false
 
@@ -152,7 +148,7 @@ defmodule Hyper.Node.Layer.Server do
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_timeout_ms)}
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:layer))}
   end
 
   @spec cancel_idle(State.t()) :: State.t()
