@@ -36,9 +36,24 @@ defmodule Hyper.Cfg.Grpc do
           adapter_opts: keyword()
         }
 
-  @doc "Load the gRPC server configuration from application env."
+  import Hyper.Cfg, only: [get_cfg: 1]
+
+  @doc "Load the gRPC server configuration: config.exs > [grpc] toml > defaults."
   @spec load() :: t()
-  def load, do: struct!(__MODULE__, Application.get_env(:hyper, __MODULE__, []))
+  def load do
+    %__MODULE__{
+      enabled: get_cfg(runtime: {__MODULE__, :enabled}, toml: "grpc.enabled", default: false),
+      port: get_cfg(runtime: {__MODULE__, :port}, toml: "grpc.port", default: @default_port),
+      cred: cred(get_cfg(runtime: {__MODULE__, :cred}, toml: "grpc.cred", default: nil)),
+      adapter_opts: get_cfg(runtime: {__MODULE__, :adapter_opts}, toml: "grpc.adapter_opts", default: [])
+    }
+  end
+
+  @spec cred(term()) :: GRPC.Credential.t() | nil
+  defp cred(nil), do: nil
+  defp cred(%GRPC.Credential{} = c), do: c
+  defp cred(%{"cert" => cert, "key" => key}),
+    do: GRPC.Credential.new(ssl: [certfile: cert, keyfile: key])
 
   @doc """
   The `GRPC.Server.Supervisor` options for this config: the endpoint and port,
