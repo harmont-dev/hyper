@@ -125,10 +125,20 @@ defmodule Mix.Tasks.Firecracker.Install do
     fc = Path.join(prefix, "firecracker")
     jailer = Path.join(prefix, "jailer")
 
+    # This task runs unprivileged, so the binaries land owned by the invoking
+    # user. The suidhelper's SafeBin refuses any binary not owned by root and not
+    # free of group/other write bits, so the operator MUST chown/chmod them or
+    # every jailer launch fails closed. Print the exact commands rather than a
+    # vague "ensure root-owned".
     Mix.shell().info("""
 
-    Add to /etc/hyper/config.toml (file: root-owned, mode 0644; binaries:
-    root-owned, not group- or world-writable):
+    Almost done. Run these as root so the setuid helper will accept the binaries
+    (it refuses any jailer/firecracker not owned by root):
+
+        sudo chown root:root #{fc} #{jailer}
+        sudo chmod 0755      #{fc} #{jailer}
+
+    Then add to /etc/hyper/config.toml (file: root-owned, mode 0644):
 
         firecracker = "#{fc}"
         jailer      = "#{jailer}"
