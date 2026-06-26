@@ -3,26 +3,24 @@ defmodule Sys.Mon.Cpu do
 
   alias Sys.Linux.Proc.Stat
   alias Sys.Mon.Server
-  alias Unit.Time
-
-  @period_ms 23
-  @tau_s 30
 
   @moduledoc """
   Monitors instantaneous CPU utilization (the soft beta_vcpus signal).
 
-  Samples `/proc/stat` every #{@period_ms} ms and reports the busy fraction
+  Samples `/proc/stat` every 23 ms and reports the busy fraction
   (`0.0..1.0`, normalized across all cores) between consecutive reads - never the
   load average, which has different semantics. The first read only establishes a
-  baseline (`:skip`). Readings are smoothed with a #{@tau_s}-second time constant
+  baseline (`:skip`). Readings are smoothed with a 30-second time constant
   (sampling fast only de-noises the filter; the smoothing window is set by `tau`).
   """
 
   @impl true
-  def period, do: Time.ms(@period_ms)
+  @spec period :: Unit.Time.t()
+  def period, do: Hyper.Cfg.Mon.period(:cpu)
 
   @impl true
-  def tau, do: Time.s(@tau_s)
+  @spec tau :: Unit.Time.t()
+  def tau, do: Hyper.Cfg.Mon.tau(:cpu)
 
   @doc "The latest instantaneous + filtered CPU utilization (fractions `0.0..1.0`)."
   @spec value() :: Server.Reading.t()
