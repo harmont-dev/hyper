@@ -33,4 +33,13 @@ defmodule Hyper.Cfg.ResolverTest do
       get_cfg(toml: "definitely.absent")
     end
   end
+
+  test "fetch_cfg/1 returns {:ok, value} or :error without raising" do
+    Application.put_env(:hyper, :__cfg_test, "v")
+    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test) == {:ok, "v"}
+    Application.delete_env(:hyper, :__cfg_test)
+    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test) == :error
+    assert Hyper.Cfg.fetch_cfg(toml: "definitely.absent") == :error
+    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test, default: "d") == {:ok, "d"}
+  end
 end

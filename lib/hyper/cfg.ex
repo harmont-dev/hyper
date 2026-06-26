@@ -32,9 +32,13 @@ defmodule Hyper.Cfg do
           | {:default, term()}
 
   @doc false
+  @spec fetch_cfg([source]) :: {:ok, term()} | :error
+  def fetch_cfg(sources) when is_list(sources), do: resolve(sources)
+
+  @doc false
   @spec get_cfg([source]) :: term()
   def get_cfg(sources) when is_list(sources) do
-    case resolve(sources) do
+    case fetch_cfg(sources) do
       {:ok, value} ->
         value
 
