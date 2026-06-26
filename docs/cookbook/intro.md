@@ -67,22 +67,38 @@ helper, never named by the unprivileged caller. Their paths therefore live in
 the helper's own config, `/etc/hyper/config.toml`, and default to
 `/usr/sbin/{losetup,blockdev,dmsetup}`.
 
-**The config file is optional.** If it is absent the helper uses the built-in
-defaults below (and `work_dir = "/srv/hyper"`, matching the node's own
-fallback). Create one only to override a default - and if you do, it must be
-root-owned and not group/other-writable, or the helper refuses to start (a
-present-but-untrusted file is treated as an attack signal, unlike a missing
-one):
+**The config file must exist** to set `firecracker` and `jailer` (no built-in
+defaults for those). The device-tool paths (`dmsetup`, `losetup`, `blockdev`)
+and `work_dir` do have built-in defaults, so if you only need those defaults
+and are not running VMs you may omit the file entirely. When the file is
+present it must be root-owned and not group/other-writable, or the helper
+refuses to start (a present-but-untrusted file is treated as an attack signal,
+unlike a missing one):
 
 ```toml
-# /etc/hyper/config.toml (root-owned, mode 0644) - every line optional
+# /etc/hyper/config.toml (root-owned, mode 0644)
 work_dir = "/srv/hyper"
 
-# Each must be an absolute path to a root-owned, non-world-writable binary;
-# the helper validates this before it will exec the tool.
+# REQUIRED - no default. Each must be an absolute path to a root-owned,
+# non-group/world-writable binary named exactly "firecracker" or "jailer"
+# (the helper validates the basename). Run `mix firecracker.install` to
+# download the pinned release and print these values.
+firecracker = "/opt/firecracker/firecracker"
+jailer      = "/opt/firecracker/jailer"
+
+# Optional device-tool overrides; default to /usr/sbin/{dmsetup,losetup,blockdev}.
+# Each must be root-owned and not group/world-writable.
 dmsetup  = "/usr/sbin/dmsetup"
 losetup  = "/usr/sbin/losetup"
 blockdev = "/usr/sbin/blockdev"
+
+# Optional. Governs which uid/gid values the helper accepts when launching the
+# jailer. Must satisfy min > 0 and min <= max. Defaults to {900000, 999999}.
+# If you narrow this range, set the same bounds in `config :hyper, uid_gid_range:`
+# so the node hands out only uids the helper will accept.
+[uid_gid_range]
+min = 900000
+max = 999999
 ```
 
 `dmsetup` (lvm2) is frequently *not* installed by default - check that one
@@ -168,14 +184,22 @@ printf 'dm_snapshot\ndm_thin_pool\nloop\n' | sudo tee /etc/modules-load.d/hyper.
     echo 'd /sys/fs/cgroup/hyper 0755 root root -' \
       | sudo tee /etc/tmpfiles.d/hyper-cgroup.conf
     ```
-  - The host UID/GID range given by `uid_gid_range` must be free for Hyper to
-    allocate per-VM users from.
+  - The host UID/GID range must be free for Hyper to allocate per-VM users
+    from. The node's range is set by `uid_gid_range` in `config :hyper`; the
+    helper independently reads `[uid_gid_range]` from `/etc/hyper/config.toml`
+    (see below) and only accepts jailer `--uid`/`--gid` within that range.
+    Keep the two in sync.
 
 #### Auto-redistributed
 
-The remaining runtime dependencies - `firecracker`, `jailer`, `umoci`, and the
-guest `vmlinux` kernels - are downloaded, checksum-verified, and managed by
-Hyper itself; you do not install them.
+`umoci` and the guest `vmlinux` kernels are downloaded, checksum-verified, and
+managed by Hyper itself; you do not install them.
+
+`firecracker` and `jailer` are not auto-downloaded. Install them with
+`mix firecracker.install [--prefix <dir>]` (default prefix `/opt/firecracker`),
+which downloads the pinned v1.16.0 release, places the binaries at
+`<prefix>/firecracker` and `<prefix>/jailer`, and prints the config snippets to
+paste into `/etc/hyper/config.toml` and `config.exs`.
 
 ### Installation
 
@@ -190,18 +214,19 @@ configuration.
 
 ```elixir
 config :hyper,
-  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
-  jailer_bin: "/opt/firecracker/jailer-v1.16.0-x86_64",
-  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
-  firecracker_bin: "/opt/firecracker/firecracker-v1.16.0-x86_64",
+  # REQUIRED. Must point at the bare-basename binaries installed by
+  # `mix firecracker.install`. The setuid helper validates these paths
+  # (root-owned, non-group/world-writable, basename exactly "firecracker"/"jailer").
+  firecracker_bin: "/opt/firecracker/firecracker",
+  jailer_bin: "/opt/firecracker/jailer",
   # You must create a parent cgroup on your system. Continue reading for
   # further details.
   cgroup_parent: "hyper",
-  # TODO(markovejnovic): Merge these directories into one.
   jailer_chroot_base: "/srv/hyper/jails",
   socket_dir: "/srv/hyper/socks",
   scratch_dir: "/srv/hyper/scratch",
-  # Hyper requires that each VM you pass 
+  # Must match the [uid_gid_range] table in /etc/hyper/config.toml so the node
+  # hands out only uids the helper will accept.
   uid_gid_range: {900_000, 999_999},
   layer_dir: "/srv/hyper/layers"
 ```
