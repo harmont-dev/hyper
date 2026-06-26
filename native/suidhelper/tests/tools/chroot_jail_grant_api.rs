@@ -13,7 +13,9 @@
 //!     can never escape the anchored jail tree (the core TOCTOU guarantee);
 //!   * pending — a not-yet-created socket (or half-built jail) is `Pending`, not
 //!     an error, so the controller keeps probing;
-//!   * grant — a real socket is chowned to the caller and left mode 0660.
+//!   * grant — a real socket is chowned to the caller and left mode 0660, and
+//!     its parent `root` dir is opened for the caller's group to traverse
+//!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
 use hyper_suidhelper::tools::chroot_jail::grant_api::{grant_api_under, Error, GrantOut};
 use hyper_suidhelper::util::safe_path::ValidationError;
@@ -134,6 +136,21 @@ fn real_socket_is_granted_and_chmod_0660() {
     assert_eq!(meta.mode() & 0o777, 0o660, "socket must be chmod'd 0660");
     assert_eq!(meta.uid(), nix::unistd::getuid().as_raw());
     assert_eq!(meta.gid(), nix::unistd::getgid().as_raw());
+
+    // The parent `root` dir must also be opened for the caller's group to
+    // traverse, else the node could not reach the socket: chgrp'd to the caller,
+    // chmod'd 0710 (owner rwx, group --x, other none).
+    let root_meta = fs::symlink_metadata(&root).unwrap();
+    assert_eq!(
+        root_meta.mode() & 0o777,
+        0o710,
+        "jail root must be chmod'd 0710 for traversal",
+    );
+    assert_eq!(
+        root_meta.gid(),
+        nix::unistd::getgid().as_raw(),
+        "jail root must be chgrp'd to the caller",
+    );
 }
 
 // A regular file planted at api.socket is refused and left untouched (not chmod'd).

@@ -4,13 +4,22 @@
 //!
 //! The jailer drops firecracker to a per-VM uid/gid and chroots it; firecracker
 //! then creates its API socket at `<jail>/root/api.socket` owned by that per-VM
-//! id, mode `0755`. Connecting a unix socket needs *write* permission on the
-//! node, so the node user (a different uid) gets `EACCES`. This op chowns just
-//! that one socket to the helper's CALLER — `getuid()`/`getgid()`, which inside
-//! the privileged scope are the real (caller) ids while euid is 0 — and chmods
-//! it `0660`. The node thus connects as owner, and humans added to the node's
-//! group connect via the group bit. Per-VM isolation is otherwise untouched:
-//! only this single socket moves, nothing else in the jail.
+//! id. Connecting a unix socket needs *write* permission on the node, so the
+//! node user (a different uid) gets `EACCES`. This op chowns just that one
+//! socket to the helper's CALLER — `getuid()`/`getgid()`, which inside the
+//! privileged scope are the real (caller) ids while euid is 0 — and chmods it
+//! `0660`. The node thus connects as owner, and humans added to the node's
+//! group connect via the group bit.
+//!
+//! That alone is not enough: the jailer leaves `<id>/root` as `0700` owned by
+//! the per-VM uid, and connecting needs *search* (`+x`) on every ancestor, so
+//! the node cannot even traverse into `root` to reach the (now its own) socket.
+//! So this op also opens just that one directory to the caller's group: it keeps
+//! the per-VM uid as owner (firecracker still needs it), chgrps `root` to the
+//! caller's gid, and chmods it `0710` — owner `rwx`, group `--x` (traverse, not
+//! list), other none. Per-VM isolation is otherwise untouched: only this socket
+//! and its immediate parent's group/mode move, nothing else in the jail, and
+//! unrelated users stay locked out.
 //!
 //! Security: the socket path is validated as a `SafePath` and reached by an
 //! `O_NOFOLLOW` walk from `JAIL_BASE`, so a symlinked component cannot redirect
@@ -45,6 +54,11 @@ const SOCKET_PARENT_DEPTH: usize = 3;
 /// Mode handed to the node: owner+group read/write, no world access.
 const SOCKET_MODE: u32 = 0o660;
 
+/// Mode set on the jail `root` dir so the node's group can *traverse* it to
+/// reach the socket: owner `rwx` (the per-VM uid, unchanged), group `--x`
+/// (traverse, not list), other none.
+const JAIL_ROOT_MODE: u32 = 0o710;
+
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
 #[derive(Debug, ThisError)]
@@ -65,6 +79,10 @@ pub enum Error {
     Chown(#[source] safe_dir::Error),
     #[error("chmoding the socket: {0}")]
     Chmod(#[source] safe_dir::Error),
+    #[error("chgrp-ing the jail root dir to the caller: {0}")]
+    ChgrpRoot(#[source] safe_dir::Error),
+    #[error("chmoding the jail root dir for traversal: {0}")]
+    ChmodRoot(#[source] safe_dir::Error),
 }
 
 #[derive(Args)]
@@ -139,6 +157,14 @@ pub fn grant_api_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Erro
     root.chown(leaf, getuid().as_raw(), getgid().as_raw())
         .map_err(Error::Chown)?;
     root.chmod(leaf, SOCKET_MODE).map_err(Error::Chmod)?;
+
+    // Open `root` itself to the caller's group so the node can traverse into it
+    // to reach the socket (the jailer leaves it 0700 / per-VM uid). Owner stays
+    // the per-VM uid; only the group and mode move. Operate on the pinned `root`
+    // fd (already opened `O_NOFOLLOW`), never by name - TOCTOU-safe.
+    root.chgrp_self(getgid().as_raw())
+        .map_err(Error::ChgrpRoot)?;
+    root.chmod_self(JAIL_ROOT_MODE).map_err(Error::ChmodRoot)?;
     Ok(GrantOut::Granted)
 }
 

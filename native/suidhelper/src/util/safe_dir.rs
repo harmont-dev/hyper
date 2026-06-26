@@ -17,8 +17,8 @@ use super::safe_path::SafePath;
 use nix::dir::{Dir, Type};
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::libc::dev_t;
-use nix::sys::stat::{fchmodat, fstatat, mknodat, FchmodatFlags, FileStat, Mode, SFlag};
-use nix::unistd::{dup, fchownat, linkat, unlinkat, Gid, Uid, UnlinkatFlags};
+use nix::sys::stat::{fchmod, fchmodat, fstatat, mknodat, FchmodatFlags, FileStat, Mode, SFlag};
+use nix::unistd::{dup, fchown, fchownat, linkat, unlinkat, Gid, Uid, UnlinkatFlags};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -211,6 +211,26 @@ impl SafeDir {
         )
         .map_err(|source| Error::Chmod {
             name: name.to_path_buf(),
+            source,
+        })
+    }
+
+    /// `fchmod` this directory through its own held fd. Unlike [`chmod`](Self::chmod),
+    /// which re-resolves a *name*, this targets the fd we already opened
+    /// `O_NOFOLLOW`, so there is no path component to swap - TOCTOU-safe on the
+    /// directory itself.
+    pub fn chmod_self(&self, mode: u32) -> Result<(), Error> {
+        fchmod(self.0.as_raw_fd(), Mode::from_bits_truncate(mode)).map_err(|source| Error::Chmod {
+            name: PathBuf::from("."),
+            source,
+        })
+    }
+
+    /// `fchown` this directory's group through its own held fd, preserving its
+    /// owner (no uid passed). Same TOCTOU guarantee as [`chmod_self`](Self::chmod_self).
+    pub fn chgrp_self(&self, gid: u32) -> Result<(), Error> {
+        fchown(self.0.as_raw_fd(), None, Some(Gid::from_raw(gid))).map_err(|source| Error::Chown {
+            name: PathBuf::from("."),
             source,
         })
     }
