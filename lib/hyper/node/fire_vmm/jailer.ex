@@ -36,8 +36,6 @@ defmodule Hyper.Node.FireVMM.Jailer do
     first failure.
     """
 
-    alias Hyper.Config
-
     @doc "Run every pre-requisite check, halting at the first failure."
     @spec run() :: :ok | {:error, term()}
     def run do
@@ -63,7 +61,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     defp parent_cgroup_present do
-      if Sys.Linux.Cgroup.V2.named_exists?(Config.parent_cgroup()),
+      if Sys.Linux.Cgroup.V2.named_exists?(Hyper.Cfg.Jails.cgroup()),
         do: :ok,
         else: {:error, :missing_parent_cgroup}
     end
@@ -108,7 +106,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         "--cgroup-version",
         "2",
         "--parent-cgroup",
-        Hyper.Config.parent_cgroup()
+        Hyper.Cfg.Jails.cgroup()
       ] ++
         cgroup_flags(opts.type) ++
         ["--", "--api-sock", "/" <> @jail_socket]
@@ -145,7 +143,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   """
   @spec cgroup_dir(Hyper.Vm.id()) :: Path.t()
   def cgroup_dir(id) do
-    Path.join(["/sys/fs/cgroup", Hyper.Config.parent_cgroup(), exec_name(), id])
+    Path.join(["/sys/fs/cgroup", Hyper.Cfg.Jails.cgroup(), exec_name(), id])
   end
 
   @doc """
