@@ -1,4 +1,4 @@
-defmodule Hyper.Img.Db.Gc.Config do
+defmodule Hyper.Cfg.Gc do
   @moduledoc """
   Configuration for the layer garbage collector (`Hyper.Img.Db.Gc`).
 
@@ -6,7 +6,7 @@ defmodule Hyper.Img.Db.Gc.Config do
   to change. Durations are `Unit.Time` values, so (like `Hyper.Cfg.Budget`)
   overrides belong in `config/runtime.exs`:
 
-      config :hyper, Hyper.Img.Db.Gc.Config,
+      config :hyper, Hyper.Cfg.Gc,
         enabled: true,
         sweep_interval: Unit.Time.s(30),
         grace_period: Unit.Time.s(60 * 60)

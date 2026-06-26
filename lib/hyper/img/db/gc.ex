@@ -33,7 +33,8 @@ defmodule Hyper.Img.Db.Gc do
 
   alias Hyper.Cluster.Routing
   alias Hyper.Img.Db.{Blob, ImageLayer, Repo}
-  alias Hyper.Img.Db.Gc.{Config, Sweep}
+  alias Hyper.Cfg.Gc, as: Config
+  alias Hyper.Img.Db.Gc.Sweep
   alias Hyper.Node.Layer.Repo, as: LayerRepo
 
   @singleton_key {:singleton, :layer_gc}
