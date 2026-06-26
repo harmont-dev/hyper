@@ -13,9 +13,9 @@ defmodule Hyper.Cfg.Dirs do
   @spec work_dir :: Path.t()
   def work_dir, do: get_cfg(toml: "work_dir", default: "/srv/hyper")
 
-  @doc "Read-only image layer store (`<work_dir>/layers`)."
+  @doc "Read-only image layer store. Delegates to `Hyper.Cfg.Img.store/0`."
   @spec layer_dir :: Path.t()
-  def layer_dir, do: Path.join(work_dir(), "layers")
+  def layer_dir, do: Hyper.Cfg.Img.store()
 
   @doc "Per-VM control/gRPC sockets (`<work_dir>/socks`)."
   @spec socket_dir :: Path.t()
