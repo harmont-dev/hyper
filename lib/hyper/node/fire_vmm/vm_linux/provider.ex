@@ -1,7 +1,7 @@
 defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   @moduledoc """
   Installs the guest-kernel (vmlinux) images for the current architecture into
-  `Hyper.Config.vmlinux_install_dir/0` (`<work_dir>/redist/vmlinux`).
+  `Hyper.Cfg.Dirs.vmlinux_install_dir/0` (`<work_dir>/redist/vmlinux`).
 
   The available kernels and their SHA-256 sums come from the statically-embedded
   `Hyper.Node.FireVMM.VmLinux.Manifest`. `ensure_installed/0` installs *every*
@@ -89,5 +89,5 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
 
   defp build_path(dir, build), do: Path.join(dir, build.asset)
 
-  defp install_dir, do: Hyper.Config.vmlinux_install_dir()
+  defp install_dir, do: Hyper.Cfg.Dirs.vmlinux_install_dir()
 end

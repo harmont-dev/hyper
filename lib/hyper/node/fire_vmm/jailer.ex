@@ -79,7 +79,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     defp chroot_writable do
-      case Sys.Posix.ensure_writable_dir(Config.chroot_base()) do
+      case Sys.Posix.ensure_writable_dir(Hyper.Cfg.Dirs.chroot_base()) do
         {:ok} -> :ok
         {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
       end
@@ -104,7 +104,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         "--gid",
         to_string(opts.gid),
         "--chroot-base-dir",
-        Hyper.Config.chroot_base(),
+        Hyper.Cfg.Dirs.chroot_base(),
         "--cgroup-version",
         "2",
         "--parent-cgroup",
@@ -129,7 +129,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
   @spec chroot_dir(Hyper.Vm.id()) :: Path.t()
   def chroot_dir(id) do
-    Path.join([Hyper.Config.chroot_base(), exec_name(), id])
+    Path.join([Hyper.Cfg.Dirs.chroot_base(), exec_name(), id])
   end
 
   @doc "Host path of the VM's chroot root (`<chroot_base>/<exec>/<id>/root`)."
@@ -158,7 +158,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @spec host_socket(Hyper.Vm.id()) :: Path.t()
   def host_socket(id) do
     Path.join([
-      Hyper.Config.chroot_base(),
+      Hyper.Cfg.Dirs.chroot_base(),
       exec_name(),
       id,
       "root",

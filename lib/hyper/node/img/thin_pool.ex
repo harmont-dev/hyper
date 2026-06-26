@@ -50,7 +50,7 @@ defmodule Hyper.Node.Img.ThinPool do
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
-    with :ok <- File.mkdir_p(Hyper.Config.scratch_dir()),
+    with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
          :ok <- zero_metadata(meta),
@@ -114,7 +114,7 @@ defmodule Hyper.Node.Img.ThinPool do
   # Create a sparse file of `size` if absent; reuse it if already present.
   @spec ensure_backing(String.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
   defp ensure_backing(file, size) do
-    path = Path.join(Hyper.Config.scratch_dir(), file)
+    path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), file)
 
     case File.open(path, [:write, :read]) do
       {:ok, io} ->
