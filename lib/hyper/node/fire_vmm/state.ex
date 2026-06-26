@@ -113,6 +113,8 @@ defmodule Hyper.Node.FireVMM.State do
     alias Hyper.Node.FireVMM.{Client, Opts}
     alias Unit.Time
 
+    require Logger
+
     # How often to probe the daemon's API while waiting for it.
     @probe_interval Time.ms(50)
 
@@ -123,9 +125,19 @@ defmodule Hyper.Node.FireVMM.State do
         {:ok, %InstanceInfo{}} ->
           {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
 
-        {:error, _reason} ->
+        {:error, reason} ->
           if System.monotonic_time(:millisecond) >= data.boot_deadline do
-            {:stop, {:shutdown, {:boot_failed, :daemon_unready}}, data}
+            # firecracker's own log shows the API server is up, so a persistent
+            # probe failure points at the host->jail socket (path or, more often,
+            # permissions: the jailer drops firecracker to the per-VM uid and the
+            # unprivileged controller cannot reach the jailed socket). Surface the
+            # last error rather than swallowing it into a bare :daemon_unready.
+            Logger.warning(
+              "vm #{id}: firecracker API not reachable before deadline; " <>
+                "last probe error: #{inspect(reason)}"
+            )
+
+            {:stop, {:shutdown, {:boot_failed, {:daemon_unready, reason}}}, data}
           else
             {:keep_state_and_data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
           end
