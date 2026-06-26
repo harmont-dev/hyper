@@ -1,31 +1,12 @@
 defmodule Hyper.Cfg.Gc do
   @moduledoc """
-  Configuration for the layer garbage collector (`Hyper.Img.Db.Gc`).
-
-  Every field has a default, so configuration is optional - set only what you want
-  to change. Durations are `Unit.Time` values, so (like `Hyper.Cfg.Budget`)
-  overrides belong in `config/runtime.exs`:
-
-      config :hyper, Hyper.Cfg.Gc,
-        enabled: true,
-        sweep_interval: Unit.Time.s(30),
-        grace_period: Unit.Time.s(60 * 60)
-
-  Set `enabled: false` to turn the collector off entirely - it then never starts.
-
-  ## Fields
-
-    * `enabled` - run the collector at all (default `true`).
-    * `batch_size` - rows per keyset page (default `200`).
-    * `batch_pause` - pause between pages within a sweep (default `100ms`).
-    * `sweep_interval` - rest between completed sweeps (default `60s`).
-    * `acquire_interval` - how often a standby retries to become active (default `5s`).
-    * `retry` - backoff after the medium or database is unavailable (default `60s`).
-    * `statement_timeout` - cap on each GC DB statement so it can't pin a backend
-      (default `5s`).
-    * `grace_period` - never prune a blob younger than this, so a row whose file is
-      still being published is safe (default `1h`).
+  Layer garbage collector tuning. Each field reads from `config.exs`
+  (`config :hyper, Hyper.Cfg.Gc, ...`), then the `[img.gc]` table, then its
+  default. Durations are `Unit.Time` — Elixir terms in `config.exs`, strings
+  (`"60s"`, `"1h"`) in TOML.
   """
+
+  import Hyper.Cfg, only: [get_cfg: 1]
 
   @type t :: %__MODULE__{
           enabled: boolean(),
@@ -34,22 +15,38 @@ defmodule Hyper.Cfg.Gc do
           sweep_interval: Unit.Time.t(),
           acquire_interval: Unit.Time.t(),
           retry: Unit.Time.t(),
-          statement_timeout: Unit.Time.t(),
+          timeout: Unit.Time.t(),
           grace_period: Unit.Time.t()
         }
+  defstruct [
+    :enabled,
+    :batch_size,
+    :batch_pause,
+    :sweep_interval,
+    :acquire_interval,
+    :retry,
+    :timeout,
+    :grace_period
+  ]
 
-  defstruct enabled: true,
-            batch_size: 200,
-            batch_pause: Unit.Time.ms(100),
-            sweep_interval: Unit.Time.s(60),
-            acquire_interval: Unit.Time.s(5),
-            retry: Unit.Time.s(60),
-            statement_timeout: Unit.Time.s(5),
-            grace_period: Unit.Time.s(60 * 60)
-
-  @doc "Build the config from app env, filling any unset field with its default."
-  @spec load() :: t()
+  @spec load :: t()
   def load do
-    struct!(__MODULE__, Application.get_env(:hyper, __MODULE__, []))
+    struct!(__MODULE__, [
+      {:enabled, get_cfg(runtime: {__MODULE__, :enabled}, toml: "img.gc.enabled", default: true)},
+      {:batch_size, get_cfg(runtime: {__MODULE__, :batch_size}, toml: "img.gc.batch_size", default: 200)},
+      {:batch_pause, duration(:batch_pause, "img.gc.batch_pause", Unit.Time.ms(100))},
+      {:sweep_interval, duration(:sweep_interval, "img.gc.sweep_interval", Unit.Time.s(60))},
+      {:acquire_interval, duration(:acquire_interval, "img.gc.acquire_interval", Unit.Time.s(5))},
+      {:retry, duration(:retry, "img.gc.retry", Unit.Time.s(60))},
+      {:timeout, duration(:timeout, "img.gc.timeout", Unit.Time.s(5))},
+      {:grace_period, duration(:grace_period, "img.gc.grace_period", Unit.Time.s(3600))}
+    ])
+  end
+
+  defp duration(key, toml, default) do
+    case get_cfg(runtime: {__MODULE__, key}, toml: toml, default: default) do
+      %_mod{} = t -> t
+      s when is_binary(s) -> Unit.Time.parse!(s)
+    end
   end
 end
