@@ -147,12 +147,28 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
         "helper handed the jailer a non-canonical argv",
     );
 
-    // The execve envp must be empty: once ruid==0 a smuggled LD_PRELOAD would be
-    // honored, so nothing of the caller's environment may reach the root jailer.
+    // The helper execve's the jailer with an EMPTY envp (see src/tools/jailer.rs):
+    // once ruid==0 a smuggled LD_PRELOAD would be honored, so nothing of the
+    // caller's environment may reach the root jailer. The recorder is a `/bin/sh`
+    // script and the shell *self-sets* `PWD` (and, under bash, `_`/`SHLVL`) on
+    // startup, so a literally-empty environ is impossible to observe through it.
+    // We instead prove no CALLER variable survives: the helper is spawned with
+    // `HYPER_*` config vars in its own environment (see `run`), so their absence
+    // here is the leak canary - had the helper passed its environment through,
+    // they would appear alongside `PWD`.
     let environ = fs::read(&env_rec).expect("recorded environ");
+    let leaked: Vec<String> = environ
+        .split(|&b| b == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| String::from_utf8_lossy(entry).into_owned())
+        .filter(|entry| {
+            let key = entry.split('=').next().unwrap_or("");
+            !matches!(key, "PWD" | "_" | "SHLVL")
+        })
+        .collect();
     assert!(
-        environ.is_empty(),
-        "jailer inherited a non-empty environment: {environ:?}",
+        leaked.is_empty(),
+        "caller environment leaked to the jailer (only shell-set PWD/_/SHLVL allowed): {leaked:?}",
     );
 }
 
