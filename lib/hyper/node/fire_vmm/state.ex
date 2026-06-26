@@ -39,12 +39,13 @@ defmodule Hyper.Node.FireVMM.State do
   }
 
   @enforce_keys [:opts]
-  defstruct [:opts, :spec, :boot_deadline]
+  defstruct [:opts, :spec, :boot_deadline, api_granted: false]
 
   @type t :: %State{
           opts: Opts.t(),
           spec: BootSpec.Cold.t() | nil,
-          boot_deadline: integer() | nil
+          boot_deadline: integer() | nil,
+          api_granted: boolean()
         }
 
   # How long to wait for the daemon's API to come up before failing the boot.
@@ -110,7 +111,8 @@ defmodule Hyper.Node.FireVMM.State do
     @moduledoc "Poll the (already-launched) daemon's API socket, then advance to `:configuring`."
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
-    alias Hyper.Node.FireVMM.{Client, Opts}
+    alias Hyper.Node.FireVMM.{Client, Jailer, Opts}
+    alias Hyper.SuidHelper.ChrootJail
     alias Unit.Time
 
     require Logger
@@ -118,34 +120,71 @@ defmodule Hyper.Node.FireVMM.State do
     # How often to probe the daemon's API while waiting for it.
     @probe_interval Time.ms(50)
 
-    # Poll the daemon's API until it answers, then configure. Give up if the
-    # readiness deadline passes first.
+    # Hand the jailed API socket to the node user, then poll the daemon's API
+    # until it answers and advance to `:configuring`. Give up if the readiness
+    # deadline passes first. The grant must happen before the probe: firecracker
+    # creates the socket owned by the per-VM uid, so the unprivileged controller
+    # gets EACCES on connect until the helper chowns it to us.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
-      case Client.run(Client.via(id), &Operations.describe_instance/1) do
-        {:ok, %InstanceInfo{}} ->
-          {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+      case ensure_api_granted(id, data) do
+        {:cont, data} ->
+          case Client.run(Client.via(id), &Operations.describe_instance/1) do
+            {:ok, %InstanceInfo{}} ->
+              {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
 
-        {:error, reason} ->
-          if System.monotonic_time(:millisecond) >= data.boot_deadline do
-            # firecracker's own log shows the API server is up, so a persistent
-            # probe failure points at the host->jail socket (path or, more often,
-            # permissions: the jailer drops firecracker to the per-VM uid and the
-            # unprivileged controller cannot reach the jailed socket). Surface the
-            # last error rather than swallowing it into a bare :daemon_unready.
-            Logger.warning(
-              "vm #{id}: firecracker API not reachable before deadline; " <>
-                "last probe error: #{inspect(reason)}"
-            )
-
-            {:stop, {:shutdown, {:boot_failed, {:daemon_unready, reason}}}, data}
-          else
-            {:keep_state_and_data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
+            {:error, reason} ->
+              keep_probing(id, data, reason)
           end
+
+        {:wait, data, reason} ->
+          keep_probing(id, data, reason)
       end
     end
 
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
+    end
+
+    # Ensure the jailed API socket has been handed to the node user. Idempotent
+    # once granted (we record it in `data` so we ask the helper only once).
+    # `:socket_pending` means firecracker has not created the socket yet, so we
+    # keep waiting; a hard error is logged but also tolerated until the deadline
+    # (the probe that follows would fail with EACCES anyway and drive the stop).
+    @spec ensure_api_granted(Hyper.Vm.id(), State.t()) ::
+            {:cont, State.t()} | {:wait, State.t(), term()}
+    defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
+
+    defp ensure_api_granted(id, data) do
+      case ChrootJail.grant_api(Jailer.host_socket(id)) do
+        :ok ->
+          {:cont, %{data | api_granted: true}}
+
+        {:error, :socket_pending} ->
+          {:wait, data, :socket_pending}
+
+        {:error, reason} ->
+          Logger.warning("vm #{id}: grant-api failed: #{inspect(reason)}")
+          {:wait, data, {:grant_api, reason}}
+      end
+    end
+
+    # Keep waiting for readiness, re-arming the probe timer, unless the deadline
+    # has lapsed - then fail the boot, surfacing `reason` rather than swallowing
+    # it into a bare `:daemon_unready`. A persistent failure here points at the
+    # host->jail socket (path or, more often, the grant/permission step above).
+    @spec keep_probing(Hyper.Vm.id(), State.t(), term()) ::
+            {:keep_state, State.t(), list()} | {:stop, term(), State.t()}
+    defp keep_probing(id, data, reason) do
+      if System.monotonic_time(:millisecond) >= data.boot_deadline do
+        Logger.warning(
+          "vm #{id}: firecracker API not reachable before deadline; " <>
+            "last probe error: #{inspect(reason)}"
+        )
+
+        {:stop, {:shutdown, {:boot_failed, {:daemon_unready, reason}}}, data}
+      else
+        {:keep_state, data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
+      end
     end
   end
 

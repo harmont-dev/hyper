@@ -57,4 +57,25 @@ defmodule Hyper.SuidHelper.ChrootJail do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Hand the firecracker API `socket` to the node user so the unprivileged
+  controller can `connect()` to it. The jailer drops firecracker to a per-VM
+  uid/gid and chroots it, so the socket it creates is owned by that per-VM id and
+  the node (a different uid) gets `EACCES` on connect. The helper chowns just
+  that one socket to its caller (the node user) and chmods it `0660`, leaving the
+  rest of the per-VM isolation intact.
+
+  Returns `{:error, :socket_pending}` while firecracker has not yet created the
+  socket, so the caller can keep waiting.
+  """
+  @spec grant_api(Path.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_api", include: [:socket])
+  def grant_api(socket) do
+    case SuidHelper.exec(["chroot-jail", "grant-api", "--socket", socket]) do
+      {:ok, %{"result" => "granted"}} -> :ok
+      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+      {:error, _} = err -> err
+    end
+  end
 end
