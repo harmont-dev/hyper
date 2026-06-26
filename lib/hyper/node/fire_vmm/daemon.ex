@@ -23,6 +23,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
 
   use OpenTelemetryDecorator
 
+  require Logger
+
   @shutdown_timeout Time.s(5)
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
@@ -46,9 +48,26 @@ defmodule Hyper.Node.FireVMM.Daemon do
     with :ok <- SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id)) do
       cmd = Jailer.command(opts)
 
-      case MuonTrap.Daemon.start_link(cmd.binary, cmd.args, []) do
-        {:ok, pid} -> {:ok, pid}
-        {:error, _} = err -> err
+      # Surface what the jailed process actually does: `log_output` routes the
+      # helper/jailer/firecracker stdout+stderr (guest serial console included)
+      # to the Logger, and `exit_status_to_reason` turns MuonTrap's opaque
+      # `:error_exit_status` into `{:firecracker_exited, status}` so a crash
+      # report names the real exit code instead of hiding it.
+      daemon_opts = [
+        log_output: :info,
+        log_prefix: "vm #{id} firecracker: ",
+        stderr_to_stdout: true,
+        exit_status_to_reason: &{:firecracker_exited, &1}
+      ]
+
+      case MuonTrap.Daemon.start_link(cmd.binary, cmd.args, daemon_opts) do
+        {:ok, pid} ->
+          Logger.info("vm #{id}: jailer launched under MuonTrap (#{inspect(pid)})")
+          {:ok, pid}
+
+        {:error, reason} = err ->
+          Logger.error("vm #{id}: jailer failed to launch: #{inspect(reason)}")
+          err
       end
     end
   end
