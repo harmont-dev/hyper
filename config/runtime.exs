@@ -14,17 +14,42 @@ config :hyper, Hyper.Node.Config.Budget,
 # Where to send traces. Defaults to Honeycomb; override OTEL_EXPORTER_OTLP_*
 # to point at any OTLP/HTTP backend (Collector, Grafana, etc).
 if config_env() != :test do
-  endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io")
+  custom_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT")
+  api_key = System.get_env("HONEYCOMB_API_KEY")
 
-  headers =
-    case System.get_env("HONEYCOMB_API_KEY") do
-      nil -> []
-      "" -> []
-      key -> [{"x-honeycomb-team", key}]
+  cond do
+    api_key not in [nil, ""] ->
+      config :opentelemetry_exporter,
+        otlp_protocol: :http_protobuf,
+        otlp_endpoint: custom_endpoint || "https://api.honeycomb.io",
+        otlp_headers: [{"x-honeycomb-team", api_key}]
+
+    custom_endpoint not in [nil, ""] ->
+      # A custom OTLP backend (e.g. a local Collector) needs no Honeycomb key.
+      config :opentelemetry_exporter,
+        otlp_protocol: :http_protobuf,
+        otlp_endpoint: custom_endpoint,
+        otlp_headers: []
+
+    true ->
+      # No backend configured: exporting to the Honeycomb default with no key
+      # 401s on every batch. Stay silent instead (typical for local dev). Set
+      # HONEYCOMB_API_KEY or OTEL_EXPORTER_OTLP_ENDPOINT to enable tracing.
+      config :opentelemetry, traces_exporter: :none
+  end
+end
+
+# Operator overrides from a well-known location. An optional Elixir config file
+# at /etc/hyper/config.exs (override the path with HYPER_CONFIG) is merged in
+# last, so its values win over every default set above. An absent file is a
+# no-op -- the normal case in dev and CI. Skipped under :test so the suite never
+# reads host state.
+if config_env() != :test do
+  hyper_config = System.get_env("HYPER_CONFIG") || "/etc/hyper/config.exs"
+
+  if File.exists?(hyper_config) do
+    for {app, kw} <- Config.Reader.read!(hyper_config, env: config_env()) do
+      config app, kw
     end
-
-  config :opentelemetry_exporter,
-    otlp_protocol: :http_protobuf,
-    otlp_endpoint: endpoint,
-    otlp_headers: headers
+  end
 end

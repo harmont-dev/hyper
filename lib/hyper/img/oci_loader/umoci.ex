@@ -5,9 +5,9 @@ defmodule Hyper.Img.OciLoader.Umoci do
 
   Two sources, in priority order (mirrors `Hyper.Node.Vmlinux`):
 
-    1. An operator-configured path via `config :hyper, umoci_path:
-       "/path/to/umoci"` (`Hyper.Config.umoci_path/0`). If set, it wins and is
-       never downloaded.
+    1. An operator-configured path via `[tools] umoci` in
+       `/etc/hyper/config.toml` (`Hyper.Config.umoci_path/0`). If set, it wins
+       and is never downloaded.
     2. Otherwise the pinned static binary downloaded by `ensure_installed/0`
        into `Hyper.Config.umoci_install_dir/0` (`<work_dir>/redist/umoci`).
   """
@@ -57,13 +57,13 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec bin() :: Path.t()
   def bin do
-    configured = Config.umoci_path()
+    case Config.umoci_path() do
+      nil ->
+        {:ok, arch} = Sys.Arch.current()
+        default_path(arch)
 
-    if configured != nil do
-      configured
-    else
-      {:ok, arch} = Sys.Arch.current()
-      default_path(arch)
+      configured ->
+        configured
     end
   end
 
