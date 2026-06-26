@@ -6,7 +6,7 @@ defmodule Hyper.Config do
   single source of truth, `/etc/hyper/config.toml`, at runtime — never duplicated
   in `config :hyper`. The node and the helper parse the same file, so they cannot
   drift: `work_dir`, the `[tools]` binary paths (`firecracker`, `jailer`, ...),
-  `parent_cgroup`, and `[uid_gid_range]`. The file is read once on first access
+  and the `[jails]` table (`cgroup`, `uid_gid_range`). The file is read once on first access
   and cached in `:persistent_term`; an absent file (local dev / CI) yields the
   same built-in defaults the helper compiles in, so both sides still agree.
 
@@ -135,10 +135,15 @@ defmodule Hyper.Config do
 
   @doc """
   Name of the parent cgroup used as a supervision cgroup for all VMs. Read from
-  `parent_cgroup` in `#{@config_path}` (shared with the helper), default `"hyper"`.
+  `[jails] cgroup` in `#{@config_path}` (shared with the helper), default `"hyper"`.
   """
   @spec parent_cgroup :: String.t()
-  def parent_cgroup, do: Map.get(config_toml(), "parent_cgroup", @default_parent_cgroup)
+  def parent_cgroup, do: Map.get(jails(), "cgroup", @default_parent_cgroup)
+
+  # The `[jails]` table (VM placement/confinement, shared with the helper), or
+  # `%{}` when the file or table is absent.
+  @spec jails :: map()
+  defp jails, do: Map.get(config_toml(), "jails", %{})
 
   @doc """
   Path to the directory where all VM sockets are held.
@@ -153,14 +158,14 @@ defmodule Hyper.Config do
   Range in which `Hyper` allocates uid/gids: each VM gets a fresh uid/gid pair in
   this range. Critical that no other process on the system uses this range.
 
-  Read from the `[uid_gid_range]` table (`min`/`max`) in `#{@config_path}` — the
-  same file the helper validates against, so the node only ever hands out uids the
-  helper will accept. Defaults to `#{inspect(@default_uid_gid_range)}` when absent.
+  Read from `[jails] uid_gid_range` (a `[min, max]` array) in `#{@config_path}` —
+  the same file the helper validates against, so the node only ever hands out uids
+  the helper will accept. Defaults to `#{inspect(@default_uid_gid_range)}` when absent.
   """
   @spec uid_gid_range :: {integer(), integer()}
   def uid_gid_range do
-    case Map.get(config_toml(), "uid_gid_range") do
-      %{"min" => min, "max" => max} -> {min, max}
+    case Map.get(jails(), "uid_gid_range") do
+      [min, max] -> {min, max}
       _ -> @default_uid_gid_range
     end
   end

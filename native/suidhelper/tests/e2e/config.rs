@@ -210,7 +210,7 @@ fn bad_uid_gid_range_exits_2_as_root() {
     // never receive because it skips its privilege drop when uid == 0.
     let p = write_root_config(
         tmp.path(),
-        "work_dir = \"/srv/hyper\"\n[uid_gid_range]\nmin = 0\nmax = 100\n",
+        "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [0, 100]\n",
     );
     let out = run_with_config(&p, &["sys-test"]);
     assert_eq!(out.status.code(), Some(2));

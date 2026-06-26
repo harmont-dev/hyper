@@ -3,10 +3,10 @@
 //!
 //! ## UID/GID range divergence
 //!
-//! Elixir keeps `compile_env` default `{900_000, 999_999}` that governs which
-//! UIDs the node hands *out*; this helper reads `[uid_gid_range]` from
-//! config.toml to decide which UIDs it *accepts* (default `{900_000, 999_999}`
-//! when the key is absent). Operators narrowing the range must set **both**.
+//! Elixir keeps a default `{900_000, 999_999}` that governs which UIDs the node
+//! hands *out*; this helper reads `[jails] uid_gid_range` from config.toml to
+//! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
+//! absent). Operators narrowing the range must set **both**.
 
 use crate::util::safe_bin::{self, SafeBin};
 use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
@@ -45,12 +45,20 @@ pub enum BinError {
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
 const INSECURE_CONFIG_PATH_ENV: &str = "HYPER_SETUIDHELPER_CONFIG_PATH";
 
-/// UID/GID allocation band, read from `[uid_gid_range]` in config.toml.
-/// Controls which UIDs the helper *accepts* from the BEAM — see module docs.
+/// UID/GID allocation band, read from `[jails] uid_gid_range` in config.toml as
+/// a two-element `[min, max]` array. Controls which UIDs the helper *accepts*
+/// from the BEAM — see module docs.
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(from = "[u32; 2]")]
 pub struct UidGidRange {
     pub min: u32,
     pub max: u32,
+}
+
+impl From<[u32; 2]> for UidGidRange {
+    fn from([min, max]: [u32; 2]) -> Self {
+        Self { min, max }
+    }
 }
 
 // Band defaults match Elixir's `compile_env` allocation defaults so that an
@@ -91,10 +99,30 @@ pub struct Config {
     work_dir: PathBuf,
     #[serde(default)]
     tools: Tools,
-    #[serde(default = "default_parent_cgroup")]
-    parent_cgroup: String,
     #[serde(default)]
+    jails: Jails,
+}
+
+/// The `[jails]` table: how the helper places and confines each VM jail.
+///
+/// `cgroup` is the parent cgroup the jailer nests every VM beneath (default
+/// `"hyper"`). `uid_gid_range` is the `[min, max]` band of UIDs/GIDs the helper
+/// accepts from the BEAM; absent means the built-in default. A missing `[jails]`
+/// table, or any missing key within it, falls back to these defaults.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Jails {
+    cgroup: String,
     uid_gid_range: Option<UidGidRange>,
+}
+
+impl Default for Jails {
+    fn default() -> Self {
+        Self {
+            cgroup: default_parent_cgroup(),
+            uid_gid_range: None,
+        }
+    }
 }
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
@@ -156,8 +184,7 @@ impl Default for Config {
         Self {
             work_dir: default_work_dir(),
             tools: Tools::default(),
-            parent_cgroup: default_parent_cgroup(),
-            uid_gid_range: None,
+            jails: Jails::default(),
         }
     }
 }
@@ -227,10 +254,10 @@ impl Config {
             .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
     }
 
-    /// The jailer `--parent-cgroup` value. Defaults to `"hyper"`, matching the
-    /// Elixir node's `@parent_cgroup`.
+    /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to
+    /// `"hyper"`, matching the Elixir node's default.
     pub fn parent_cgroup(&self) -> &str {
-        &self.parent_cgroup
+        &self.jails.cgroup
     }
 
     /// The UID/GID band the helper accepts from the BEAM. Defaults to
@@ -238,7 +265,8 @@ impl Config {
     /// A present range with min==0 or min>max is rejected at load time by
     /// [`Config::safe_load`], so this accessor is always total.
     pub fn uid_gid_range(&self) -> (u32, u32) {
-        self.uid_gid_range
+        self.jails
+            .uid_gid_range
             .map(|r| (r.min, r.max))
             .unwrap_or(DEFAULT_UID_GID)
     }
@@ -273,7 +301,7 @@ impl Config {
             return Err(LoadingError::Relative(path));
         }
 
-        if let Some(r) = &config.uid_gid_range {
+        if let Some(r) = &config.jails.uid_gid_range {
             validate_uid_gid_range(r)?;
         }
 

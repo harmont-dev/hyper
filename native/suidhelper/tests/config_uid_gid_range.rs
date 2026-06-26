@@ -29,7 +29,7 @@ proptest! {
     fn valid_range_round_trips_via_toml(min in 1u32.., delta in 0u32..) {
         let max = min.saturating_add(delta);
         let body = format!(
-            "work_dir = \"/srv/hyper\"\n[uid_gid_range]\nmin = {min}\nmax = {max}\n"
+            "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [{min}, {max}]\n"
         );
         let config: Config = toml::from_str(&body).expect("valid TOML");
         prop_assert_eq!(config.uid_gid_range(), (min, max));
