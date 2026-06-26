@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Firecracker.Install do
        and `SafeBin<"jailer">`, which match on basename only — version-stamped
        names such as `firecracker-v1.16.0-x86_64` are rejected unconditionally.
     4. Marks both binaries executable (`0o755`).
-    5. Prints the configuration snippets the operator needs to paste.
+    5. Prints the `/etc/hyper/config.toml` snippet the operator needs to paste.
 
   This task installs **unprivileged** binaries and prints configuration.
   Privilege at runtime is handled by `hyper-suidhelper` (the setuid helper).
@@ -131,11 +131,7 @@ defmodule Mix.Tasks.Firecracker.Install do
     root-owned, not group- or world-writable):
 
         firecracker = "#{fc}"
-        jailer = "#{jailer}"
-
-    Or in your Elixir config (e.g. config/runtime.exs):
-
-        config :hyper, firecracker_bin: "#{fc}", jailer_bin: "#{jailer}"
+        jailer      = "#{jailer}"
     """)
   end
 end

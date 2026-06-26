@@ -21,8 +21,8 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   # async: false because persistent_term is global state.
   setup do
     :persistent_term.put({Hyper.Config, :config_toml}, %{
-      "firecracker_bin" => "/usr/local/bin/firecracker-v1.16.0-x86_64",
-      "jailer_bin" => "/usr/local/bin/jailer-v1.16.0-x86_64"
+      "firecracker" => "/usr/local/bin/firecracker",
+      "jailer" => "/usr/local/bin/jailer"
     })
 
     on_exit(fn -> :persistent_term.erase({Hyper.Config, :config_toml}) end)
@@ -71,6 +71,13 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     refute "--cgroup-version" in args
     refute "--parent-cgroup" in args
     refute "--" in args
+  end
+
+  test "args include --cgroup cpu.max and memory.max for :micro type" do
+    %{args: args} = Jailer.command(micro_opts())
+    assert "--cgroup" in args
+    assert Enum.any?(args, &String.starts_with?(&1, "cpu.max="))
+    assert Enum.any?(args, &String.starts_with?(&1, "memory.max="))
   end
 
   property "gen_vm_id/0 never produces an id starting with -" do

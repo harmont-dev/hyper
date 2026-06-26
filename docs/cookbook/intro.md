@@ -198,8 +198,8 @@ managed by Hyper itself; you do not install them.
 `firecracker` and `jailer` are not auto-downloaded. Install them with
 `mix firecracker.install [--prefix <dir>]` (default prefix `/opt/firecracker`),
 which downloads the pinned v1.16.0 release, places the binaries at
-`<prefix>/firecracker` and `<prefix>/jailer`, and prints the config snippets to
-paste into `/etc/hyper/config.toml` and `config.exs`.
+`<prefix>/firecracker` and `<prefix>/jailer`, and prints the `/etc/hyper/config.toml`
+snippet to paste in.
 
 ### Installation
 
@@ -214,11 +214,6 @@ configuration.
 
 ```elixir
 config :hyper,
-  # REQUIRED. Must point at the bare-basename binaries installed by
-  # `mix firecracker.install`. The setuid helper validates these paths
-  # (root-owned, non-group/world-writable, basename exactly "firecracker"/"jailer").
-  firecracker_bin: "/opt/firecracker/firecracker",
-  jailer_bin: "/opt/firecracker/jailer",
   # You must create a parent cgroup on your system. Continue reading for
   # further details.
   cgroup_parent: "hyper",
@@ -230,6 +225,10 @@ config :hyper,
   uid_gid_range: {900_000, 999_999},
   layer_dir: "/srv/hyper/layers"
 ```
+
+The `firecracker` and `jailer` binary paths are **not** set here — they are read
+from `/etc/hyper/config.toml` (the single source of truth shared with the setuid
+helper). See the `config.toml` example above.
 
 <!-- TODO(markovejnovic): Update the config section. -->
 

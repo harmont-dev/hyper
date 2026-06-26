@@ -96,7 +96,6 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
-toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [profile.release]
 strip = true

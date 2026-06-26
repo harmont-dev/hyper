@@ -3,9 +3,9 @@ defmodule Hyper.Config do
   Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
 
   Runtime values shared with the setuid helper (`native/suidhelper`) — `work_dir`,
-  `firecracker_bin`, `jailer_bin` — are read from `/etc/hyper/config.toml` (the
-  single source of truth for both sides) the first time they are needed, then
-  cached in `:persistent_term`. Everything else is compile-time.
+  `firecracker`, `jailer` — are read from `/etc/hyper/config.toml` (the single
+  source of truth for both sides) the first time they are needed, then cached in
+  `:persistent_term`. Everything else is compile-time.
   """
 
   # The shared data-root config file, read by both this node and the setuid
@@ -37,19 +37,39 @@ defmodule Hyper.Config do
 
   @doc """
   Absolute path to the firecracker binary, as set in `#{@config_path}` under the
-  `firecracker_bin` key. Raises if the key is absent — the operator must configure
-  it; there is no default.
+  `firecracker` key. Raises if the key is absent — the operator must configure it;
+  there is no default.
+
+  For the launch path only. Pre-launch checks should use `firecracker_bin_configured/0`
+  so a missing key returns a typed error rather than crashing.
   """
   @spec firecracker_bin :: Path.t()
-  def firecracker_bin, do: fetch_bin!("firecracker_bin")
+  def firecracker_bin, do: fetch_bin!("firecracker")
+
+  @doc """
+  Non-raising form of `firecracker_bin/0`. Returns `{:ok, path}` when the
+  `firecracker` key is present in `#{@config_path}`, or `:error` when it is absent.
+  """
+  @spec firecracker_bin_configured :: {:ok, Path.t()} | :error
+  def firecracker_bin_configured, do: Map.fetch(config_toml(), "firecracker")
 
   @doc """
   Absolute path to the jailer binary, as set in `#{@config_path}` under the
-  `jailer_bin` key. Raises if the key is absent — the operator must configure it;
+  `jailer` key. Raises if the key is absent — the operator must configure it;
   there is no default.
+
+  For the launch path only. Pre-launch checks should use `jailer_bin_configured/0`
+  so a missing key returns a typed error rather than crashing.
   """
   @spec jailer_bin :: Path.t()
-  def jailer_bin, do: fetch_bin!("jailer_bin")
+  def jailer_bin, do: fetch_bin!("jailer")
+
+  @doc """
+  Non-raising form of `jailer_bin/0`. Returns `{:ok, path}` when the `jailer` key
+  is present in `#{@config_path}`, or `:error` when it is absent.
+  """
+  @spec jailer_bin_configured :: {:ok, Path.t()} | :error
+  def jailer_bin_configured, do: Map.fetch(config_toml(), "jailer")
 
   @spec fetch_bin!(String.t()) :: Path.t()
   defp fetch_bin!(key) do

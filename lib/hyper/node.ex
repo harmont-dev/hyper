@@ -168,15 +168,20 @@ defmodule Hyper.Node do
   end
 
   @spec check_firecracker_bins ::
-          :ok | {:error, {:firecracker_bin_missing | :jailer_bin_missing, Path.t()}}
+          :ok
+          | {:error, {:firecracker_bin_missing | :jailer_bin_missing, Path.t()}}
+          | {:error, :firecracker_not_configured | :jailer_not_configured}
   defp check_firecracker_bins do
-    fc = Hyper.Config.firecracker_bin()
-    jail = Hyper.Config.jailer_bin()
-
-    cond do
-      not Sys.Posix.executable?(fc) -> {:error, {:firecracker_bin_missing, fc}}
-      not Sys.Posix.executable?(jail) -> {:error, {:jailer_bin_missing, jail}}
-      true -> :ok
+    with {:fc, {:ok, fc}} <- {:fc, Hyper.Config.firecracker_bin_configured()},
+         {:jail, {:ok, jail}} <- {:jail, Hyper.Config.jailer_bin_configured()} do
+      cond do
+        not Sys.Posix.executable?(fc) -> {:error, {:firecracker_bin_missing, fc}}
+        not Sys.Posix.executable?(jail) -> {:error, {:jailer_bin_missing, jail}}
+        true -> :ok
+      end
+    else
+      {:fc, :error} -> {:error, :firecracker_not_configured}
+      {:jail, :error} -> {:error, :jailer_not_configured}
     end
   end
 
