@@ -81,9 +81,9 @@ defmodule Hyper.Img.OciLoader do
   def test_system do
     with {:ok, _arch} <- Sys.Arch.current() do
       tools = [
-        {"skopeo", Config.skopeo_path()},
+        {"skopeo", Hyper.Cfg.Tools.skopeo()},
         {"umoci", Umoci.bin()},
-        {"mke2fs", Config.mke2fs_path()}
+        {"mke2fs", Hyper.Cfg.Tools.mke2fs()}
       ]
 
       missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
@@ -137,7 +137,7 @@ defmodule Hyper.Img.OciLoader do
     bundle = Path.join(tmp, "bundle")
 
     skopeo =
-      cmd(Config.skopeo_path(), [
+      cmd(Hyper.Cfg.Tools.skopeo(), [
         "copy",
         "--override-os",
         "linux",
@@ -192,7 +192,7 @@ defmodule Hyper.Img.OciLoader do
       ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
         ["#{Information.as_mib(size)}M"]
 
-    case tag(cmd(Config.mke2fs_path(), args), :mke2fs) do
+    case tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs) do
       :ok ->
         {:ok, staged}
 

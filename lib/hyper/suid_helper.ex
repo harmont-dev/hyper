@@ -30,7 +30,7 @@ defmodule Hyper.SuidHelper do
   @spec exec([String.t()]) :: {:ok, map()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.exec", include: [:argv])
   def exec(argv) do
-    case System.cmd(Hyper.Config.suid_helper(), argv, stderr_to_stdout: true) do
+    case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv, stderr_to_stdout: true) do
       {out, 0} -> {:ok, Jason.decode!(out)}
       {out, code} -> {:error, {code, String.trim(out)}}
     end
@@ -91,7 +91,7 @@ defmodule Hyper.SuidHelper do
 
   @spec helper_present() :: :ok | {:error, :suid_helper_not_found}
   defp helper_present do
-    if System.find_executable(Hyper.Config.suid_helper()),
+    if System.find_executable(Hyper.Cfg.Tools.suidhelper()),
       do: :ok,
       else: {:error, :suid_helper_not_found}
   end

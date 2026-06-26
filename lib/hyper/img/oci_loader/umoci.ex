@@ -40,7 +40,7 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
-    if Config.umoci_path() != nil do
+    if Hyper.Cfg.Tools.umoci() != nil do
       :ok
     else
       with {:ok, arch} <- Sys.Arch.current() do
@@ -57,7 +57,7 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec bin() :: Path.t()
   def bin do
-    case Config.umoci_path() do
+    case Hyper.Cfg.Tools.umoci() do
       nil ->
         {:ok, arch} = Sys.Arch.current()
         default_path(arch)

@@ -62,7 +62,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
     case SuidHelper.exec([
            "dmsetup",
            "--bin",
-           Hyper.Config.dmsetup_path(),
+           Hyper.Cfg.Tools.dmsetup(),
            "remove",
            "--retry",
            name
@@ -77,7 +77,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])
   def message(name, message) do
     argv =
-      ["dmsetup", "--bin", Hyper.Config.dmsetup_path(), "message", name, "--message", message]
+      ["dmsetup", "--bin", Hyper.Cfg.Tools.dmsetup(), "message", name, "--message", message]
 
     case SuidHelper.exec(argv) do
       {:ok, _} -> :ok
@@ -92,7 +92,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.test_system")
   def test_system do
-    if System.find_executable(Hyper.Config.dmsetup_path()),
+    if System.find_executable(Hyper.Cfg.Tools.dmsetup()),
       do: test_targets(),
       else: {:error, :dmsetup_not_found}
   end
@@ -101,7 +101,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec test_targets() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.test_targets")
   def test_targets do
-    case System.cmd(Hyper.Config.dmsetup_path(), ["targets"], stderr_to_stdout: true) do
+    case System.cmd(Hyper.Cfg.Tools.dmsetup(), ["targets"], stderr_to_stdout: true) do
       {out, 0} ->
         have = parse_targets(out)
         missing = Enum.reject(@required_targets, &MapSet.member?(have, &1))
@@ -146,7 +146,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec create(String.t(), String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, err()}
   defp create(name, table, flags) do
     argv =
-      ["dmsetup", "--bin", Hyper.Config.dmsetup_path(), "create", name] ++
+      ["dmsetup", "--bin", Hyper.Cfg.Tools.dmsetup(), "create", name] ++
         flags ++ ["--table", table]
 
     case SuidHelper.exec(argv) do

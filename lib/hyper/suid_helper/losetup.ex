@@ -11,7 +11,7 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec attach_ro(Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Losetup.attach_ro", include: [:path])
   def attach_ro(path) do
-    case SuidHelper.exec(["losetup", "--bin", Hyper.Config.losetup_path(), "attach", path]) do
+    case SuidHelper.exec(["losetup", "--bin", Hyper.Cfg.Tools.losetup(), "attach", path]) do
       {:ok, %{"device" => dev}} -> {:ok, dev}
       {:error, _} = err -> err
     end
@@ -24,7 +24,7 @@ defmodule Hyper.SuidHelper.Losetup do
     case SuidHelper.exec([
            "losetup",
            "--bin",
-           Hyper.Config.losetup_path(),
+           Hyper.Cfg.Tools.losetup(),
            "attach",
            "--rw",
            path
@@ -38,7 +38,7 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec detach(Path.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Losetup.detach", include: [:dev])
   def detach(dev) do
-    case SuidHelper.exec(["losetup", "--bin", Hyper.Config.losetup_path(), "detach", dev]) do
+    case SuidHelper.exec(["losetup", "--bin", Hyper.Cfg.Tools.losetup(), "detach", dev]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -48,7 +48,7 @@ defmodule Hyper.SuidHelper.Losetup do
   @spec test_system() :: :ok | {:error, :losetup_not_found}
   @decorate with_span("Hyper.SuidHelper.Losetup.test_system")
   def test_system do
-    if System.find_executable(Hyper.Config.losetup_path()),
+    if System.find_executable(Hyper.Cfg.Tools.losetup()),
       do: :ok,
       else: {:error, :losetup_not_found}
   end
