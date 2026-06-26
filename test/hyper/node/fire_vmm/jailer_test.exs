@@ -80,9 +80,12 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert Enum.any?(args, &String.starts_with?(&1, "memory.max="))
   end
 
-  property "gen_vm_id/0 never produces an id starting with -" do
+  # firecracker rejects an instance id containing `_` (and dm/jailer names must
+  # not lead with `-`), so the id must be strictly alphanumeric.
+  property "gen_vm_id/0 produces only alphanumeric ids" do
     check all(_ <- StreamData.constant(nil)) do
-      refute String.starts_with?(Hyper.gen_vm_id(), "-")
+      id = Hyper.gen_vm_id()
+      assert id =~ ~r/\A[A-Za-z0-9]+\z/
     end
   end
 end

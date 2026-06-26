@@ -34,9 +34,24 @@ defmodule Hyper do
     end
   end
 
-  @doc "Generate a fresh VM id (url-safe base64, dm-name compatible)."
+  @doc """
+  Generate a fresh VM id: a `v` prefix followed by lowercase base32 of 10 random
+  bytes, charset `[a-z2-7]`.
+
+  Alphanumeric only - no `-`, `_`, or other punctuation. That is the intersection
+  of three independent constraints the id must satisfy at once:
+
+    * firecracker rejects `_` in an instance id (`InvalidInstanceId`);
+    * dm/jailer names must not start with `-`;
+    * registry keys and chroot path components stay trivially safe.
+
+  The previous base64url encoding emitted `-` and `_`, so it could produce ids
+  firecracker refused at boot (`Invalid char (_)`).
+  """
   @spec gen_vm_id() :: Hyper.Vm.id()
-  def gen_vm_id, do: "v" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+  def gen_vm_id do
+    "v" <> Base.encode32(:crypto.strong_rand_bytes(10), padding: false, case: :lower)
+  end
 
   @spec resolve_arch(Hyper.Vm.Instance.arch() | nil) ::
           {:ok, Hyper.Vm.Instance.arch()} | {:error, term()}
