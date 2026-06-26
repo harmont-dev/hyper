@@ -14,7 +14,7 @@ Configuring `Hyper` is done through four layers, in priority:
 **Note that not all layers allow all configuration fields to be tweaked.** Read
 further for more details on where and how each configuration field is set.
 
-## Configuration Fields
+# Configuration Fields
 
 This section briefly outlines the configuration fields available in `Hyper`.
 Note the keys are abbreviated for better layout:
@@ -26,13 +26,13 @@ Note the keys are abbreviated for better layout:
     configuration section expands to
     `:hyper, Hyper.Cfg.Tools, mke2fs: "/path/to/mke2fs"`.
 
-### Root Keys (`Hyper.Config`, `-`)
+## Root Keys (`Hyper.Config`, `-`)
 
 | Config Key    | `config.exs` | `config.toml` | Default                           | Notes                                                                   |
 |---------------|-------------------------|--------------------------|-----------------------------------|-------------------------------------------------------------------------|
 | `work_dir`    | -                       | `work_dir`               | -                                 | [Absolute Path](#absolute-path) where `Hyper` creates its working tree. |
 
-### Tool Configuration (`Hyper.Cfg.Tools`, `[tools]`)
+## Tool Configuration (`Hyper.Cfg.Tools`, `[tools]`)
 
 Hyper relies on a large number of external tools, of which the paths are
 configurable:
@@ -49,14 +49,14 @@ configurable:
 | `umoci`       | `.umoci`                | `.umoci`            | Automatically downloaded.           |                                 |
 | `suidhelper`  | `.suidhelper`           | `.suidhelper`       | `"/usr/local/bin/hyper-suidhelper"` | [Absolute Path](#absolute-path) |
 
-### Jail Confinement (`-`, `[jails]`)
+## Jail Confinement (`-`, `[jails]`)
 
 | Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
 |----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `cgroup`       | -                       | `.cgroup`           | `"hyper"`                         | Parent cgroup under which each VM's cgroup is nested. Each VM receives its own ephemeral cgroup which lives under the umbrella of this cgroup.            |
 | `uid_gid_range`| -                       | `.uid_gid_range`    | -                                 | [Range](#range) limiting the UID/GID values given to VMs. Each VM receives its own UID/GID pair, within these bounds. Must not be an existing user/group. |
 
-### gRPC Configuration (`Hyper.Cfg.Grpc`, `[grpc]`)
+## gRPC Configuration (`Hyper.Cfg.Grpc`, `[grpc]`)
 
 Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface
 with `Hyper` from any language.
@@ -77,7 +77,7 @@ with `Hyper` from any language.
 > you can also conditionally enable the `gRPC` server based on logic in your
 > `config.exs`, for example, to only spawn it on your "main" server.
 
-### Telemetry Configuration (`Hyper.Cfg.Otel`, `[otel]`)
+## Telemetry Configuration (`Hyper.Cfg.Otel`, `[otel]`)
 
 You can configure telemetry with Hyper by adding this section to your
 configuration and Hyper will emit tracing spans as configured.
@@ -88,7 +88,7 @@ configuration and Hyper will emit tracing spans as configured.
 | `endpoint`     | `.endpoint`    | `.endpoint`             | - | |
 | `headers`     | `.headers`    | `.headers`             | -       |  |
 
-### Budget Configuration (`Hyper.Cfg.Budget`, `[budget]`)
+## Budget Configuration (`Hyper.Cfg.Budget`, `[budget]`)
 
 Hyper allows you to control the absolute maximal budgets that are available to
 all VMs on a particular node.
@@ -104,7 +104,7 @@ all VMs on a particular node.
 | `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | -                                 | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
 | `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | -                                 | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
 
-### VmLinux Paths (`Hyper.Cfg.VmLinux`, `[vmlinux]`)
+## VmLinux Paths (`Hyper.Cfg.VmLinux`, `[vmlinux]`)
 
 Hyper requires Linux images for the architectures it runs on:
 
@@ -113,7 +113,7 @@ Hyper requires Linux images for the architectures it runs on:
 | `amd64`  | `.amd64`   | `.amd64`   | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path).            |
 | `aarch64`| `.aarch64` | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
 
-### Image Configuration (`Hyper.Cfg.Img`, `[img]`)
+## Image Configuration (`Hyper.Cfg.Img`, `[img]`)
 
 Hyper's image provisioning layer has a large set of configuration flags
 enabling you to tweak how you want Hyper to manage images.
@@ -124,7 +124,7 @@ enabling you to tweak how you want Hyper to manage images.
 
 Additionally, sub-sections are available.
 
-#### Database Configuration (`Hyper.Cfg.Img.Db`, `[img.db]`)
+### Database Configuration (`Hyper.Cfg.Img.Db`, `[img.db]`)
 
 | Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
 |----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -133,7 +133,7 @@ Additionally, sub-sections are available.
 | `password`  | `.password`   | -  | - |  |
 | `hostname`  | `.hostname`   | -  | - |  |
 
-#### Garbage Collector Configuration (`Hyper.Cfg.Img.Gc`, `[img.gc]`)
+### Garbage Collector Configuration (`Hyper.Cfg.Img.Gc`, `[img.gc]`)
 
 Hyper supports a mechanism to prune unreferenced image layers. Unreferenced
 image layers occur when an ungraceful crash happens, resulting in entries in
@@ -152,11 +152,11 @@ necessary.
 | `timeout`  | `.timeout`   | `.timeout`  | `5s` |  |
 | `grace_period`  | `.grace_period`   | `.grace_period`  | `1h` |  |
 
-### Cluster Topology (`Hyper.Cfg.Cluster`, `[cluster]`)
+## Cluster Topology (`Hyper.Cfg.Cluster`, `[cluster]`)
 
 <!-- TODO(markovejnovic): Write this -->
 
-### Key Types
+## Key Types
 
 #### Absolute Path
 
