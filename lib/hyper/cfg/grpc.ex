@@ -19,11 +19,18 @@ defmodule Hyper.Cfg.Grpc do
   Build the credential where you load your keys (e.g. `config/runtime.exs`);
   Hyper never reads the filesystem on your behalf.
 
+  Each field also reads from the `[grpc]` table of `config.toml` when not set in
+  `config.exs`. There, `cred` is given as an inline table
+  `{ cert = "/path/cert.pem", key = "/path/key.pem" }`, which is coerced into a
+  `GRPC.Credential`.
+
   > #### Co-located nodes {: .info}
   >
   > Every node binds `:port`. Running multiple nodes on one host (e.g. a local
   > cluster) requires giving each a distinct port via its own config.
   """
+
+  import Hyper.Cfg, only: [get_cfg: 1]
 
   @default_port 50_051
 
@@ -35,8 +42,6 @@ defmodule Hyper.Cfg.Grpc do
           cred: GRPC.Credential.t() | nil,
           adapter_opts: keyword()
         }
-
-  import Hyper.Cfg, only: [get_cfg: 1]
 
   @doc "Load the gRPC server configuration: config.exs > [grpc] toml > defaults."
   @spec load() :: t()
