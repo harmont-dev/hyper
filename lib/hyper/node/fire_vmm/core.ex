@@ -18,8 +18,9 @@ defmodule Hyper.Node.FireVMM.Core do
     * firecracker crash -> the `Daemon` child exits; both restart; `Daemon`
       resets the stale jail and relaunches, and the fresh controller cold-boots.
 
-  `MuonTrap` kills the OS process when its port closes (teardown or BEAM death),
-  so no firecracker process outlives the supervisor.
+  `Daemon` guarantees firecracker is dead on teardown via the helper's
+  `cgroup.kill` (MuonTrap's port-close kill misses the setsid'd firecracker), so
+  no firecracker process outlives a graceful supervisor shutdown.
   """
 
   use Supervisor

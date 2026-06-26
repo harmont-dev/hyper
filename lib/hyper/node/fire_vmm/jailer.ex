@@ -123,13 +123,29 @@ defmodule Hyper.Node.FireVMM.Jailer do
   end
 
   @doc """
-  Host path of the VM's cgroup leaf (`/sys/fs/cgroup/<parent>/<exec>/<id>`), the
-  cgroup the jailer creates for firecracker. Reconstructed (the jailer owns its
+  Host path of the cgroup dir holding every VM's leaf (`/sys/fs/cgroup/<parent>`).
+  Its immediate subdir names are vm_ids - the leaves the jailer creates for
+  firecracker - so listing it (directories only; the dir also holds cgroup control
+  files) enumerates the cgroup leaves on this host.
+
+  Note the cgroup hierarchy has NO `<exec>` level: the jailer (cgroup v2,
+  `--parent-cgroup <parent>`) places firecracker directly at `<parent>/<id>`,
+  unlike the chroot (`<chroot_base>/<exec>/<id>`). Confirmed via
+  `/proc/<pid>/cgroup` = `0::/<parent>/<id>`.
+  """
+  @spec cgroup_parent_dir() :: Path.t()
+  def cgroup_parent_dir do
+    Path.join("/sys/fs/cgroup", Hyper.Config.parent_cgroup())
+  end
+
+  @doc """
+  Host path of the VM's cgroup leaf (`/sys/fs/cgroup/<parent>/<id>`), the cgroup
+  the jailer creates for firecracker. Reconstructed (the jailer owns its
   placement) so a relaunch can clear the stale leaf left by a prior incarnation.
   """
   @spec cgroup_dir(Hyper.Vm.id()) :: Path.t()
   def cgroup_dir(id) do
-    Path.join(["/sys/fs/cgroup", Hyper.Config.parent_cgroup(), exec_name(), id])
+    Path.join(cgroup_parent_dir(), id)
   end
 
   @doc """
