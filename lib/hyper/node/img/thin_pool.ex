@@ -13,7 +13,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
   use GenServer
 
-  alias Hyper.Node.Config.Img, as: ImgConfig
+  alias Hyper.Cfg.Img, as: ImgConfig
   alias Hyper.SuidHelper
   alias Unit.Information
 

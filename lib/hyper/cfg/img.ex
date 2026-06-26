@@ -1,4 +1,4 @@
-defmodule Hyper.Node.Config.Img do
+defmodule Hyper.Cfg.Img do
   @moduledoc """
   This node's image storage configuration: the device-mapper geometry behind the
   read-only layer chain (dm-snapshot) and the per-VM writable layers (dm-thin).

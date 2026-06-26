@@ -18,7 +18,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot", include: [:name])
   def create_snapshot(name, origin_dev, cow_dev, sectors) do
-    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Node.Config.Img.chunk_sectors())
+    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Cfg.Img.chunk_sectors())
     create(name, table, ["--readonly"])
   end
 
