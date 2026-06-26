@@ -10,8 +10,8 @@ defmodule Hyper.Node.Budget.NodeState do
   knowing the target's config or core count.
   """
 
-  alias Hyper.Node.Budget.Hard
   alias Hyper.Cfg.Budget, as: Config
+  alias Hyper.Node.Budget.Hard
   alias Hyper.Vm.Instance.Spec
   alias Sys.Mon
   alias Sys.Mon.Server.Reading

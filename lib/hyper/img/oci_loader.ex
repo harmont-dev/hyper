@@ -185,7 +185,9 @@ defmodule Hyper.Img.OciLoader do
   defp build_ext4(rootfs, {size, inodes}) do
     Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs (#{inodes} inodes)")
     File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
-    staged = Path.join(Hyper.Cfg.Dirs.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
+
+    staged =
+      Path.join(Hyper.Cfg.Dirs.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
 
     args =
       ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++

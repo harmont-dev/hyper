@@ -1,8 +1,8 @@
 defmodule Hyper.Cfg.ToolsTest do
   use ExUnit.Case, async: false
 
-  alias Hyper.Cfg.Tools
   alias Hyper.Cfg.Toml
+  alias Hyper.Cfg.Tools
 
   setup do
     # Hermetic: empty TOML cache so we assert built-in defaults, not the

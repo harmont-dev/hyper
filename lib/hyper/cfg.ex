@@ -48,6 +48,7 @@ defmodule Hyper.Cfg do
 
   @spec resolve([source]) :: {:ok, term()} | :error
   defp resolve([]), do: :error
+
   defp resolve([source | rest]) do
     case from(source) do
       {:ok, value} -> {:ok, value}

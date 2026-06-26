@@ -23,10 +23,6 @@ defmodule Hyper.Cfg.Toml do
     end)
   end
 
-  @doc "Path to the shared config file."
-  @spec path :: Path.t()
-  def path, do: @config_path
-
   @doc "Drop the cache so the next read re-parses the file (test hook)."
   @spec reload :: map()
   def reload do

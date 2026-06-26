@@ -25,5 +25,7 @@ defmodule Hyper.Cfg.JailsTest do
     assert Jails.range_from([800_000, 899_999]) == {800_000, 899_999}
     assert Jails.range_from(nil) == {900_000, 999_999}
     assert Jails.range_from("garbage") == {900_000, 999_999}
+    # A two-element list of non-integers must fall to the default, never a bogus tuple.
+    assert Jails.range_from(["a", "b"]) == {900_000, 999_999}
   end
 end

@@ -149,7 +149,11 @@ defmodule Hyper.Node.Img.Mutable do
 
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:mutable))}
+
+    %{
+      state
+      | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:mutable))
+    }
   end
 
   defp cancel_idle(%State{idle_ref: nil} = state), do: state

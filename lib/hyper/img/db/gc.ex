@@ -31,9 +31,9 @@ defmodule Hyper.Img.Db.Gc do
   require Logger
   import Ecto.Query
 
+  alias Hyper.Cfg.Gc, as: Config
   alias Hyper.Cluster.Routing
   alias Hyper.Img.Db.{Blob, ImageLayer, Repo}
-  alias Hyper.Cfg.Gc, as: Config
   alias Hyper.Img.Db.Gc.Sweep
   alias Hyper.Node.Layer.Repo, as: LayerRepo
 

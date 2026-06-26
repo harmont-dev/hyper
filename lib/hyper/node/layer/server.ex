@@ -5,7 +5,8 @@ defmodule Hyper.Node.Layer.Server do
   Reference-counted via process monitors: each holder `acquire/1`s the layer and
   the server monitors it, so a holder that crashes is released automatically (no
   leaked count). When the last holder goes away the server waits a short idle
-  grace period and then stops, unmounting the block device in `terminate/2`.
+  grace period and then stops, unmounting the block device in `terminate/2`. The
+  grace period keeps bursty acquire/release cycles from thrashing the mount.
   """
 
   use GenServer
@@ -148,7 +149,11 @@ defmodule Hyper.Node.Layer.Server do
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:layer))}
+
+    %{
+      state
+      | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:layer))
+    }
   end
 
   @spec cancel_idle(State.t()) :: State.t()

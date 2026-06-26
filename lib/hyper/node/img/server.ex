@@ -225,7 +225,11 @@ defmodule Hyper.Node.Img.Server do
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:img))}
+
+    %{
+      state
+      | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:img))
+    }
   end
 
   @spec cancel_idle(State.t()) :: State.t()

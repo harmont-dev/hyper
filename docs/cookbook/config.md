@@ -2,277 +2,182 @@
 
 Configuring `Hyper` is done through four layers, in priority:
 
-  1. Runtime `/etc/hyper/config.exs` is the canonical Elixir way to configure
-     the system. This allows you to inject arbitrary code to configure `Hyper`.
-  2. `Hyper` will fall back to reading `/etc/hyper/config.toml` at runtime, on
-     bootup, on each node.
-  3. `Hyper` will use its compile-time configuration through `config.ex`.
-  4. `Hyper` will use defaults.
-
-**Note that not all layers allow all configuration fields to be tweaked.** This
-is usually done for security.
-
 ## Configuration Files
 
-### `/etc/hyper/config.exs`
+| File | Description |
+|------|-------------|
+| `/etc/hyper/config.exs` | The `config.exs` file is exlusively used by the unprivileged `hyper` application. The purpose of this file is to allow you to load configuration values at runtime. If you are using a secrets manager, this is the right place to load the secrets. Must be owned by `root` and only writeable by `root`. |
+| `/etc/hyper/config.toml` | The `/etc/hyper/config.toml` file is used for static configuration. Unlike `config.exs`, it is used by both `Hyper` and `hyper-suidhelper` which means that it can impact the behavior of a process running under `root`. Must be owned by `root` and only writable by `root`. |
+| Compile-Time `config.ex` | The compile-time configuration is generally used to fine-tune the performance of Hyper. You likely do not need to edit most of the configuration fields exposed by this file for day-to-day usage, but they are available for you to tweak. |
+| Defaults | `Hyper` has a set of sane defaults for some, but not all config fields. |
 
-The `config.exs` file is exlusively used by the unprivileged `hyper`
-application. The purpose of this file is to allow you to load configuration
-values at runtime. If you are using a secrets manager, this is the right place
-to load the secrets.
-
-### `/etc/hyper/config.toml`
-
-The `/etc/hyper/config.toml` file is used for static configuration. Unlike
-`config.exs`, it is used by both `Hyper` and `hyper-suidhelper` which means
-that it can impact the behavior of a process running under `root`.
-
-### Compile-Time Config
-
-The compile-time configuration is generally used to fine-tune the performance
-of Hyper. You likely do not need to edit most of the configuration fields
-exposed by this file for day-to-day usage, but they are available for you to
-tweak.
+**Note that not all layers allow all configuration fields to be tweaked.** Read
+further for more details on where and how each configuration field is set.
 
 ## Configuration Fields
 
-### Tool Configuration
+This section briefly outlines the configuration fields available in `Hyper`.
+Note the keys are abbreviated for better layout:
 
-Hyper relies on a large number of external tools, all configured under the
-`[tools]` table in `/etc/hyper/config.toml`.
+  - `config.exs` refers to `/etc/hyper/config.exs`.
+  - `config.toml` refers to `/etc/hyper/config.toml`.
+  - All keys under `config.exs` are written in short-hand form. The parent
+    group is given as the section title. For example, `.mke2fs` in the tool
+    configuration section expands to
+    `:hyper, Hyper.Config.Tools, mke2fs: "/path/to/mke2fs"`.
 
-#### Privileged tools (run by the setuid helper)
+### Root Keys (`Hyper.Config`, `-`)
 
-| Tool | Required | Default | `/etc/hyper/config.toml` |
-|------|----------|---------|--------------------------|
-| `firecracker` | Yes | - | `tools.firecracker` |
-| `jailer` | Yes | - | `tools.jailer` |
-| `dmsetup` | No | `/usr/sbin/dmsetup` | `tools.dmsetup` |
-| `losetup` | No | `/usr/sbin/losetup` | `tools.losetup` |
-| `blockdev` | No | `/usr/sbin/blockdev` | `tools.blockdev` |
+| Config Key    | `config.exs` | `config.toml` | Default                           | Notes                                                                   |
+|---------------|-------------------------|--------------------------|-----------------------------------|-------------------------------------------------------------------------|
+| `work_dir`    | -                       | `work_dir`               | -                                 | [Absolute Path](#absolute-path) where `Hyper` creates its working tree. |
 
-> #### Requirements {: .info}
+### Tool Configuration (`Hyper.Config.Tools`, `[tools]`)
+
+Hyper relies on a large number of external tools, of which the paths are
+configurable:
+
+| Config Key    | `config.exs` | `config.toml` | Default                             | Notes                           |
+|---------------|-------------------------|--------------------------|-------------------------------------|---------------------------------|
+| `firecracker` | -                       | `.firecracker`      | -                                   | [Safe Path](#safe-path)         |
+| `jailer`      | -                       | `.jailer`           | -                                   | [Safe Path](#safe-path)         |
+| `dmsetup`     | -                       | `.dmsetup`          | `"/usr/sbin/dmsetup"`               | [Safe Path](#safe-path)         |
+| `losetup`     | -                       | `.losetup`          | `"/usr/sbin/losetup"`               | [Safe Path](#safe-path)         |
+| `blockdev`    | -                       | `.blockdev`         | `"/usr/sbin/blockdev"`              | [Safe Path](#safe-path)         |
+| `mke2fs`      | `.mke2fs`               | `.losetup`          | `$PATH["mke2fs"]`                   |                                 |
+| `skopeo`      | `.skopeo`               | `.skopeo`           | `$PATH["skopeo"]`                   |                                 |
+| `umoci`       | `.umoci`                | `.umoci`            | Automatically downloaded.           |                                 |
+| `suidhelper`  | `.suidhelper`           | `.suidhelper`       | `"/usr/local/bin/hyper-suidhelper"` | [Absolute Path](#absolute-path) |
+
+### Jail Confinement (`-`, `[jails]`)
+
+| Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
+|----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cgroup`       | -                       | `.cgroup`           | `"hyper"`                         | Parent cgroup under which each VM's cgroup is nested. Each VM receives its own ephemeral cgroup which lives under the umbrella of this cgroup.            |
+| `uid_gid_range`| -                       | `.uid_gid_range`    | -                                 | [Range](#range) limiting the UID/GID values given to VMs. Each VM receives its own UID/GID pair, within these bounds. Must not be an existing user/group. |
+
+### gRPC Configuration (`Hyper.Config.Grpc`, `[grpc]`)
+
+Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface
+with `Hyper` from any language.
+
+| Config Key | `config.exs`             | `config.toml`| Default | Notes                                                                                                  |
+|------------|-------------------------------------|-------------------------|---------|--------------------------------------------------------------------------------------------------------|
+| `enabled`  | `.enabled` | `.enabled`          | `false` |                                                                                                        |
+| `port`     | `.port`    | `.port`             | `50051` | The port on which to serve the interface.                                                              |
+| `cred`     | `.cred`    | `.cred`             | `nil`       | Either a `GRPC.Credential` or a TOML struct `{ cert = "/path/to/cert.pem", key = "/path/to/key.pem"}`. Cleartext mode when `nil`. |
+
+> #### Uniqueness {: .info}
 >
-> - These paths **can only** be configured through `/etc/hyper/config.toml`.
->   Both `Hyper` and `hyper-setuidhelper` rely on these paths being identical.
+> Note that if you choose to use a homogenous configuration across all your
+> nodes and you enable the gRPC server on all of them, you will spawn multiple
+> gRPC servers, one-per-node, in your cluster.
 >
-> - The paths **must** be given as absolute paths.
-> - The basename **must** match the configuration, eg. `firecracker` must have
->   a path `/foo/bar/firecracker`.
-> - The tools must be owned by the `root` user.
-> - The tools must be exlusively writable by `root`.
+> This is perfectly legal, if you so desire, but it is important to note that
+> you can also conditionally enable the `gRPC` server based on logic in your
+> `config.exs`, for example, to only spawn it on your "main" server.
 
-#### Node tools (run by the unprivileged node)
+### Telemetry Configuration (`Hyper.Config.Otel`, `[otel]`)
 
-| Tool | Required | Default | `/etc/hyper/config.toml` |
-|------|----------|---------|--------------------------|
-| `skopeo` | No | `skopeo` (on `PATH`) | `tools.skopeo` |
-| `mke2fs` | No | `mke2fs` (on `PATH`) | `tools.mke2fs` |
-| `umoci` | No | downloaded + cached under `<work_dir>/redist/umoci` | `tools.umoci` |
-| `suidhelper` | No | `/usr/local/bin/hyper-suidhelper` | `tools.suidhelper` |
+You can configure telemetry with Hyper by adding this section to your
+configuration and Hyper will emit tracing spans as configured.
 
-> #### These are not privileged {: .info}
->
-> The node runs these directly as the unprivileged hyper user, so — unlike the
-> privileged tools above — they carry **no** root-ownership or basename
-> requirement. `skopeo`/`mke2fs` default to the bare name resolved on `PATH`;
-> leave `umoci` unset to let Hyper download and cache a pinned release. They
-> share the one `[tools]` table with the privileged binaries — the helper simply
-> ignores the keys it does not own.
+| Config Key | `config.exs`             | `config.toml`| Default | Notes                                                                                                  |
+|------------|-------------------------------------|-------------------------|---------|--------------------------------------------------------------------------------------------------------|
+| `proto`  | `.proto` | `.proto`          | - |                                                                                                        |
+| `endpoint`     | `.endpoint`    | `.endpoint`             | - | |
+| `headers`     | `.headers`    | `.headers`             | -       |  |
 
-## The shared file: `/etc/hyper/config.toml`
+### Budget Configuration (`Hyper.Config.Budget`, `[budget]`)
 
-> #### Security {: .error}
->
-> This file **must** be owned by `root` and be neither group- nor
-> world-writable (e.g. mode `0644`). The setuid helper refuses to start
-> otherwise — a present-but-untrusted file is treated as operator
-> misconfiguration and is fatal (exit `2`), never silently ignored.
+Hyper allows you to control the absolute maximal budgets that are available to
+all VMs on a particular node.
 
-### Root keys
+| Config Key         | `config.exs`               | `config.toml`  | Default                           | Notes                                                                                                                                       |
+|--------------------|---------------------------------------|---------------------------|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| `mem_max`          | `.mem_max`          | `.mem_max`          | `"hyper"`                         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of RAM usage. This value **must not** exceed available system memory. |
+| `disk_max`         | `.disk_max`         | `.disk_max`         | -                                 | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of disk usage. This value **must not** exceed available system disk space. |
+| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | -                                 | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of CPU usage. |
+| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | -                                 | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of CPU usage. |
+| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | -                                 | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of disk bandwidth. |
+| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | -                                 | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of disk bandwidth. |
+| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | -                                 | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
+| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | -                                 | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
 
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `work_dir` | string (absolute path) | `/srv/hyper` | Root of all node-local runtime state. Every other directory is derived from it. Must be an absolute path. Strongly recommended to sit on an NVMe drive. |
+### VmLinux Paths (`Hyper.Config.VmLinux`, `[vmlinux]`)
 
-The following directories are derived from `work_dir` and are **not**
-independently configurable:
+Hyper requires Linux images for the architectures it runs on:
 
-| Path | Purpose |
-|------|---------|
-| `<work_dir>/jails` | Per-VM chroot directories |
-| `<work_dir>/socks` | Per-VM control/gRPC sockets |
-| `<work_dir>/scratch` | Per-VM copy-on-write writable layers |
-| `<work_dir>/layers` | Read-only image layer store |
-| `<work_dir>/redist` | Node-downloaded binaries (`vmlinux`, `umoci`) |
+| Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
+|----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `amd64`  | `.amd64`   | `.amd64`   | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path).            |
+| `aarch64`| `.aarch64` | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
 
-### `[jails]` — confinement
+### Image Configuration (`Hyper.Config.Img`, `[img]`)
 
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `cgroup` | string | `"hyper"` | Parent cgroup under which every VM cgroup is nested (passed to the jailer as `--parent-cgroup`). The operator must create `/sys/fs/cgroup/<name>` and enable subtree control. |
-| `uid_gid_range` | `[min, max]` | `[900000, 999999]` | UID/GID band each VM jail is allocated from. `min` must be `>= 1` and `<= max`; `min = 0` is rejected (uid 0 is root, and the jailer skips its privilege drop for uid 0). |
+Hyper's image provisioning layer has a large set of configuration flags
+enabling you to tweak how you want Hyper to manage images.
 
-> #### `uid_gid_range` is enforced on both sides {: .warning}
->
-> The node only hands out UIDs in this range, and the helper only *accepts*
-> UIDs in this range. Because both read the same file, narrowing the band is a
-> single edit here — no second place to keep in sync. Nothing else on the host
-> may use UIDs/GIDs in this range.
+| Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
+|----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `store`  | `.store`   | `.store`   | - | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
 
-### Complete example
+Additionally, sub-sections are available.
 
-```toml
-# Root of all node-local state. Strongly prefer an NVMe-backed mount.
-work_dir = "/srv/hyper"
+#### Database Configuration (`Hyper.Config.Img.Db`, `[img.db]`)
 
-# External binaries. The privileged ones (firecracker..blockdev) must be
-# root-owned, not group/world-writable, absolute, and named exactly as their
-# key; the node tools (skopeo/mke2fs/umoci/suidhelper) have no such requirement.
-[tools]
-firecracker = "/opt/firecracker/firecracker"   # required; basename must be 'firecracker'
-jailer      = "/opt/firecracker/jailer"         # required; basename must be 'jailer'
-# dmsetup    = "/usr/sbin/dmsetup"              # optional (default shown)
-# losetup    = "/usr/sbin/losetup"              # optional (default shown)
-# blockdev   = "/usr/sbin/blockdev"             # optional (default shown)
-# skopeo     = "skopeo"                          # optional node tool (default shown)
-# mke2fs     = "mke2fs"                          # optional node tool (default shown)
-# umoci      = "/usr/bin/umoci"                  # optional; omit to auto-download
-# suidhelper = "/usr/local/bin/hyper-suidhelper" # optional (default shown)
+| Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
+|----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `database`  | `.database`   | -  | `"hyper"` |  |
+| `username`  | `.username`   | -  | - |  |
+| `password`  | `.password`   | -  | - |  |
+| `hostname`  | `.hostname`   | -  | - |  |
 
-[jails]
-cgroup        = "hyper"               # default
-uid_gid_range = [900000, 999999]      # default
-```
+#### Garbage Collector Configuration (`Hyper.Config.Img.Gc`, `[img.gc]`)
 
-The minimal file is just `work_dir` plus the two required tools — everything
-else defaults.
+Hyper supports a mechanism to prune unreferenced image layers. Unreferenced
+image layers occur when an ungraceful crash happens, resulting in entries in
+the layer medium which are not referenced by the database, and, consequently,
+unusable. This is always enabled. Since this scans through the whole layer
+database, it can have an impact on performance, and tweaking it may be
+necessary.
 
-## Node-only configuration (`config :hyper`)
+| Config Key     | `config.exs` | `config.toml` | Default                           | Notes                                                                                                                                                     |
+|----------------|-------------------------|--------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `batch_size`  | `.batch_size`   | `.batch_size`  | `"hyper"` | `200` |
+| `batch_pause`  | `.batch_pause`   | `.batch_pause`  | `100ms` |  |
+| `sweep_interval`  | `.sweep_interval`   | `.sweep_interval`  | `60s` |  |
+| `acquire_interval`  | `.acquire_interval`   | `.acquire_interval`  | `5s` |  |
+| `retry`  | `.retry`   | `.retry`  | `60s` |  |
+| `timeout`  | `.timeout`   | `.timeout`  | `5s` |  |
+| `grace_period`  | `.grace_period`   | `.grace_period`  | `1h` |  |
 
-These have no helper counterpart and stay in `config :hyper`. The node's tool
-paths (`skopeo`, `mke2fs`, `umoci`, `suidhelper`) used to live here but now read
-from the `[tools]` table above — see [Tool Configuration](#tool-configuration).
+### Cluster Topology (`Hyper.Cfg.Cluster`, `[cluster]`)
 
-### Guest kernels
+<!-- TODO(markovejnovic): Write this -->
 
-| Key | Where read | Type | Default | Meaning |
-|-----|-----------|------|---------|---------|
-| `vmlinux` | runtime | `%{arch => path}` | `%{}` | Per-architecture guest kernel images, keyed by `Sys.Arch.t()`. The operator places kernels on the host and points these at them. |
+### Key Types
 
-```elixir
-config :hyper,
-  vmlinux: %{x86_64: "/srv/hyper/redist/vmlinux/vmlinux-x86_64"}
-```
+#### Absolute Path
 
-### Resource budget — `Hyper.Node.Config.Budget`
+  - Typed as a string in TOML and elixir.
+  - Must be given as an absolute path.
 
-The per-node resource budget. **Required**: the node refuses to boot if it is
-absent. Set it in `config/runtime.exs`. Use the `Unit.*` quantities, never bare
-numbers.
+#### Safe Path
 
-| Key | Type | Meaning |
-|-----|------|---------|
-| `mem_max` | `Unit.Information.t()` | Hard memory cap for this node. |
-| `disk_max` | `Unit.Information.t()` | Hard disk cap for this node. |
-| `cpu_max_load` | float `0.0..1.0` | CPU-utilization fraction above which the node is considered full. |
-| `disk_bw_cap` | `Unit.Bandwidth.t()` | Absolute disk throughput capacity. |
-| `disk_bw_max_load` | float `0.0..1.0` | Fraction of `disk_bw_cap` past which disk is saturated. |
-| `net_bw_cap` | `Unit.Bandwidth.t()` | Absolute network throughput capacity. |
-| `net_bw_max_load` | float `0.0..1.0` | Fraction of `net_bw_cap` past which network is saturated. |
+  - Is an [Absolute Path](#absolute-path).
+  - The basename **must** match the configuration, eg. `firecracker` must have
+    a path `/foo/bar/firecracker`.
+  - Must be owned by `root`.
+  - Must be only writable by `root`.
+  - Must not be a symlink.
 
-```elixir
-config :hyper, Hyper.Node.Config.Budget,
-  mem_max: Unit.Information.gib(4),
-  disk_max: Unit.Information.gib(4),
-  cpu_max_load: 0.8,
-  disk_bw_cap: Unit.Bandwidth.gibps(1),
-  disk_bw_max_load: 0.8,
-  net_bw_cap: Unit.Bandwidth.gibps(1),
-  net_bw_max_load: 0.8
-```
+#### Range
 
-### gRPC server — `Hyper.Grpc.Config`
+  - Typed as a 2-tuple in Elixir
+  - Typed as an array of two elements in TOML.
+  - `[min, max]` semantics.
 
-The public gRPC interface. **Disabled by default.**
+#### Unit
 
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `enabled` | boolean | `false` | Whether the server starts. |
-| `port` | port number | `50051` | Listen port. |
-| `cred` | `GRPC.Credential.t()` \| `nil` | `nil` | TLS credential, or `nil` for plaintext. |
-| `adapter_opts` | keyword | `[]` | Forwarded to the server adapter, e.g. `[ip: {0, 0, 0, 0}]`. |
-
-```elixir
-config :hyper, Hyper.Grpc.Config,
-  enabled: true,
-  port: 50_051,
-  cred: GRPC.Credential.new(ssl: [certfile: "/path/cert.pem", keyfile: "/path/key.pem"])
-```
-
-> #### Co-located nodes {: .info}
->
-> Every node binds `:port`. Running multiple nodes on one host requires giving
-> each a distinct port. Build the TLS credential where you load your keys
-> (e.g. `config/runtime.exs`); Hyper never reads the filesystem on your behalf.
-
-### Layer garbage collector — `Hyper.Img.Db.Gc.Config`
-
-A cluster-wide singleton that prunes unreferenced image layers. Every field has
-a default; set only what you change. Durations are `Unit.Time` values, so
-overrides belong in `config/runtime.exs`. Set `enabled: false` to never start it.
-
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `enabled` | boolean | `true` | Run the collector at all. |
-| `batch_size` | `pos_integer` | `200` | Rows per keyset page (smaller = finer pause granularity). |
-| `batch_pause` | `Unit.Time.t()` | `100ms` | Pause between pages within a sweep. |
-| `sweep_interval` | `Unit.Time.t()` | `60s` | Rest between completed sweeps. |
-| `acquire_interval` | `Unit.Time.t()` | `5s` | How often a standby retries to become the active singleton. |
-| `retry` | `Unit.Time.t()` | `60s` | Backoff when the medium or DB is unavailable. |
-| `statement_timeout` | `Unit.Time.t()` | `5s` | Cap on each GC DB statement so it can't pin a backend. |
-| `grace_period` | `Unit.Time.t()` | `1h` | Never prune a blob younger than this (protects a row whose file is still being published). |
-
-```elixir
-config :hyper, Hyper.Img.Db.Gc.Config,
-  enabled: true,
-  sweep_interval: Unit.Time.s(30),
-  grace_period: Unit.Time.s(60 * 60)
-```
-
-### Orphaned-resource reaper — `Hyper.Node.Reaper.Config`
-
-A per-node sweeper that reclaims orphaned firecracker cgroups and `hyper-rw-*`
-device-mapper volumes left behind by unclean BEAM deaths. Uses a two-strike
-grace period (an orphan must be seen on two consecutive ticks before it is
-reaped). Set `enabled: false` to never start it.
-
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `enabled` | boolean | `true` | Run the reaper at all. |
-| `interval` | `Unit.Time.t()` | `60s` | Rest between reap ticks. |
-
-```elixir
-config :hyper, Hyper.Node.Reaper.Config,
-  enabled: true,
-  interval: Unit.Time.s(30)
-```
-
-### Telemetry (OpenTelemetry)
-
-Tracing is configured in `config/runtime.exs` from environment variables:
-
-| Variable | Effect |
-|----------|--------|
-| `HONEYCOMB_API_KEY` | Export to `https://api.honeycomb.io` with this key. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | If `HONEYCOMB_API_KEY` is unset, export to this OTLP/HTTP endpoint (e.g. a local Collector), no auth header. |
-
-If neither is set, tracing is disabled.
-
-### Database and cluster topology
-
-The image-metadata database (`Hyper.Img.Db.Repo`, a standard Ecto/PostgreSQL
-repo) and the cluster topology (`:libcluster`) are configured in
-`config/config.exs` like any Elixir app. PostgreSQL is a required runtime
-dependency — the node will not boot without a reachable instance. See
-[Installation](install.md) for connection setup.
+  - Represents a unit as defined in `Unit.*`.
