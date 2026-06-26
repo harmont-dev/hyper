@@ -1,21 +1,30 @@
 defmodule Hyper.Config do
   @moduledoc """
-  Host configuration, read from `config :hyper, ...` (see `config/config.exs`).
+  Host configuration.
 
-  Runtime values shared with the setuid helper (`native/suidhelper`) — `work_dir`,
-  `firecracker`, `jailer` — are read from `/etc/hyper/config.toml` (the single
-  source of truth for both sides) the first time they are needed, then cached in
-  `:persistent_term`. Everything else is compile-time.
+  Everything shared with the setuid helper (`native/suidhelper`) is read from the
+  single source of truth, `/etc/hyper/config.toml`, at runtime — never duplicated
+  in `config :hyper`. The node and the helper parse the same file, so they cannot
+  drift: `work_dir`, the `[tools]` binary paths (`firecracker`, `jailer`, ...),
+  `parent_cgroup`, and `[uid_gid_range]`. The file is read once on first access
+  and cached in `:persistent_term`; an absent file (local dev / CI) yields the
+  same built-in defaults the helper compiles in, so both sides still agree.
+
+  Node-only settings with no helper counterpart (`skopeo`/`umoci`/`mke2fs` paths,
+  `vmlinux`, the cluster topology) stay in `config :hyper`.
   """
 
-  # The shared data-root config file, read by both this node and the setuid
-  # helper. Absent in local dev / CI, where `@dev_work_dir` is used instead.
+  # The shared config file, read by both this node and the setuid helper. Absent
+  # in local dev / CI, where the built-in defaults below are used instead.
   @config_path "/etc/hyper/config.toml"
   @dev_work_dir "/srv/hyper"
 
-  @parent_cgroup Application.compile_env(:hyper, :cgroup_parent, "hyper")
-  @uid_gid_range Application.compile_env!(:hyper, :uid_gid_range)
-  @layer_dir Application.compile_env!(:hyper, :layer_dir)
+  # Defaults for the helper-shared values, kept in lockstep with the helper's
+  # `Config::default` (native/suidhelper/src/config.rs) so an absent config.toml
+  # makes the node and the helper agree out of the box.
+  @default_parent_cgroup "hyper"
+  @default_uid_gid_range {900_000, 999_999}
+
   @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
   @umoci_path Application.compile_env(:hyper, :umoci_path, nil)
   @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
@@ -36,49 +45,53 @@ defmodule Hyper.Config do
   def redist_dir, do: Path.join(work_dir(), "redist")
 
   @doc """
-  Absolute path to the firecracker binary, as set in `#{@config_path}` under the
-  `firecracker` key. Raises if the key is absent — the operator must configure it;
-  there is no default.
+  Absolute path to the firecracker binary, from the `[tools]` table in
+  `#{@config_path}`. Raises if absent — the operator must configure it; there is
+  no default.
 
   For the launch path only. Pre-launch checks should use `firecracker_bin_configured/0`
   so a missing key returns a typed error rather than crashing.
   """
   @spec firecracker_bin :: Path.t()
-  def firecracker_bin, do: fetch_bin!("firecracker")
+  def firecracker_bin, do: fetch_tool!("firecracker")
 
   @doc """
   Non-raising form of `firecracker_bin/0`. Returns `{:ok, path}` when the
-  `firecracker` key is present in `#{@config_path}`, or `:error` when it is absent.
+  `[tools] firecracker` key is present in `#{@config_path}`, or `:error` otherwise.
   """
   @spec firecracker_bin_configured :: {:ok, Path.t()} | :error
-  def firecracker_bin_configured, do: Map.fetch(config_toml(), "firecracker")
+  def firecracker_bin_configured, do: Map.fetch(tools(), "firecracker")
 
   @doc """
-  Absolute path to the jailer binary, as set in `#{@config_path}` under the
-  `jailer` key. Raises if the key is absent — the operator must configure it;
-  there is no default.
+  Absolute path to the jailer binary, from the `[tools]` table in `#{@config_path}`.
+  Raises if absent — the operator must configure it; there is no default.
 
   For the launch path only. Pre-launch checks should use `jailer_bin_configured/0`
   so a missing key returns a typed error rather than crashing.
   """
   @spec jailer_bin :: Path.t()
-  def jailer_bin, do: fetch_bin!("jailer")
+  def jailer_bin, do: fetch_tool!("jailer")
 
   @doc """
-  Non-raising form of `jailer_bin/0`. Returns `{:ok, path}` when the `jailer` key
-  is present in `#{@config_path}`, or `:error` when it is absent.
+  Non-raising form of `jailer_bin/0`. Returns `{:ok, path}` when the
+  `[tools] jailer` key is present in `#{@config_path}`, or `:error` otherwise.
   """
   @spec jailer_bin_configured :: {:ok, Path.t()} | :error
-  def jailer_bin_configured, do: Map.fetch(config_toml(), "jailer")
+  def jailer_bin_configured, do: Map.fetch(tools(), "jailer")
 
-  @spec fetch_bin!(String.t()) :: Path.t()
-  defp fetch_bin!(key) do
-    case Map.fetch(config_toml(), key) do
+  # The `[tools]` table (binary paths shared with the helper), or `%{}` when the
+  # file or table is absent.
+  @spec tools :: map()
+  defp tools, do: Map.get(config_toml(), "tools", %{})
+
+  @spec fetch_tool!(String.t()) :: Path.t()
+  defp fetch_tool!(key) do
+    case Map.fetch(tools(), key) do
       {:ok, path} ->
         path
 
       :error ->
-        raise "#{@config_path}: key #{inspect(key)} is not set; " <>
+        raise "#{@config_path}: `[tools] #{key}` is not set; " <>
                 "operator must configure it before starting the node"
     end
   end
@@ -121,9 +134,11 @@ defmodule Hyper.Config do
   def chroot_base, do: Path.join(work_dir(), "jails")
 
   @doc """
-  A name for the parent cgroup which is used as a supervision cgroup for all VMs.
+  Name of the parent cgroup used as a supervision cgroup for all VMs. Read from
+  `parent_cgroup` in `#{@config_path}` (shared with the helper), default `"hyper"`.
   """
-  def parent_cgroup, do: @parent_cgroup
+  @spec parent_cgroup :: String.t()
+  def parent_cgroup, do: Map.get(config_toml(), "parent_cgroup", @default_parent_cgroup)
 
   @doc """
   Path to the directory where all VM sockets are held.
@@ -135,12 +150,20 @@ defmodule Hyper.Config do
   def socket_dir, do: Path.join(work_dir(), "socks")
 
   @doc """
-  Range in which `Hyper` will attempt to allocate uid/gids. Whenever a VM is allocated, it will
-  get a fresh uid/gid pair in this range. It is absolutely critical that this range is not used
-  by any other process on the system, as that can risk security.
+  Range in which `Hyper` allocates uid/gids: each VM gets a fresh uid/gid pair in
+  this range. Critical that no other process on the system uses this range.
+
+  Read from the `[uid_gid_range]` table (`min`/`max`) in `#{@config_path}` — the
+  same file the helper validates against, so the node only ever hands out uids the
+  helper will accept. Defaults to `#{inspect(@default_uid_gid_range)}` when absent.
   """
   @spec uid_gid_range :: {integer(), integer()}
-  def uid_gid_range, do: @uid_gid_range
+  def uid_gid_range do
+    case Map.get(config_toml(), "uid_gid_range") do
+      %{"min" => min, "max" => max} -> {min, max}
+      _ -> @default_uid_gid_range
+    end
+  end
 
   @doc """
   Location of all image layers on all nodes.
@@ -151,9 +174,11 @@ defmodule Hyper.Config do
 
   Must be stable across all nodes, and must be a directory. If it does not exist, `Hyper.Node`
   will attempt to create one.
+
+  Derived as `<work_dir>/layers`, so it follows `work_dir` from `#{@config_path}`.
   """
   @spec layer_dir :: Path.t()
-  def layer_dir, do: @layer_dir
+  def layer_dir, do: Path.join(work_dir(), "layers")
 
   @doc "Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images)."
   def skopeo_path, do: @skopeo_path

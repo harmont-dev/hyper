@@ -158,7 +158,7 @@ fn jailer_unconfigured_when_absent() {
 fn jailer_basename_mismatch_rejected() {
     // The basename check in SafeBin::from_path precedes the stat, so we do not
     // need a real file — any absolute path with the wrong leaf name is enough.
-    let body = "work_dir = \"/srv/hyper\"\njailer = \"/usr/local/bin/not-jailer\"\n";
+    let body = "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"/usr/local/bin/not-jailer\"\n";
     let config: Config = toml::from_str(body).unwrap();
     let err = config
         .jailer()
@@ -184,7 +184,7 @@ fn firecracker_and_jailer_return_ok_when_root_owned_as_root() {
         fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let body = format!(
-        "work_dir = \"/srv/hyper\"\nfirecracker = \"{}\"\njailer = \"{}\"\n",
+        "work_dir = \"/srv/hyper\"\n[tools]\nfirecracker = \"{}\"\njailer = \"{}\"\n",
         fc.display(),
         jr.display(),
     );

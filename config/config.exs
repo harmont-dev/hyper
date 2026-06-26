@@ -21,11 +21,6 @@ config :libcluster,
     ]
   ]
 
-config :hyper,
-  cgroup_parent: "hyper",
-  uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers"
-
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.

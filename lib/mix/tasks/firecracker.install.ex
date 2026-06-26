@@ -140,6 +140,7 @@ defmodule Mix.Tasks.Firecracker.Install do
 
     Then add to /etc/hyper/config.toml (file: root-owned, mode 0644):
 
+        [tools]
         firecracker = "#{fc}"
         jailer      = "#{jailer}"
     """)

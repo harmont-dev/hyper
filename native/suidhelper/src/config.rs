@@ -89,20 +89,42 @@ fn config_path() -> PathBuf {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     work_dir: PathBuf,
-    #[serde(default = "default_dmsetup")]
-    dmsetup: PathBuf,
-    #[serde(default = "default_losetup")]
-    losetup: PathBuf,
-    #[serde(default = "default_blockdev")]
-    blockdev: PathBuf,
     #[serde(default)]
-    firecracker: Option<PathBuf>,
-    #[serde(default)]
-    jailer: Option<PathBuf>,
+    tools: Tools,
     #[serde(default = "default_parent_cgroup")]
     parent_cgroup: String,
     #[serde(default)]
     uid_gid_range: Option<UidGidRange>,
+}
+
+/// Paths to the external binaries the helper runs, the `[tools]` table.
+///
+/// The device tools (`dmsetup`, `losetup`, `blockdev`) carry built-in defaults;
+/// `firecracker` and `jailer` have none and must be configured before any VM can
+/// launch — their absence surfaces as [`BinError::Unconfigured`] at use time, not
+/// at load. Every path is validated as a root-owned, correctly-named [`SafeBin`]
+/// when accessed, never at parse time (the file is read unprivileged). A missing
+/// `[tools]` table, or any missing key within it, falls back to these defaults.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Tools {
+    dmsetup: PathBuf,
+    losetup: PathBuf,
+    blockdev: PathBuf,
+    firecracker: Option<PathBuf>,
+    jailer: Option<PathBuf>,
+}
+
+impl Default for Tools {
+    fn default() -> Self {
+        Self {
+            dmsetup: default_dmsetup(),
+            losetup: default_losetup(),
+            blockdev: default_blockdev(),
+            firecracker: None,
+            jailer: None,
+        }
+    }
 }
 
 // The default data root. Must match the Elixir node's `@dev_work_dir`, which it
@@ -133,11 +155,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             work_dir: default_work_dir(),
-            dmsetup: default_dmsetup(),
-            losetup: default_losetup(),
-            blockdev: default_blockdev(),
-            firecracker: None,
-            jailer: None,
+            tools: Tools::default(),
             parent_cgroup: default_parent_cgroup(),
             uid_gid_range: None,
         }
@@ -174,24 +192,25 @@ impl Config {
 
     /// The validated `dmsetup` binary the helper will run.
     pub fn dmsetup(&self) -> Result<SafeBin<"dmsetup">, safe_bin::Error> {
-        SafeBin::from_path(&self.dmsetup)
+        SafeBin::from_path(&self.tools.dmsetup)
     }
 
     /// The validated `losetup` binary the helper will run.
     pub fn losetup(&self) -> Result<SafeBin<"losetup">, safe_bin::Error> {
-        SafeBin::from_path(&self.losetup)
+        SafeBin::from_path(&self.tools.losetup)
     }
 
     /// The validated `blockdev` binary the helper will run.
     pub fn blockdev(&self) -> Result<SafeBin<"blockdev">, safe_bin::Error> {
-        SafeBin::from_path(&self.blockdev)
+        SafeBin::from_path(&self.tools.blockdev)
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
-    /// must set this key before any VM can be launched.
+    /// must set `[tools] firecracker` before any VM can be launched.
     pub fn firecracker(&self) -> Result<SafeBin<"firecracker">, BinError> {
-        self.firecracker
+        self.tools
+            .firecracker
             .as_deref()
             .ok_or(BinError::Unconfigured("firecracker"))
             .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
@@ -199,9 +218,10 @@ impl Config {
 
     /// The Firecracker jailer binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
-    /// must set this key before any VM can be launched.
+    /// must set `[tools] jailer` before any VM can be launched.
     pub fn jailer(&self) -> Result<SafeBin<"jailer">, BinError> {
-        self.jailer
+        self.tools
+            .jailer
             .as_deref()
             .ok_or(BinError::Unconfigured("jailer"))
             .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))

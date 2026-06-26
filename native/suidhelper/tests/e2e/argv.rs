@@ -36,7 +36,8 @@ fn install_fake(dir: &Path, basename: &str, record: &Path, stdout_line: &str) ->
 /// caller argument.
 fn write_root_config(dir: &Path, bins: &[(&str, &Path)]) -> PathBuf {
     let p = dir.join("config.toml");
-    let mut body = String::from("work_dir = \"/srv/hyper\"\n");
+    // Every key here is a tool name, so they live under the `[tools]` table.
+    let mut body = String::from("work_dir = \"/srv/hyper\"\n[tools]\n");
     for (key, path) in bins {
         body.push_str(&format!("{key} = \"{}\"\n", path.display()));
     }

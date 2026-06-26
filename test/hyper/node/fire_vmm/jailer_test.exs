@@ -20,8 +20,10 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   # async: false because persistent_term is global state.
   setup do
     :persistent_term.put({Hyper.Config, :config_toml}, %{
-      "firecracker" => "/usr/local/bin/firecracker",
-      "jailer" => "/usr/local/bin/jailer"
+      "tools" => %{
+        "firecracker" => "/usr/local/bin/firecracker",
+        "jailer" => "/usr/local/bin/jailer"
+      }
     })
 
     on_exit(fn -> :persistent_term.erase({Hyper.Config, :config_toml}) end)

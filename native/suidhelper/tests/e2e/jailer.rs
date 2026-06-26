@@ -58,7 +58,7 @@ fn install_firecracker(dir: &Path) -> PathBuf {
 fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     let body = format!(
-        "work_dir = \"/srv/hyper\"\njailer = \"{}\"\nfirecracker = \"{}\"\n",
+        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n",
         jailer.display(),
         firecracker.display(),
     );
