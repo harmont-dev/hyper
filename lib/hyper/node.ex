@@ -143,7 +143,7 @@ defmodule Hyper.Node do
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with {:ok, _} <- Hyper.Node.Config.Budget.load(),
+    with {:ok, _} <- Hyper.Cfg.Budget.load(),
          :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),

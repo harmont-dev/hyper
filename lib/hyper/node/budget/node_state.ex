@@ -11,7 +11,7 @@ defmodule Hyper.Node.Budget.NodeState do
   """
 
   alias Hyper.Node.Budget.Hard
-  alias Hyper.Node.Config.Budget, as: Config
+  alias Hyper.Cfg.Budget, as: Config
   alias Hyper.Vm.Instance.Spec
   alias Sys.Mon
   alias Sys.Mon.Server.Reading

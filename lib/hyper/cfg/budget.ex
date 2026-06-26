@@ -1,4 +1,4 @@
-defmodule Hyper.Node.Config.Budget do
+defmodule Hyper.Cfg.Budget do
   @moduledoc """
   This node's resource budget configuration.
 

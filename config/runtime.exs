@@ -2,7 +2,7 @@ import Config
 
 # Per-node resource budget. Lives in runtime config because it builds `Unit.*`
 # values, which are only loadable once the app's modules are on the code path.
-config :hyper, Hyper.Node.Config.Budget,
+config :hyper, Hyper.Cfg.Budget,
   mem_max: Unit.Information.gib(4),
   disk_max: Unit.Information.gib(4),
   cpu_max_load: 0.8,

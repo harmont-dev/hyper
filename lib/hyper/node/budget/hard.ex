@@ -6,7 +6,7 @@ defmodule Hyper.Node.Budget.Hard do
 
   "Hard" means the limits are inviolable: a reservation that would push the
   running total past the node's configured `mem_max`/`disk_max`
-  (`Hyper.Node.Config.Budget`) is refused outright. Callers reserve through
+  (`Hyper.Cfg.Budget`) is refused outright. Callers reserve through
   `with_budget/2`, which holds the budget for the duration of the callback and
   releases it afterwards.
   """
@@ -15,7 +15,7 @@ defmodule Hyper.Node.Budget.Hard do
   use Unit.Operators
   use OpenTelemetryDecorator
 
-  alias Hyper.Node.Config.Budget, as: Config
+  alias Hyper.Cfg.Budget, as: Config
   alias Hyper.Vm.Instance
 
   defmodule State do

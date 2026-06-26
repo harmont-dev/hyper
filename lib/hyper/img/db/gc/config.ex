@@ -3,7 +3,7 @@ defmodule Hyper.Img.Db.Gc.Config do
   Configuration for the layer garbage collector (`Hyper.Img.Db.Gc`).
 
   Every field has a default, so configuration is optional - set only what you want
-  to change. Durations are `Unit.Time` values, so (like `Hyper.Node.Config.Budget`)
+  to change. Durations are `Unit.Time` values, so (like `Hyper.Cfg.Budget`)
   overrides belong in `config/runtime.exs`:
 
       config :hyper, Hyper.Img.Db.Gc.Config,
