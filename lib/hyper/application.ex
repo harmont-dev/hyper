@@ -12,7 +12,7 @@ defmodule Hyper.Application do
     # the repo's default telemetry_prefix (its module path, underscored).
     _ = OpentelemetryEcto.setup([:hyper, :img, :db, :repo])
 
-    topologies = Application.get_env(:libcluster, :topologies, [])
+    topologies = Hyper.Cfg.Cluster.topologies()
 
     children =
       [
