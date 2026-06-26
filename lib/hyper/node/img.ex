@@ -84,7 +84,8 @@ defmodule Hyper.Node.Img do
   # even if `callable` raises. A background task re-bumps the lease for the whole
   # run, so a long-lived VM never lets its claim lapse. If the lease cannot be
   # taken, returns the error and never runs `callable`.
-  @spec with_image_lease(Hyper.Img.id(), Hyper.Vm.Id.t(), (-> result)) :: result | {:error, term()}
+  @spec with_image_lease(Hyper.Img.id(), Hyper.Vm.Id.t(), (-> result)) ::
+          result | {:error, term()}
         when result: var
   defp with_image_lease(img, vm_id, callable) do
     ttl = Db.Lease.default_ttl()
