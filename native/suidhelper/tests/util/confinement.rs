@@ -8,6 +8,7 @@ use hyper_suidhelper::util::safe_file::{
     Any, IsBlockDevice, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile,
 };
 use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use nix::errno::Errno;
 use nix::fcntl::OFlag;
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -114,6 +115,42 @@ fn safefile_mode_axis_rejects_group_writable() {
 
     fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
     assert!(SafeFile::<IsRegularFile, Any, OnlyRootWritable>::open(&p, OFlag::O_PATH).is_ok());
+}
+
+// write_file writes its bytes to an existing file through the pinned dir fd.
+#[test]
+fn write_file_writes_bytes_to_existing_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let f = tmp.path().join("f");
+    fs::write(&f, b"x").unwrap();
+
+    let dir = SafeDir::open(&safe(tmp.path())).unwrap();
+    dir.write_file(Path::new("f"), b"1").unwrap();
+    assert_eq!(fs::read(&f).unwrap(), b"1");
+}
+
+// write_file refuses a symlinked target (O_NOFOLLOW) and leaves it untouched: a
+// write cannot be redirected through a symlink out of the pinned dir.
+#[test]
+fn write_file_refuses_symlinked_target_and_leaves_it_unchanged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("target");
+    fs::write(&target, b"keep").unwrap();
+    symlink(&target, tmp.path().join("link")).unwrap();
+
+    let dir = SafeDir::open(&safe(tmp.path())).unwrap();
+    assert!(dir.write_file(Path::new("link"), b"1").is_err());
+    assert_eq!(fs::read(&target).unwrap(), b"keep");
+}
+
+// write_file on a missing name fails with ENOENT (no O_CREAT), so the caller can
+// treat an absent pseudo-file as a no-op.
+#[test]
+fn write_file_missing_returns_enoent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = SafeDir::open(&safe(tmp.path())).unwrap();
+    let err = dir.write_file(Path::new("nope"), b"1").unwrap_err();
+    assert_eq!(err.errno(), Some(Errno::ENOENT));
 }
 
 // SafeFile::open refuses a symlinked final component (O_NOFOLLOW).
