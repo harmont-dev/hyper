@@ -10,8 +10,10 @@ defmodule Hyper.Config do
   and cached in `:persistent_term`; an absent file (local dev / CI) yields the
   same built-in defaults the helper compiles in, so both sides still agree.
 
-  Node-only settings with no helper counterpart (`skopeo`/`umoci`/`mke2fs` paths,
-  `vmlinux`, the cluster topology) stay in `config :hyper`.
+  The node's own tools (`skopeo`, `umoci`, `mke2fs`, `suidhelper`) share that same
+  `[tools]` table — the helper simply ignores the keys it does not recognise, so
+  one table serves both. Only `vmlinux` and the cluster topology remain in
+  `config :hyper`.
   """
 
   # The shared config file, read by both this node and the setuid helper. Absent
@@ -25,9 +27,13 @@ defmodule Hyper.Config do
   @default_parent_cgroup "hyper"
   @default_uid_gid_range {900_000, 999_999}
 
-  @skopeo_path Application.compile_env(:hyper, :skopeo_path, "skopeo")
-  @umoci_path Application.compile_env(:hyper, :umoci_path, nil)
-  @mke2fs_path Application.compile_env(:hyper, :mke2fs_path, "mke2fs")
+  # Defaults for the node-only `[tools]` binaries (skopeo/umoci/mke2fs/suidhelper).
+  # These bare keys live alongside the helper's own tools in the `[tools]` table;
+  # the helper ignores the keys it does not recognise, so the two sides share one
+  # table without colliding.
+  @default_skopeo "skopeo"
+  @default_mke2fs "mke2fs"
+  @default_suid_helper "/usr/local/bin/hyper-suidhelper"
 
   @doc """
   Root work directory for this node. All firecracker paths derive from it.
@@ -93,6 +99,27 @@ defmodule Hyper.Config do
       :error ->
         raise "#{@config_path}: `[tools] #{key}` is not set; " <>
                 "operator must configure it before starting the node"
+    end
+  end
+
+  # A `[tools]` path with a built-in default: the configured string, or `default`
+  # when the key is absent (or set to a non-string, treated as unset). The
+  # `is_binary/1` guard pins the success type to `String.t()` so the public
+  # accessors stay precisely typed for Dialyzer rather than widening to `any()`.
+  @spec tool_path(String.t(), String.t()) :: String.t()
+  defp tool_path(key, default) do
+    case Map.get(tools(), key) do
+      path when is_binary(path) -> path
+      _ -> default
+    end
+  end
+
+  # A `[tools]` path with no default: the configured string, or `nil` when unset.
+  @spec optional_tool_path(String.t()) :: String.t() | nil
+  defp optional_tool_path(key) do
+    case Map.get(tools(), key) do
+      path when is_binary(path) -> path
+      _ -> nil
     end
   end
 
@@ -185,32 +212,39 @@ defmodule Hyper.Config do
   @spec layer_dir :: Path.t()
   def layer_dir, do: Path.join(work_dir(), "layers")
 
-  @doc "Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images)."
-  def skopeo_path, do: @skopeo_path
+  @doc """
+  Path to the skopeo binary (used by `Hyper.Img.OciLoader` to pull OCI images).
+  Read from `[tools] skopeo` in `#{@config_path}`, default `#{@default_skopeo}` (on `PATH`).
+  """
+  @spec skopeo_path :: String.t()
+  def skopeo_path, do: tool_path("skopeo", @default_skopeo)
 
   @doc """
   Operator-configured path to the umoci binary, or `nil` (the default) to let
-  `Hyper.Img.OciLoader.Umoci` download and manage a pinned default.
+  `Hyper.Img.OciLoader.Umoci` download and manage a pinned default. Read from
+  `[tools] umoci` in `#{@config_path}`.
   """
-  def umoci_path, do: @umoci_path
+  @spec umoci_path :: String.t() | nil
+  def umoci_path, do: optional_tool_path("umoci")
 
-  @doc "Path to the mke2fs binary (used by `Hyper.Img.OciLoader` to build the ext4 rootfs)."
-  def mke2fs_path, do: @mke2fs_path
-
-  # Where `cargo xtask install` (via `mix suidhelper.install`) drops the helper.
-  @default_suid_helper "/usr/local/bin/hyper-suidhelper"
+  @doc """
+  Path to the mke2fs binary (used by `Hyper.Img.OciLoader` to build the ext4 rootfs).
+  Read from `[tools] mke2fs` in `#{@config_path}`, default `#{@default_mke2fs}` (on `PATH`).
+  """
+  @spec mke2fs_path :: String.t()
+  def mke2fs_path, do: tool_path("mke2fs", @default_mke2fs)
 
   @doc """
   Path to the setuid-root device helper (`hyper-suidhelper`). The node runs
   unprivileged and routes every `losetup`/`dmsetup`/`blockdev` operation through
   it.
 
-  Defaults to `#{@default_suid_helper}`, the install path used by `mix
-  suidhelper.install`. Runtime config (host-specific), so an operator who
-  installs it elsewhere can override per node without recompiling.
+  Read from `[tools] suidhelper` in `#{@config_path}`, default `#{@default_suid_helper}`
+  (the install path used by `mix suidhelper.install`), so an operator who installs
+  it elsewhere can override it per node without recompiling.
   """
-  @spec suid_helper :: Path.t()
-  def suid_helper, do: Application.get_env(:hyper, :suid_helper, @default_suid_helper)
+  @spec suid_helper :: String.t()
+  def suid_helper, do: tool_path("suidhelper", @default_suid_helper)
 
   @doc """
   Directory for per-VM scratch (writable-layer COW) files. Must be node-local and
