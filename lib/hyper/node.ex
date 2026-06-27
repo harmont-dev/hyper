@@ -63,7 +63,7 @@ defmodule Hyper.Node do
   layer, resolve the kernel, and start the VM supervisor. The uid is freed and
   the mutable layer torn down automatically when the VM supervisor dies.
   """
-  @spec start_image_vm(Hyper.Vm.id(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
+  @spec start_image_vm(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
@@ -89,7 +89,7 @@ defmodule Hyper.Node do
   end
 
   @doc false
-  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
+  @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
   def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, mutable, kernel) do
     %FireVMM.Opts{

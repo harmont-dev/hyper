@@ -85,15 +85,15 @@ defmodule Hyper.Grpc.Codec do
   end
 
   @doc "Convert a domain result to an outbound response message, or an error to `GRPC.RPCError`."
-  @spec to_grpc({:created, Hyper.Vm.id(), node()}) :: CreateVmResponse.t()
+  @spec to_grpc({:created, Hyper.Vm.Id.t(), node()}) :: CreateVmResponse.t()
   def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
     do: %CreateVmResponse{vm_id: vm_id, node: to_string(node)}
 
-  @spec to_grpc({:located, Hyper.Vm.id(), node()}) :: GetVmResponse.t()
+  @spec to_grpc({:located, Hyper.Vm.Id.t(), node()}) :: GetVmResponse.t()
   def to_grpc({:located, vm_id, node}),
     do: %GetVmResponse{vm_id: vm_id, node: to_string(node)}
 
-  @spec to_grpc({:vms, [{Hyper.Vm.id(), node()}]}) :: ListVmsResponse.t()
+  @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}]}) :: ListVmsResponse.t()
   def to_grpc({:vms, vms}),
     do: %ListVmsResponse{vms: Enum.map(vms, &vm/1)}
 
@@ -117,7 +117,7 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:exit, {:nodedown, _}}), do: rpc_error(:machine_unreachable)
   def to_grpc({:exit, reason}), do: rpc_error({:stop_failed, reason})
 
-  @spec vm({Hyper.Vm.id(), node()}) :: Vm.t()
+  @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
   @spec instance_type(instance_enum()) :: {:ok, Hyper.Vm.Instance.t()}
