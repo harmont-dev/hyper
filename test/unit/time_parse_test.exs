@@ -4,23 +4,28 @@ defmodule Unit.TimeParseTest do
 
   alias Unit.Time
 
-  test "parses each suffix" do
-    assert Time.parse!("500ns") == Time.ns(500)
-    assert Time.parse!("100us") == Time.us(100)
-    assert Time.parse!("100ms") == Time.ms(100)
-    assert Time.parse!("60s") == Time.s(60)
-    assert Time.parse!("30m") == Time.s(30 * 60)
-    assert Time.parse!("1h") == Time.s(3600)
-    assert Time.parse!("1 h") == Time.s(3600)
+  for {input, expected} <- [
+        {"500ns", Time.ns(500)},
+        {"100us", Time.us(100)},
+        {"100ms", Time.ms(100)},
+        {"60s", Time.s(60)},
+        {"30m", Time.s(30 * 60)},
+        {"1h", Time.s(3600)},
+        {"1 h", Time.s(3600)}
+      ] do
+    test "parses #{inspect(input)}" do
+      assert Time.parse!(unquote(input)) == unquote(Macro.escape(expected))
+    end
   end
 
-  test "rejects garbage" do
-    assert {:error, _} = Time.parse("5")
-    assert {:error, _} = Time.parse("5 secs")
-    assert_raise ArgumentError, fn -> Time.parse!("soon") end
+  for input <- ["5", "5 secs", "soon", ""] do
+    test "rejects #{inspect(input)}" do
+      assert {:error, _} = Time.parse(unquote(input))
+      assert_raise ArgumentError, fn -> Time.parse!(unquote(input)) end
+    end
   end
 
-  property "parse! inverts s" do
+  property "parse! inverts the s constructor across a range" do
     check all(n <- integer(0..100_000)) do
       assert Time.parse!("#{n}s") == Time.s(n)
     end

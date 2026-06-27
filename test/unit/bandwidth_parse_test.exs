@@ -4,20 +4,26 @@ defmodule Unit.BandwidthParseTest do
 
   alias Unit.Bandwidth
 
-  test "parses each suffix" do
-    assert Bandwidth.parse!("100Bps") == Bandwidth.bps(100)
-    assert Bandwidth.parse!("4KiBps") == Bandwidth.kibps(4)
-    assert Bandwidth.parse!("512MiBps") == Bandwidth.mibps(512)
-    assert Bandwidth.parse!("1GiBps") == Bandwidth.gibps(1)
-    assert Bandwidth.parse!("1 GiBps") == Bandwidth.gibps(1)
+  for {input, expected} <- [
+        {"100Bps", Bandwidth.bps(100)},
+        {"4KiBps", Bandwidth.kibps(4)},
+        {"512MiBps", Bandwidth.mibps(512)},
+        {"1GiBps", Bandwidth.gibps(1)},
+        {"1 GiBps", Bandwidth.gibps(1)}
+      ] do
+    test "parses #{inspect(input)}" do
+      assert Bandwidth.parse!(unquote(input)) == unquote(Macro.escape(expected))
+    end
   end
 
-  test "rejects garbage" do
-    assert {:error, _} = Bandwidth.parse("1GiB")
-    assert_raise ArgumentError, fn -> Bandwidth.parse!("fast") end
+  for input <- ["1GiB", "fast", ""] do
+    test "rejects #{inspect(input)}" do
+      assert {:error, _} = Bandwidth.parse(unquote(input))
+      assert_raise ArgumentError, fn -> Bandwidth.parse!(unquote(input)) end
+    end
   end
 
-  property "parse! inverts gibps" do
+  property "parse! inverts the gibps constructor across a range" do
     check all(n <- integer(0..1024)) do
       assert Bandwidth.parse!("#{n}GiBps") == Bandwidth.gibps(n)
     end

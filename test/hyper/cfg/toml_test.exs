@@ -8,16 +8,23 @@ defmodule Hyper.Cfg.TomlTest do
     :ok
   end
 
-  test "fetch_in/2 traverses nested tables and stops at a missing segment" do
-    cfg = %{"tools" => %{"firecracker" => "/opt/fc"}}
-    assert Toml.fetch_in(cfg, "tools.firecracker") == {:ok, "/opt/fc"}
-    assert Toml.fetch_in(cfg, "tools.jailer") == :error
-    assert Toml.fetch_in(cfg, "tools.firecracker.extra") == :error
-    assert Toml.fetch_in(cfg, "missing") == :error
+  @cfg %{"work_dir" => "/data", "tools" => %{"firecracker" => "/opt/fc"}}
+
+  for {path, expected} <- [
+        {"work_dir", {:ok, "/data"}},
+        {"tools.firecracker", {:ok, "/opt/fc"}},
+        {"tools.jailer", :error},
+        {"tools.firecracker.extra", :error},
+        {"missing", :error}
+      ] do
+    test "fetch_in #{inspect(path)} -> #{inspect(expected)}" do
+      assert Toml.fetch_in(unquote(Macro.escape(@cfg)), unquote(path)) ==
+               unquote(Macro.escape(expected))
+    end
   end
 
   test "fetch/1 reads the seeded cache; absent keys return :error" do
-    Toml.put_cache(%{"work_dir" => "/data", "tools" => %{"firecracker" => "/opt/fc"}})
+    Toml.put_cache(@cfg)
     assert Toml.fetch("work_dir") == {:ok, "/data"}
     assert Toml.fetch("tools.firecracker") == {:ok, "/opt/fc"}
     assert Toml.fetch("tools.jailer") == :error
