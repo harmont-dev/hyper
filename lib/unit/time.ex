@@ -55,8 +55,10 @@ defmodule Unit.Time do
   @doc ~s(Parse a duration string like `"60s"`/`"100ms"`/`"1h"`. Suffixes: ns/us/ms/s/m/h.)
   @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
   def parse(s) when is_binary(s) do
-    case Regex.run(~r/^\s*(\d+)\s*(ns|us|ms|s|m|h)\s*$/, s) do
-      [_, n, suffix] -> {:ok, %__MODULE__{ns: String.to_integer(n) * Map.fetch!(@units, suffix)}}
+    with {n, suffix} when n >= 0 <- Integer.parse(String.trim(s)),
+         {:ok, mult} <- Map.fetch(@units, String.trim(suffix)) do
+      {:ok, %__MODULE__{ns: n * mult}}
+    else
       _ -> {:error, {:bad_unit, s}}
     end
   end

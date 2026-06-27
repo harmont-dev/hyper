@@ -43,12 +43,11 @@ defmodule Unit.Bandwidth do
   @doc "Parse a string like `\"1GiBps\"`. Suffixes: Bps/KiBps/MiBps/GiBps/TiBps."
   @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
   def parse(s) when is_binary(s) do
-    case Regex.run(~r/^\s*(\d+)\s*(Bps|KiBps|MiBps|GiBps|TiBps)\s*$/, s) do
-      [_, n, suffix] ->
-        {:ok, %__MODULE__{bytes_per_sec: String.to_integer(n) * Map.fetch!(@units, suffix)}}
-
-      _ ->
-        {:error, {:bad_unit, s}}
+    with {n, suffix} when n >= 0 <- Integer.parse(String.trim(s)),
+         {:ok, mult} <- Map.fetch(@units, String.trim(suffix)) do
+      {:ok, %__MODULE__{bytes_per_sec: n * mult}}
+    else
+      _ -> {:error, {:bad_unit, s}}
     end
   end
 

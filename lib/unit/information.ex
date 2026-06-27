@@ -49,12 +49,11 @@ defmodule Unit.Information do
   @doc "Parse a string like `\"4GiB\"` into an `Information`. Suffixes: B/KiB/MiB/GiB/TiB."
   @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
   def parse(s) when is_binary(s) do
-    case Regex.run(~r/^\s*(\d+)\s*(B|KiB|MiB|GiB|TiB)\s*$/, s) do
-      [_, n, suffix] ->
-        {:ok, %__MODULE__{bytes: String.to_integer(n) * Map.fetch!(@units, suffix)}}
-
-      _ ->
-        {:error, {:bad_unit, s}}
+    with {n, suffix} when n >= 0 <- Integer.parse(String.trim(s)),
+         {:ok, mult} <- Map.fetch(@units, String.trim(suffix)) do
+      {:ok, %__MODULE__{bytes: n * mult}}
+    else
+      _ -> {:error, {:bad_unit, s}}
     end
   end
 
