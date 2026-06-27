@@ -352,7 +352,35 @@ grace_period = "1h"
 
 ## Cluster Topology
 
-<!-- TODO(markovejnovic): Write this -->
+Hyper forms a BEAM cluster (Distributed Erlang) so nodes discover each other and
+share VM routing and budget state. The topology is given in
+[libcluster](https://github.com/bitwalker/libcluster) syntax and forwarded
+directly to it. Because a topology references strategy *modules*, it is
+`config.exs`-only. Omit it — the default — to run a single, unclustered node.
+
+| Config Key   | `config.exs`  | `config.toml` | Default | Notes |
+| ------------ | ------------- | ------------- | ------- | ----- |
+| `topologies` | `.topologies` | -             | `[]`    | A [libcluster topology](https://hexdocs.pm/libcluster) keyword list. `[]` is single-node. |
+
+<!-- tabs open -->
+### `config.exs`
+
+```elixir
+config :hyper, Hyper.Cfg.Cluster,
+  topologies: [
+    hyper: [
+      strategy: Cluster.Strategy.DNSPoll,
+      config: [query: "hyper.svc.cluster.local", node_basename: "hyper"]
+    ]
+  ]
+```
+
+### `config.toml`
+
+```toml
+# Cluster topologies reference strategy modules, so they are set in config.exs only.
+```
+<!-- tabs close -->
 
 ## Key Types
 
@@ -389,6 +417,14 @@ A complete `config.exs` and `config.toml` exercising every section:
 
 ```elixir
 import Config
+
+config :hyper, Hyper.Cfg.Cluster,
+  topologies: [
+    hyper: [
+      strategy: Cluster.Strategy.DNSPoll,
+      config: [query: "hyper.svc.cluster.local", node_basename: "hyper"]
+    ]
+  ]
 
 # Node-only tools (config.exs wins over config.toml for these).
 config :hyper, Hyper.Cfg.Tools,
