@@ -6,9 +6,9 @@ Configuring `Hyper` is done through four layers, in priority:
 
 | File                     | Description |
 | ------------------------ | ----------- |
-| `/etc/hyper/config.exs`  | The `config.exs` file is exlusively used by the unprivileged `hyper` application. The purpose of this file is to allow you to load configuration values at runtime. If you are using a secrets manager, this is the right place to load the secrets. Must be owned by `root` and only writeable by `root`. |
+| `/etc/hyper/config.exs`  | The `config.exs` file is exclusively used by the unprivileged `hyper` application. The purpose of this file is to allow you to load configuration values at runtime. If you are using a secrets manager, this is the right place to load the secrets. Must be owned by `root` and only writeable by `root`. |
 | `/etc/hyper/config.toml` | The `/etc/hyper/config.toml` file is used for static configuration. Unlike `config.exs`, it is used by both `Hyper` and `hyper-suidhelper` which means that it can impact the behavior of a process running under `root`. Must be owned by `root` and only writable by `root`. |
-| Compile-Time `config.ex` | The compile-time configuration is generally used to fine-tune the performance of Hyper. You likely do not need to edit most of the configuration fields exposed by this file for day-to-day usage, but they are available for you to tweak. |
+| Compile-Time `config.exs` | The compile-time configuration is generally used to fine-tune the performance of Hyper. You likely do not need to edit most of the configuration fields exposed by this file for day-to-day usage, but they are available for you to tweak. |
 | Defaults                 | `Hyper` has a set of sane defaults for some, but not all config fields. |
 
 **Note that not all layers allow all configuration fields to be tweaked.** Read
@@ -28,9 +28,9 @@ Note the keys are abbreviated for better layout:
 
 ## Root Keys
 
-| Config Key | `config.exs` | `config.toml` | Default | Notes |
-| ---------- | ------------ | ------------- | ------- | ----- |
-| `work_dir` | -            | `work_dir`    | -       | [Absolute Path](#absolute-path) where `Hyper` creates its working tree. |
+| Config Key | `config.exs` | `config.toml` | Default        | Notes |
+| ---------- | ------------ | ------------- | -------------- | ----- |
+| `work_dir` | -            | `work_dir`    | `"/srv/hyper"` | [Absolute Path](#absolute-path) where `Hyper` creates its working tree. |
 
 <!-- tabs open -->
 ### `config.toml`
@@ -94,7 +94,7 @@ suidhelper = "/usr/local/bin/hyper-suidhelper"
 | Config Key      | `config.exs` | `config.toml`    | Default   | Notes |
 | --------------- | ------------ | ---------------- | --------- | ----- |
 | `cgroup`        | -            | `.cgroup`        | `"hyper"` | Parent cgroup under which each VM's cgroup is nested. Each VM receives its own ephemeral cgroup which lives under the umbrella of this cgroup. |
-| `uid_gid_range` | -            | `.uid_gid_range` | -         | [Range](#range) limiting the UID/GID values given to VMs. Each VM receives its own UID/GID pair, within these bounds. Must not be an existing user/group. |
+| `uid_gid_range` | -            | `.uid_gid_range` | -         | **Required.** [Range](#range) limiting the UID/GID values given to VMs. Each VM receives its own UID/GID pair, within these bounds. Must not be an existing user/group. |
 
 <!-- tabs open -->
 ### `config.toml`
@@ -185,18 +185,18 @@ headers = { "authorization" = "Bearer YOUR_TOKEN" }
 ## Budget Configuration
 
 Hyper allows you to control the absolute maximal budgets that are available to
-all VMs on a particular node.
+all VMs on a particular node. Every field is required except `cpu_max_cap`.
 
-| Config Key         | `config.exs`        | `config.toml`       | Default   | Notes |
-| ------------------ | ------------------- | ------------------- | --------- | ----- |
-| `mem_max`          | `.mem_max`          | `.mem_max`          | -         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of RAM usage. This value **must not** exceed available system memory. |
-| `disk_max`         | `.disk_max`         | `.disk_max`         | -         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of disk usage. This value **must not** exceed available system disk space. |
-| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | -         | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of CPU usage. |
-| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | -         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of CPU usage. |
-| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | -         | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of disk bandwidth. |
-| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | -         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of disk bandwidth. |
-| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | -         | [$\beta$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
-| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | -         | [$\alpha$ budget](./architecture.md#budgets) [unit](#unit) of net bandwidth. |
+| Config Key         | `config.exs`        | `config.toml`       | Default | Notes |
+| ------------------ | ------------------- | ------------------- | ------- | ----- |
+| `mem_max`          | `.mem_max`          | `.mem_max`          | -       | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of RAM the node offers VMs. Must not exceed available system memory. |
+| `disk_max`         | `.disk_max`         | `.disk_max`         | -       | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Must not exceed available system disk. |
+| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | -       | [$\beta$ (soft) budget](./architecture.md#budgets): instantaneous CPU load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `nil`   | [$\beta$ (soft) budget](./architecture.md#budgets): soft CPU capacity in cores (a float). Optional. |
+| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | -       | [$\beta$ (soft) budget](./architecture.md#budgets): soft disk-bandwidth capacity ([unit](#unit)). |
+| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | -       | [$\beta$ (soft) budget](./architecture.md#budgets): disk-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | -       | [$\beta$ (soft) budget](./architecture.md#budgets): soft network-bandwidth capacity ([unit](#unit)). |
+| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | -       | [$\beta$ (soft) budget](./architecture.md#budgets): network-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -257,12 +257,13 @@ aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 
 ## Image Configuration
 
-Hyper's image provisioning layer has a large set of configuration flags
-enabling you to tweak how you want Hyper to manage images.
+Hyper's image provisioning layer stores read-only layers on a configurable
+medium. (The device-mapper geometry behind it is fixed at compile time and
+rarely needs tweaking.)
 
-| Config Key | `config.exs` | `config.toml` | Default | Notes |
-| ---------- | ------------ | ------------- | ------- | ----- |
-| `store`    | `.store`     | `.store`      | -       | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
+| Config Key | `config.exs` | `config.toml` | Default             | Notes |
+| ---------- | ------------ | ------------- | ------------------- | ----- |
+| `store`    | `.store`     | `.store`      | `<work_dir>/layers` | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -284,12 +285,16 @@ Additionally, sub-sections are available.
 
 ### Database Configuration
 
-| Config Key | `config.exs` | `config.toml` | Default   | Notes |
-| ---------- | ------------ | ------------- | --------- | ----- |
-| `database` | `.database`  | -             | `"hyper"` |  |
-| `username` | `.username`  | -             | -         |  |
-| `password` | `.password`  | -             | -         |  |
-| `hostname` | `.hostname`  | -             | -         |  |
+These are secrets, so they are `config.exs`-only. Any key you set overrides the
+image-database repo's compiled-in connection config; keys you omit keep that
+built-in value.
+
+| Config Key | `config.exs` | `config.toml` | Default | Notes |
+| ---------- | ------------ | ------------- | ------- | ----- |
+| `database` | `.database`  | -             | -       | Postgres database name. |
+| `username` | `.username`  | -             | -       | Postgres role. |
+| `password` | `.password`  | -             | -       | Postgres password — load it from a secrets manager. |
+| `hostname` | `.hostname`  | -             | -       | Postgres host. |
 
 <!-- tabs open -->
 ### `config.exs`
