@@ -12,8 +12,9 @@ config :opentelemetry,
 #     iex --name a@127.0.0.1 --cookie hyper -S mix
 #     iex --name b@127.0.0.1 --cookie hyper -S mix
 #
-# Swap the strategy for prod (DNSPoll / EC2 tags).
-config :libcluster,
+# Swap the strategy for prod (DNSPoll / EC2 tags). Hyper forwards this straight
+# to libcluster; see `Hyper.Cfg.Cluster`.
+config :hyper, Hyper.Cfg.Cluster,
   topologies: [
     hyper: [
       strategy: Cluster.Strategy.Epmd,
@@ -21,15 +22,10 @@ config :libcluster,
     ]
   ]
 
-config :hyper,
-  cgroup_parent: "hyper",
-  uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers"
-
 if config_env() == :test do
   config :opentelemetry, traces_exporter: :none
   # No cluster formation during tests.
-  config :libcluster, topologies: []
+  config :hyper, Hyper.Cfg.Cluster, topologies: []
 
   # JUnit XML for Codecov Test Analytics. A fixed report_dir (not the default
   # app_path) gives CI a stable path; automatic_create_dir? mkdirs it since

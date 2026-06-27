@@ -77,7 +77,7 @@ defmodule Hyper.Node.Users do
   def test_system do
     alias Sys.Linux.Subid
 
-    {min, max} = Hyper.Config.uid_gid_range()
+    {min, max} = Hyper.Cfg.Jails.uid_gid_range()
 
     cond do
       passwd_conflicts(min, max) != [] ->
@@ -99,7 +99,7 @@ defmodule Hyper.Node.Users do
 
   @impl true
   def init(_opts) do
-    {min, max} = Hyper.Config.uid_gid_range()
+    {min, max} = Hyper.Cfg.Jails.uid_gid_range()
     {:ok, %State{max: max, next: min}}
   end
 

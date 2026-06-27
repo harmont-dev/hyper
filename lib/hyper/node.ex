@@ -143,7 +143,7 @@ defmodule Hyper.Node do
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with {:ok, _} <- Hyper.Node.Config.Budget.load(),
+    with {:ok, _} <- Hyper.Cfg.Budget.load(),
          :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),
@@ -160,10 +160,10 @@ defmodule Hyper.Node do
   @spec check_helper_base(Path.t()) ::
           :ok | {:error, {:suid_helper_base_mismatch, Path.t(), Path.t()}}
   defp check_helper_base(base) do
-    if base == Hyper.Config.work_dir() do
+    if base == Hyper.Cfg.Dirs.work_dir() do
       :ok
     else
-      {:error, {:suid_helper_base_mismatch, base, Hyper.Config.work_dir()}}
+      {:error, {:suid_helper_base_mismatch, base, Hyper.Cfg.Dirs.work_dir()}}
     end
   end
 

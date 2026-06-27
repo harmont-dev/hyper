@@ -1,7 +1,7 @@
 defmodule Hyper.Node.FireVMM.Provider do
   @moduledoc """
   Installs the firecracker release for the current architecture into
-  `Hyper.Config.firecracker_install_dir/0` (`<work_dir>/redist/firecracker`).
+  `Hyper.Cfg.Dirs.firecracker_install_dir/0` (`<work_dir>/redist/firecracker`).
 
   `ensure_installed/0` is idempotent: if the binaries are already present and
   executable it returns `:ok` without touching the network. Otherwise it fetches
@@ -88,5 +88,5 @@ defmodule Hyper.Node.FireVMM.Provider do
     Path.join(install_dir(), Map.fetch!(dl, key))
   end
 
-  defp install_dir, do: Hyper.Config.firecracker_install_dir()
+  defp install_dir, do: Hyper.Cfg.Dirs.firecracker_install_dir()
 end

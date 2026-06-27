@@ -37,6 +37,28 @@ defmodule Unit.Bandwidth do
   @doc "The zero throughput (additive identity)."
   @spec zero() :: t()
   def zero, do: %__MODULE__{bytes_per_sec: 0}
+
+  @units %{"Bps" => 1, "KiBps" => @kib, "MiBps" => @mib, "GiBps" => @gib, "TiBps" => @tib}
+
+  @doc "Parse a string like `\"1GiBps\"`. Suffixes: Bps/KiBps/MiBps/GiBps/TiBps."
+  @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
+  def parse(s) when is_binary(s) do
+    with {n, suffix} when n >= 0 <- Integer.parse(String.trim(s)),
+         {:ok, mult} <- Map.fetch(@units, String.trim(suffix)) do
+      {:ok, %__MODULE__{bytes_per_sec: n * mult}}
+    else
+      _ -> {:error, {:bad_unit, s}}
+    end
+  end
+
+  @doc "Like `parse/1` but raises `ArgumentError` on bad input."
+  @spec parse!(String.t()) :: t()
+  def parse!(s) do
+    case parse(s) do
+      {:ok, v} -> v
+      {:error, _} -> raise ArgumentError, "invalid Bandwidth string: #{inspect(s)}"
+    end
+  end
 end
 
 defimpl Unit.Quantity, for: Unit.Bandwidth do

@@ -67,6 +67,10 @@ defmodule Hyper.MixProject do
       {:junit_formatter, "~> 3.4", only: :test, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      # Syntect-backed Makeup lexer: covers the doc languages that have no
+      # dedicated Makeup lexer (markdown, toml, bash, sh, python). Elixir/erlang
+      # still use their native lexers; this fills the rest in one dep.
+      {:makeup_syntect, "~> 0.1", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
       {:grpc, "~> 1.0"},
       {:grpc_server, "~> 1.0"},
@@ -105,6 +109,8 @@ defmodule Hyper.MixProject do
       extras: [
         "README.md",
         "docs/cookbook/intro.md",
+        "docs/cookbook/install.md",
+        "docs/cookbook/config.md",
         "docs/cookbook/architecture.md",
         "docs/grpc.md"
       ],
@@ -183,6 +189,32 @@ defmodule Hyper.MixProject do
   end
 
   # `mix check` - the strict gate. Runs fast checks first, slow ones (dialyzer) last.
+  # Give ```bash / ```sh real syntax highlighting in the docs.
+  #
+  # Two obstacles, both about *who registers the lexer last*:
+  #   1. makeup_syntect registers the shell grammar only under its raw syntect
+  #      name "Shell-Unix-Generic" (ExDoc resolves fences by lexer name, not
+  #      file extension), so ```bash / ```sh never reach it.
+  #   2. ExDoc itself registers a minimal `ExDoc.ShellLexer` for sh/bash/shell/
+  #      zsh (it only de-selects the `$ ` prompt; everything else is plain text)
+  #      from `ExDoc.Application.start`, which runs during the `docs` task.
+  #
+  # So we start :ex_doc and :makeup_syntect here first (idempotent — the later
+  # `docs` task won't re-run their `start/2`), then register our shell aliases
+  # LAST so they win. Dev-only; runs as the `docs` alias's first step.
+  defp register_doc_lexers(_args) do
+    {:ok, _} = Application.ensure_all_started(:makeup_syntect)
+    {:ok, _} = Application.ensure_all_started(:ex_doc)
+
+    Makeup.Registry.register_lexer(MakeupSyntect.Lexer,
+      options: [language: "Shell-Unix-Generic"],
+      names: ["bash", "sh", "shell", "zsh"],
+      extensions: []
+    )
+
+    :ok
+  end
+
   defp aliases do
     [
       check: [
@@ -192,6 +224,12 @@ defmodule Hyper.MixProject do
         "test --warnings-as-errors",
         "dialyzer"
       ],
+      # makeup_syntect registers the shell grammar only under its raw syntect
+      # name "Shell-Unix-Generic", and ExDoc resolves fences by lexer *name*
+      # (not file extension), so ```bash / ```sh would fall back to plain text.
+      # Alias them to the shell grammar before ExDoc runs (same VM, so the
+      # registration is visible to the highlighter).
+      docs: ["loadpaths", &register_doc_lexers/1, "docs"],
       # Force a regeneration of the Firecracker bindings (ignores staleness).
       "firecracker.gen": ["compile.firecracker_gen --force"],
       # Force a regeneration of the gRPC bindings (ignores staleness).

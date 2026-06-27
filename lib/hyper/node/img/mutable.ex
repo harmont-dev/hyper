@@ -24,8 +24,6 @@ defmodule Hyper.Node.Img.Mutable do
 
   use OpenTelemetryDecorator
 
-  @idle_timeout_ms :timer.seconds(30)
-
   defmodule Opts do
     @moduledoc false
     @enforce_keys [:img_id, :vm_id]
@@ -149,9 +147,13 @@ defmodule Hyper.Node.Img.Mutable do
     end
   end
 
+  # How long an idle mutable layer lingers with no users before it is torn down.
+  @idle_grace :timer.seconds(30)
+
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_timeout_ms)}
+
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_grace)}
   end
 
   defp cancel_idle(%State{idle_ref: nil} = state), do: state

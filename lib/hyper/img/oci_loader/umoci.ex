@@ -5,14 +5,12 @@ defmodule Hyper.Img.OciLoader.Umoci do
 
   Two sources, in priority order (mirrors `Hyper.Node.Vmlinux`):
 
-    1. An operator-configured path via `config :hyper, umoci_path:
-       "/path/to/umoci"` (`Hyper.Config.umoci_path/0`). If set, it wins and is
-       never downloaded.
+    1. An operator-configured path via `[tools] umoci` in
+       `/etc/hyper/config.toml` (`Hyper.Cfg.Tools.umoci/0`). If set, it wins
+       and is never downloaded.
     2. Otherwise the pinned static binary downloaded by `ensure_installed/0`
-       into `Hyper.Config.umoci_install_dir/0` (`<work_dir>/redist/umoci`).
+       into `Hyper.Cfg.Dirs.umoci_install_dir/0` (`<work_dir>/redist/umoci`).
   """
-
-  alias Hyper.Config
 
   require Logger
 
@@ -40,7 +38,7 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
-    if Config.umoci_path() != nil do
+    if Hyper.Cfg.Tools.umoci() != nil do
       :ok
     else
       with {:ok, arch} <- Sys.Arch.current() do
@@ -57,19 +55,19 @@ defmodule Hyper.Img.OciLoader.Umoci do
   """
   @spec bin() :: Path.t()
   def bin do
-    configured = Config.umoci_path()
+    case Hyper.Cfg.Tools.umoci() do
+      nil ->
+        {:ok, arch} = Sys.Arch.current()
+        default_path(arch)
 
-    if configured != nil do
-      configured
-    else
-      {:ok, arch} = Sys.Arch.current()
-      default_path(arch)
+      configured ->
+        configured
     end
   end
 
   @spec default_path(Sys.Arch.t()) :: Path.t()
   defp default_path(arch) do
-    Path.join(Config.umoci_install_dir(), Map.fetch!(@downloads, arch).asset)
+    Path.join(Hyper.Cfg.Dirs.umoci_install_dir(), Map.fetch!(@downloads, arch).asset)
   end
 
   @spec install(Sys.Arch.t(), Path.t()) :: :ok | {:error, term()}

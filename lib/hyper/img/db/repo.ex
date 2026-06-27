@@ -16,4 +16,9 @@ defmodule Hyper.Img.Db.Repo do
   use Ecto.Repo,
     otp_app: :hyper,
     adapter: Ecto.Adapters.Postgres
+
+  @impl true
+  def init(_context, config) do
+    {:ok, Keyword.merge(config, Hyper.Cfg.Img.Db.repo_opts())}
+  end
 end
