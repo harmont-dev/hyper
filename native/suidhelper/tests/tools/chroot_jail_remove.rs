@@ -164,6 +164,53 @@ fn symlinked_chroot_component_does_not_escape() {
     );
 }
 
+// cgroup.kill is written "1" before the rmdir: the fix SIGKILLs the subtree
+// first. Here cgroup.kill keeps the leaf non-empty so rmdir returns ENOTEMPTY
+// (tolerated) and the leaf survives — letting us assert the write happened.
+#[test]
+fn cgroup_kill_is_written_before_rmdir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path();
+    let leaf = base.join("slice").join("leaf");
+    fs::create_dir_all(&leaf).unwrap();
+    fs::write(leaf.join("cgroup.kill"), b"0").unwrap();
+
+    remove_cgroup_under(base, &leaf).expect("write+rmdir must be Ok");
+    assert!(leaf.exists(), "non-empty leaf must survive");
+    assert_eq!(
+        fs::read(leaf.join("cgroup.kill")).unwrap(),
+        b"1",
+        "cgroup.kill must have been written \"1\"",
+    );
+}
+
+// A leaf without a cgroup.kill file (pre-5.14/non-v2 kernel) is tolerated: the
+// missing pseudo-file is a no-op and the empty leaf is removed normally.
+#[test]
+fn missing_cgroup_kill_is_tolerated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path();
+    let leaf = base.join("slice").join("leaf");
+    fs::create_dir_all(&leaf).unwrap();
+
+    remove_cgroup_under(base, &leaf).expect("missing cgroup.kill must be Ok");
+    assert!(!leaf.exists(), "empty leaf must be removed");
+}
+
+// The leaf is already gone but its parent survives: the new openat_dir(leaf)
+// ENOENT branch returns Ok without touching the parent.
+#[test]
+fn missing_leaf_with_present_parent_is_ok() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path();
+    let parent = base.join("slice");
+    fs::create_dir(&parent).unwrap();
+    let leaf = parent.join("leaf"); // never created
+
+    remove_cgroup_under(base, &leaf).expect("missing leaf must be Ok");
+    assert!(parent.exists(), "parent must survive");
+}
+
 proptest! {
     // For a chroot `depth` components below the jail base (target never created),
     // remove_chroot_under returns Ok iff depth == 2, else ChrootDepth. The

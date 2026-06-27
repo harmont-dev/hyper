@@ -26,6 +26,11 @@ defmodule Hyper.Node do
       real-time monitors backing the soft budget (`Hyper.Node.Budget.Soft`).
       Lives here, not at the application root, because both are per-node and only
       meaningful while this node hosts VMs.
+
+    * `Hyper.Node.Reaper` - a periodic, liveness-aware GC for per-VM host
+      resources (orphaned firecracker cgroups and `hyper-rw-*` dm volumes) stranded
+      by an unclean death whose vm_id never reboots. Started last so the VM
+      supervisor it consults for liveness is already up.
   """
 
   use Supervisor
@@ -40,8 +45,14 @@ defmodule Hyper.Node do
 
   def start_link(opts \\ []) do
     case test_system() do
-      :ok -> Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
-      {:error, reason} -> {:error, reason}
+      :ok ->
+        # Clear any dm/loop devices a previous unclean shutdown left behind,
+        # before the device-owning children start and collide with them.
+        :ok = Hyper.Node.Reclaim.run()
+        Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -49,10 +60,16 @@ defmodule Hyper.Node do
   def init(_opts) do
     children = [
       Hyper.Node.Users,
+      # Layer owns Hyper.Node.Layer.Registry, which Budget.Advertiser queries
+      # (via Hyper.Node.Layer.active/0) as it advertises on init - so Layer must
+      # be up first.
+      Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
-      Hyper.Node.Layer,
-      Hyper.Node.Img
+      Hyper.Node.Img,
+      # Last child: :one_for_one starts in order, so the VM supervisor and Img are
+      # up before the reaper's first tick can read their liveness.
+      Hyper.Node.Reaper
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -63,7 +80,7 @@ defmodule Hyper.Node do
   layer, resolve the kernel, and start the VM supervisor. The uid is freed and
   the mutable layer torn down automatically when the VM supervisor dies.
   """
-  @spec start_image_vm(Hyper.Vm.id(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
+  @spec start_image_vm(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
@@ -89,7 +106,7 @@ defmodule Hyper.Node do
   end
 
   @doc false
-  @spec build_opts(Hyper.Vm.id(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
+  @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
   def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, mutable, kernel) do
     %FireVMM.Opts{
@@ -144,16 +161,35 @@ defmodule Hyper.Node do
   @spec test_system :: :ok | {:error, term()}
   def test_system do
     with {:ok, _} <- Hyper.Cfg.Budget.load(),
-         :ok <- Hyper.Node.FireVMM.Provider.ensure_installed(),
+         :ok <- check_firecracker_bins(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),
          :ok <- Hyper.Img.OciLoader.Umoci.ensure_installed(),
+         :ok <- Hyper.Img.OciLoader.test_system(),
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
          {:ok, base} <- Hyper.SuidHelper.sys_test(),
          :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
+    end
+  end
+
+  @spec check_firecracker_bins ::
+          :ok
+          | {:error, {:firecracker_bin_missing | :jailer_bin_missing, Path.t()}}
+          | {:error, :firecracker_not_configured | :jailer_not_configured}
+  defp check_firecracker_bins do
+    with {:fc, {:ok, fc}} <- {:fc, Hyper.Cfg.Tools.firecracker_configured()},
+         {:jail, {:ok, jail}} <- {:jail, Hyper.Cfg.Tools.jailer_configured()} do
+      cond do
+        not Sys.Posix.executable?(fc) -> {:error, {:firecracker_bin_missing, fc}}
+        not Sys.Posix.executable?(jail) -> {:error, {:jailer_bin_missing, jail}}
+        true -> :ok
+      end
+    else
+      {:fc, :error} -> {:error, :firecracker_not_configured}
+      {:jail, :error} -> {:error, :jailer_not_configured}
     end
   end
 

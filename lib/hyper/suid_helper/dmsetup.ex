@@ -59,14 +59,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec remove(String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.remove", include: [:name])
   def remove(name) do
-    case SuidHelper.exec([
-           "dmsetup",
-           "--bin",
-           Hyper.Cfg.Tools.dmsetup(),
-           "remove",
-           "--retry",
-           name
-         ]) do
+    case SuidHelper.exec(["dmsetup", "remove", "--retry", name]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -76,39 +69,31 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec message(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])
   def message(name, message) do
-    argv =
-      ["dmsetup", "--bin", Hyper.Cfg.Tools.dmsetup(), "message", name, "--message", message]
-
-    case SuidHelper.exec(argv) do
+    case SuidHelper.exec(["dmsetup", "message", name, "--message", message]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
   end
 
   @doc """
-  Check the dmsetup binary is present and the kernel exposes the dm targets we
-  use (snapshot, thin, thin-pool).
+  Verify the kernel exposes the dm targets we use (snapshot, thin, thin-pool).
+
+  Routes through the setuid helper: `dmsetup targets` opens `/dev/mapper/control`,
+  which needs root, and the BEAM runs unprivileged. The helper validates its
+  configured `dmsetup` binary before running it, so a missing or unsafe binary
+  surfaces here too.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.test_system")
   def test_system do
-    if System.find_executable(Hyper.Cfg.Tools.dmsetup()),
-      do: test_targets(),
-      else: {:error, :dmsetup_not_found}
-  end
-
-  @doc "Verify the kernel exposes the dm targets we use (snapshot, thin, thin-pool)."
-  @spec test_targets() :: :ok | {:error, term()}
-  @decorate with_span("Hyper.SuidHelper.Dmsetup.test_targets")
-  def test_targets do
-    case System.cmd(Hyper.Cfg.Tools.dmsetup(), ["targets"], stderr_to_stdout: true) do
-      {out, 0} ->
+    case SuidHelper.exec(["dmsetup", "targets"]) do
+      {:ok, %{"output" => out}} ->
         have = parse_targets(out)
         missing = Enum.reject(@required_targets, &MapSet.member?(have, &1))
         if missing == [], do: :ok, else: {:error, {:missing_dm_targets, missing}}
 
-      {out, code} ->
-        {:error, {:dmsetup_targets_failed, code, String.trim(out)}}
+      {:error, {code, msg}} ->
+        {:error, {:dmsetup_targets_failed, code, msg}}
     end
   end
 
@@ -120,6 +105,32 @@ defmodule Hyper.SuidHelper.Dmsetup do
     |> Enum.map(&(&1 |> String.split() |> List.first()))
     |> Enum.reject(&is_nil/1)
     |> MapSet.new()
+  end
+
+  @doc "Names of every device-mapper device currently present on this host."
+  @spec list() :: {:ok, [String.t()]} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.list")
+  def list do
+    case SuidHelper.exec(["dmsetup", "ls"]) do
+      {:ok, %{"output" => out}} -> {:ok, parse_names(out)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc false
+  @spec parse_names(String.t()) :: [String.t()]
+  def parse_names(out) do
+    case String.trim(out) do
+      # `dmsetup ls` prints this sentinel (not a device row) when there are none.
+      "No devices found" ->
+        []
+
+      _ ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.map(&(&1 |> String.split() |> List.first()))
+        |> Enum.reject(&is_nil/1)
+    end
   end
 
   @doc false
@@ -145,9 +156,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   # create flags (e.g. `--readonly`). Returns the `/dev/mapper/<name>` path.
   @spec create(String.t(), String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, err()}
   defp create(name, table, flags) do
-    argv =
-      ["dmsetup", "--bin", Hyper.Cfg.Tools.dmsetup(), "create", name] ++
-        flags ++ ["--table", table]
+    argv = ["dmsetup", "create", name] ++ flags ++ ["--table", table]
 
     case SuidHelper.exec(argv) do
       {:ok, %{"device" => dev}} -> {:ok, dev}

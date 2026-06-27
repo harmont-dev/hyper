@@ -28,8 +28,28 @@ defmodule Hyper.Cluster.Routing do
   @spec via(term()) :: {:via, module(), {atom(), term()}}
   def via(key), do: {:via, Horde.Registry, {@name, key}}
 
+  @doc """
+  Register the calling process under `key` from inside its own `init`.
+
+  Prefer this over starting a process with a `{:via, Horde.Registry, _}` name.
+  OTP's post-start name check (`gen:get_proc_name`) calls `whereis_name`
+  immediately after the synchronous `register`, but Horde materialises the name
+  into its local ETS only asynchronously, via the DeltaCRDT diff loop. Under
+  registry churn that read loses the race and OTP aborts startup with
+  `{:process_not_registered_via, Horde.Registry}`. Registering from within
+  `init` carries no such self-check, while leaving the name cluster-resolvable
+  through `via/1` once the diff propagates (callers already tolerate that lag).
+  """
+  @spec register_self(term()) :: :ok | {:error, {:already_registered, pid()}}
+  def register_self(key) do
+    case Horde.Registry.register(@name, key, nil) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_registered, _pid}} = err -> err
+    end
+  end
+
   @doc "Which node currently runs `vm_id`? `nil` if unknown."
-  @spec whereis(Hyper.Vm.id()) :: node() | nil
+  @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   @decorate with_span("Hyper.Cluster.Routing.whereis", include: [:vm_id])
   def whereis(vm_id) do
     case Horde.Registry.lookup(@name, {vm_id, :supervisor}) do
@@ -43,7 +63,7 @@ defmodule Hyper.Cluster.Routing do
   replica via a registry match spec; intended to be called on the node that owns
   `pid` (see `Hyper.id/1`).
   """
-  @spec id_for(pid()) :: Hyper.Vm.id() | nil
+  @spec id_for(pid()) :: Hyper.Vm.Id.t() | nil
   @decorate with_span("Hyper.Cluster.Routing.id_for")
   def id_for(pid) when is_pid(pid) do
     case Horde.Registry.select(@name, [
@@ -55,7 +75,7 @@ defmodule Hyper.Cluster.Routing do
   end
 
   @doc "Every VM the cluster currently knows about, paired with the node it runs on."
-  @spec all() :: [{Hyper.Vm.id(), node()}]
+  @spec all() :: [{Hyper.Vm.Id.t(), node()}]
   @decorate with_span("Hyper.Cluster.Routing.all")
   def all do
     @name

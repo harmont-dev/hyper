@@ -53,7 +53,7 @@ defmodule Hyper.Node.Img do
   end
 
   @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
-  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.id()) :: {:ok, pid()} | {:error, term()}
+  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.Id.t()) :: {:ok, pid()} | {:error, term()}
   def create_mutable(img_id, vm_id) do
     case DynamicSupervisor.start_child(
            @mutable_sup,
@@ -74,7 +74,7 @@ defmodule Hyper.Node.Img do
   Serve `img` to `vm_id` for the duration of `callable`, holding a DB lease on the
   image (and transitively its whole blob chain) the whole time.
   """
-  @spec with_image(Hyper.Img.id(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()}
+  @spec with_image(Hyper.Img.id(), Hyper.Vm.Id.t(), (-> result)) :: result | {:error, term()}
         when result: var
   def with_image(img, vm_id, callable) do
     with_image_lease(img, vm_id, callable)
@@ -84,7 +84,8 @@ defmodule Hyper.Node.Img do
   # even if `callable` raises. A background task re-bumps the lease for the whole
   # run, so a long-lived VM never lets its claim lapse. If the lease cannot be
   # taken, returns the error and never runs `callable`.
-  @spec with_image_lease(Hyper.Img.id(), Hyper.Vm.id(), (-> result)) :: result | {:error, term()}
+  @spec with_image_lease(Hyper.Img.id(), Hyper.Vm.Id.t(), (-> result)) ::
+          result | {:error, term()}
         when result: var
   defp with_image_lease(img, vm_id, callable) do
     ttl = Db.Lease.default_ttl()
@@ -104,7 +105,7 @@ defmodule Hyper.Node.Img do
   # Re-bump the lease forever at 1/3 of the TTL, until killed. Runs in a task for the
   # lifetime of `callable`; transient bump failures are swallowed so a DB hiccup
   # can't tear down the VM - the next tick retries.
-  @spec heartbeat(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) :: no_return()
+  @spec heartbeat(Hyper.Img.id(), Hyper.Vm.Id.t(), Unit.Time.t()) :: no_return()
   defp heartbeat(img, vm_id, ttl) do
     Process.sleep(div(Unit.Time.as_ms(ttl), 3))
 

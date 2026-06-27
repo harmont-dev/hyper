@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `chroot-jail`: per-VM chroot/jail lifecycle.
 
+pub mod grant_api;
 mod prepare;
 pub mod remove;
 
+pub use grant_api::GrantApiArgs;
 pub use prepare::PrepareArgs;
 pub use remove::RemoveArgs;
 
@@ -15,6 +17,8 @@ pub enum ChrootJailOp {
     Prepare(PrepareArgs),
     /// Remove a VM's stale chroot and cgroup leaf before relaunching the jailer.
     Remove(RemoveArgs),
+    /// Hand the firecracker API socket to the node user (chown to caller, 0660).
+    GrantApi(GrantApiArgs),
 }
 
 impl ChrootJailOp {
@@ -25,6 +29,7 @@ impl ChrootJailOp {
         match self {
             ChrootJailOp::Prepare(args) => prepare::run(args),
             ChrootJailOp::Remove(args) => remove::run(args),
+            ChrootJailOp::GrantApi(args) => grant_api::run(args),
         }
     }
 }

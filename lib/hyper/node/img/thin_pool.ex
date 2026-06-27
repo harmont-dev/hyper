@@ -95,6 +95,13 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
+  # Each privileged command runs through `System.cmd`, which links a transient
+  # port to this process; because we trap exits (for `terminate/2` teardown),
+  # the port's normal close is delivered here. Ignore it. An abnormal exit
+  # carries a non-`:normal` reason and falls through to the default handler.
+  def handle_info({:EXIT, _port, :normal}, state), do: {:noreply, state}
+
+  @impl true
   def terminate(_reason, state) do
     _ = SuidHelper.Dmsetup.remove(@pool_name)
     _ = SuidHelper.Losetup.detach(state.data_loop)
