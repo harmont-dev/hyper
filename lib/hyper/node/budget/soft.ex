@@ -7,7 +7,7 @@ defmodule Hyper.Node.Budget.Soft do
 
   The soft metrics are the ones whose overcommitment degrades speed rather than
   correctness: CPU utilization, disk bandwidth, and network bandwidth. For each,
-  the node carries a load ceiling in `Hyper.Node.Config.Budget` (e.g. "never
+  the node carries a load ceiling in `Hyper.Cfg.Budget` (e.g. "never
   schedule onto a machine already past 80% CPU"). A spec is admissible only if the
   measured load plus the spec's nominal demand stays under that ceiling on every
   metric.
@@ -19,7 +19,7 @@ defmodule Hyper.Node.Budget.Soft do
   use Unit.Operators
   use OpenTelemetryDecorator
 
-  alias Hyper.Node.Config.Budget, as: Config
+  alias Hyper.Cfg.Budget, as: Config
   alias Hyper.Vm.Instance
   alias Sys.Mon
   alias Sys.Mon.Server.Reading

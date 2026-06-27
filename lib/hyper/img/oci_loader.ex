@@ -20,7 +20,6 @@ defmodule Hyper.Img.OciLoader do
 
   use Unit.Operators
 
-  alias Hyper.Config
   alias Hyper.Img.OciLoader.Umoci
   alias Unit.Information
 
@@ -81,9 +80,9 @@ defmodule Hyper.Img.OciLoader do
   def test_system do
     with {:ok, _arch} <- Sys.Arch.current() do
       tools = [
-        {"skopeo", Config.skopeo_path()},
+        {"skopeo", Hyper.Cfg.Tools.skopeo()},
         {"umoci", Umoci.bin()},
-        {"mke2fs", Config.mke2fs_path()}
+        {"mke2fs", Hyper.Cfg.Tools.mke2fs()}
       ]
 
       missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
@@ -137,7 +136,7 @@ defmodule Hyper.Img.OciLoader do
     bundle = Path.join(tmp, "bundle")
 
     skopeo =
-      cmd(Config.skopeo_path(), [
+      cmd(Hyper.Cfg.Tools.skopeo(), [
         "copy",
         "--override-os",
         "linux",
@@ -185,14 +184,16 @@ defmodule Hyper.Img.OciLoader do
           {:ok, Path.t()} | {:error, term()}
   defp build_ext4(rootfs, {size, inodes}) do
     Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs (#{inodes} inodes)")
-    File.mkdir_p!(Config.layer_dir())
-    staged = Path.join(Config.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
+    File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
+
+    staged =
+      Path.join(Hyper.Cfg.Dirs.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
 
     args =
       ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
         ["#{Information.as_mib(size)}M"]
 
-    case tag(cmd(Config.mke2fs_path(), args), :mke2fs) do
+    case tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs) do
       :ok ->
         {:ok, staged}
 

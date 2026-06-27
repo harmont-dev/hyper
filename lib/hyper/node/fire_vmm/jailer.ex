@@ -35,7 +35,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     first failure.
     """
 
-    alias Hyper.Config
+    alias Hyper.Cfg.{Dirs, Jails}
 
     @doc "Run every pre-requisite check, halting at the first failure."
     @spec run() :: :ok | {:error, term()}
@@ -62,7 +62,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     defp parent_cgroup_present do
-      if Sys.Linux.Cgroup.V2.named_exists?(Config.parent_cgroup()),
+      if Sys.Linux.Cgroup.V2.named_exists?(Jails.cgroup()),
         do: :ok,
         else: {:error, :missing_parent_cgroup}
     end
@@ -78,7 +78,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     defp chroot_writable do
-      case Sys.Posix.ensure_writable_dir(Config.chroot_base()) do
+      case Sys.Posix.ensure_writable_dir(Dirs.chroot_base()) do
         {:ok} -> :ok
         {:error, reason} -> {:error, {:chroot_base_unavailable, reason}}
       end
@@ -97,7 +97,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
         cgroup_flags(opts.type) ++
         ["--api-sock", "/" <> @jail_socket]
 
-    %{binary: Hyper.Config.suid_helper(), args: args, host_socket: host_socket(opts.vm_id)}
+    %{binary: Hyper.Cfg.Tools.suidhelper(), args: args, host_socket: host_socket(opts.vm_id)}
   end
 
   # Find the appropriate jailer cgroup flags for the given instance type.
@@ -113,7 +113,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
   @spec chroot_dir(Hyper.Vm.Id.t()) :: Path.t()
   def chroot_dir(id) do
-    Path.join([Hyper.Config.chroot_base(), exec_name(), id])
+    Path.join([Hyper.Cfg.Dirs.chroot_base(), exec_name(), id])
   end
 
   @doc "Host path of the VM's chroot root (`<chroot_base>/<exec>/<id>/root`)."
@@ -135,7 +135,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   """
   @spec cgroup_parent_dir() :: Path.t()
   def cgroup_parent_dir do
-    Path.join("/sys/fs/cgroup", Hyper.Config.parent_cgroup())
+    Path.join("/sys/fs/cgroup", Hyper.Cfg.Jails.cgroup())
   end
 
   @doc """
@@ -158,7 +158,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @spec host_socket(Hyper.Vm.Id.t()) :: Path.t()
   def host_socket(id) do
     Path.join([
-      Hyper.Config.chroot_base(),
+      Hyper.Cfg.Dirs.chroot_base(),
       exec_name(),
       id,
       "root",
@@ -166,5 +166,5 @@ defmodule Hyper.Node.FireVMM.Jailer do
     ])
   end
 
-  defp exec_name, do: Path.basename(Hyper.Config.firecracker_bin())
+  defp exec_name, do: Path.basename(Hyper.Cfg.Tools.firecracker())
 end

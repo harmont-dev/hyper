@@ -35,12 +35,12 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
 
   test "default_path/1 resolves under the configured install dir", %{builds: _} do
     assert {:ok, path} = Provider.default_path(:x86_64)
-    assert path == Path.join(Hyper.Config.vmlinux_install_dir(), "vmlinux-x86_64-6.1")
+    assert path == Path.join(Hyper.Cfg.Dirs.vmlinux_install_dir(), "vmlinux-x86_64-6.1")
   end
 
   test "path/1 resolves a known build under the install dir" do
     assert Provider.path("x86_64-6.1") ==
-             {:ok, Path.join(Hyper.Config.vmlinux_install_dir(), "vmlinux-x86_64-6.1")}
+             {:ok, Path.join(Hyper.Cfg.Dirs.vmlinux_install_dir(), "vmlinux-x86_64-6.1")}
   end
 
   test "path/1 rejects an unknown build name" do

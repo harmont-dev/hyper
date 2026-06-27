@@ -93,7 +93,7 @@ defmodule Hyper.Node.Reclaim do
 
   @spec under_data_dirs?(Path.t()) :: boolean()
   defp under_data_dirs?(path) do
-    String.starts_with?(path, Hyper.Config.scratch_dir() <> "/") or
-      String.starts_with?(path, Hyper.Config.layer_dir() <> "/")
+    String.starts_with?(path, Hyper.Cfg.Dirs.scratch_dir() <> "/") or
+      String.starts_with?(path, Hyper.Cfg.Dirs.layer_dir() <> "/")
   end
 end

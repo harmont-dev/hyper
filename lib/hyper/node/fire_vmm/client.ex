@@ -33,8 +33,6 @@ defmodule Hyper.Node.FireVMM.Client do
 
   alias Hyper.Node.FireVMM.Jailer
 
-  @call_timeout 35_000
-
   defmodule Opts do
     @moduledoc """
     Start options for `Hyper.Node.FireVMM.Client`. Only `:vm_id` is required;
@@ -67,6 +65,9 @@ defmodule Hyper.Node.FireVMM.Client do
 
   @spec via(Hyper.Vm.Id.t()) :: GenServer.name()
   def via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :client})
+
+  # Cap on a single Firecracker API call.
+  @call_timeout :timer.seconds(35)
 
   @doc "Run a generated operation against this VM's daemon, serialized."
   @spec run(GenServer.server(), (keyword() -> result)) :: result when result: var

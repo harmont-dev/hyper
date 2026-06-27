@@ -6,7 +6,7 @@ defmodule Hyper.Img do
   `create/2` ingests a prepared image file -- e.g. the ext4 rootfs produced by
   `Hyper.Img.OciLoader` -- into the shared media store and the image database. It
   content-addresses the file (sha256 of its bytes = the image id), publishes it
-  into `Hyper.Config.layer_dir/0` at `layer_<id>.img`, then records it as a
+  into `Hyper.Cfg.Dirs.layer_dir/0` at `layer_<id>.img`, then records it as a
   one-layer base image (`blobs` + `images` + `image_layers`). Producers of image
   files stay decoupled from the store and DB: they hand a path to `create/2`.
   """
@@ -15,7 +15,6 @@ defmodule Hyper.Img do
 
   require Logger
 
-  alias Hyper.Config
   alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
 
   @type id :: String.t()
@@ -85,7 +84,7 @@ defmodule Hyper.Img do
   @spec publish(Path.t(), id()) :: {:ok, Path.t(), :created | :reused} | {:error, term()}
   @decorate with_span("Hyper.Img.publish", include: [:id])
   defp publish(src, id) do
-    File.mkdir_p!(Config.layer_dir())
+    File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
     final = final_path(id)
 
     if File.exists?(final) do
@@ -125,7 +124,7 @@ defmodule Hyper.Img do
   end
 
   @spec final_path(id()) :: Path.t()
-  defp final_path(id), do: Path.join(Config.layer_dir(), "layer_#{id}.img")
+  defp final_path(id), do: Path.join(Hyper.Cfg.Dirs.layer_dir(), "layer_#{id}.img")
 
   # Record the base image: one blob, one image (id == blob id), one layer at
   # position 0. All upserts are idempotent so a re-publish of the same bytes is a

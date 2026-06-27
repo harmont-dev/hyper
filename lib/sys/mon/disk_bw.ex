@@ -5,25 +5,25 @@ defmodule Sys.Mon.DiskBw do
   alias Sys.Linux.Proc.Diskstats
   alias Sys.Mon.Server
   alias Unit.Bandwidth
-  alias Unit.Time
-
-  @period_ms 31
-  @tau_s 20
 
   @moduledoc """
   Monitors instantaneous disk bandwidth (the soft beta_disk_bw signal).
 
   Samples cumulative read+write bytes across whole physical disks from
-  `/proc/diskstats` every #{@period_ms} ms and differentiates them into bytes/sec
+  `/proc/diskstats` every 31 ms and differentiates them into bytes/sec
   via `Controls.Rate` (the first read only establishes a baseline). The rate series
-  is smoothed with a #{@tau_s}-second time constant. Readings are `Unit.Bandwidth`.
+  is smoothed with a 20-second time constant. Readings are `Unit.Bandwidth`.
   """
 
+  # Prime sampling period, co-prime with the sibling monitors so their reads
+  # rarely land on the same tick.
   @impl true
-  def period, do: Time.ms(@period_ms)
+  @spec period :: Unit.Time.t()
+  def period, do: Unit.Time.ms(31)
 
   @impl true
-  def tau, do: Time.s(@tau_s)
+  @spec tau :: Unit.Time.t()
+  def tau, do: Unit.Time.s(20)
 
   @doc "The latest instantaneous + filtered disk bandwidth (`Unit.Bandwidth` readings)."
   @spec value() :: Server.Reading.t()

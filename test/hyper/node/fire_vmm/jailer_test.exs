@@ -15,18 +15,18 @@ defmodule Hyper.Node.FireVMM.JailerTest do
 
   @vm_id "vmtest01"
 
-  # Stub config_toml persistent_term so firecracker_bin/jailer_bin resolve
-  # to dummy paths without requiring /etc/hyper/config.toml on the test host.
-  # async: false because persistent_term is global state.
+  # Stub the cached TOML so firecracker/jailer resolve to dummy paths without
+  # requiring /etc/hyper/config.toml on the test host. async: false because the
+  # cache is global state.
   setup do
-    :persistent_term.put({Hyper.Config, :config_toml}, %{
+    Hyper.Cfg.Toml.put_cache(%{
       "tools" => %{
         "firecracker" => "/usr/local/bin/firecracker",
         "jailer" => "/usr/local/bin/jailer"
       }
     })
 
-    on_exit(fn -> :persistent_term.erase({Hyper.Config, :config_toml}) end)
+    on_exit(fn -> Hyper.Cfg.Toml.reload() end)
   end
 
   defp micro_opts do
@@ -43,7 +43,7 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   end
 
   test "binary is the suid helper" do
-    assert Jailer.command(micro_opts()).binary == Hyper.Config.suid_helper()
+    assert Jailer.command(micro_opts()).binary == Hyper.Cfg.Tools.suidhelper()
   end
 
   test "args start with the jailer subcommand" do

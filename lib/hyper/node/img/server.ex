@@ -21,9 +21,6 @@ defmodule Hyper.Node.Img.Server do
 
   use OpenTelemetryDecorator
 
-  # Grace period after the last holder leaves before the image is torn down.
-  @idle_timeout_ms :timer.seconds(30)
-
   defmodule State do
     @moduledoc false
 
@@ -231,10 +228,14 @@ defmodule Hyper.Node.Img.Server do
     end
   end
 
+  # How long an idle image lingers with no users before it is torn down.
+  @idle_grace :timer.seconds(30)
+
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
-    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_timeout_ms)}
+
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_grace)}
   end
 
   @spec cancel_idle(State.t()) :: State.t()

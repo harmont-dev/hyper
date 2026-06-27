@@ -1,4 +1,4 @@
-defmodule Hyper.Node.Config.Img do
+defmodule Hyper.Cfg.Img do
   @moduledoc """
   This node's image storage configuration: the device-mapper geometry behind the
   read-only layer chain (dm-snapshot) and the per-VM writable layers (dm-thin).
@@ -7,7 +7,10 @@ defmodule Hyper.Node.Config.Img do
     * `thin_block_sectors` - dm-thin pool allocation block size.
     * `thin_pool_data_size` / `thin_pool_meta_size` - sparse sizes of the node's
       dm-thin pool backing devices.
+    * `store` - absolute path to the read-only layer store.
   """
+
+  import Hyper.Cfg, only: [get_cfg: 1]
 
   @chunk_sectors Application.compile_env(:hyper, :chunk_sectors, 8)
   @thin_block_sectors Application.compile_env(:hyper, :thin_block_sectors, 128)
@@ -30,4 +33,17 @@ defmodule Hyper.Node.Config.Img do
   @doc "Sparse size of the node's dm-thin pool metadata device."
   @spec thin_pool_meta_size :: Unit.Information.t()
   def thin_pool_meta_size, do: Unit.Information.gib(1)
+
+  @doc """
+  Absolute path to the read-only layer store. config.exs (`store:`) > `[img] store`
+  toml > `<work_dir>/layers`.
+  """
+  @spec store :: Path.t()
+  def store,
+    do:
+      get_cfg(
+        runtime: {__MODULE__, :store},
+        toml: "img.store",
+        default: Path.join(Hyper.Cfg.Dirs.work_dir(), "layers")
+      )
 end

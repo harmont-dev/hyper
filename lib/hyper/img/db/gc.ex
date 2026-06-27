@@ -31,9 +31,10 @@ defmodule Hyper.Img.Db.Gc do
   require Logger
   import Ecto.Query
 
+  alias Hyper.Cfg.Gc, as: Config
   alias Hyper.Cluster.Routing
   alias Hyper.Img.Db.{Blob, ImageLayer, Repo}
-  alias Hyper.Img.Db.Gc.{Config, Sweep}
+  alias Hyper.Img.Db.Gc.Sweep
   alias Hyper.Node.Layer.Repo, as: LayerRepo
 
   @singleton_key {:singleton, :layer_gc}
@@ -59,13 +60,7 @@ defmodule Hyper.Img.Db.Gc do
   @impl true
   def init(opts) do
     config = Keyword.get(opts, :config) || Config.load()
-
-    if config.enabled do
-      {:ok, %__MODULE__{config: config}, {:continue, :acquire}}
-    else
-      Logger.info("layer gc: disabled by config; not starting")
-      :ignore
-    end
+    {:ok, %__MODULE__{config: config}, {:continue, :acquire}}
   end
 
   @impl true
@@ -99,7 +94,7 @@ defmodule Hyper.Img.Db.Gc do
         try do
           {:noreply, scan_one_batch(state)}
         rescue
-          # Only swallow database unavailability (incl. statement_timeout aborts)
+          # Only swallow database unavailability (incl. timed-out statements)
           # and retry; let any other exception crash so a real bug surfaces.
           e in [Postgrex.Error, DBConnection.ConnectionError] ->
             Logger.warning(
@@ -247,11 +242,11 @@ defmodule Hyper.Img.Db.Gc do
     state |> with_low_priority(fn -> Repo.all(query) end) |> MapSet.new()
   end
 
-  # Run a DB operation at low priority: in a transaction whose statement_timeout
-  # is capped, so it can never pin a backend and yields under contention.
+  # Run a DB operation at low priority: in a transaction with a capped per-statement
+  # timeout, so it can never pin a backend and yields under contention.
   @spec with_low_priority(t(), (-> result)) :: result when result: var
   defp with_low_priority(state, fun) do
-    timeout = Unit.Time.as_ms(state.config.statement_timeout)
+    timeout = Unit.Time.as_ms(state.config.timeout)
 
     {:ok, result} =
       Repo.transaction(fn ->

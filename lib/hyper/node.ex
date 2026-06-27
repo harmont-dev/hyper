@@ -160,7 +160,7 @@ defmodule Hyper.Node do
 
   @spec test_system :: :ok | {:error, term()}
   def test_system do
-    with {:ok, _} <- Hyper.Node.Config.Budget.load(),
+    with {:ok, _} <- Hyper.Cfg.Budget.load(),
          :ok <- check_firecracker_bins(),
          :ok <- Hyper.Node.FireVMM.VmLinux.Provider.ensure_installed(),
          :ok <- Hyper.Node.Vmlinux.test_system(),
@@ -180,8 +180,8 @@ defmodule Hyper.Node do
           | {:error, {:firecracker_bin_missing | :jailer_bin_missing, Path.t()}}
           | {:error, :firecracker_not_configured | :jailer_not_configured}
   defp check_firecracker_bins do
-    with {:fc, {:ok, fc}} <- {:fc, Hyper.Config.firecracker_bin_configured()},
-         {:jail, {:ok, jail}} <- {:jail, Hyper.Config.jailer_bin_configured()} do
+    with {:fc, {:ok, fc}} <- {:fc, Hyper.Cfg.Tools.firecracker_configured()},
+         {:jail, {:ok, jail}} <- {:jail, Hyper.Cfg.Tools.jailer_configured()} do
       cond do
         not Sys.Posix.executable?(fc) -> {:error, {:firecracker_bin_missing, fc}}
         not Sys.Posix.executable?(jail) -> {:error, {:jailer_bin_missing, jail}}
@@ -196,10 +196,10 @@ defmodule Hyper.Node do
   @spec check_helper_base(Path.t()) ::
           :ok | {:error, {:suid_helper_base_mismatch, Path.t(), Path.t()}}
   defp check_helper_base(base) do
-    if base == Hyper.Config.work_dir() do
+    if base == Hyper.Cfg.Dirs.work_dir() do
       :ok
     else
-      {:error, {:suid_helper_base_mismatch, base, Hyper.Config.work_dir()}}
+      {:error, {:suid_helper_base_mismatch, base, Hyper.Cfg.Dirs.work_dir()}}
     end
   end
 

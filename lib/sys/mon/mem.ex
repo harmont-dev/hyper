@@ -4,25 +4,25 @@ defmodule Sys.Mon.Mem do
   alias Sys.Linux.Proc.Meminfo
   alias Sys.Mon.Server
   alias Unit.Information
-  alias Unit.Time
-
-  @period_ms 29
-  @tau_s 30
 
   @moduledoc """
   Monitors instantaneous memory pressure.
 
-  Samples `/proc/meminfo` every #{@period_ms} ms and reports *used* memory as
-  `MemTotal - MemAvailable`, smoothed with a #{@tau_s}-second time constant. Although
+  Samples `/proc/meminfo` every 29 ms and reports *used* memory as
+  `MemTotal - MemAvailable`, smoothed with a 30-second time constant. Although
   memory is an alpha (hard) budget tracked from VM specs, the live figure is useful
   for detecting actual pressure. Readings are `Unit.Information`.
   """
 
+  # Prime sampling period, co-prime with the sibling monitors so their reads
+  # rarely land on the same tick.
   @impl true
-  def period, do: Time.ms(@period_ms)
+  @spec period :: Unit.Time.t()
+  def period, do: Unit.Time.ms(29)
 
   @impl true
-  def tau, do: Time.s(@tau_s)
+  @spec tau :: Unit.Time.t()
+  def tau, do: Unit.Time.s(30)
 
   @doc "The latest instantaneous + filtered used memory (`Unit.Information` readings)."
   @spec value() :: Server.Reading.t()

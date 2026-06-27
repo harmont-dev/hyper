@@ -15,8 +15,8 @@ defmodule Hyper.Node.Layer.Repo do
   @decorate with_span("Hyper.Node.Layer.Repo.test_system")
   def test_system do
     cond do
-      not File.exists?(Hyper.Config.layer_dir()) -> {:error, :layer_dir_not_found}
-      not File.dir?(Hyper.Config.layer_dir()) -> {:error, :layer_dir_not_dir}
+      not File.exists?(Hyper.Cfg.Dirs.layer_dir()) -> {:error, :layer_dir_not_found}
+      not File.dir?(Hyper.Cfg.Dirs.layer_dir()) -> {:error, :layer_dir_not_dir}
       true -> :ok
     end
   end
@@ -25,7 +25,7 @@ defmodule Hyper.Node.Layer.Repo do
   @spec find_layer(Hyper.Layer.id()) :: {:ok, Path.t()} | {:error, File.posix()}
   @decorate with_span("Hyper.Node.Layer.Repo.find_layer")
   def find_layer(id) do
-    path = Path.join([Hyper.Config.layer_dir(), layer_basename(id)])
+    path = Path.join([Hyper.Cfg.Dirs.layer_dir(), layer_basename(id)])
 
     case File.stat(path) do
       {:ok, _stat} -> {:ok, path}

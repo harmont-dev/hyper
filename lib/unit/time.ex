@@ -42,6 +42,35 @@ defmodule Unit.Time do
   @doc "The zero duration (additive identity)."
   @spec zero() :: t()
   def zero, do: %__MODULE__{ns: 0}
+
+  @units %{
+    "ns" => 1,
+    "us" => @us,
+    "ms" => @ms,
+    "s" => @s,
+    "m" => 60 * @s,
+    "h" => 3600 * @s
+  }
+
+  @doc ~s(Parse a duration string like `"60s"`/`"100ms"`/`"1h"`. Suffixes: ns/us/ms/s/m/h.)
+  @spec parse(String.t()) :: {:ok, t()} | {:error, {:bad_unit, String.t()}}
+  def parse(s) when is_binary(s) do
+    with {n, suffix} when n >= 0 <- Integer.parse(String.trim(s)),
+         {:ok, mult} <- Map.fetch(@units, String.trim(suffix)) do
+      {:ok, %__MODULE__{ns: n * mult}}
+    else
+      _ -> {:error, {:bad_unit, s}}
+    end
+  end
+
+  @doc "Like `parse/1` but raises `ArgumentError` on bad input."
+  @spec parse!(String.t()) :: t()
+  def parse!(s) do
+    case parse(s) do
+      {:ok, v} -> v
+      {:error, _} -> raise ArgumentError, "invalid Time string: #{inspect(s)}"
+    end
+  end
 end
 
 defimpl Unit.Quantity, for: Unit.Time do

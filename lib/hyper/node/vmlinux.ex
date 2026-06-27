@@ -5,7 +5,7 @@ defmodule Hyper.Node.Vmlinux do
   Two sources, in priority order:
 
     1. An operator-configured path for the node's architecture, via
-       `config :hyper, vmlinux: %{<arch> => <path>}` (see `Hyper.Config.vmlinux/0`).
+       `config :hyper, Hyper.Cfg.VmLinux, amd64: ..., aarch64: ...` (see `Hyper.Cfg.VmLinux.images/0`).
        If set, it wins - the operator can pin a custom kernel.
     2. Otherwise, the default kernel downloaded by
        `Hyper.Node.FireVMM.VmLinux.Provider` (highest version for the arch).
@@ -24,7 +24,7 @@ defmodule Hyper.Node.Vmlinux do
   """
   @spec path(Sys.Arch.t()) :: Path.t()
   def path(arch) do
-    case Map.fetch(Hyper.Config.vmlinux(), arch) do
+    case Map.fetch(Hyper.Cfg.VmLinux.images(), arch) do
       {:ok, path} ->
         path
 
@@ -44,7 +44,7 @@ defmodule Hyper.Node.Vmlinux do
   @spec test_system() :: :ok | {:error, term()}
   def test_system do
     with {:ok, arch} <- Sys.Arch.current() do
-      case Map.fetch(Hyper.Config.vmlinux(), arch) do
+      case Map.fetch(Hyper.Cfg.VmLinux.images(), arch) do
         {:ok, path} ->
           present(path)
 
