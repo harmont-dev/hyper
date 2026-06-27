@@ -26,19 +26,13 @@ Note the keys are abbreviated for better layout:
     configuration section expands to
     `:hyper, Hyper.Cfg.Tools, mke2fs: "/path/to/mke2fs"`.
 
-## Root Keys (`Hyper.Cfg`, `-`)
+## Root Keys
 
 | Config Key | `config.exs` | `config.toml` | Default | Notes |
 | ---------- | ------------ | ------------- | ------- | ----- |
 | `work_dir` | -            | `work_dir`    | -       | [Absolute Path](#absolute-path) where `Hyper` creates its working tree. |
 
 <!-- tabs open -->
-### `config.exs`
-
-```elixir
-# `work_dir` is shared with hyper-suidhelper, so it is set in config.toml only.
-```
-
 ### `config.toml`
 
 ```toml
@@ -46,7 +40,7 @@ work_dir = "/srv/hyper"
 ```
 <!-- tabs close -->
 
-## Tool Configuration (`Hyper.Cfg.Tools`, `[tools]`)
+## Tool Configuration
 
 Hyper relies on a large number of external tools, of which the paths are
 configurable:
@@ -67,6 +61,8 @@ configurable:
 ### `config.exs`
 
 ```elixir
+# Note that not all the tools are available here. Privileged tools, used by the
+# suidhelper, cannot be configured here.
 config :hyper, Hyper.Cfg.Tools,
   skopeo: "/usr/local/bin/skopeo",
   mke2fs: "/usr/local/bin/mke2fs",
@@ -93,7 +89,7 @@ suidhelper = "/usr/local/bin/hyper-suidhelper"
 ```
 <!-- tabs close -->
 
-## Jail Confinement (`-`, `[jails]`)
+## Jail Confinement
 
 | Config Key      | `config.exs` | `config.toml`    | Default   | Notes |
 | --------------- | ------------ | ---------------- | --------- | ----- |
@@ -101,12 +97,6 @@ suidhelper = "/usr/local/bin/hyper-suidhelper"
 | `uid_gid_range` | -            | `.uid_gid_range` | -         | [Range](#range) limiting the UID/GID values given to VMs. Each VM receives its own UID/GID pair, within these bounds. Must not be an existing user/group. |
 
 <!-- tabs open -->
-### `config.exs`
-
-```elixir
-# Jail confinement is shared with hyper-suidhelper, so it is set in config.toml only.
-```
-
 ### `config.toml`
 
 ```toml
@@ -116,7 +106,7 @@ uid_gid_range = [900000, 999999]
 ```
 <!-- tabs close -->
 
-## gRPC Configuration (`Hyper.Cfg.Grpc`, `[grpc]`)
+## gRPC Configuration
 
 Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface
 with `Hyper` from any language.
@@ -160,7 +150,7 @@ cred = { cert = "/etc/hyper/tls/cert.pem", key = "/etc/hyper/tls/key.pem" }
 ```
 <!-- tabs close -->
 
-## Telemetry Configuration (`Hyper.Cfg.Otel`, `[otel]`)
+## Telemetry Configuration
 
 You can configure telemetry with Hyper by adding this section to your
 configuration and Hyper will emit tracing spans as configured.
@@ -191,7 +181,7 @@ headers = { "x-honeycomb-team" = "YOUR_API_KEY" }
 ```
 <!-- tabs close -->
 
-## Budget Configuration (`Hyper.Cfg.Budget`, `[budget]`)
+## Budget Configuration
 
 Hyper allows you to control the absolute maximal budgets that are available to
 all VMs on a particular node.
@@ -237,7 +227,7 @@ net_bw_max_load = 0.8
 ```
 <!-- tabs close -->
 
-## VmLinux Paths (`Hyper.Cfg.VmLinux`, `[vmlinux]`)
+## VmLinux Paths
 
 Hyper requires Linux images for the architectures it runs on:
 
@@ -264,7 +254,7 @@ aarch64 = "/srv/hyper/redist/vmlinux/vmlinux-aarch64"
 ```
 <!-- tabs close -->
 
-## Image Configuration (`Hyper.Cfg.Img`, `[img]`)
+## Image Configuration
 
 Hyper's image provisioning layer has a large set of configuration flags
 enabling you to tweak how you want Hyper to manage images.
@@ -291,7 +281,7 @@ store = "/srv/hyper/layers"
 
 Additionally, sub-sections are available.
 
-### Database Configuration (`Hyper.Cfg.Img.Db`, `[img.db]`)
+### Database Configuration
 
 | Config Key | `config.exs` | `config.toml` | Default   | Notes |
 | ---------- | ------------ | ------------- | --------- | ----- |
@@ -310,15 +300,9 @@ config :hyper, Hyper.Cfg.Img.Db,
   password: System.fetch_env!("HYPER_DB_PASSWORD"),
   hostname: "db.internal"
 ```
-
-### `config.toml`
-
-```toml
-# Database credentials are secrets -- set them in config.exs only.
-```
 <!-- tabs close -->
 
-### Garbage Collector Configuration (`Hyper.Cfg.Img.Gc`, `[img.gc]`)
+### Garbage Collector Configuration
 
 Hyper supports a mechanism to prune unreferenced image layers. Unreferenced
 image layers occur when an ungraceful crash happens, resulting in entries in
@@ -365,7 +349,7 @@ grace_period = "1h"
 ```
 <!-- tabs close -->
 
-## Cluster Topology (`Hyper.Cfg.Cluster`, `[cluster]`)
+## Cluster Topology
 
 <!-- TODO(markovejnovic): Write this -->
 
