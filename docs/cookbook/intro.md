@@ -13,16 +13,19 @@ of the aforementioned systems.
 The absolute best way to understand `Hyper` and how it works is to play around
 with it.
 
-#### Auto-redistributed
+## Getting Started
 
-`umoci` and the guest `vmlinux` kernels are downloaded, checksum-verified, and
-managed by Hyper itself; you do not install them.
+The absolute best way to get started with `Hyper` is to play with it.
 
-`firecracker` and `jailer` are not auto-downloaded. Install them with
-`mix firecracker.install [--prefix <dir>]` (default prefix `/opt/firecracker`),
-which downloads the pinned v1.16.0 release, places the binaries at
-`<prefix>/firecracker` and `<prefix>/jailer`, and prints the `/etc/hyper/config.toml`
-snippet to paste in.
+### Requirements
+
+Hyper requires the following software be installed on each node running it:
+
+  - [`skopeo`](https://github.com/containers/skopeo)
+  - [`e2fsprogs`](https://github.com/tytso/e2fsprogs)
+
+Hyper has more runtime dependencies, but they are automatically redistributed
+by Hyper.
 
 ### Installation
 
@@ -30,23 +33,30 @@ snippet to paste in.
 
 ### Configuration
 
-Almost all host configuration — `work_dir`, the `[tools]` binary paths
-(`firecracker`, `jailer`, `dmsetup`, ...), and the `[jails]` table (`cgroup`,
-`uid_gid_range`) — lives in `/etc/hyper/config.toml` (the single source of
-truth shared with the setuid helper, shown above), and every node-local path
-(`jails`, `socks`, `scratch`, `layers`) is derived from `work_dir`. None of it is
-repeated in `config :hyper`.
-
-The node's own tool paths (`skopeo`, `mke2fs`, `umoci`, `suidhelper`) now live in
-the `[tools]` table of `/etc/hyper/config.toml` alongside the privileged binaries,
-so `config :hyper` holds only the per-architecture guest kernels (each with a
-default, so the block may be omitted):
+Running `Hyper` is involved and requires a large number of pre-requisites. The
+configuration of `:hyper` can be done by creating a `config :hyper` entry in
+your `config.exs`. Refer to the given snippet for details on each
+configuration.
 
 ```elixir
 config :hyper,
-  # Per-architecture guest kernel images placed on the host.
-  vmlinux: %{x86_64: "/srv/hyper/redist/vmlinux/vmlinux-x86_64"}
+  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
+  jailer_bin: "/opt/firecracker/jailer-v1.16.0-x86_64",
+  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
+  firecracker_bin: "/opt/firecracker/firecracker-v1.16.0-x86_64",
+  # You must create a parent cgroup on your system. Continue reading for
+  # further details.
+  cgroup_parent: "hyper",
+  # TODO(markovejnovic): Merge these directories into one.
+  jailer_chroot_base: "/srv/hyper/jails",
+  socket_dir: "/srv/hyper/socks",
+  scratch_dir: "/srv/hyper/scratch",
+  # Hyper requires that each VM you pass 
+  uid_gid_range: {900_000, 999_999},
+  layer_dir: "/srv/hyper/layers"
 ```
+
+<!-- TODO(markovejnovic): Update the config section. -->
 
 ### Usage
 
