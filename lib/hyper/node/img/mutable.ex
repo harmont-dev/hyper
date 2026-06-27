@@ -120,6 +120,14 @@ defmodule Hyper.Node.Img.Mutable do
   def handle_info(:idle_timeout, state), do: {:noreply, state}
 
   @impl true
+  # Each privileged command runs through `System.cmd`, which links a transient
+  # port to this process and returns only once that command has finished. Because
+  # we trap exits (for `terminate/2` teardown), the now-defunct port's exit lands
+  # here afterwards -- stale by construction, whatever its reason -- so ignore any
+  # port exit. (A linked *process* exiting is a different event and still raises.)
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
+
+  @impl true
   def terminate(_reason, state) do
     # Destroy the thin volume, then release the image (its monitor on us also
     # fires, but releasing explicitly keeps teardown deterministic).
