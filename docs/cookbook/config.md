@@ -241,16 +241,16 @@ Hyper requires Linux images for the architectures it runs on:
 
 ```elixir
 config :hyper, Hyper.Cfg.VmLinux,
-  amd64: "/srv/hyper/redist/vmlinux/vmlinux-amd64",
-  aarch64: "/srv/hyper/redist/vmlinux/vmlinux-aarch64"
+  amd64: "/opt/hyper/kernels/vmlinux-amd64",
+  aarch64: "/opt/hyper/kernels/vmlinux-aarch64"
 ```
 
 ### `config.toml`
 
 ```toml
 [vmlinux]
-amd64 = "/srv/hyper/redist/vmlinux/vmlinux-amd64"
-aarch64 = "/srv/hyper/redist/vmlinux/vmlinux-aarch64"
+amd64 = "/opt/hyper/kernels/vmlinux-amd64"
+aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 ```
 <!-- tabs close -->
 
@@ -268,14 +268,14 @@ enabling you to tweak how you want Hyper to manage images.
 
 ```elixir
 config :hyper, Hyper.Cfg.Img,
-  store: "/srv/hyper/layers"
+  store: "/mnt/hyper/layers"
 ```
 
 ### `config.toml`
 
 ```toml
 [img]
-store = "/srv/hyper/layers"
+store = "/mnt/hyper/layers"
 ```
 <!-- tabs close -->
 
@@ -414,7 +414,7 @@ config :hyper, Hyper.Cfg.Budget,
   net_bw_max_load: 0.8
 
 config :hyper, Hyper.Cfg.Img,
-  store: "/srv/hyper/layers"
+  store: "/mnt/hyper/layers"
 
 config :hyper, Hyper.Cfg.Img.Db,
   database: "hyper",
@@ -455,11 +455,11 @@ net_bw_cap = "1GiBps"
 net_bw_max_load = 0.8
 
 [vmlinux]
-amd64 = "/srv/hyper/redist/vmlinux/vmlinux-amd64"
-aarch64 = "/srv/hyper/redist/vmlinux/vmlinux-aarch64"
+amd64 = "/opt/hyper/kernels/vmlinux-amd64"
+aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 
 [img]
-store = "/srv/hyper/layers"
+store = "/mnt/hyper/layers"
 
 [img.gc]
 batch_size = 200
