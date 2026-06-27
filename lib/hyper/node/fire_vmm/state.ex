@@ -58,7 +58,7 @@ defmodule Hyper.Node.FireVMM.State do
     :gen_statem.start_link(via(id), __MODULE__, opts, [])
   end
 
-  @spec stop(Hyper.Vm.id()) :: :ok
+  @spec stop(Hyper.Vm.Id.t()) :: :ok
   def stop(id) do
     :gen_statem.call(via(id), :stop)
   end
@@ -174,7 +174,7 @@ defmodule Hyper.Node.FireVMM.State do
 
     # Cold boot, issued through the Client and aborting at the first error:
     # machine-config -> boot-source -> each drive -> each NIC -> InstanceStart.
-    @spec apply_spec(Hyper.Vm.id(), BootSpec.Cold.t()) :: :ok | {:error, term()}
+    @spec apply_spec(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
     @decorate with_span("Hyper.Node.FireVMM.State.Configuring.apply_spec", include: [:id])
     defp apply_spec(id, %BootSpec.Cold{} = cold) do
       via = Client.via(id)

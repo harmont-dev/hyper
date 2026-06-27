@@ -49,7 +49,7 @@ defmodule Hyper.Img.Db.Lease do
   Upserts on `(node_id, vm_id)` - the same call both takes a fresh lease and
   heartbeats a live one.
   """
-  @spec bump(Hyper.Img.id(), Hyper.Vm.id(), Unit.Time.t()) ::
+  @spec bump(Hyper.Img.id(), Hyper.Vm.Id.t(), Unit.Time.t()) ::
           {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t()}
   @decorate with_span("Hyper.Img.Db.Lease.bump", include: [:image_id, :vm_id])
   def bump(image_id, vm_id, ttl) do
@@ -72,7 +72,7 @@ defmodule Hyper.Img.Db.Lease do
   Release the lease issued to the given node_id and the given vm_id. Since each VM only ever uses
   one image, it is not necessary to specify the image id.
   """
-  @spec release(Hyper.Vm.id()) :: :ok
+  @spec release(Hyper.Vm.Id.t()) :: :ok
   @decorate with_span("Hyper.Img.Db.Lease.release", include: [:vm_id])
   def release(vm_id) do
     query = from(l in __MODULE__, where: l.node_id == ^to_string(node()) and l.vm_id == ^vm_id)

@@ -29,7 +29,7 @@ defmodule Hyper.Node.Img.Mutable do
     @enforce_keys [:img_id, :vm_id]
     defstruct [:img_id, :vm_id]
 
-    @type t :: %__MODULE__{img_id: Hyper.Img.id(), vm_id: Hyper.Vm.id()}
+    @type t :: %__MODULE__{img_id: Hyper.Img.id(), vm_id: Hyper.Vm.Id.t()}
   end
 
   defmodule State do
@@ -129,7 +129,7 @@ defmodule Hyper.Node.Img.Mutable do
   end
 
   @doc false
-  @spec dm_name(Hyper.Vm.id()) :: String.t()
+  @spec dm_name(Hyper.Vm.Id.t()) :: String.t()
   def dm_name(vm_id), do: "hyper-rw-#{sanitize(vm_id)}"
 
   defp sanitize(id), do: String.replace(id, ~r/[^A-Za-z0-9._-]/, "_")

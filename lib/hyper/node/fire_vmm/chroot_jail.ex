@@ -27,7 +27,7 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
   `uid:gid`), and return `cold` with its kernel + rootfs paths rewritten to their
   in-jail equivalents. Fails the boot if either artifact cannot be staged.
   """
-  @spec stage(Hyper.Vm.id(), non_neg_integer(), non_neg_integer(), Cold.t()) ::
+  @spec stage(Hyper.Vm.Id.t(), non_neg_integer(), non_neg_integer(), Cold.t()) ::
           {:ok, Cold.t()} | {:error, term()}
   @decorate with_span("Hyper.Node.FireVMM.ChrootJail.stage", include: [:vm_id])
   def stage(vm_id, uid, gid, %Cold{} = cold) do
