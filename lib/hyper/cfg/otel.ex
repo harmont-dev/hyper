@@ -2,14 +2,12 @@ defmodule Hyper.Cfg.Otel do
   @moduledoc """
   OpenTelemetry exporter configuration. Resolved from `config :hyper,
   Hyper.Cfg.Otel, proto:/endpoint:/headers:` (config.exs), the `[otel]` toml
-  table, then the `HONEYCOMB_API_KEY` / `OTEL_EXPORTER_OTLP_ENDPOINT` env vars.
+  table, then the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var.
   `config/runtime.exs` calls `exporter_options/1` and feeds the result to
   `config :opentelemetry_exporter`.
   """
 
   import Hyper.Cfg, only: [fetch_cfg: 1]
-
-  @honeycomb "https://api.honeycomb.io"
 
   @doc "Resolve the `:opentelemetry_exporter` options, or `:none`."
   @spec exporter_options(keyword()) :: {:ok, keyword()} | :none
@@ -25,7 +23,7 @@ defmodule Hyper.Cfg.Otel do
          [
            otlp_protocol: proto(pick(exs, :proto, "otel.proto")),
            otlp_endpoint: ep,
-           otlp_headers: headers(pick(exs, :headers, "otel.headers") || env_headers())
+           otlp_headers: headers(pick(exs, :headers, "otel.headers"))
          ]}
     end
   end
@@ -56,21 +54,7 @@ defmodule Hyper.Cfg.Otel do
   defp headers(_), do: []
 
   @spec env_endpoint() :: String.t() | nil
-  defp env_endpoint do
-    cond do
-      nonempty(System.get_env("HONEYCOMB_API_KEY")) -> @honeycomb
-      ep = nonempty(System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT")) -> ep
-      true -> nil
-    end
-  end
-
-  @spec env_headers() :: [{String.t(), String.t()}]
-  defp env_headers do
-    case nonempty(System.get_env("HONEYCOMB_API_KEY")) do
-      nil -> []
-      key -> [{"x-honeycomb-team", key}]
-    end
-  end
+  defp env_endpoint, do: nonempty(System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT"))
 
   @spec nonempty(String.t() | nil) :: String.t() | nil
   defp nonempty(s) when is_binary(s) and s != "", do: s

@@ -10,22 +10,16 @@ defmodule Hyper.Cfg.JailsTest do
     :ok
   end
 
-  test "defaults match the helper's compiled-in defaults" do
-    assert Jails.cgroup() == "hyper"
-    assert Jails.uid_gid_range() == {900_000, 999_999}
+  test "uid_gid_range is required: raises when [jails] omits it" do
+    assert_raise Hyper.Cfg.MissingError, fn -> Jails.uid_gid_range() end
   end
 
-  test "reads the [jails] table when present" do
-    Toml.put_cache(%{"jails" => %{"cgroup" => "fleet", "uid_gid_range" => [800_000, 899_999]}})
-    assert Jails.cgroup() == "fleet"
+  test "uid_gid_range parses [min, max] integers and refuses anything else" do
+    Toml.put_cache(%{"jails" => %{"uid_gid_range" => [800_000, 899_999]}})
     assert Jails.uid_gid_range() == {800_000, 899_999}
-  end
 
-  test "uid_gid_range parses a TOML [min, max] array into a tuple" do
-    assert Jails.range_from([800_000, 899_999]) == {800_000, 899_999}
-    assert Jails.range_from(nil) == {900_000, 999_999}
-    assert Jails.range_from("garbage") == {900_000, 999_999}
-    # A two-element list of non-integers must fall to the default, never a bogus tuple.
-    assert Jails.range_from(["a", "b"]) == {900_000, 999_999}
+    # A non-integer pair must raise, never yield a bogus confinement band.
+    Toml.put_cache(%{"jails" => %{"uid_gid_range" => ["a", "b"]}})
+    assert_raise ArgumentError, fn -> Jails.uid_gid_range() end
   end
 end
