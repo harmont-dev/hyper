@@ -14,13 +14,15 @@ defmodule Sys.Mon.Cpu do
   (sampling fast only de-noises the filter; the smoothing window is set by `tau`).
   """
 
+  # Prime sampling period, co-prime with the sibling monitors so their reads
+  # rarely land on the same tick.
   @impl true
   @spec period :: Unit.Time.t()
-  def period, do: Hyper.Cfg.Mon.period(:cpu)
+  def period, do: Unit.Time.ms(23)
 
   @impl true
   @spec tau :: Unit.Time.t()
-  def tau, do: Hyper.Cfg.Mon.tau(:cpu)
+  def tau, do: Unit.Time.s(30)
 
   @doc "The latest instantaneous + filtered CPU utilization (fractions `0.0..1.0`)."
   @spec value() :: Server.Reading.t()

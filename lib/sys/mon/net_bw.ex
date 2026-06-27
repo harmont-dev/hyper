@@ -15,13 +15,15 @@ defmodule Sys.Mon.NetBw do
   20-second time constant. Readings are `Unit.Bandwidth`.
   """
 
+  # Prime sampling period, co-prime with the sibling monitors so their reads
+  # rarely land on the same tick.
   @impl true
   @spec period :: Unit.Time.t()
-  def period, do: Hyper.Cfg.Mon.period(:net_bw)
+  def period, do: Unit.Time.ms(37)
 
   @impl true
   @spec tau :: Unit.Time.t()
-  def tau, do: Hyper.Cfg.Mon.tau(:net_bw)
+  def tau, do: Unit.Time.s(20)
 
   @doc "The latest instantaneous + filtered network bandwidth (`Unit.Bandwidth` readings)."
   @spec value() :: Server.Reading.t()

@@ -14,13 +14,15 @@ defmodule Sys.Mon.Mem do
   for detecting actual pressure. Readings are `Unit.Information`.
   """
 
+  # Prime sampling period, co-prime with the sibling monitors so their reads
+  # rarely land on the same tick.
   @impl true
   @spec period :: Unit.Time.t()
-  def period, do: Hyper.Cfg.Mon.period(:mem)
+  def period, do: Unit.Time.ms(29)
 
   @impl true
   @spec tau :: Unit.Time.t()
-  def tau, do: Hyper.Cfg.Mon.tau(:mem)
+  def tau, do: Unit.Time.s(30)
 
   @doc "The latest instantaneous + filtered used memory (`Unit.Information` readings)."
   @spec value() :: Server.Reading.t()
