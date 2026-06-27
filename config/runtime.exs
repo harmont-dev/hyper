@@ -38,3 +38,18 @@ if config_env() != :test do
       config :opentelemetry, traces_exporter: :none
   end
 end
+
+# Operator overrides from a well-known location. An optional Elixir config file
+# at /etc/hyper/config.exs (override the path with HYPER_CONFIG) is merged in
+# last, so its values win over every default set above. An absent file is a
+# no-op -- the normal case in dev and CI. Skipped under :test so the suite never
+# reads host state.
+if config_env() != :test do
+  hyper_config = System.get_env("HYPER_CONFIG") || "/etc/hyper/config.exs"
+
+  if File.exists?(hyper_config) do
+    for {app, kw} <- Config.Reader.read!(hyper_config, env: config_env()) do
+      config app, kw
+    end
+  end
+end
