@@ -27,7 +27,8 @@ defmodule Hyper.Cfg do
   end
 
   @type source ::
-          {:runtime, atom() | {module(), atom()}}
+          {:exs, {keyword(), atom()}}
+          | {:runtime, atom() | {module(), atom()}}
           | {:toml, String.t()}
           | {:default, term()}
 
@@ -63,6 +64,10 @@ defmodule Hyper.Cfg do
   @spec from(source) :: {:ok, term()} | :error
   defp from({:default, value}), do: {:ok, value}
   defp from({:toml, path}), do: Hyper.Cfg.Toml.fetch(path)
+
+  # An explicit keyword list, used when config.exs is read by hand during
+  # `config/runtime.exs` boot (before it reaches app env) — see `Hyper.Cfg.Otel`.
+  defp from({:exs, {kw, key}}) when is_list(kw), do: Keyword.fetch(kw, key)
 
   defp from({:runtime, {mod, key}}) do
     case Application.get_env(:hyper, mod) do

@@ -7,7 +7,7 @@ defmodule Hyper.Cfg.Otel do
   `config :opentelemetry_exporter`.
   """
 
-  import Hyper.Cfg, only: [fetch_cfg: 1]
+  import Hyper.Cfg, only: [get_cfg: 1]
 
   @doc "Resolve the `:opentelemetry_exporter` options, or `:none`."
   @spec exporter_options(keyword()) :: {:ok, keyword()} | :none
@@ -28,20 +28,9 @@ defmodule Hyper.Cfg.Otel do
     end
   end
 
+  # config.exs (the explicit `exs` keyword, since we run during boot) > [otel] toml.
   @spec pick(keyword(), atom(), String.t()) :: term() | nil
-  defp pick(exs, key, toml) do
-    case Keyword.fetch(exs, key) do
-      {:ok, v} ->
-        v
-
-      :error ->
-        case fetch_cfg(toml: toml),
-          do: (
-            {:ok, v} -> v
-            :error -> nil
-          )
-    end
-  end
+  defp pick(exs, key, toml), do: get_cfg(exs: {exs, key}, toml: toml, default: nil)
 
   @spec proto(term()) :: :http_protobuf | :grpc
   defp proto(p) when p in [:http_protobuf, :grpc], do: p
