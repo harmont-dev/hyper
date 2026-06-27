@@ -146,14 +146,14 @@ defmodule Hyper.Node.Layer.Server do
     end
   end
 
+  # How long an idle layer mount lingers with no users before it is torn down.
+  @idle_grace :timer.seconds(30)
+
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
 
-    %{
-      state
-      | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:layer))
-    }
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_grace)}
   end
 
   @spec cancel_idle(State.t()) :: State.t()

@@ -69,10 +69,13 @@ defmodule Hyper.Node.FireVMM.Client do
   @spec via(Hyper.Vm.id()) :: GenServer.name()
   def via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :client})
 
+  # Cap on a single Firecracker API call.
+  @call_timeout :timer.seconds(35)
+
   @doc "Run a generated operation against this VM's daemon, serialized."
   @spec run(GenServer.server(), (keyword() -> result)) :: result when result: var
   def run(server, op_fun) when is_function(op_fun, 1) do
-    GenServer.call(server, {:run, op_fun}, Hyper.Cfg.Timeouts.fire_call_ms())
+    GenServer.call(server, {:run, op_fun}, @call_timeout)
   end
 
   @impl true

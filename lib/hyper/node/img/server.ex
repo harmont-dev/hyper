@@ -222,14 +222,14 @@ defmodule Hyper.Node.Img.Server do
     end
   end
 
+  # How long an idle image lingers with no users before it is torn down.
+  @idle_grace :timer.seconds(30)
+
   @spec arm_idle(State.t()) :: State.t()
   defp arm_idle(state) do
     state = cancel_idle(state)
 
-    %{
-      state
-      | idle_ref: Process.send_after(self(), :idle_timeout, Hyper.Cfg.Timeouts.idle_ms(:img))
-    }
+    %{state | idle_ref: Process.send_after(self(), :idle_timeout, @idle_grace)}
   end
 
   @spec cancel_idle(State.t()) :: State.t()
