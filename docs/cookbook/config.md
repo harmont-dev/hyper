@@ -158,9 +158,9 @@ configuration and Hyper will emit tracing spans as configured.
 
 | Config Key | `config.exs` | `config.toml` | Default | Notes |
 | ---------- | ------------ | ------------- | ------- | ----- |
-| `proto`    | `.proto`     | `.proto`      | -       |  |
-| `endpoint` | `.endpoint`  | `.endpoint`   | -       |  |
-| `headers`  | `.headers`   | `.headers`    | -       |  |
+| `proto`    | `.proto`     | `.proto`      | `http_protobuf` | One of `http_protobuf` or `grpc`. |
+| `endpoint` | `.endpoint`  | `.endpoint`   | -       | OTLP collector URL. Falls back to the standard `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable; telemetry is disabled when none is set. |
+| `headers`  | `.headers`   | `.headers`    | -       | Headers sent with each export, e.g. an auth token for your backend. |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -168,8 +168,8 @@ configuration and Hyper will emit tracing spans as configured.
 ```elixir
 config :hyper, Hyper.Cfg.Otel,
   proto: :http_protobuf,
-  endpoint: "https://api.honeycomb.io",
-  headers: %{"x-honeycomb-team" => "YOUR_API_KEY"}
+  endpoint: "https://otel-collector.internal:4318",
+  headers: %{"authorization" => "Bearer YOUR_TOKEN"}
 ```
 
 ### `config.toml`
@@ -177,8 +177,8 @@ config :hyper, Hyper.Cfg.Otel,
 ```toml
 [otel]
 proto = "http_protobuf"
-endpoint = "https://api.honeycomb.io"
-headers = { "x-honeycomb-team" = "YOUR_API_KEY" }
+endpoint = "https://otel-collector.internal:4318"
+headers = { "authorization" = "Bearer YOUR_TOKEN" }
 ```
 <!-- tabs close -->
 
@@ -401,8 +401,8 @@ config :hyper, Hyper.Cfg.Grpc,
 
 config :hyper, Hyper.Cfg.Otel,
   proto: :http_protobuf,
-  endpoint: "https://api.honeycomb.io",
-  headers: %{"x-honeycomb-team" => System.fetch_env!("HONEYCOMB_API_KEY")}
+  endpoint: "https://otel-collector.internal:4318",
+  headers: %{"authorization" => System.fetch_env!("OTEL_AUTH_TOKEN")}
 
 config :hyper, Hyper.Cfg.Budget,
   mem_max: Unit.Information.gib(4),
@@ -443,7 +443,7 @@ port = 50051
 
 [otel]
 proto = "http_protobuf"
-endpoint = "https://api.honeycomb.io"
+endpoint = "https://otel-collector.internal:4318"
 
 [budget]
 mem_max = "4GiB"
