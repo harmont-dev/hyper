@@ -9,7 +9,6 @@ defmodule Hyper.Cfg.Gc do
   import Hyper.Cfg, only: [get_cfg: 1]
 
   @type t :: %__MODULE__{
-          enabled: boolean(),
           batch_size: pos_integer(),
           batch_pause: Unit.Time.t(),
           sweep_interval: Unit.Time.t(),
@@ -19,7 +18,6 @@ defmodule Hyper.Cfg.Gc do
           grace_period: Unit.Time.t()
         }
   defstruct [
-    :enabled,
     :batch_size,
     :batch_pause,
     :sweep_interval,
@@ -32,7 +30,6 @@ defmodule Hyper.Cfg.Gc do
   @spec load :: t()
   def load do
     struct!(__MODULE__, [
-      {:enabled, get_cfg(runtime: {__MODULE__, :enabled}, toml: "img.gc.enabled", default: true)},
       {:batch_size,
        get_cfg(runtime: {__MODULE__, :batch_size}, toml: "img.gc.batch_size", default: 200)},
       {:batch_pause, duration(:batch_pause, "img.gc.batch_pause", Unit.Time.ms(100))},

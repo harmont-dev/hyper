@@ -60,13 +60,7 @@ defmodule Hyper.Img.Db.Gc do
   @impl true
   def init(opts) do
     config = Keyword.get(opts, :config) || Config.load()
-
-    if config.enabled do
-      {:ok, %__MODULE__{config: config}, {:continue, :acquire}}
-    else
-      Logger.info("layer gc: disabled by config; not starting")
-      :ignore
-    end
+    {:ok, %__MODULE__{config: config}, {:continue, :acquire}}
   end
 
   @impl true

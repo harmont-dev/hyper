@@ -18,7 +18,6 @@ defmodule Hyper.Cfg.GcTest do
 
   test "defaults when nothing configured" do
     cfg = Gc.load()
-    assert cfg.enabled == true
     assert cfg.batch_size == 200
     assert cfg.sweep_interval == Unit.Time.s(60)
     assert cfg.timeout == Unit.Time.s(5)

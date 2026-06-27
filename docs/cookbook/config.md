@@ -111,11 +111,12 @@ uid_gid_range = [900000, 999999]
 Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface
 with `Hyper` from any language.
 
-| Config Key | `config.exs` | `config.toml` | Default | Notes |
-| ---------- | ------------ | ------------- | ------- | ----- |
-| `enabled`  | `.enabled`   | `.enabled`    | `false` |  |
-| `port`     | `.port`      | `.port`       | `50051` | The port on which to serve the interface. |
-| `cred`     | `.cred`      | `.cred`       | `nil`   | Either a `GRPC.Credential` or a TOML struct `{ cert = "/path/to/cert.pem", key = "/path/to/key.pem"}`. Cleartext mode when `nil`. |
+| Config Key     | `config.exs`    | `config.toml`   | Default | Notes |
+| -------------- | --------------- | --------------- | ------- | ----- |
+| `enabled`      | `.enabled`      | `.enabled`      | `false` |  |
+| `port`         | `.port`         | `.port`         | `50051` | The port on which to serve the interface. |
+| `cred`         | `.cred`         | `.cred`         | `nil`   | Either a `GRPC.Credential` or a TOML struct `{ cert = "/path/to/cert.pem", key = "/path/to/key.pem"}`. Cleartext mode when `nil`. |
+| `adapter_opts` | `.adapter_opts` | `.adapter_opts` | `[]`    | Options forwarded to the gRPC server adapter, e.g. the bind address `ip: {0, 0, 0, 0}`. |
 
 > #### Uniqueness {: .info}
 >
