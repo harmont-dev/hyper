@@ -66,7 +66,7 @@ defmodule Hyper.Node.FireVMM.Client do
     GenServer.start_link(__MODULE__, opts, gen_opts(name))
   end
 
-  @spec via(Hyper.Vm.id()) :: GenServer.name()
+  @spec via(Hyper.Vm.Id.t()) :: GenServer.name()
   def via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :client})
 
   # Cap on a single Firecracker API call.
