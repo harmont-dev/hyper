@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
 
   @helper_dir "native/suidhelper"
   @source Path.join(@helper_dir, "target/release/hyper-suidhelper")
-  # Must match `Hyper.Config`'s default `suid_helper` path and the xtask's
+  # Must match `Hyper.Cfg.Tools.suidhelper/0`'s default path and the xtask's
   # `INSTALL_PATH`: a `PATH` location the unprivileged node can exec.
   @install_path "/usr/local/bin/hyper-suidhelper"
 

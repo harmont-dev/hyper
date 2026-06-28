@@ -96,10 +96,17 @@ defmodule Hyper.Node.Img.ThinPool do
 
   @impl true
   # Each privileged command runs through `System.cmd`, which links a transient
-  # port to this process; because we trap exits (for `terminate/2` teardown),
-  # the port's normal close is delivered here. Ignore it. An abnormal exit
-  # carries a non-`:normal` reason and falls through to the default handler.
-  def handle_info({:EXIT, _port, :normal}, state), do: {:noreply, state}
+  # port to this process and returns only once that command has finished. Because
+  # we trap exits (for `terminate/2` teardown), the now-defunct port's exit lands
+  # here afterwards -- stale by construction, whatever its reason -- so ignore it.
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
+
+  @impl true
+  # No process is deliberately linked here beyond those transient command ports,
+  # so a linked *process* EXIT is a genuine fault: propagate its reason (so
+  # terminate/2 still runs teardown) rather than crash opaquely on an unmatched
+  # message.
+  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
 
   @impl true
   def terminate(_reason, state) do
