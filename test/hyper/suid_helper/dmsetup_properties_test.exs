@@ -73,4 +73,17 @@ defmodule Hyper.SuidHelper.DmsetupPropertiesTest do
       assert Dmsetup.parse_targets(out) == MapSet.new(targets)
     end
   end
+
+  property "parse_names recovers the device name from each `dmsetup ls` row" do
+    check all(names <- uniq_list_of(dev(), min_length: 1, max_length: 6)) do
+      # `dmsetup ls` rows are "<name>\t(major:minor)"; order is preserved.
+      out = Enum.map_join(names, "\n", fn n -> "#{n}\t(254:0)" end)
+      assert Dmsetup.parse_names(out) == names
+    end
+  end
+
+  test "parse_names reads the empty-table sentinel as no devices" do
+    assert Dmsetup.parse_names("No devices found\n") == []
+    assert Dmsetup.parse_names("") == []
+  end
 end
