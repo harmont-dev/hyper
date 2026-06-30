@@ -1,4 +1,7 @@
 defmodule Hyper.Node.Reaper.LivenessTest do
+  # Guards the Img.Mutable.active_vm_ids/0 + Plan.orphans/3 contract: a live mutable
+  # layer protects its vm_id from reaping. The gather_live/0 union of this source into
+  # the full live set is verified by manual live-node testing (Task 4), not CI.
   use ExUnit.Case, async: false
 
   alias Hyper.Node.Img

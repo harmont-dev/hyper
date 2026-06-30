@@ -6,10 +6,12 @@ defmodule Hyper.Node.Reaper do
   whose vm_id never reboots (so `Hyper.Node.Reclaim`, which runs once at boot, and
   the relaunch-time cleanup in the FireVMM path, never get a chance to clear it).
 
-  Liveness is the whole point. The reaper consults two independent sources of
-  truth for "this vm is alive" (`Plan.orphans/3` removes their union from the
-  candidate set) and only ever touches `hyper-rw-*` dm names and per-VM cgroup
-  leaves - never `hyper-thinpool`, `hyper-img-*`, or a live VM's resources. A
+  Liveness is the whole point. The reaper consults three independent sources of
+  truth for "this vm is alive" — the local VM supervisor's children, the cluster
+  routing table, and the node's live mutable layers (`Img.Mutable.active_vm_ids/0`)
+  — (`Plan.orphans/3` removes their union from the candidate set) and only ever
+  touches `hyper-rw-*` dm names and per-VM cgroup leaves - never `hyper-thinpool`,
+  `hyper-img-*`, or a live VM's resources. A
   candidate must also survive two consecutive ticks (`Plan.confirm/2`) before it
   is reaped, so a VM caught mid-boot (resources present, not yet registered) is
   given a grace tick rather than destroyed.
