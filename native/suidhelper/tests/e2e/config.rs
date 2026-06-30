@@ -34,17 +34,28 @@ fn write_root_config(dir: &Path, body: &str) -> std::path::PathBuf {
     p
 }
 
-/// A missing config file is refused at SafeFile::open with exit code 2.
-/// The error is LoadingError::File(ValidationError::Open(ENOENT)),
-/// which displays as "open failed: <errno>".
+/// A genuinely-absent config file is NOT an error: the helper falls back to the
+/// built-in defaults (compiled into this root-owned binary, hence trusted). The
+/// default `work_dir` is `/srv/hyper`. Needs root because `sys-test` then
+/// acquires privileges to prove it can promote.
 #[test]
-fn missing_config_exits_2() {
+fn missing_config_falls_back_to_defaults_as_root() {
+    if !is_root() {
+        eprintln!("SKIP missing_config defaults: sys-test needs root");
+        return;
+    }
     let tmp = tempfile::tempdir().unwrap();
     let missing = tmp.path().join("nope.toml");
     let out = run_with_config(&missing, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(2), "missing config must exit 2");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("open failed"), "stderr: {err}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "absent config should use defaults; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
+    assert_eq!(json["sys_test"], "ok");
+    assert_eq!(json["hyper_base"], "/srv/hyper");
 }
 
 #[test]

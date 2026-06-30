@@ -1,17 +1,16 @@
-//! A validated `--bin` path.
+//! A validated tool-binary path.
 //!
-//! The caller names the binary to run, but it must be the expected tool and a
-//! binary only root could have produced. [`SafeBin`] is a newtype whose only
-//! constructor runs those checks, so holding one is proof the path was
-//! validated. The const string parameter `NAME` is the basename it was validated
-//! against - a `SafeBin<"losetup">` can never be passed where a
-//! `SafeBin<"dmsetup">` is wanted. Combined with the [`FromStr`] impl (see
-//! `tools`), clap validates the path at argument-parse time with no per-tool
-//! boilerplate.
+//! The path of each device tool (`losetup`, `dmsetup`, `blockdev`) comes from
+//! the root-owned config file, never from the unprivileged caller. [`SafeBin`]
+//! is a newtype whose only constructor runs the safety checks, so holding one is
+//! proof the path was validated. The const string parameter `NAME` is the
+//! basename it was validated against - a `SafeBin<"losetup">` can never be
+//! passed where a `SafeBin<"dmsetup">` is wanted.
 //!
-//! These checks are what keep this from being arbitrary-root-execution: an
-//! unprivileged caller cannot point us at a binary it controls (must be
-//! root-owned, not group/other-writable, not a symlink, exact basename).
+//! These checks are what keep this from being arbitrary-root-execution: even a
+//! mistaken config entry cannot point us at a binary a non-root user controls
+//! (must be an absolute path, the exact basename, root-owned, not a symlink, not
+//! group/other-writable).
 
 use std::ffi::OsStr;
 use std::fs;
@@ -23,14 +22,14 @@ use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("--bin must be an absolute path: {0}")]
+    #[error("binary path must be absolute: {0}")]
     NotAbsolute(PathBuf),
-    #[error("--bin basename must be `{expected}`: {got}")]
+    #[error("binary basename must be `{expected}`: {got}")]
     Name {
         expected: &'static str,
         got: PathBuf,
     },
-    #[error("--bin {path}: {source}")]
+    #[error("binary {path}: {source}")]
     Stat {
         path: PathBuf,
         #[source]
@@ -44,22 +43,17 @@ pub enum Error {
     Writable(PathBuf),
 }
 
-/// A `--bin` path validated to have basename `NAME`. The wrapped path is private
-/// and the only constructor is the [`FromStr`] impl, so a `SafeBin` value cannot
-/// exist without having been checked.
+/// A tool-binary path validated to have basename `NAME`. The wrapped path is
+/// private and the only constructor is [`SafeBin::from_path`], so a `SafeBin`
+/// value cannot exist without having been checked.
 #[derive(Debug, Clone)]
 pub struct SafeBin<const NAME: &'static str>(PathBuf);
 
-// Lets clap validate `--bin` at parse time straight into a `SafeBin<NAME>`, with
-// no per-tool value parser: the const basename is the whole spec. Validates that
-// `s` is an absolute path with basename `NAME`, a regular root-owned file no
-// non-root user could have written.
-impl<const NAME: &'static str> FromStr for SafeBin<NAME> {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bin = Path::new(s);
-
+impl<const NAME: &'static str> SafeBin<NAME> {
+    /// Validate `bin` as the `NAME` tool binary: an absolute path with basename
+    /// `NAME`, a real (non-symlink) regular file owned by root that no non-root
+    /// user could have written. These checks are the whole point of the type.
+    pub fn from_path(bin: &Path) -> Result<Self, Error> {
         if !bin.is_absolute() {
             return Err(Error::NotAbsolute(bin.to_path_buf()));
         }
@@ -90,6 +84,16 @@ impl<const NAME: &'static str> FromStr for SafeBin<NAME> {
         }
 
         Ok(Self(bin.to_path_buf()))
+    }
+}
+
+// Lets a string parse straight into a validated `SafeBin<NAME>` (used by the
+// test suite); delegates to the single `from_path` constructor.
+impl<const NAME: &'static str> FromStr for SafeBin<NAME> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_path(Path::new(s))
     }
 }
 
