@@ -15,6 +15,7 @@
 
 use clap::{Parser, Subcommand};
 use hyper_suidhelper::config;
+use hyper_suidhelper::tools::jailer::{self, JailerArgs};
 use hyper_suidhelper::tools::Tool;
 use hyper_suidhelper::util::setuid_privileged::{self, Privileged};
 use serde::Serialize;
@@ -37,6 +38,9 @@ enum Command {
     Tool(Tool),
     /// Check the helper is correctly installed (can promote to root).
     SysTest,
+    /// Validate the caller's args, become root, and `execve` the firecracker
+    /// jailer in our place. Prints nothing on success (the image is replaced).
+    Jailer(JailerArgs),
     /// Print the build version and BLAKE3 checksum of this binary.
     Version,
 }
@@ -101,12 +105,21 @@ fn main() {
     config::Config::init();
 
     // Each command yields a serializable value (errors stringified to unify); we
-    // render the final JSON line here.
+    // render the final JSON line here. The jailer is the exception: it `execve`s
+    // in place, so on success it never returns and never emits JSON, and on
+    // failure it reports to stderr and exits before reaching the JSON pipeline.
     let output = match command {
         Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
         Command::SysTest => SysTest::perform()
             .map(Output::SysTest)
             .map_err(|e| e.to_string()),
+        Command::Jailer(args) => {
+            let e = jailer::run(args).expect_err("jailer::run only returns on error");
+            eprintln!("{e}");
+            // _exit bypasses atexit handlers; safe because we are permanently root
+            // at this point and must not run any cleanup registered before escalation.
+            unsafe { nix::libc::_exit(2) }
+        }
         Command::Version => unreachable!("handled above"),
     };
 
