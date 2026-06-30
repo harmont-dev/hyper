@@ -1,5 +1,5 @@
-//! `SafeBin<NAME>` is what stops `--bin` from pointing the helper at an
-//! attacker-controlled binary it would then run as root. The constructor demands
+//! `SafeBin<NAME>` is what stops a configured path from pointing the helper at
+//! an attacker-controlled binary it would then run as root. The constructor demands
 //! an absolute path, exact basename, a real (non-symlink) regular file owned by
 //! root and not group/other-writable. These assert the refusal axes; the symlink
 //! axis is root-independent, the owner axis is asserted both ways.

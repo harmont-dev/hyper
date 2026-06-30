@@ -1,7 +1,8 @@
 //! Per-tool CLI fragments and their `IsTool` implementations. Each tool lives in
-//! its own submodule and owns its own error type, operand validation, and `--bin`
-//! parser; this module owns the shared trait, the `Tool` subcommand tree, and the
-//! privilege boundary.
+//! its own submodule and owns its own error type and operand validation; this
+//! module owns the shared trait, the `Tool` subcommand tree, and the privilege
+//! boundary. The binary each tool runs is resolved from the trusted config here,
+//! never passed by the caller.
 
 mod blockdev;
 pub mod chroot_jail;
@@ -13,15 +14,15 @@ pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
 pub use losetup::{Losetup, LosetupArgs};
 
-use crate::util::safe_bin::SafeBin;
+use crate::config::Config;
 use crate::util::setuid_privileged::{self, Privileged};
 use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
-/// Errors of the dispatch layer: whatever the privilege guard or the chosen tool
-/// raises on the way out. (`--bin` and operand validation are handled by clap at
-/// parse time, so they never reach here.)
+/// Errors of the dispatch layer: an invalid configured binary (`SafeBin`), the
+/// privilege guard, or the chosen tool's own failure on the way out. (Operand
+/// validation is handled by clap at parse time, so it never reaches here.)
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error(transparent)]
@@ -65,28 +66,23 @@ pub trait IsTool {
     }
 }
 
-/// The subcommand tree: one subcommand per tool, each taking its own `--bin`
-/// with the tool-specific args flattened in from the submodule.
+/// The subcommand tree: one subcommand per tool, with the tool-specific args
+/// flattened in from the submodule. The binary each tool runs is not a caller
+/// argument - it comes from the root-owned config (see [`Config`]).
 #[derive(Subcommand)]
 pub enum Tool {
     /// Attach/detach loop devices.
     Losetup {
-        #[arg(long)]
-        bin: SafeBin<"losetup">,
         #[command(flatten)]
         args: LosetupArgs,
     },
     /// Create/remove device-mapper snapshot devices.
     Dmsetup {
-        #[arg(long)]
-        bin: SafeBin<"dmsetup">,
         #[command(flatten)]
         args: DmsetupArgs,
     },
     /// Query a block device's size.
     Blockdev {
-        #[arg(long)]
-        bin: SafeBin<"blockdev">,
         #[command(flatten)]
         args: BlockdevArgs,
     },
@@ -99,13 +95,24 @@ pub enum Tool {
 
 impl Tool {
     /// Dispatch to the selected tool's `run` (or, for `chroot-jail`, its nested
-    /// op), returning its already-serialized `Value`. The `--bin` is already
-    /// validated (it is a `SafeBin`, constructed only by its value parser).
+    /// op), returning its already-serialized `Value`. The binary path is taken
+    /// from the trusted config and validated (`SafeBin`) here, as the real uid,
+    /// before any privilege is acquired.
     pub fn run(self) -> Result<serde_json::Value, Error> {
+        let config = Config::get();
         match self {
-            Tool::Losetup { bin, args } => Losetup::new(bin.into(), args).run(),
-            Tool::Dmsetup { bin, args } => Dmsetup::new(bin.into(), args).run(),
-            Tool::Blockdev { bin, args } => Blockdev::new(bin.into(), args).run(),
+            Tool::Losetup { args } => {
+                let bin = config.losetup().map_err(|e| Error::Tool(Box::new(e)))?;
+                Losetup::new(bin.into(), args).run()
+            }
+            Tool::Dmsetup { args } => {
+                let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
+                Dmsetup::new(bin.into(), args).run()
+            }
+            Tool::Blockdev { args } => {
+                let bin = config.blockdev().map_err(|e| Error::Tool(Box::new(e)))?;
+                Blockdev::new(bin.into(), args).run()
+            }
             Tool::ChrootJail { op } => op.run(),
         }
     }

@@ -28,18 +28,6 @@ defmodule Hyper.Cfg.Tools do
   @spec jailer_configured :: {:ok, Path.t()} | :error
   def jailer_configured, do: Hyper.Cfg.Toml.fetch("tools.jailer")
 
-  @doc "dmsetup binary (privileged, config.toml-only)."
-  @spec dmsetup :: Path.t()
-  def dmsetup, do: get_cfg(toml: "tools.dmsetup", default: "/usr/sbin/dmsetup")
-
-  @doc "losetup binary (privileged, config.toml-only)."
-  @spec losetup :: Path.t()
-  def losetup, do: get_cfg(toml: "tools.losetup", default: "/usr/sbin/losetup")
-
-  @doc "blockdev binary (privileged, config.toml-only)."
-  @spec blockdev :: Path.t()
-  def blockdev, do: get_cfg(toml: "tools.blockdev", default: "/usr/sbin/blockdev")
-
   @doc "skopeo binary (node tool). config.exs > config.toml > `skopeo` on PATH."
   @spec skopeo :: String.t()
   def skopeo, do: get_cfg(runtime: {__MODULE__, :skopeo}, toml: "tools.skopeo", default: "skopeo")

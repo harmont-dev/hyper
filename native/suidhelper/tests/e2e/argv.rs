@@ -1,7 +1,7 @@
 //! L4: prove the exact argv (and empty env) the helper hands to the child tool —
-//! the one thing the design deliberately hides from the caller. We point `--bin`
-//! at a root-owned fake that writes its argv+env to a file as JSON, then assert
-//! on the reconstructed command line.
+//! the one thing the design deliberately hides from the caller. We point the
+//! tool's config path at a root-owned fake that writes its argv+env to a file as
+//! JSON, then assert on the reconstructed command line.
 #![cfg(feature = "insecure_test_seams")]
 
 use std::fs;
@@ -31,9 +31,16 @@ fn install_fake(dir: &Path, basename: &str, record: &Path, stdout_line: &str) ->
     path // root-owned because this test runs as root
 }
 
-fn write_root_config(dir: &Path) -> PathBuf {
+/// Write a root-owned config that points the named tools at the given (fake)
+/// binaries, so the helper resolves each tool's path from config rather than a
+/// caller argument.
+fn write_root_config(dir: &Path, bins: &[(&str, &Path)]) -> PathBuf {
     let p = dir.join("config.toml");
-    fs::write(&p, "work_dir = \"/srv/hyper\"\n").unwrap();
+    let mut body = String::from("work_dir = \"/srv/hyper\"\n");
+    for (key, path) in bins {
+        body.push_str(&format!("{key} = \"{}\"\n", path.display()));
+    }
+    fs::write(&p, body).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
     p
 }
@@ -60,17 +67,15 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let cfg = write_root_config(tmp.path());
     let rec = tmp.path().join("argv.json");
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
     // Deliberately weird inner spacing; the helper must re-render canonically.
     let out = run(
         &cfg,
         &[
             "dmsetup",
-            "--bin",
-            bin.to_str().unwrap(),
             "create",
             "hyper-vm1",
             "--readonly",
@@ -106,21 +111,11 @@ fn dmsetup_remove_retry_toggle_as_root() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let cfg = write_root_config(tmp.path());
     let rec = tmp.path().join("argv.json");
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
-    let out = run(
-        &cfg,
-        &[
-            "dmsetup",
-            "--bin",
-            bin.to_str().unwrap(),
-            "remove",
-            "--retry",
-            "hyper-vm1",
-        ],
-    );
+    let out = run(&cfg, &["dmsetup", "remove", "--retry", "hyper-vm1"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(recorded_argv(&rec), vec!["remove", "--retry", "hyper-vm1"]);
 }
@@ -132,16 +127,14 @@ fn dmsetup_message_create_thin_as_root() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let cfg = write_root_config(tmp.path());
     let rec = tmp.path().join("argv.json");
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
     let out = run(
         &cfg,
         &[
             "dmsetup",
-            "--bin",
-            bin.to_str().unwrap(),
             "message",
             "hyper-pool",
             "--message",
@@ -157,27 +150,63 @@ fn dmsetup_message_create_thin_as_root() {
 }
 
 #[test]
+fn dmsetup_targets_argv_and_parse_as_root() {
+    if !is_root() {
+        eprintln!("SKIP dmsetup_targets: needs root");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let rec = tmp.path().join("argv.json");
+    // Fake prints one `dmsetup targets` row; the helper returns it verbatim.
+    let bin = install_fake(tmp.path(), "dmsetup", &rec, "snapshot         v1.16.0");
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
+
+    let out = run(&cfg, &["dmsetup", "targets"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(recorded_argv(&rec), vec!["targets"]);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["result"], "targets");
+    assert_eq!(json["output"], "snapshot         v1.16.0\n");
+}
+
+#[test]
+fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
+    if !is_root() {
+        eprintln!("SKIP dmsetup_rejects_bin: needs root to own the config file");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    // A real, root-owned system file, but the wrong basename for `dmsetup`.
+    let cfg = write_root_config(tmp.path(), &[("dmsetup", Path::new("/usr/bin/env"))]);
+
+    let out = run(&cfg, &["dmsetup", "targets"]);
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "a configured binary with the wrong basename must be refused"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("basename must be"), "stderr: {err}");
+}
+
+#[test]
 fn blockdev_getsz_argv_and_parse_as_root() {
     if !is_root() {
         eprintln!("SKIP blockdev: needs root");
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let cfg = write_root_config(tmp.path());
     let rec = tmp.path().join("argv.json");
     // Fake prints "2048" as the sector count for the helper to parse.
     let bin = install_fake(tmp.path(), "blockdev", &rec, "2048");
+    let cfg = write_root_config(tmp.path(), &[("blockdev", &bin)]);
 
-    let out = run(
-        &cfg,
-        &[
-            "blockdev",
-            "--bin",
-            bin.to_str().unwrap(),
-            "--getsz",
-            "/dev/loop0",
-        ],
-    );
+    let out = run(&cfg, &["blockdev", "--getsz", "/dev/loop0"]);
     assert_eq!(
         out.status.code(),
         Some(0),
