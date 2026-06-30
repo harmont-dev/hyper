@@ -17,8 +17,8 @@ use super::safe_path::SafePath;
 use nix::dir::{Dir, Type};
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::libc::dev_t;
-use nix::sys::stat::{mknodat, Mode, SFlag};
-use nix::unistd::{dup, fchownat, linkat, unlinkat, write, Gid, Uid, UnlinkatFlags};
+use nix::sys::stat::{fchmod, fchmodat, fstatat, mknodat, FchmodatFlags, FileStat, Mode, SFlag};
+use nix::unistd::{dup, fchown, fchownat, linkat, unlinkat, write, Gid, Uid, UnlinkatFlags};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -39,6 +39,10 @@ pub enum Error {
     Mknod { name: PathBuf, source: nix::Error },
     #[error("fchownat {name:?}: {source}")]
     Chown { name: PathBuf, source: nix::Error },
+    #[error("fchmodat {name:?}: {source}")]
+    Chmod { name: PathBuf, source: nix::Error },
+    #[error("fstatat {name:?}: {source}")]
+    Stat { name: PathBuf, source: nix::Error },
     #[error("linkat -> {name:?}: {source}")]
     Link { name: PathBuf, source: nix::Error },
     #[error("dup: {0}")]
@@ -55,6 +59,8 @@ impl Error {
             | Error::Write { source, .. }
             | Error::Mknod { source, .. }
             | Error::Chown { source, .. }
+            | Error::Chmod { source, .. }
+            | Error::Stat { source, .. }
             | Error::Link { source, .. } => Some(*source),
             Error::ReadDir(source) | Error::Dup(source) => Some(*source),
         }
@@ -212,6 +218,55 @@ impl SafeDir {
         )
         .map_err(|source| Error::Chown {
             name: name.to_path_buf(),
+            source,
+        })
+    }
+
+    /// `fstat` entry `name` relative to this dir's fd without following a final
+    /// symlink (`AT_SYMLINK_NOFOLLOW`). A symlink stats as itself (`S_IFLNK`),
+    /// never its target, so a caller inspecting the file type can reject one.
+    pub fn stat(&self, name: &Path) -> Result<FileStat, Error> {
+        fstatat(Some(self.0.as_raw_fd()), name, AtFlags::AT_SYMLINK_NOFOLLOW).map_err(|source| {
+            Error::Stat {
+                name: name.to_path_buf(),
+                source,
+            }
+        })
+    }
+
+    /// `chmod` entry `name` to `mode`. Linux's `fchmodat` has no working
+    /// no-follow mode (it returns `ENOTSUP`), so this follows a final symlink;
+    /// call it only after [`stat`](Self::stat) has proven `name` is not a
+    /// symlink, so the follow is a no-op on a real (non-link) entry.
+    pub fn chmod(&self, name: &Path, mode: u32) -> Result<(), Error> {
+        fchmodat(
+            Some(self.0.as_raw_fd()),
+            name,
+            Mode::from_bits_truncate(mode),
+            FchmodatFlags::FollowSymlink,
+        )
+        .map_err(|source| Error::Chmod {
+            name: name.to_path_buf(),
+            source,
+        })
+    }
+
+    /// `fchmod` this directory through its own held fd. Unlike [`chmod`](Self::chmod),
+    /// which re-resolves a *name*, this targets the fd we already opened
+    /// `O_NOFOLLOW`, so there is no path component to swap - TOCTOU-safe on the
+    /// directory itself.
+    pub fn chmod_self(&self, mode: u32) -> Result<(), Error> {
+        fchmod(self.0.as_raw_fd(), Mode::from_bits_truncate(mode)).map_err(|source| Error::Chmod {
+            name: PathBuf::from("."),
+            source,
+        })
+    }
+
+    /// `fchown` this directory's group through its own held fd, preserving its
+    /// owner (no uid passed). Same TOCTOU guarantee as [`chmod_self`](Self::chmod_self).
+    pub fn chgrp_self(&self, gid: u32) -> Result<(), Error> {
+        fchown(self.0.as_raw_fd(), None, Some(Gid::from_raw(gid))).map_err(|source| Error::Chown {
+            name: PathBuf::from("."),
             source,
         })
     }
