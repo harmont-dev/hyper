@@ -26,14 +26,19 @@ defmodule Hyper.Node.Reaper do
   alias Hyper.Cluster.Routing
   alias Hyper.Node.FireVMM.Jailer
   alias Hyper.Node.Img
-  alias Hyper.Node.Reaper.{Config, Plan}
+  alias Hyper.Node.Reaper.Plan
   alias Hyper.SuidHelper.{ChrootJail, Dmsetup}
 
   @vm_sup Hyper.Node.VMSupervisor
 
-  defstruct [:config, last_orphans: MapSet.new()]
+  # Rest between reap ticks. Deliberately not configurable: the two-strike
+  # confirmation (`Plan.confirm/2`) already means an orphan is reaped at most one
+  # interval after it is first seen, so the exact value is not load-bearing.
+  @interval Unit.Time.s(60)
 
-  @type t :: %__MODULE__{config: Config.t(), last_orphans: MapSet.t(String.t())}
+  defstruct last_orphans: MapSet.new()
+
+  @type t :: %__MODULE__{last_orphans: MapSet.t(String.t())}
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -41,31 +46,24 @@ defmodule Hyper.Node.Reaper do
   end
 
   @impl true
-  def init(opts) do
-    config = Keyword.get(opts, :config) || Config.load()
-
-    if config.enabled do
-      schedule(config)
-      {:ok, %__MODULE__{config: config}}
-    else
-      Logger.info("reaper: disabled by config; not starting")
-      :ignore
-    end
+  def init(_opts) do
+    schedule()
+    {:ok, %__MODULE__{}}
   end
 
   @impl true
   def handle_info(:tick, state) do
     state = sweep(state)
-    schedule(state.config)
+    schedule()
     {:noreply, state}
   end
 
   # Ignore any unexpected message (port noise, stale timers) rather than crashing.
   def handle_info(_msg, state), do: {:noreply, state}
 
-  @spec schedule(Config.t()) :: reference()
-  defp schedule(config) do
-    Process.send_after(self(), :tick, Unit.Time.as_ms(config.interval))
+  @spec schedule() :: reference()
+  defp schedule do
+    Process.send_after(self(), :tick, Unit.Time.as_ms(@interval))
   end
 
   @spec sweep(t()) :: t()
