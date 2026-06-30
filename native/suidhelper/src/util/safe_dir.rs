@@ -18,7 +18,7 @@ use nix::dir::{Dir, Type};
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::libc::dev_t;
 use nix::sys::stat::{mknodat, Mode, SFlag};
-use nix::unistd::{dup, fchownat, linkat, unlinkat, Gid, Uid, UnlinkatFlags};
+use nix::unistd::{dup, fchownat, linkat, unlinkat, write, Gid, Uid, UnlinkatFlags};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -33,6 +33,8 @@ pub enum Error {
     ReadDir(#[source] nix::Error),
     #[error("unlinkat {name:?}: {source}")]
     Unlink { name: PathBuf, source: nix::Error },
+    #[error("write {name:?}: {source}")]
+    Write { name: PathBuf, source: nix::Error },
     #[error("mknodat {name:?}: {source}")]
     Mknod { name: PathBuf, source: nix::Error },
     #[error("fchownat {name:?}: {source}")]
@@ -50,6 +52,7 @@ impl Error {
         match self {
             Error::Open { source, .. }
             | Error::Unlink { source, .. }
+            | Error::Write { source, .. }
             | Error::Mknod { source, .. }
             | Error::Chown { source, .. }
             | Error::Link { source, .. } => Some(*source),
@@ -131,6 +134,39 @@ impl SafeDir {
         })?;
         // SAFETY: as above.
         Ok(unsafe { SafeFile::from_raw_fd(raw) })
+    }
+
+    /// Open existing file `name` write-only (`O_WRONLY|O_NOFOLLOW|O_CLOEXEC`, no
+    /// `O_CREAT`/`O_TRUNC`) and write `contents`. For kernel pseudo-files such as
+    /// `cgroup.kill` where a single `write` is the whole API. `O_NOFOLLOW` rejects a
+    /// symlinked `name`, so the write cannot be redirected out of this pinned dir.
+    pub fn write_file(&self, name: &Path, contents: &[u8]) -> Result<(), Error> {
+        let raw = openat(
+            Some(self.0.as_raw_fd()),
+            name,
+            OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|source| Error::Open {
+            name: name.to_path_buf(),
+            source,
+        })?;
+        // SAFETY: openat just handed us this fd; nobody else owns it.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+        let mut off = 0;
+        while off < contents.len() {
+            match write(&fd, &contents[off..]) {
+                Ok(0) => break,
+                Ok(n) => off += n,
+                Err(source) => {
+                    return Err(Error::Write {
+                        name: name.to_path_buf(),
+                        source,
+                    })
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Create a block device node `name` in this directory with the given
