@@ -81,10 +81,19 @@ defmodule Hyper.Node.Reaper do
   end
 
   # Over-counting "live" only defers a reap (safe); under-counting destroys a live
-  # VM (catastrophic). So union two independent liveness sources: the local VM
-  # supervisor's children and the cluster routing table's view of this node.
+  # VM (catastrophic). Union three independent liveness sources: the local VM
+  # supervisor's children, the cluster routing table's view of this node, and the
+  # live mutable layers (which own the hyper-rw volumes and exist during the
+  # mid-boot and idle-grace windows when a vm is in neither of the other two).
   @spec gather_live() :: MapSet.t(String.t())
-  defp gather_live, do: MapSet.union(local_live(), routed_live())
+  defp gather_live do
+    local_live()
+    |> MapSet.union(routed_live())
+    |> MapSet.union(mutable_live())
+  end
+
+  @spec mutable_live() :: MapSet.t(String.t())
+  defp mutable_live, do: MapSet.new(Img.Mutable.active_vm_ids())
 
   @spec local_live() :: MapSet.t(String.t())
   defp local_live do
