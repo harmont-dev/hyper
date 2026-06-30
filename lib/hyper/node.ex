@@ -26,6 +26,11 @@ defmodule Hyper.Node do
       real-time monitors backing the soft budget (`Hyper.Node.Budget.Soft`).
       Lives here, not at the application root, because both are per-node and only
       meaningful while this node hosts VMs.
+
+    * `Hyper.Node.Reaper` - a periodic, liveness-aware GC for per-VM host
+      resources (orphaned firecracker cgroups and `hyper-rw-*` dm volumes) stranded
+      by an unclean death whose vm_id never reboots. Started last so the VM
+      supervisor it consults for liveness is already up.
   """
 
   use Supervisor
@@ -61,7 +66,10 @@ defmodule Hyper.Node do
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
-      Hyper.Node.Img
+      Hyper.Node.Img,
+      # Last child: :one_for_one starts in order, so the VM supervisor and Img are
+      # up before the reaper's first tick can read their liveness.
+      Hyper.Node.Reaper
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
