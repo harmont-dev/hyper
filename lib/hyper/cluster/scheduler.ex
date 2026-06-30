@@ -16,6 +16,8 @@ defmodule Hyper.Cluster.Scheduler do
   alias Hyper.Vm.Instance.Spec
   alias Unit.Information
 
+  require Logger
+
   use OpenTelemetryDecorator
 
   @type layer_sizes :: [{Hyper.Layer.id(), Unit.Information.t()}]
@@ -45,8 +47,15 @@ defmodule Hyper.Cluster.Scheduler do
     |> candidates(layers)
     |> Enum.reduce_while({:error, :no_capacity}, fn node, acc ->
       case attempt.(node) do
-        {:ok, result} -> {:halt, {:ok, {node, result}}}
-        {:error, _reason} -> {:cont, acc}
+        {:ok, result} ->
+          {:halt, {:ok, {node, result}}}
+
+        {:error, reason} ->
+          # The candidate fit the snapshot but refused at confirmation time.
+          # Log the real reason: otherwise an actual boot failure on the only
+          # candidate is indistinguishable from genuine `:no_capacity`.
+          Logger.warning("scheduler: #{inspect(node)} refused placement: #{inspect(reason)}")
+          {:cont, acc}
       end
     end)
   end
