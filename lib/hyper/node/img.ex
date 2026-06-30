@@ -45,6 +45,7 @@ defmodule Hyper.Node.Img do
   def registry, do: @registry
 
   @doc false
+  @spec mutable_registry() :: atom()
   def mutable_registry, do: @mutable_registry
 
   @doc "Activate `img_id` on this node: start (or reuse) its image server."
