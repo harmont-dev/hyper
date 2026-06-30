@@ -55,15 +55,12 @@ defmodule Hyper.Node.FireVMM.Client do
     @type t :: %__MODULE__{socket_path: Path.t()}
   end
 
+  # Prod path (vm_id, no explicit name) starts unnamed and self-registers in
+  # `init` - see `Hyper.Cluster.Routing.register_self/1`. A `:name` override
+  # (test stand-ins) is honoured as a plain local name and skips registration.
   @spec start_link(Opts.t()) :: GenServer.on_start()
   def start_link(%Opts{} = opts) do
-    name =
-      case opts.name do
-        nil when not is_nil(opts.vm_id) -> via(opts.vm_id)
-        other -> other
-      end
-
-    GenServer.start_link(__MODULE__, opts, gen_opts(name))
+    GenServer.start_link(__MODULE__, opts, gen_opts(opts.name))
   end
 
   @spec via(Hyper.Vm.Id.t()) :: GenServer.name()
@@ -79,11 +76,25 @@ defmodule Hyper.Node.FireVMM.Client do
   end
 
   @impl true
-  @spec init(Opts.t()) :: {:ok, State.t()}
+  @spec init(Opts.t()) :: {:ok, State.t()} | {:stop, {:already_registered, pid()}}
   def init(%Opts{} = opts) do
-    socket_path = opts.socket_path || Jailer.host_socket(opts.vm_id)
-    {:ok, %State{socket_path: socket_path}}
+    with :ok <- register(opts) do
+      socket_path = opts.socket_path || Jailer.host_socket(opts.vm_id)
+      {:ok, %State{socket_path: socket_path}}
+    end
   end
+
+  # Register cluster-wide under {vm_id, :client} on the prod path. With an
+  # explicit name (test stand-in), the name is the local registration, so skip.
+  @spec register(Opts.t()) :: :ok | {:stop, {:already_registered, pid()}}
+  defp register(%Opts{name: nil, vm_id: vm_id}) when not is_nil(vm_id) do
+    case Hyper.Cluster.Routing.register_self({vm_id, :client}) do
+      :ok -> :ok
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  defp register(%Opts{}), do: :ok
 
   @impl true
   def handle_call({:run, op_fun}, _from, %State{socket_path: socket_path} = state) do

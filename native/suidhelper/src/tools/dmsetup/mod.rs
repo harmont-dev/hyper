@@ -52,11 +52,11 @@ enum DmOp {
         #[arg(long)]
         message: ThinMessage,
     },
-    /// List the names of existing dm devices (for stale-device reclaim).
-    Ls,
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
+    /// List the names of existing dm devices (for stale-device reclaim).
+    Ls,
 }
 
 #[derive(Serialize)]
@@ -65,8 +65,8 @@ pub enum DmsetupOut {
     Created { device: PathBuf },
     Removed,
     Messaged,
-    Listed { output: String },
     Targets { output: String },
+    Listed { output: String },
 }
 
 pub struct Dmsetup {
@@ -112,11 +112,11 @@ impl IsTool for Dmsetup {
                     .arg("0")
                     .arg(message.to_string());
             }
-            DmOp::Ls => {
-                cmd.arg("ls");
-            }
             DmOp::Targets => {
                 cmd.arg("targets");
+            }
+            DmOp::Ls => {
+                cmd.arg("ls");
             }
         }
 
@@ -137,10 +137,10 @@ impl IsTool for Dmsetup {
             },
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
-            DmOp::Ls => DmsetupOut::Listed {
+            DmOp::Targets => DmsetupOut::Targets {
                 output: String::from_utf8_lossy(&out.stdout).into_owned(),
             },
-            DmOp::Targets => DmsetupOut::Targets {
+            DmOp::Ls => DmsetupOut::Listed {
                 output: String::from_utf8_lossy(&out.stdout).into_owned(),
             },
         })

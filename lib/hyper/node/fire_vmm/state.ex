@@ -39,12 +39,13 @@ defmodule Hyper.Node.FireVMM.State do
   }
 
   @enforce_keys [:opts]
-  defstruct [:opts, :spec, :boot_deadline]
+  defstruct [:opts, :spec, :boot_deadline, api_granted: false]
 
   @type t :: %State{
           opts: Opts.t(),
           spec: BootSpec.Cold.t() | nil,
-          boot_deadline: integer() | nil
+          boot_deadline: integer() | nil,
+          api_granted: boolean()
         }
 
   # How long to wait for the daemon's API to come up before failing the boot.
@@ -54,8 +55,11 @@ defmodule Hyper.Node.FireVMM.State do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
   end
 
-  def start_link(%Opts{vm_id: id} = opts) do
-    :gen_statem.start_link(via(id), __MODULE__, opts, [])
+  # Started unnamed; the controller self-registers under `{id, :state}` from
+  # `init` (see `Hyper.Cluster.Routing.register_self/1`). `stop/1` still resolves
+  # it cluster-wide through `via/1`.
+  def start_link(%Opts{} = opts) do
+    :gen_statem.start_link(__MODULE__, opts, [])
   end
 
   @spec stop(Hyper.Vm.Id.t()) :: :ok
@@ -72,12 +76,21 @@ defmodule Hyper.Node.FireVMM.State do
   # The daemon is already (being) started by `Core` as our sibling. Read the root
   # device off the per-VM mutable layer, resolve the boot spec, set the readiness
   # deadline, and start probing the API.
-  def init(%Opts{mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} = opts) do
-    spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
-    deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
-    data = %State{opts: opts, spec: spec, boot_deadline: deadline}
+  def init(
+        %Opts{vm_id: id, mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} =
+          opts
+      ) do
+    case Hyper.Cluster.Routing.register_self({id, :state}) do
+      :ok ->
+        spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
+        deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
+        data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 
-    {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
+        {:ok, :awaiting_api, data, [{:state_timeout, 0, :probe}]}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +
@@ -110,30 +123,80 @@ defmodule Hyper.Node.FireVMM.State do
     @moduledoc "Poll the (already-launched) daemon's API socket, then advance to `:configuring`."
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
-    alias Hyper.Node.FireVMM.{Client, Opts}
+    alias Hyper.Node.FireVMM.{Client, Jailer, Opts}
+    alias Hyper.SuidHelper.ChrootJail
     alias Unit.Time
+
+    require Logger
 
     # How often to probe the daemon's API while waiting for it.
     @probe_interval Time.ms(50)
 
-    # Poll the daemon's API until it answers, then configure. Give up if the
-    # readiness deadline passes first.
+    # Hand the jailed API socket to the node user, then poll the daemon's API
+    # until it answers and advance to `:configuring`. Give up if the readiness
+    # deadline passes first. The grant must happen before the probe: firecracker
+    # creates the socket owned by the per-VM uid, so the unprivileged controller
+    # gets EACCES on connect until the helper chowns it to us.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
-      case Client.run(Client.via(id), &Operations.describe_instance/1) do
-        {:ok, %InstanceInfo{}} ->
-          {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
+      case ensure_api_granted(id, data) do
+        {:cont, data} ->
+          case Client.run(Client.via(id), &Operations.describe_instance/1) do
+            {:ok, %InstanceInfo{}} ->
+              {:next_state, :configuring, data, [{:state_timeout, 0, :configure}]}
 
-        {:error, _reason} ->
-          if System.monotonic_time(:millisecond) >= data.boot_deadline do
-            {:stop, {:shutdown, {:boot_failed, :daemon_unready}}, data}
-          else
-            {:keep_state_and_data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
+            {:error, reason} ->
+              keep_probing(id, data, reason)
           end
+
+        {:wait, data, reason} ->
+          keep_probing(id, data, reason)
       end
     end
 
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
+    end
+
+    # Ensure the jailed API socket has been handed to the node user. Idempotent
+    # once granted (we record it in `data` so we ask the helper only once).
+    # `:socket_pending` means firecracker has not created the socket yet, so we
+    # keep waiting; a hard error is logged but also tolerated until the deadline
+    # (the probe that follows would fail with EACCES anyway and drive the stop).
+    @spec ensure_api_granted(Hyper.Vm.Id.t(), State.t()) ::
+            {:cont, State.t()} | {:wait, State.t(), term()}
+    defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
+
+    defp ensure_api_granted(id, data) do
+      case ChrootJail.grant_api(Jailer.host_socket(id)) do
+        :ok ->
+          {:cont, %{data | api_granted: true}}
+
+        {:error, :socket_pending} ->
+          {:wait, data, :socket_pending}
+
+        {:error, reason} ->
+          Logger.warning("vm #{id}: grant-api failed: #{inspect(reason)}")
+          {:wait, data, {:grant_api, reason}}
+      end
+    end
+
+    # Keep waiting for readiness, re-arming the probe timer, unless the deadline
+    # has lapsed - then fail the boot, surfacing `reason` rather than swallowing
+    # it into a bare `:daemon_unready`. A persistent failure here points at the
+    # host->jail socket (path or, more often, the grant/permission step above).
+    @spec keep_probing(Hyper.Vm.Id.t(), State.t(), term()) ::
+            {:keep_state, State.t(), list()} | {:stop, term(), State.t()}
+    defp keep_probing(id, data, reason) do
+      if System.monotonic_time(:millisecond) >= data.boot_deadline do
+        Logger.warning(
+          "vm #{id}: firecracker API not reachable before deadline; " <>
+            "last probe error: #{inspect(reason)}"
+        )
+
+        {:stop, {:shutdown, {:boot_failed, {:daemon_unready, reason}}}, data}
+      else
+        {:keep_state, data, [{:state_timeout, Time.as_ms(@probe_interval), :probe}]}
+      end
     end
   end
 
@@ -145,8 +208,12 @@ defmodule Hyper.Node.FireVMM.State do
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
     alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
 
+    require Logger
+
     # Stage boot artifacts into the chroot, then issue the pre-boot config and
-    # start the guest.
+    # start the guest. Both failure paths end the boot via a supervisor restart,
+    # so log the reason here - otherwise it vanishes into the `:one_for_all`
+    # cycle and the VM just appears to relaunch for no visible cause.
     def handle(
           :state_timeout,
           :configure,
@@ -155,11 +222,17 @@ defmodule Hyper.Node.FireVMM.State do
       case ChrootJail.stage(id, uid, gid, spec) do
         {:ok, jailed_spec} ->
           case apply_spec(id, jailed_spec) do
-            :ok -> {:next_state, :running, data}
-            {:error, reason} -> {:stop, {:shutdown, {:boot_failed, reason}}, data}
+            :ok ->
+              Logger.info("vm #{id}: configured, guest starting")
+              {:next_state, :running, data}
+
+            {:error, reason} ->
+              Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
+              {:stop, {:shutdown, {:boot_failed, reason}}, data}
           end
 
         {:error, reason} ->
+          Logger.error("vm #{id}: boot failed staging jail: #{inspect(reason)}")
           {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
       end
     end
