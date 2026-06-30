@@ -40,8 +40,14 @@ defmodule Hyper.Node do
 
   def start_link(opts \\ []) do
     case test_system() do
-      :ok -> Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
-      {:error, reason} -> {:error, reason}
+      :ok ->
+        # Clear any dm/loop devices a previous unclean shutdown left behind,
+        # before the device-owning children start and collide with them.
+        :ok = Hyper.Node.Reclaim.run()
+        Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

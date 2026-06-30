@@ -52,6 +52,8 @@ enum DmOp {
         #[arg(long)]
         message: ThinMessage,
     },
+    /// List the names of existing dm devices (for stale-device reclaim).
+    Ls,
 }
 
 #[derive(Serialize)]
@@ -60,6 +62,7 @@ pub enum DmsetupOut {
     Created { device: PathBuf },
     Removed,
     Messaged,
+    Listed { output: String },
 }
 
 pub struct Dmsetup {
@@ -105,6 +108,9 @@ impl IsTool for Dmsetup {
                     .arg("0")
                     .arg(message.to_string());
             }
+            DmOp::Ls => {
+                cmd.arg("ls");
+            }
         }
 
         cmd.env_clear().output()
@@ -124,6 +130,9 @@ impl IsTool for Dmsetup {
             },
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
+            DmOp::Ls => DmsetupOut::Listed {
+                output: String::from_utf8_lossy(&out.stdout).into_owned(),
+            },
         })
     }
 }

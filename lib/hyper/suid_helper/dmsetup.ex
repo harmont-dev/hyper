@@ -72,6 +72,32 @@ defmodule Hyper.SuidHelper.Dmsetup do
     end
   end
 
+  @doc "Names of the existing dm devices."
+  @spec list() :: {:ok, [String.t()]} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.list")
+  def list do
+    case SuidHelper.exec(["dmsetup", "--bin", Hyper.Cfg.Tools.dmsetup(), "ls"]) do
+      {:ok, %{"output" => out}} -> {:ok, parse_names(out)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc false
+  @spec parse_names(String.t()) :: [String.t()]
+  def parse_names(out) do
+    case String.trim(out) do
+      # `dmsetup ls` prints this sentinel (not a device row) when there are none.
+      "No devices found" ->
+        []
+
+      _ ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.map(&(&1 |> String.split() |> List.first()))
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
   @doc "Send a thin-pool `message` to dm device `name`."
   @spec message(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])

@@ -66,6 +66,8 @@ enum LosetupOp {
     Attach(AttachArgs),
     /// Detach a loop device.
     Detach { dev: LoopDev },
+    /// List loop devices as `NAME BACK-FILE` rows (for stale-device reclaim).
+    List,
 }
 
 #[derive(Serialize)]
@@ -73,6 +75,7 @@ enum LosetupOp {
 pub enum LosetupOut {
     Attached { device: PathBuf },
     Detached,
+    Listed { output: String },
 }
 
 pub struct Losetup {
@@ -101,6 +104,15 @@ impl IsTool for Losetup {
                 let dev: &Path = dev.as_ref();
                 cmd.arg("-d").arg(dev);
             }
+            LosetupOp::List => {
+                cmd.args([
+                    "--list",
+                    "--noheadings",
+                    "--raw",
+                    "--output",
+                    "NAME,BACK-FILE",
+                ]);
+            }
         }
 
         cmd.env_clear().output()
@@ -119,6 +131,9 @@ impl IsTool for Losetup {
                 device: PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()),
             },
             LosetupOp::Detach { .. } => LosetupOut::Detached,
+            LosetupOp::List => LosetupOut::Listed {
+                output: String::from_utf8_lossy(&out.stdout).into_owned(),
+            },
         })
     }
 }

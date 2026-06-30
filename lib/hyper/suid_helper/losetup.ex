@@ -44,6 +44,31 @@ defmodule Hyper.SuidHelper.Losetup do
     end
   end
 
+  @doc "Currently-attached loop devices as `{device, backing_file}` pairs."
+  @spec list() :: {:ok, [{Path.t(), Path.t()}]} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Losetup.list")
+  def list do
+    case SuidHelper.exec(["losetup", "--bin", Hyper.Cfg.Tools.losetup(), "list"]) do
+      {:ok, %{"output" => out}} -> {:ok, parse_list(out)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc false
+  @spec parse_list(String.t()) :: [{Path.t(), Path.t()}]
+  def parse_list(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn line ->
+      # `NAME BACK-FILE` rows; a loop with no backing file has only one column
+      # (nothing for us to reclaim by file), so skip it.
+      case String.split(line, " ", parts: 2, trim: true) do
+        [dev, backing] -> [{dev, String.trim(backing)}]
+        _ -> []
+      end
+    end)
+  end
+
   @doc "Check the losetup binary is present."
   @spec test_system() :: :ok | {:error, :losetup_not_found}
   @decorate with_span("Hyper.SuidHelper.Losetup.test_system")
