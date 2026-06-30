@@ -20,6 +20,7 @@ defmodule Hyper.Node.Img do
   alias Hyper.Node.Img.ThinPool
 
   @registry Hyper.Node.Img.Registry
+  @mutable_registry Hyper.Node.Img.MutableRegistry
   @server_sup Hyper.Node.Img.Supervisor
   @mutable_sup Hyper.Node.Img.MutableSupervisor
 
@@ -31,6 +32,7 @@ defmodule Hyper.Node.Img do
   def init(_opts) do
     children = [
       {Registry, keys: :unique, name: @registry},
+      {Registry, keys: :unique, name: @mutable_registry},
       ThinPool,
       {DynamicSupervisor, strategy: :one_for_one, name: @server_sup},
       {DynamicSupervisor, strategy: :one_for_one, name: @mutable_sup}
@@ -41,6 +43,9 @@ defmodule Hyper.Node.Img do
 
   @doc false
   def registry, do: @registry
+
+  @doc false
+  def mutable_registry, do: @mutable_registry
 
   @doc "Activate `img_id` on this node: start (or reuse) its image server."
   @spec activate(Hyper.Img.id()) :: {:ok, pid()} | {:error, term()}
