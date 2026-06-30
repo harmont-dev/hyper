@@ -16,7 +16,7 @@ defmodule Hyper.Node.Img.Mutable do
   down the RO chain in turn).
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
 
   alias Hyper.Node.Img
   alias Hyper.Node.Img.{Server, ThinPool}

@@ -12,7 +12,7 @@ defmodule Hyper.Node.Img.Server do
   and releasing its layers (which then unmount once nothing else holds them).
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
   require Logger
 
   alias Hyper.Img.Db

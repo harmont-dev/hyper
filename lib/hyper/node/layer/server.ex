@@ -9,7 +9,7 @@ defmodule Hyper.Node.Layer.Server do
   grace period keeps bursty acquire/release cycles from thrashing the mount.
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
   require Logger
 
   alias Hyper.Node.Layer
