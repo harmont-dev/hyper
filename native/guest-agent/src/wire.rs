@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 
 use serde::{Deserialize, Serialize};
@@ -6,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Request {
     pub argv: Vec<String>,
     #[serde(default)]
-    pub env: Vec<(String, String)>,
+    pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]

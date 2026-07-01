@@ -4,7 +4,7 @@ use hyper_guest_agent::wire::Request;
 fn req(argv: &[&str]) -> Request {
     Request {
         argv: argv.iter().map(|s| s.to_string()).collect(),
-        env: vec![],
+        env: Default::default(),
         cwd: None,
         timeout_ms: None,
     }

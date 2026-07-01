@@ -45,7 +45,10 @@ defmodule Hyper do
   Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`, or
   `{:error, reason}` — e.g. `:agent_unavailable` if the guest agent is not yet
   listening, `:not_found` if the VM id cannot be resolved. `opts`: `:env`
-  (map), `:cwd` (string), `:timeout` (ms).
+  (map `%{String.t() => String.t()}`), `:cwd` (string), `:timeout` (ms, host-side
+  response-read timeout), `:timeout_ms` (ms, forwarded to the guest agent as an
+  exec-timeout hint), `:connect_timeout` (ms, total retry window while the guest
+  agent is starting up).
   """
   @spec exec(Hyper.Vm.t(), [String.t()], keyword()) ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}

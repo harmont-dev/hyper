@@ -21,12 +21,12 @@ pub fn run(req: &Request) -> Response {
         cmd.current_dir(cwd);
     }
     if !req.env.is_empty() {
-        cmd.env_clear().envs(req.env.iter().map(|(k, v)| (k, v)));
+        cmd.env_clear().envs(&req.env);
     }
 
     match cmd.output() {
         Ok(out) => Response {
-            // 128+signal when killed by a signal (no exit code); mirrors shells.
+            // No exit code when killed by a signal; return -1 per spec.
             exit_code: out.status.code().unwrap_or(-1),
             stdout: out.stdout,
             stderr: out.stderr,
