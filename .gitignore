@@ -48,3 +48,4 @@ docs/superpowers/
 # The expected suidhelper build identity (version + checksum) is captured from
 # the stamped binary's `version` output -- see the :suidhelper_stamp Mix compiler.
 /lib/hyper/suid_helper/expected.ex
+/priv/guest-agent/

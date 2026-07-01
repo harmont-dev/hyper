@@ -1,41 +1,42 @@
 defmodule Hyper.Node.FireVMM.GuestAgent do
   @moduledoc """
-  Resolves the per-arch path of the `hyper-guest-agent` static musl binary
-  installed by `mix guest_agent.install`.
+  Resolves the path of the `hyper-guest-agent` static musl binary that the
+  `:guest_agent_build` Mix compiler builds into `priv/guest-agent/` at compile
+  time. The agent ships inside the app (and its release) -- there is no separate
+  install step.
 
-  The binary runs as guest PID 1 inside a Firecracker microVM and must be
-  baked into the rootfs before the VM boots. `path/1` is the single source of
-  truth for where each arch's binary lives; `ensure_installed/0` verifies that
-  all expected binaries are present and executable before the node tries to use
-  them.
-
-  Install directory: `Hyper.Cfg.Dirs.guest_agent_install_dir/0`
-  (`<work_dir>/redist/guest-agent`).
+  The binary runs as guest PID 1 inside a Firecracker microVM and is baked into
+  the rootfs before the VM boots. `path/1` is the single source of truth for
+  where each arch's binary lives; `ensure_installed/0` verifies the binary for
+  *this host's* arch is present and executable -- the only one a node needs,
+  since KVM boots same-arch guests.
   """
 
-  @doc "Absolute path to the installed guest-agent binary for `arch`."
-  @spec path(Hyper.Vm.Instance.arch()) :: Path.t()
-  def path(arch), do: Path.join(install_dir(), "hyper-guest-agent-#{arch}")
+  @doc "Absolute path to the guest-agent binary for `arch` (under the app's priv dir)."
+  @spec path(Sys.Arch.t()) :: Path.t()
+  def path(arch), do: Path.join(priv_dir(), "hyper-guest-agent-#{arch}")
 
   @doc """
-  Returns `:ok` when every supported-arch binary is present and executable.
-  Returns `{:error, {:not_installed, arch}}` if a binary is missing, or
-  `{:error, {:not_executable, arch}}` if a binary exists but has no execute bit.
-  Run `mix guest_agent.install` to build and install both binaries.
+  Returns `:ok` when the guest-agent binary for the current host arch is present
+  and executable. Returns `{:error, {:not_installed, arch}}` if it is missing,
+  `{:error, {:not_executable, arch}}` if it exists without an execute bit, or
+  `{:error, {:unsupported_arch, raw}}` if the host arch is unrecognised.
+
+  The binary is produced by the `:guest_agent_build` Mix compiler; a missing one
+  means `mix compile` could not build it for this arch (see that compiler).
   """
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
-    Hyper.Vm.Instance.arches()
-    |> Enum.reduce_while(:ok, fn arch, :ok ->
+    with {:ok, arch} <- Sys.Arch.current() do
       p = path(arch)
 
       cond do
-        not File.regular?(p) -> {:halt, {:error, {:not_installed, arch}}}
-        not Sys.Posix.executable?(p) -> {:halt, {:error, {:not_executable, arch}}}
-        true -> {:cont, :ok}
+        not File.regular?(p) -> {:error, {:not_installed, arch}}
+        not Sys.Posix.executable?(p) -> {:error, {:not_executable, arch}}
+        true -> :ok
       end
-    end)
+    end
   end
 
-  defp install_dir, do: Hyper.Cfg.Dirs.guest_agent_install_dir()
+  defp priv_dir, do: Path.join(:code.priv_dir(:hyper), "guest-agent")
 end

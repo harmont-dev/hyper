@@ -14,7 +14,12 @@ defmodule Hyper.MixProject do
       # A Mix compiler (not a `compile` alias) is used because Mix honors a
       # dependency's `:compilers` but NOT its aliases or `config/` -- so this is
       # the only hook that also fires when hyper is compiled AS A DEPENDENCY.
-      compilers: [:suidhelper_stamp, :firecracker_gen, :grpc_gen | Mix.compilers()],
+      compilers: [
+        :suidhelper_stamp,
+        :guest_agent_build,
+        :firecracker_gen,
+        :grpc_gen | Mix.compilers()
+      ],
       deps: deps(),
       test_coverage: [tool: ExCoveralls],
       docs: docs(),
@@ -468,5 +473,107 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
     # ...)`: a Mix task runs once per session, so invoking it here would consume
     # the single run and leave the later `:grpc_gen` compiler's format a no-op.
     File.write!(@out, [Code.format_string!(source), "\n"])
+  end
+end
+
+defmodule Mix.Tasks.Compile.GuestAgentBuild do
+  @moduledoc """
+  Mix compiler that builds the static `hyper-guest-agent` musl binaries into
+  `priv/guest-agent/`, so the guest agent ships *inside* the app (and its
+  release) with no separate install step -- it is redistributed like the
+  generated bindings, not installed like the privileged suidhelper.
+
+  For each supported arch it runs `cargo build --release --target <musl-triple>`
+  in `native/guest-agent` and copies the binary to
+  `priv/guest-agent/hyper-guest-agent-<arch>`.
+
+  The arch matching the build host is *required* -- a failure there is a hard
+  error (missing `cargo` / musl target). Any *cross* arch is best-effort: it is
+  attempted only when its `rustup` target is installed, and a build/link failure
+  there (e.g. no cross-linker on a dev box) is a warning + skip rather than a
+  compile failure. A node only ever runs its own arch's guests (KVM is
+  same-arch), so the host binary is the sole runtime requirement; the cross copy
+  is redistribution surplus, built wherever the toolchain allows.
+
+  Always runs (cargo is incremental, so a no-op rebuild is cheap).
+  """
+
+  use Mix.Task.Compiler
+
+  @agent_dir "native/guest-agent"
+  @out_dir "priv/guest-agent"
+  @arches [x86_64: "x86_64-unknown-linux-musl", aarch64: "aarch64-unknown-linux-musl"]
+
+  @impl Mix.Task.Compiler
+  def run(_argv) do
+    File.mkdir_p!(@out_dir)
+    host = host_arch()
+    installed = installed_targets()
+
+    Enum.each(@arches, fn {arch, triple} ->
+      cond do
+        arch == host -> build!(arch, triple, required: true)
+        triple in installed -> build!(arch, triple, required: false)
+        # Cross target not installed: nothing to build, and nothing to warn about
+        # -- this host simply does not redistribute that arch.
+        true -> :ok
+      end
+    end)
+
+    {:ok, []}
+  end
+
+  defp build!(arch, triple, required: required?) do
+    case System.cmd("cargo", ["build", "--release", "--target", triple],
+           cd: @agent_dir,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        install(arch, triple)
+
+      {output, code} when required? ->
+        Mix.raise("""
+        Building the guest-agent for the host arch #{arch} (#{triple}) failed (exit #{code}):
+
+        #{output}
+        Ensure `cargo` and the musl target are installed: `rustup target add #{triple}`.
+        """)
+
+      {_output, _code} ->
+        Mix.shell().error(
+          "guest-agent: skipping cross arch #{arch} (#{triple}) -- build failed " <>
+            "(missing cross-linker?). The host arch was built; install the cross " <>
+            "toolchain to also redistribute #{arch}."
+        )
+    end
+  end
+
+  defp install(arch, triple) do
+    src = Path.join(@agent_dir, "target/#{triple}/release/hyper-guest-agent")
+    dest = Path.join(@out_dir, "hyper-guest-agent-#{arch}")
+    File.cp!(src, dest)
+    File.chmod!(dest, 0o755)
+  end
+
+  # Inlined rather than calling `Sys.Arch` because this compiler can run before
+  # the Elixir compiler has built the app modules.
+  defp host_arch do
+    sys = to_string(:erlang.system_info(:system_architecture))
+
+    cond do
+      String.contains?(sys, "x86_64") or String.contains?(sys, "amd64") -> :x86_64
+      String.contains?(sys, "aarch64") or String.contains?(sys, "arm64") -> :aarch64
+      # Fall back to x86_64 so `build!(required: true)` surfaces a clear cargo
+      # error for the real target rather than this compiler guessing.
+      true -> :x86_64
+    end
+  end
+
+  defp installed_targets do
+    case System.cmd("rustup", ["target", "list", "--installed"], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
+      # No rustup / unknown: build only the host arch (never attempt a cross build).
+      _ -> []
+    end
   end
 end
