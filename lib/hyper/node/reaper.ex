@@ -68,6 +68,16 @@ defmodule Hyper.Node.Reaper do
     Process.send_after(self(), :tick, Unit.Time.as_ms(@interval))
   end
 
+  # TODO(arch): this sweep is a periodic reconciler (desired VMs vs actual
+  # dm/cgroup state) bolted on as a *backstop* to per-process `terminate/2`
+  # cleanup. That split is the root fragility behind the `restart: :temporary`
+  # requirement in `Img.Mutable`/`Img.Server`/`Layer.Server`: resource lifetime is
+  # coupled to BEAM-process lifetime, so restart strategy is load-bearing and this
+  # reaper must independently reconstruct liveness (which then has to stay in sync
+  # with the real owners -- the exact drift that stranded/reaped live volumes).
+  # A sturdier design promotes this reconciliation to the *primary* cleanup
+  # mechanism, demoting `terminate/2` to an optimization rather than a correctness
+  # requirement -- at which point restart strategy stops being load-bearing.
   @spec sweep(t()) :: t()
   @decorate with_span("Hyper.Node.Reaper.sweep")
   defp sweep(%__MODULE__{} = state) do

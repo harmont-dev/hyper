@@ -16,6 +16,10 @@ defmodule Hyper.Node.Img.Mutable do
   down the RO chain in turn).
   """
 
+  # `:temporary` is load-bearing: on idle this server destroys its per-VM thin
+  # volume in `terminate/2`, so a `:permanent` restart would resurrect the dm
+  # device it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper`
+  # for why coupling resource lifetime to process lifetime is a smell.
   use GenServer, restart: :temporary
 
   alias Hyper.Node.Img
