@@ -20,6 +20,7 @@ defmodule Hyper.Node.Img do
   alias Hyper.Node.Img.ThinPool
 
   @registry Hyper.Node.Img.Registry
+  @mutable_registry Hyper.Node.Img.MutableRegistry
   @server_sup Hyper.Node.Img.Supervisor
   @mutable_sup Hyper.Node.Img.MutableSupervisor
 
@@ -31,6 +32,7 @@ defmodule Hyper.Node.Img do
   def init(_opts) do
     children = [
       {Registry, keys: :unique, name: @registry},
+      {Registry, keys: :unique, name: @mutable_registry},
       ThinPool,
       {DynamicSupervisor, strategy: :one_for_one, name: @server_sup},
       {DynamicSupervisor, strategy: :one_for_one, name: @mutable_sup}
@@ -41,6 +43,10 @@ defmodule Hyper.Node.Img do
 
   @doc false
   def registry, do: @registry
+
+  @doc false
+  @spec mutable_registry() :: atom()
+  def mutable_registry, do: @mutable_registry
 
   @doc "Activate `img_id` on this node: start (or reuse) its image server."
   @spec activate(Hyper.Img.id()) :: {:ok, pid()} | {:error, term()}
@@ -55,6 +61,9 @@ defmodule Hyper.Node.Img do
   @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
   @spec create_mutable(Hyper.Img.id(), Hyper.Vm.Id.t()) :: {:ok, pid()} | {:error, term()}
   def create_mutable(img_id, vm_id) do
+    # Unlike activate/1, we intentionally do NOT map {:already_started, pid} -> {:ok, pid}:
+    # vm_ids are unique per VM, so a duplicate vm_id is a bug, not a shared-server reuse.
+    # Surfacing {:error, {:already_started, pid}} enforces the one-mutable-per-vm invariant.
     case DynamicSupervisor.start_child(
            @mutable_sup,
            {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}

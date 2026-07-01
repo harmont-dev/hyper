@@ -16,7 +16,11 @@ defmodule Hyper.Node.Img.Mutable do
   down the RO chain in turn).
   """
 
-  use GenServer
+  # `:temporary` is load-bearing: on idle this server destroys its per-VM thin
+  # volume in `terminate/2`, so a `:permanent` restart would resurrect the dm
+  # device it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper`
+  # for why coupling resource lifetime to process lifetime is a smell.
+  use GenServer, restart: :temporary
 
   alias Hyper.Node.Img
   alias Hyper.Node.Img.{Server, ThinPool}
@@ -47,7 +51,8 @@ defmodule Hyper.Node.Img.Mutable do
   end
 
   @spec start_link(Opts.t()) :: GenServer.on_start()
-  def start_link(%Opts{} = opts), do: GenServer.start_link(__MODULE__, opts)
+  def start_link(%Opts{vm_id: vm_id} = opts),
+    do: GenServer.start_link(__MODULE__, opts, name: via(vm_id))
 
   @spec blk_path(GenServer.server()) :: Path.t()
   def blk_path(server), do: GenServer.call(server, :blk_path)
@@ -145,6 +150,14 @@ defmodule Hyper.Node.Img.Mutable do
   @doc false
   @spec dm_name(Hyper.Vm.Id.t()) :: String.t()
   def dm_name(vm_id), do: "hyper-rw-#{sanitize(vm_id)}"
+
+  @doc "vm_ids of every live mutable layer on this node."
+  @spec active_vm_ids() :: [Hyper.Vm.Id.t()]
+  def active_vm_ids do
+    Registry.select(Img.mutable_registry(), [{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
+
+  defp via(vm_id), do: {:via, Registry, {Img.mutable_registry(), vm_id}}
 
   defp sanitize(id), do: String.replace(id, ~r/[^A-Za-z0-9._-]/, "_")
 

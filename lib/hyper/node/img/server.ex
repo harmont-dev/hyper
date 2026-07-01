@@ -12,7 +12,11 @@ defmodule Hyper.Node.Img.Server do
   and releasing its layers (which then unmount once nothing else holds them).
   """
 
-  use GenServer
+  # `:temporary` is load-bearing: on idle this server removes its shared image dm
+  # chain in `terminate/2`, so a `:permanent` restart would resurrect the chain
+  # it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper` for why
+  # coupling resource lifetime to process lifetime is a smell.
+  use GenServer, restart: :temporary
   require Logger
 
   alias Hyper.Img.Db

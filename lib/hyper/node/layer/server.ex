@@ -9,7 +9,11 @@ defmodule Hyper.Node.Layer.Server do
   grace period keeps bursty acquire/release cycles from thrashing the mount.
   """
 
-  use GenServer
+  # `:temporary` is load-bearing: on idle this server removes its layer's dm
+  # mount in `terminate/2`, so a `:permanent` restart would resurrect the device
+  # it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper` for why
+  # coupling resource lifetime to process lifetime is a smell.
+  use GenServer, restart: :temporary
   require Logger
 
   alias Hyper.Node.Layer

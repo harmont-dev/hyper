@@ -6,10 +6,12 @@ defmodule Hyper.Node.Reaper do
   whose vm_id never reboots (so `Hyper.Node.Reclaim`, which runs once at boot, and
   the relaunch-time cleanup in the FireVMM path, never get a chance to clear it).
 
-  Liveness is the whole point. The reaper consults two independent sources of
-  truth for "this vm is alive" (`Plan.orphans/3` removes their union from the
-  candidate set) and only ever touches `hyper-rw-*` dm names and per-VM cgroup
-  leaves - never `hyper-thinpool`, `hyper-img-*`, or a live VM's resources. A
+  Liveness is the whole point. The reaper consults three independent sources of
+  truth for "this vm is alive" — the local VM supervisor's children, the cluster
+  routing table, and the node's live mutable layers (`Img.Mutable.active_vm_ids/0`)
+  — (`Plan.orphans/3` removes their union from the candidate set) and only ever
+  touches `hyper-rw-*` dm names and per-VM cgroup leaves - never `hyper-thinpool`,
+  `hyper-img-*`, or a live VM's resources. A
   candidate must also survive two consecutive ticks (`Plan.confirm/2`) before it
   is reaped, so a VM caught mid-boot (resources present, not yet registered) is
   given a grace tick rather than destroyed.
@@ -66,6 +68,16 @@ defmodule Hyper.Node.Reaper do
     Process.send_after(self(), :tick, Unit.Time.as_ms(@interval))
   end
 
+  # TODO(arch): this sweep is a periodic reconciler (desired VMs vs actual
+  # dm/cgroup state) bolted on as a *backstop* to per-process `terminate/2`
+  # cleanup. That split is the root fragility behind the `restart: :temporary`
+  # requirement in `Img.Mutable`/`Img.Server`/`Layer.Server`: resource lifetime is
+  # coupled to BEAM-process lifetime, so restart strategy is load-bearing and this
+  # reaper must independently reconstruct liveness (which then has to stay in sync
+  # with the real owners -- the exact drift that stranded/reaped live volumes).
+  # A sturdier design promotes this reconciliation to the *primary* cleanup
+  # mechanism, demoting `terminate/2` to an optimization rather than a correctness
+  # requirement -- at which point restart strategy stops being load-bearing.
   @spec sweep(t()) :: t()
   @decorate with_span("Hyper.Node.Reaper.sweep")
   defp sweep(%__MODULE__{} = state) do
@@ -81,10 +93,19 @@ defmodule Hyper.Node.Reaper do
   end
 
   # Over-counting "live" only defers a reap (safe); under-counting destroys a live
-  # VM (catastrophic). So union two independent liveness sources: the local VM
-  # supervisor's children and the cluster routing table's view of this node.
+  # VM (catastrophic). Union three independent liveness sources: the local VM
+  # supervisor's children, the cluster routing table's view of this node, and the
+  # live mutable layers (which own the hyper-rw volumes and exist during the
+  # mid-boot and idle-grace windows when a vm is in neither of the other two).
   @spec gather_live() :: MapSet.t(String.t())
-  defp gather_live, do: MapSet.union(local_live(), routed_live())
+  defp gather_live do
+    local_live()
+    |> MapSet.union(routed_live())
+    |> MapSet.union(mutable_live())
+  end
+
+  @spec mutable_live() :: MapSet.t(String.t())
+  defp mutable_live, do: MapSet.new(Img.Mutable.active_vm_ids())
 
   @spec local_live() :: MapSet.t(String.t())
   defp local_live do
