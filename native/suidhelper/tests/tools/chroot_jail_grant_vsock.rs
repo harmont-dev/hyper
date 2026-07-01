@@ -3,8 +3,8 @@
 //! The promises under test (refusal contracts first — they are the security
 //! boundary):
 //!   * shape — the socket is accepted iff it is exactly
-//!     `<exec>/<id>/root/<name>.vsock` below the jail base; any other depth or a
-//!     leaf that does not end with `.vsock` is refused before any chown;
+//!     `<exec>/<id>/root/vsock.sock` below the jail base; any other depth or a
+//!     leaf that is not `vsock.sock` is refused before any chown;
 //!   * lexical — a `.`/`..`/empty component or a relative path is always rejected
 //!     before any filesystem access;
 //!   * type — a regular file or a symlink planted at the socket path is refused
@@ -38,7 +38,7 @@ fn socket_outside_jail_base_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path().join("jail");
     fs::create_dir(&jail).unwrap();
-    let outside = tmp.path().join("elsewhere/exec/id/root/vm.vsock");
+    let outside = tmp.path().join("elsewhere/exec/id/root/vsock.sock");
     let err = grant_vsock_under(&jail, &outside).unwrap_err();
     assert!(
         matches!(err, Error::SocketPath(ValidationError::NotUnderBase)),
@@ -47,19 +47,21 @@ fn socket_outside_jail_base_is_rejected() {
 }
 
 #[test]
-fn wrong_leaf_extension_is_rejected() {
+fn wrong_leaf_name_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
-    let bad = jail.join("exec").join("id").join("root").join("evil.sock");
+    // `evil.vsock` would have passed the old suffix check — the exact-name gate
+    // must reject it.
+    let bad = jail.join("exec").join("id").join("root").join("evil.vsock");
     let err = grant_vsock_under(jail, &bad).unwrap_err();
     assert!(matches!(err, Error::SocketName(_)), "got {err:?}");
 }
 
 #[test]
-fn leaf_without_extension_is_rejected() {
+fn api_socket_name_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
-    let bad = jail.join("exec").join("id").join("root").join("notvsock");
+    let bad = jail.join("exec").join("id").join("root").join("api.socket");
     let err = grant_vsock_under(jail, &bad).unwrap_err();
     assert!(matches!(err, Error::SocketName(_)), "got {err:?}");
 }
@@ -68,7 +70,7 @@ fn leaf_without_extension_is_rejected() {
 fn too_shallow_is_shape_error() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
-    let bad = jail.join("exec").join("id").join("vm.vsock"); // missing root/
+    let bad = jail.join("exec").join("id").join("vsock.sock"); // missing root/
     let err = grant_vsock_under(jail, &bad).unwrap_err();
     assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
 }
@@ -82,7 +84,7 @@ fn too_deep_is_shape_error() {
         .join("id")
         .join("root")
         .join("extra")
-        .join("vm.vsock");
+        .join("vsock.sock");
     let err = grant_vsock_under(jail, &bad).unwrap_err();
     assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
 }
@@ -91,7 +93,7 @@ fn too_deep_is_shape_error() {
 fn dotdot_traversal_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
-    let bad = PathBuf::from(format!("{}/exec/../id/root/vm.vsock", jail.display()));
+    let bad = PathBuf::from(format!("{}/exec/../id/root/vsock.sock", jail.display()));
     let err = grant_vsock_under(jail, &bad).unwrap_err();
     assert!(
         matches!(err, Error::SocketPath(ValidationError::LooseComponents)),
@@ -102,7 +104,7 @@ fn dotdot_traversal_is_rejected() {
 #[test]
 fn relative_socket_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
-    let err = grant_vsock_under(tmp.path(), Path::new("exec/id/root/vm.vsock")).unwrap_err();
+    let err = grant_vsock_under(tmp.path(), Path::new("exec/id/root/vsock.sock")).unwrap_err();
     assert!(
         matches!(err, Error::SocketPath(ValidationError::NotAbsolute)),
         "got {err:?}",
@@ -114,7 +116,7 @@ fn missing_socket_is_pending() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let root = make_root(jail);
-    let socket = root.join("vm.vsock"); // never created
+    let socket = root.join("vsock.sock"); // never created
     let out = grant_vsock_under(jail, &socket).expect("missing socket must be Ok(Pending)");
     assert!(matches!(out, GrantOut::Pending), "got {out:?}");
 }
@@ -123,7 +125,7 @@ fn missing_socket_is_pending() {
 fn missing_jail_tree_is_pending() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
-    let socket = jail.join("exec").join("id").join("root").join("vm.vsock");
+    let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
     let out = grant_vsock_under(jail, &socket).expect("half-built jail must be Ok(Pending)");
     assert!(matches!(out, GrantOut::Pending), "got {out:?}");
 }
@@ -133,7 +135,7 @@ fn real_socket_is_granted_and_chmod_0660() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let root = make_root(jail);
-    let socket = root.join("vm.vsock");
+    let socket = root.join("vsock.sock");
     let _listener = UnixListener::bind(&socket).unwrap();
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -163,7 +165,8 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let root = make_root(jail);
-    let imposter = root.join("vm.vsock");
+    // Use the real name so the S_ISSOCK gate — not the name gate — fires.
+    let imposter = root.join("vsock.sock");
     fs::write(&imposter, b"not a socket").unwrap();
     fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
 
@@ -183,7 +186,8 @@ fn symlink_at_leaf_is_refused() {
     let root = make_root(jail);
     let target = tmp.path().join("real-target");
     fs::write(&target, b"secret").unwrap();
-    let link = root.join("vm.vsock");
+    // Use the real name so the S_ISSOCK gate fires, not the name gate.
+    let link = root.join("vsock.sock");
     symlink(&target, &link).unwrap();
 
     let err = grant_vsock_under(jail, &link).unwrap_err();
@@ -198,14 +202,14 @@ fn symlinked_component_does_not_escape() {
 
     let sentinel = tmp.path().join("sentinel");
     fs::create_dir_all(sentinel.join("id").join("root")).unwrap();
-    let outside_socket = sentinel.join("id").join("root").join("vm.vsock");
+    let outside_socket = sentinel.join("id").join("root").join("vsock.sock");
     let _listener = UnixListener::bind(&outside_socket).unwrap();
     fs::set_permissions(&outside_socket, fs::Permissions::from_mode(0o700)).unwrap();
 
     // `<jail>/exec` is a symlink to the external sentinel dir.
     symlink(&sentinel, jail.join("exec")).unwrap();
 
-    let socket = jail.join("exec").join("id").join("root").join("vm.vsock");
+    let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
     let _ = grant_vsock_under(&jail, &socket); // O_NOFOLLOW makes the walk refuse
 
     assert_eq!(
@@ -216,10 +220,10 @@ fn symlinked_component_does_not_escape() {
 }
 
 proptest! {
-    // For a socket `depth` components below the jail base with leaf `vm.vsock`
+    // For a socket `depth` components below the jail base with leaf `vsock.sock`
     // (target never created), grant_vsock_under returns Ok(Pending) iff depth == 4
     // (i.e. 3 parents), else SocketShape. The generator emits only plain names so
-    // the lexical gate never fires and the leaf always ends with `.vsock`.
+    // the lexical gate never fires and the leaf is always `vsock.sock`.
     #[test]
     fn shape_classification(
         parents in prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..6)
@@ -230,7 +234,7 @@ proptest! {
         for c in &parents {
             socket.push(c);
         }
-        socket.push("vm.vsock");
+        socket.push("vsock.sock");
         let res = grant_vsock_under(jail, &socket);
         if parents.len() == 3 {
             prop_assert!(matches!(res, Ok(GrantOut::Pending)), "depth 3 must be Pending, got {res:?}");

@@ -2,7 +2,7 @@
 //! `chroot-jail grant-vsock`: hand the firecracker vsock Unix-domain socket to
 //! the node user so the unprivileged controller can connect the guest via AF_VSOCK.
 //!
-//! Firecracker creates its vsock socket at `<jail>/root/<leaf>.vsock` owned by
+//! Firecracker creates its vsock socket at `<jail>/root/vsock.sock` owned by
 //! the per-VM uid/gid assigned by the jailer. The node user (a different uid)
 //! gets `EACCES` on connect. This op is the sibling of `grant-api`: it chowns
 //! just that one socket to the helper's CALLER and chmods it `0660`, then opens
@@ -10,7 +10,7 @@
 //!
 //! Security: the socket path is confined to `JAIL_BASE` via `SafePath`, reached
 //! by an `O_NOFOLLOW` walk, and validated to be at exactly
-//! `<exec>/<id>/root/<leaf>.vsock` below the base. `fstatat(AT_SYMLINK_NOFOLLOW)`
+//! `<exec>/<id>/root/vsock.sock` below the base. `fstatat(AT_SYMLINK_NOFOLLOW)`
 //! must report a real socket — a regular file or symlink at that name is refused.
 //! A missing socket (`ENOENT`, anywhere on the path) is `Pending`: firecracker has
 //! not configured vsock yet, so the controller keeps probing.
@@ -25,15 +25,19 @@ use thiserror::Error as ThisError;
 
 pub use super::grant::GrantOut;
 
+/// The fixed in-jail socket name Firecracker opens for vsock (mirrors the Elixir
+/// `Hyper.Node.FireVMM.Jailer` `@jail_vsock`).
+const VSOCK_NAME: &str = "vsock.sock";
+
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--socket path: {0}")]
     SocketPath(#[source] safe_path::ValidationError),
-    #[error("--socket must be exactly <exec>/<id>/root/<name>.vsock below JAIL_BASE: {0:?}")]
+    #[error("--socket must be exactly <exec>/<id>/root/vsock.sock below JAIL_BASE: {0:?}")]
     SocketShape(PathBuf),
-    #[error("--socket leaf must end with `.vsock`: {0:?}")]
+    #[error("--socket leaf must be {VSOCK_NAME:?}: {0:?}")]
     SocketName(PathBuf),
     #[error("walking to the jail root: {0}")]
     Walk(#[source] crate::util::safe_dir::Error),
@@ -65,7 +69,7 @@ fn map_grant_err(e: GrantError) -> Error {
 #[derive(Args)]
 pub struct GrantVsockArgs {
     /// Host path of the firecracker vsock socket, shape
-    /// <JAIL_BASE>/<exec>/<id>/root/<name>.vsock.
+    /// <JAIL_BASE>/<exec>/<id>/root/vsock.sock.
     #[arg(long)]
     socket: PathBuf,
 }
@@ -93,7 +97,7 @@ impl IsTool for GrantVsock {
     }
 }
 
-/// Hand `socket` (`<jail_base>/<exec>/<id>/root/<name>.vsock`) to the helper's
+/// Hand `socket` (`<jail_base>/<exec>/<id>/root/vsock.sock`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
 pub fn grant_vsock_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Error> {
@@ -102,11 +106,7 @@ pub fn grant_vsock_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Er
     if parents.len() != grant::SOCKET_PARENT_DEPTH {
         return Err(Error::SocketShape(socket.to_path_buf()));
     }
-    if !leaf
-        .to_str()
-        .map(|s| s.ends_with(".vsock"))
-        .unwrap_or(false)
-    {
+    if leaf != Path::new(VSOCK_NAME) {
         return Err(Error::SocketName(socket.to_path_buf()));
     }
 
@@ -118,5 +118,5 @@ pub fn grant_vsock_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Er
         return Ok(GrantOut::Pending);
     };
 
-    grant::grant_to_caller(root, &leaf).map_err(map_grant_err)
+    grant::grant_to_caller(root, Path::new(VSOCK_NAME)).map_err(map_grant_err)
 }
