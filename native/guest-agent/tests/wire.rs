@@ -6,13 +6,15 @@ use proptest::prelude::*;
 proptest! {
     #[test]
     fn request_roundtrips(argv in prop::collection::vec(".*", 1..5),
+                          env in prop::collection::vec((".*", ".*"), 0..4),
                           cwd in prop::option::of(".*"),
                           timeout in prop::option::of(any::<u64>())) {
-        let req = Request { argv, env: vec![("K".into(), "V".into())], cwd, timeout_ms: timeout };
+        let req = Request { argv, env, cwd, timeout_ms: timeout };
         let mut buf = Vec::new();
         write_request(&mut buf, &req).unwrap();
         let got = read_request(&mut &buf[..]).unwrap();
         prop_assert_eq!(req.argv, got.argv);
+        prop_assert_eq!(req.env, got.env);
         prop_assert_eq!(req.cwd, got.cwd);
         prop_assert_eq!(req.timeout_ms, got.timeout_ms);
     }
