@@ -44,4 +44,8 @@ defmodule Hyper.Cfg.Dirs do
   @doc "Where a node-downloaded firecracker installs (`<work_dir>/redist/firecracker`)."
   @spec firecracker_install_dir :: Path.t()
   def firecracker_install_dir, do: Path.join(redist_dir(), "firecracker")
+
+  @doc "Where the guest-agent binaries install (`<work_dir>/redist/guest-agent`)."
+  @spec guest_agent_install_dir :: Path.t()
+  def guest_agent_install_dir, do: Path.join(redist_dir(), "guest-agent")
 end
