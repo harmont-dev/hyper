@@ -8,8 +8,10 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration}
   alias Hyper.Vm.Instance
 
-  # Standard Firecracker serial-console kernel cmdline.
-  @default_boot_args "console=ttyS0 reboot=k panic=1 pci=off"
+  # Standard serial-console cmdline. `init=/hyper-init` runs our PID-1 guest
+  # agent instead of the image's own init (which for a bare OCI rootfs spins on
+  # a missing /sbin/openrc). Firecracker appends `root=/dev/vda rw` + virtio_mmio.
+  @default_boot_args "console=ttyS0 reboot=k panic=1 pci=off init=/hyper-init"
 
   defmodule Cold do
     @moduledoc "A resolved cold boot."
