@@ -178,4 +178,58 @@ defmodule Hyper.Node.FireVMM.ExecTest do
     assert CBOR.encode(%{"argv" => ["uname", "-a"], "env" => %{"PATH" => "/bin"}}) ==
              Base.decode16!("A264617267768265756E616D65622D6163656E76A16450415448642F62696E")
   end
+
+  # Cross-language response anchor — mirrors `rust_encodes_response_anchor` in
+  # native/guest-agent/tests/wire.rs. Both sides must use the identical hex string.
+  # stdout contains [0xFF, 0x00] which is invalid UTF-8: a text-string (major
+  # type 3) regression would be caught here because the byte string tag would
+  # be absent and CBOR.decode would return a list of integers instead.
+  test "CBOR response anchor decodes to byte-string tagged stdout/stderr" do
+    anchor = Base.decode16!("A369657869745F636F646503667374646F757444FF0068696673746465727240")
+
+    assert {:ok,
+            %{
+              "exit_code" => 3,
+              "stdout" => %CBOR.Tag{tag: :bytes, value: <<0xFF, 0x00, 0x68, 0x69>>},
+              "stderr" => %CBOR.Tag{tag: :bytes, value: ""}
+            }, ""} = CBOR.decode(anchor)
+  end
+
+  test "response anchor round-trips through the fake server with correct unwrapped bytes" do
+    {path, lsock} = start_fake_server()
+
+    server =
+      run_fake_server(lsock, fn sock ->
+        _req = recv_request(sock)
+        # Encode the anchor response — same logical value as the Rust anchor test
+        :ok = :gen_tcp.send(sock, encode_response(3, <<0xFF, 0x00, 0x68, 0x69>>, ""))
+      end)
+
+    assert {:ok, %{exit_code: 3, stdout: <<0xFF, 0x00, 0x68, 0x69>>, stderr: ""}} =
+             Exec.run(path, ["cmd"], connect_timeout: 500)
+
+    Task.await(server, 5_000)
+  end
+
+  test "malformed response (stdout as integer list) returns {:error, _} rather than raising" do
+    {path, lsock} = start_fake_server()
+
+    server =
+      run_fake_server(lsock, fn sock ->
+        _req = recv_request(sock)
+        # Send stdout as a CBOR integer list (missing serde_bytes tag) rather
+        # than a byte string — this is the regression the anchor guards against.
+        malformed =
+          CBOR.encode(%{
+            "exit_code" => 0,
+            "stdout" => [104, 105],
+            "stderr" => %CBOR.Tag{tag: :bytes, value: ""}
+          })
+
+        :ok = :gen_tcp.send(sock, malformed)
+      end)
+
+    assert {:error, _} = Exec.run(path, ["cmd"], connect_timeout: 500)
+    Task.await(server, 5_000)
+  end
 end

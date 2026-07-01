@@ -33,6 +33,32 @@ proptest! {
     }
 }
 
+/// Pins the cross-language response contract: the exact bytes produced here by
+/// ciborium must decode identically on the Elixir side. The anchor is mirrored
+/// in `test/hyper/node/fire_vmm/exec_test.exs` — both sides use the same hex.
+///
+/// `stdout` is `[0xff, 0x00, 0x68, 0x69]`, which is invalid UTF-8: a text-string
+/// (major type 3) encoder would either corrupt or reject it, so this anchor
+/// catches a regression where `serde_bytes` is removed from `stdout`/`stderr`
+/// and ciborium falls back to emitting a CBOR array-of-integers instead of a
+/// byte string (major type 2). hex: A369657869745F636F646503667374646F757444FF0068696673746465727240
+#[test]
+fn rust_encodes_response_anchor() {
+    const ANCHOR: &[u8] = &[
+        0xa3, 0x69, 0x65, 0x78, 0x69, 0x74, 0x5f, 0x63, 0x6f, 0x64, 0x65, 0x03, 0x66, 0x73, 0x74,
+        0x64, 0x6f, 0x75, 0x74, 0x44, 0xff, 0x00, 0x68, 0x69, 0x66, 0x73, 0x74, 0x64, 0x65, 0x72,
+        0x72, 0x40,
+    ];
+    let resp = Response {
+        exit_code: 3,
+        stdout: vec![0xff, 0x00, 0x68, 0x69],
+        stderr: vec![],
+    };
+    let mut buf = Vec::new();
+    write_response(&mut buf, &resp).unwrap();
+    assert_eq!(buf.as_slice(), ANCHOR);
+}
+
 /// Pins the cross-language contract: the exact bytes produced by Elixir's
 /// `CBOR.encode(%{"argv" => ["uname","-a"], "env" => %{"PATH" => "/bin"}})`
 /// must deserialize into a valid `Request` on the Rust side, confirming that

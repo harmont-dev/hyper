@@ -138,7 +138,10 @@ defmodule Hyper.Node.FireVMM.Exec do
     with {:ok, buffer} <- recv_until_closed(sock, timeout_ms, <<>>) do
       case CBOR.decode(buffer) do
         {:ok, %{"exit_code" => code, "stdout" => out, "stderr" => err}, _rest} ->
-          {:ok, %{exit_code: code, stdout: unwrap_bytes(out), stderr: unwrap_bytes(err)}}
+          with {:ok, stdout} <- unwrap_bytes(out),
+               {:ok, stderr} <- unwrap_bytes(err) do
+            {:ok, %{exit_code: code, stdout: stdout, stderr: stderr}}
+          end
 
         {:ok, _other, _rest} ->
           {:error, {:cbor_decode, :unexpected_shape}}
@@ -159,10 +162,11 @@ defmodule Hyper.Node.FireVMM.Exec do
     end
   end
 
-  @spec unwrap_bytes(term()) :: binary()
-  defp unwrap_bytes(%CBOR.Tag{tag: :bytes, value: bin}), do: bin
-  defp unwrap_bytes(nil), do: ""
-  defp unwrap_bytes(bin) when is_binary(bin), do: bin
+  @spec unwrap_bytes(term()) :: {:ok, binary()} | {:error, term()}
+  defp unwrap_bytes(%CBOR.Tag{tag: :bytes, value: bin}), do: {:ok, bin}
+  defp unwrap_bytes(nil), do: {:ok, ""}
+  defp unwrap_bytes(bin) when is_binary(bin), do: {:ok, bin}
+  defp unwrap_bytes(other), do: {:error, {:bad_response, {:not_bytes, other}}}
 
   @spec maybe_put(map(), String.t(), term()) :: map()
   defp maybe_put(map, _key, nil), do: map
