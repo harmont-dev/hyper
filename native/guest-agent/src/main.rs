@@ -32,13 +32,21 @@ fn serve() -> io::Result<()> {
     )?;
     // VMADDR_CID_ANY == u32::MAX; bind our listening port.
     bind(sock.as_raw_fd(), &VsockAddr::new(u32::MAX, VSOCK_PORT))?;
-    listen(&sock, Backlog::new(8).unwrap())?;
+    listen(&sock, Backlog::new(8).expect("8 is a valid backlog"))?;
     loop {
-        let fd = accept(sock.as_raw_fd())?;
+        let fd = loop {
+            match accept(sock.as_raw_fd()) {
+                Ok(fd) => break fd,
+                Err(nix::errno::Errno::EINTR) => continue,
+                Err(e) => return Err(e.into()),
+            }
+        };
         // One command per connection; serve serially (v1). A bad request only
         // closes this connection.
         let owned = unsafe { OwnedFd::from_raw_fd(fd) };
         let mut stream = std::os::unix::net::UnixStream::from(owned);
-        let _ = exec::serve_one(&mut stream.try_clone()?, &mut stream);
+        let _ = stream
+            .try_clone()
+            .map(|mut r| exec::serve_one(&mut r, &mut stream));
     }
 }
