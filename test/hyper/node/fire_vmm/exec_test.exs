@@ -5,14 +5,15 @@ defmodule Hyper.Node.FireVMM.ExecTest do
 
   Two invariants are probed:
 
-  1. **Protocol correctness** — the client sends `CONNECT 1024\\n`, encodes the
-     request frame (len-prefix + JSON), and decodes the response frame
-     (exit-code + stdout + stderr) correctly.
+  1. **Protocol correctness** — the client sends `CONNECT 1024\\n`, encodes
+     the request as a CBOR map, and decodes the response (a CBOR map whose
+     `stdout`/`stderr` are byte strings) correctly after reading to EOF.
 
   2. **Recv-accumulation** — when the server sends the response one byte at a
-     time, `run/3` still assembles the correct `{exit_code, stdout, stderr}`.
-     This would silently fail for an implementation that assumed a single
-     `recv` returns a complete frame.
+     time then closes, `run/3` still assembles the correct
+     `{exit_code, stdout, stderr}`. This would silently fail for an
+     implementation that stopped reading after the first `recv` rather than
+     accumulating until the connection closes.
   """
 
   use ExUnit.Case, async: true
@@ -59,17 +60,17 @@ defmodule Hyper.Node.FireVMM.ExecTest do
   end
 
   defp recv_request(sock) do
-    {:ok, <<len::32>>} = :gen_tcp.recv(sock, 4, 5_000)
-    {:ok, json} = :gen_tcp.recv(sock, len, 5_000)
-    Jason.decode!(json)
+    {:ok, data} = :gen_tcp.recv(sock, 0, 5_000)
+    {:ok, req, _rest} = CBOR.decode(data)
+    req
   end
 
   defp encode_response(exit_code, stdout, stderr) do
-    <<exit_code::32-signed>> <>
-      <<byte_size(stdout)::32>> <>
-      stdout <>
-      <<byte_size(stderr)::32>> <>
-      stderr
+    CBOR.encode(%{
+      "exit_code" => exit_code,
+      "stdout" => %CBOR.Tag{tag: :bytes, value: stdout},
+      "stderr" => %CBOR.Tag{tag: :bytes, value: stderr}
+    })
   end
 
   test "round-trip: argv, exit_code, stdout, stderr arrive correctly" do
@@ -116,11 +117,8 @@ defmodule Hyper.Node.FireVMM.ExecTest do
 
         for <<byte::8 <- resp>> do
           :ok = :gen_tcp.send(sock, <<byte>>)
-          # Force the receiver to consume one byte at a time. Without the
-          # accumulation loop in recv_exactly, a caller that read exactly
-          # N bytes in one shot could still pass — but if the implementation
-          # ever switched to recv(sock, 0, …) without accumulation, it would
-          # return after the first byte and misparse the frame.
+          # Slow the send so the client's recv loop is forced to accumulate
+          # across multiple calls rather than receiving everything in one shot.
           Process.sleep(1)
         end
       end)
@@ -131,7 +129,7 @@ defmodule Hyper.Node.FireVMM.ExecTest do
     Task.await(server, 10_000)
   end
 
-  test "optional env, cwd, timeout_ms are included in request JSON when set" do
+  test "optional env, cwd, timeout_ms are included in request when set" do
     {path, lsock} = start_fake_server()
 
     server =
@@ -155,7 +153,7 @@ defmodule Hyper.Node.FireVMM.ExecTest do
     Task.await(server, 5_000)
   end
 
-  test "absent env/cwd/timeout_ms are omitted from request JSON" do
+  test "absent env/cwd/timeout_ms are omitted from request" do
     {path, lsock} = start_fake_server()
 
     server =
@@ -174,5 +172,10 @@ defmodule Hyper.Node.FireVMM.ExecTest do
   test "returns :agent_unavailable when no server is listening within connect_timeout" do
     path = tmp_sock_path()
     assert {:error, :agent_unavailable} = Exec.run(path, ["cmd"], connect_timeout: 200)
+  end
+
+  test "CBOR encoder produces the cross-language anchor bytes" do
+    assert CBOR.encode(%{"argv" => ["uname", "-a"], "env" => %{"PATH" => "/bin"}}) ==
+             Base.decode16!("A264617267768265756E616D65622D6163656E76A16450415448642F62696E")
   end
 end

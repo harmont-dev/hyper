@@ -13,12 +13,14 @@ defmodule Hyper.Node.FireVMM.Exec do
       → "CONNECT 1024\\n"
       ← "OK <port>\\n"     (anything not starting with "OK " is an error)
 
-  Request frame: `<<byte_size(json)::32-unsigned-big>>` followed by UTF-8
-  JSON `{argv, env?, cwd?, timeout_ms?}`. Keys with `nil` values are omitted.
+  **Request**: a CBOR-encoded map `{argv, env?, cwd?, timeout_ms?}`. The
+  client sends the bytes directly with no framing — CBOR is self-delimiting
+  and the agent reads exactly one value via `ciborium::from_reader`.
 
-  Response frame: `<<exit_code::32-signed-big>>`, then two length-prefixed
-  byte fields — `<<stdout_len::32>>` + stdout bytes, `<<stderr_len::32>>`
-  + stderr bytes.
+  **Response**: a CBOR-encoded map `{exit_code, stdout, stderr}`. `stdout`
+  and `stderr` are CBOR byte strings that unwrap from `%CBOR.Tag{tag: :bytes}`
+  to raw binaries. The agent writes the value then closes the connection; the
+  client reads to EOF and decodes the accumulated bytes.
 
   ## Readiness retry
 
@@ -120,62 +122,52 @@ defmodule Hyper.Node.FireVMM.Exec do
 
   @spec send_request(:gen_tcp.socket(), [String.t()], keyword()) :: :ok | {:error, term()}
   defp send_request(sock, argv, opts) do
-    json = build_request_json(argv, opts)
-    :gen_tcp.send(sock, [<<byte_size(json)::32>>, json])
+    body =
+      %{"argv" => argv}
+      |> maybe_put("env", Keyword.get(opts, :env))
+      |> maybe_put("cwd", Keyword.get(opts, :cwd))
+      |> maybe_put("timeout_ms", Keyword.get(opts, :timeout_ms))
+      |> CBOR.encode()
+
+    :gen_tcp.send(sock, body)
   end
 
-  @spec build_request_json([String.t()], keyword()) :: binary()
-  defp build_request_json(argv, opts) do
-    %{"argv" => argv}
-    |> maybe_put("env", Keyword.get(opts, :env))
-    |> maybe_put("cwd", Keyword.get(opts, :cwd))
-    |> maybe_put("timeout_ms", Keyword.get(opts, :timeout_ms))
-    |> Jason.encode!()
+  @spec recv_response(:gen_tcp.socket(), non_neg_integer()) ::
+          {:ok, exec_result()} | {:error, term()}
+  defp recv_response(sock, timeout_ms) do
+    with {:ok, buffer} <- recv_until_closed(sock, timeout_ms, <<>>) do
+      case CBOR.decode(buffer) do
+        {:ok, %{"exit_code" => code, "stdout" => out, "stderr" => err}, _rest} ->
+          {:ok, %{exit_code: code, stdout: unwrap_bytes(out), stderr: unwrap_bytes(err)}}
+
+        {:ok, _other, _rest} ->
+          {:error, {:cbor_decode, :unexpected_shape}}
+
+        {:error, reason} ->
+          {:error, {:cbor_decode, reason}}
+      end
+    end
   end
+
+  @spec recv_until_closed(:gen_tcp.socket(), non_neg_integer(), binary()) ::
+          {:ok, binary()} | {:error, term()}
+  defp recv_until_closed(sock, timeout_ms, acc) do
+    case :gen_tcp.recv(sock, 0, timeout_ms) do
+      {:ok, data} -> recv_until_closed(sock, timeout_ms, acc <> data)
+      {:error, :closed} -> {:ok, acc}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec unwrap_bytes(term()) :: binary()
+  defp unwrap_bytes(%CBOR.Tag{tag: :bytes, value: bin}), do: bin
+  defp unwrap_bytes(nil), do: ""
+  defp unwrap_bytes(bin) when is_binary(bin), do: bin
 
   @spec maybe_put(map(), String.t(), term()) :: map()
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
-  @spec recv_response(:gen_tcp.socket(), non_neg_integer()) ::
-          {:ok, exec_result()} | {:error, term()}
-  defp recv_response(sock, timeout_ms) do
-    with {:ok, <<exit_code::32-signed>>} <- recv_exactly(sock, 4, timeout_ms),
-         {:ok, <<stdout_len::32>>} <- recv_exactly(sock, 4, timeout_ms),
-         {:ok, stdout} <- recv_exactly(sock, stdout_len, timeout_ms),
-         {:ok, <<stderr_len::32>>} <- recv_exactly(sock, 4, timeout_ms),
-         {:ok, stderr} <- recv_exactly(sock, stderr_len, timeout_ms) do
-      {:ok, %{exit_code: exit_code, stdout: stdout, stderr: stderr}}
-    end
-  end
-
-  # Read exactly `n` bytes, looping until all arrive. `:gen_tcp.recv/3` with a
-  # positive length waits until that many bytes are buffered by the OTP TCP
-  # driver, so the recursive branch is a defensive backstop rather than the
-  # common path — but it makes the accumulation contract explicit and protects
-  # against any future refactor to a lower-level read.
-  @spec recv_exactly(:gen_tcp.socket(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, binary()} | {:error, term()}
-  defp recv_exactly(_sock, 0, _timeout_ms), do: {:ok, <<>>}
-
-  defp recv_exactly(sock, n, timeout_ms) do
-    case :gen_tcp.recv(sock, n, timeout_ms) do
-      {:ok, data} when byte_size(data) == n ->
-        {:ok, data}
-
-      {:ok, partial} ->
-        case recv_exactly(sock, n - byte_size(partial), timeout_ms) do
-          {:ok, rest} -> {:ok, partial <> rest}
-          err -> err
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Read bytes one at a time until `\n`; returns the line without the trailing
-  # newline. Byte-by-byte is correct for the short (<20 byte) handshake line.
   @spec recv_line(:gen_tcp.socket(), non_neg_integer()) :: {:ok, String.t()} | {:error, term()}
   defp recv_line(sock, timeout_ms), do: recv_line(sock, timeout_ms, <<>>)
 

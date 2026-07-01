@@ -84,6 +84,7 @@ defmodule Hyper.MixProject do
       {:grpc, "~> 1.0"},
       {:grpc_server, "~> 1.0"},
       {:horde, "~> 0.9"},
+      {:cbor, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:libcluster, "~> 3.3"},
       {:muontrap, "~> 1.5"},

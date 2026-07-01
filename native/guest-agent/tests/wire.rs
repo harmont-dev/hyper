@@ -12,7 +12,7 @@ proptest! {
         let req = Request { argv, env, cwd, timeout_ms: timeout };
         let mut buf = Vec::new();
         write_request(&mut buf, &req).unwrap();
-        let got = read_request(&mut &buf[..]).unwrap();
+        let got = read_request(&buf[..]).unwrap();
         prop_assert_eq!(req.argv, got.argv);
         prop_assert_eq!(req.env, got.env);
         prop_assert_eq!(req.cwd, got.cwd);
@@ -26,27 +26,27 @@ proptest! {
         let resp = Response { exit_code: code, stdout: out, stderr: err };
         let mut buf = Vec::new();
         write_response(&mut buf, &resp).unwrap();
-        let got = read_response(&mut &buf[..]).unwrap();
+        let got = read_response(&buf[..]).unwrap();
         prop_assert_eq!(resp.exit_code, got.exit_code);
         prop_assert_eq!(resp.stdout, got.stdout);
         prop_assert_eq!(resp.stderr, got.stderr);
     }
 }
 
-/// Pins the cross-language contract: the Elixir client sends `env` as a JSON
-/// object (`{"K":"V"}`), not an array of pairs. This byte sequence is exactly
-/// what `Hyper.Node.FireVMM.Exec` produces — a big-endian u32 length prefix
-/// followed by the JSON payload. With `Vec<(String,String)>` serde would
-/// reject this with "invalid type: map, expected a sequence".
+/// Pins the cross-language contract: the exact bytes produced by Elixir's
+/// `CBOR.encode(%{"argv" => ["uname","-a"], "env" => %{"PATH" => "/bin"}})`
+/// must deserialize into a valid `Request` on the Rust side, confirming that
+/// Elixir text-string CBOR encoding is directly readable as Rust `String` /
+/// `BTreeMap<String,String>` fields.
 #[test]
-fn elixir_client_env_object_is_decoded() {
-    let json = br#"{"argv":["x"],"env":{"K":"V"}}"#;
-    let len = (json.len() as u32).to_be_bytes();
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&len);
-    frame.extend_from_slice(json);
-
-    let req = read_request(&mut &frame[..]).expect("must decode the Elixir client payload");
-    assert_eq!(req.argv, vec!["x".to_string()]);
-    assert_eq!(req.env.get("K").map(String::as_str), Some("V"));
+fn elixir_anchor_decodes_as_cbor_request() {
+    // hex: a264617267768265756e616d65622d6163656e76a16450415448642f62696e
+    const ANCHOR: &[u8] = &[
+        0xa2, 0x64, 0x61, 0x72, 0x67, 0x76, 0x82, 0x65, 0x75, 0x6e, 0x61, 0x6d, 0x65, 0x62, 0x2d,
+        0x61, 0x63, 0x65, 0x6e, 0x76, 0xa1, 0x64, 0x50, 0x41, 0x54, 0x48, 0x64, 0x2f, 0x62, 0x69,
+        0x6e,
+    ];
+    let req = read_request(ANCHOR).expect("must decode the Elixir-produced CBOR anchor");
+    assert_eq!(req.argv, vec!["uname".to_string(), "-a".to_string()]);
+    assert_eq!(req.env.get("PATH").map(String::as_str), Some("/bin"));
 }
