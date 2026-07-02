@@ -109,6 +109,14 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
     refute File.exists?(listen_path)
   end
 
+  test "child_spec sets restart to :transient" do
+    # The zombie-restart behavior depends on this: an abnormal acceptor exit (any
+    # reason other than :normal) must cause the supervisor to restart the relay,
+    # while a clean :shutdown must not.
+    spec = Relay.child_spec(%{vm_id: "vtest", vsock_uds: "/x", listen_path: "/y"})
+    assert spec.restart == :transient
+  end
+
   test "relay stops when the acceptor exits with a non-normal reason", %{relay: relay} do
     ref = Process.monitor(relay)
     # Simulate a linked acceptor crashing with a non-:normal reason. Because

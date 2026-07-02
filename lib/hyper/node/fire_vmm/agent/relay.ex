@@ -28,6 +28,20 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
   @vsock_port 1024
   @dial_timeout_ms 5_000
 
+  @spec child_spec(%{
+          required(:vm_id) => term(),
+          required(:vsock_uds) => Path.t(),
+          required(:listen_path) => Path.t()
+        }) :: Supervisor.child_spec()
+  def child_spec(init_arg) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [init_arg]},
+      restart: :transient,
+      type: :worker
+    }
+  end
+
   @spec start_link(%{
           required(:vm_id) => term(),
           required(:vsock_uds) => Path.t(),
