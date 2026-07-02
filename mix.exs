@@ -82,6 +82,7 @@ defmodule Hyper.MixProject do
       {:makeup_syntect, "~> 0.1", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
       {:grpc, "~> 1.0"},
+      {:gun, "~> 2.0"},
       {:grpc_server, "~> 1.0"},
       {:horde, "~> 0.9"},
       {:cbor, "~> 1.0"},
