@@ -36,7 +36,9 @@ use crate::config::Config;
 use crate::tools::IsTool;
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 pub use super::grant::GrantOut;
@@ -71,14 +73,36 @@ pub enum Error {
     ChmodRoot(#[source] crate::util::safe_dir::Error),
 }
 
-fn map_grant_err(e: GrantError) -> Error {
-    match e {
-        GrantError::NotASocket => Error::NotASocket,
-        GrantError::Stat(e) => Error::Stat(e),
-        GrantError::Chown(e) => Error::Chown(e),
-        GrantError::Chmod(e) => Error::Chmod(e),
-        GrantError::ChgrpRoot(e) => Error::ChgrpRoot(e),
-        GrantError::ChmodRoot(e) => Error::ChmodRoot(e),
+impl From<GrantError> for Error {
+    fn from(e: GrantError) -> Self {
+        match e {
+            GrantError::NotASocket => Error::NotASocket,
+            GrantError::Stat(e) => Error::Stat(e),
+            GrantError::Chown(e) => Error::Chown(e),
+            GrantError::Chmod(e) => Error::Chmod(e),
+            GrantError::ChgrpRoot(e) => Error::ChgrpRoot(e),
+            GrantError::ChmodRoot(e) => Error::ChmodRoot(e),
+        }
+    }
+}
+
+/// A `--socket` value validated at clap-parse time to be an absolute,
+/// strictly-componented path whose leaf is exactly `api.socket`. The
+/// base-relative shape (`<exec>/<id>/root/<leaf>` below `JAIL_BASE`) needs the
+/// runtime `jail_base`, so it is *not* enforced here — `grant_api_under` checks
+/// it. Mirrors `jailer::JailSock`: the parse stays pure, reading no config.
+#[derive(Debug, Clone)]
+pub struct ApiSocket(LexicalPath);
+
+impl FromStr for ApiSocket {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let path: LexicalPath = PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
+        if path.as_ref().file_name() != Some(OsStr::new(SOCKET_NAME)) {
+            return Err(Error::SocketName(PathBuf::from(s)));
+        }
+        Ok(Self(path))
     }
 }
 
@@ -87,7 +111,7 @@ pub struct GrantApiArgs {
     /// Host path of the firecracker API socket, shape
     /// <JAIL_BASE>/<exec>/<id>/root/api.socket.
     #[arg(long)]
-    socket: PathBuf,
+    socket: ApiSocket,
 }
 
 /// Run the `grant-api` op in its own privileged scope (returns its serialized `Value`).
@@ -116,14 +140,10 @@ impl IsTool for GrantApi {
 /// Hand `socket` (`<jail_base>/<exec>/<id>/root/api.socket`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_api_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Error> {
-    let path: LexicalPath = socket.to_path_buf().try_into().map_err(Error::SocketPath)?;
-    let (parents, leaf) = path.relative_to(jail_base).map_err(Error::SocketPath)?;
+pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, Error> {
+    let (parents, _leaf) = socket.0.relative_to(jail_base).map_err(Error::SocketPath)?;
     if parents.len() != grant::SOCKET_PARENT_DEPTH {
-        return Err(Error::SocketShape(socket.to_path_buf()));
-    }
-    if leaf != Path::new(SOCKET_NAME) {
-        return Err(Error::SocketName(socket.to_path_buf()));
+        return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
     }
 
     let base_path: LexicalPath = jail_base
@@ -134,5 +154,5 @@ pub fn grant_api_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Erro
         return Ok(GrantOut::Pending);
     };
 
-    grant::grant_to_caller(root, Path::new(SOCKET_NAME)).map_err(map_grant_err)
+    grant::grant_to_caller(root, Path::new(SOCKET_NAME)).map_err(Error::from)
 }

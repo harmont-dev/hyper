@@ -107,6 +107,14 @@ impl<A, S> AsRef<Path> for SafePath<A, S> {
     }
 }
 
+// Cloning a validated path only copies the already-proven `PathBuf`; the axis
+// markers are zero-sized, so this is independent of whether they are `Clone`.
+impl<A, S> Clone for SafePath<A, S> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), PhantomData)
+    }
+}
+
 impl<A, S> TryFrom<PathBuf> for SafePath<A, S>
 where
     A: Absoluteness,
