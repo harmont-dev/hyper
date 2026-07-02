@@ -1,52 +1,37 @@
-use std::io;
+use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
 
-use nix::sys::socket::{
-    accept, bind, listen, socket, AddressFamily, Backlog, SockFlag, SockType, VsockAddr,
-};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-
-use hyper_guest_agent::{exec, init};
+use hyper_guest_agent::{agent, init, pb};
 
 const VSOCK_PORT: u32 = 1024;
 
 fn main() -> ! {
     if let Err(e) = init::setup() {
-        eprintln!("hyper-init: setup failed: {e}");
+        eprintln!("hyper-init: mounts failed: {e}");
     }
-    // PID 1 must never return; on a fatal listener error, log and park so the
-    // kernel does not panic (panic=1 would reboot-loop).
-    if let Err(e) = serve() {
-        eprintln!("hyper-init: serve failed: {e}");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build();
+    match rt {
+        Ok(rt) => {
+            let _ = rt.block_on(serve());
+        }
+        Err(e) => eprintln!("hyper-init: runtime failed: {e}"),
     }
+    // PID 1 must never exit; park this thread forever so the kernel does not
+    // panic (panic=1 would reboot-loop the guest).
     loop {
         std::thread::park();
     }
 }
 
-fn serve() -> io::Result<()> {
-    let sock = socket(
-        AddressFamily::Vsock,
-        SockType::Stream,
-        SockFlag::empty(),
-        None,
-    )?;
-    // VMADDR_CID_ANY == u32::MAX; bind our listening port.
-    bind(sock.as_raw_fd(), &VsockAddr::new(u32::MAX, VSOCK_PORT))?;
-    listen(&sock, Backlog::new(8).expect("8 is a valid backlog"))?;
-    loop {
-        let fd = loop {
-            match accept(sock.as_raw_fd()) {
-                Ok(fd) => break fd,
-                Err(nix::errno::Errno::EINTR) => continue,
-                Err(e) => return Err(e.into()),
-            }
-        };
-        // One command per connection; serve serially (v1). A bad request only
-        // closes this connection.
-        let owned = unsafe { OwnedFd::from_raw_fd(fd) };
-        let mut stream = std::os::unix::net::UnixStream::from(owned);
-        let _ = stream
-            .try_clone()
-            .map(|mut r| exec::serve_one(&mut r, &mut stream));
-    }
+async fn serve() -> Result<(), Box<dyn std::error::Error>> {
+    // Reaper registered before accepting connections: avoids a race where a
+    // child exits between fork and SIGCHLD handler registration.
+    init::spawn_reaper();
+    let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, VSOCK_PORT))?;
+    tonic::transport::Server::builder()
+        .add_service(pb::guest_agent_server::GuestAgentServer::new(agent::Agent))
+        .serve_with_incoming(listener.incoming())
+        .await?;
+    Ok(())
 }

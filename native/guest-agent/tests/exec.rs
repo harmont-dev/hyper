@@ -1,5 +1,4 @@
-use hyper_guest_agent::exec::run;
-use hyper_guest_agent::wire::Request;
+use hyper_guest_agent::exec::{run, Request};
 
 fn req(argv: &[&str]) -> Request {
     Request {

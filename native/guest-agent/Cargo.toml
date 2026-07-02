@@ -12,11 +12,9 @@ name = "hyper-guest-agent"
 path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-ciborium = "0.2"
-serde_bytes = "0.11"
-nix = { version = "0.29", features = ["mount", "process", "socket", "signal", "fs"] }
+nix = { version = "0.29", features = ["mount", "process"] }
 tonic = "0.14"
+tonic-prost = "0.14"
 prost = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "signal"] }
 tokio-vsock = { version = "0.7", features = ["tonic014"] }
@@ -26,12 +24,7 @@ tonic-prost-build = "0.14"
 
 [dev-dependencies]
 proptest = "1"
-tonic-prost = "0.14"
 tokio-stream = "0.1"
-
-[[test]]
-name = "wire"
-path = "tests/wire.rs"
 
 [[test]]
 name = "exec"
@@ -40,3 +33,10 @@ path = "tests/exec.rs"
 [[example]]
 name = "health_uds"
 path = "examples/health_uds.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

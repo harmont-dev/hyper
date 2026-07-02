@@ -1,7 +1,20 @@
-use std::io::{self, Read, Write};
+use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 
-use crate::wire::{read_request, write_response, Request, Response};
+// Lightweight input/output types shared between this module and tests.
+// Task 4 will replace these with the gRPC ExecRequest/ExecResponse from pb.
+pub struct Request {
+    pub argv: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub cwd: Option<String>,
+    pub timeout_ms: Option<u64>,
+}
+
+pub struct Response {
+    pub exit_code: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
 
 pub fn run(req: &Request) -> Response {
     let Some((program, args)) = req.argv.split_first() else {
@@ -37,10 +50,4 @@ pub fn run(req: &Request) -> Response {
             stderr: e.to_string().into_bytes(),
         },
     }
-}
-
-pub fn serve_one(reader: &mut impl Read, writer: &mut impl Write) -> io::Result<()> {
-    let req = read_request(reader)?;
-    let resp = run(&req);
-    write_response(writer, &resp)
 }
