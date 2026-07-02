@@ -331,8 +331,13 @@ defmodule Mix.Tasks.Compile.GrpcGen do
         end
       end)
 
-    # Format all generated files in one invocation so the formatting gate passes.
-    Mix.Task.run("format", outputs)
+    # Format each generated file directly rather than via Mix.Task.run("format",
+    # outputs): a Mix task runs once per session, so when mix check runs
+    # "format --check-formatted" before "compile --force", the format task is
+    # already consumed and the Mix.Task.run call would be a no-op.
+    Enum.each(outputs, fn path ->
+      File.write!(path, [Code.format_string!(File.read!(path)), "\n"])
+    end)
   end
 
   defp stale? do
