@@ -10,9 +10,12 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     process via `handle_continue`. The acceptor blocks on `:socket.accept`
     without blocking the GenServer itself.
   - Each accepted connection spawns an unlinked connection process that
-    calls `RelayDialer.dial/3` then monitors two unlinked pipe workers (one
-    per direction). A pipe crash tears down only that connection — it cannot
-    propagate to the acceptor or to other connections.
+    calls `RelayDialer.dial/3` then spawns two linked+monitored pipe workers
+    (one per direction). The link ensures a connection handler death reaps
+    both workers; the monitor lets the handler react to a worker's normal end
+    and close both sockets cleanly. When either worker ends, the handler
+    unlinks the sibling before killing it so the resulting `:killed` exit does
+    not cascade back to the handler via the link.
   - `terminate/2` closes the listen socket (which causes the acceptor to
     exit on its next accept call) and removes the socket file so a
     subsequent `start_link` with the same path can rebind.
@@ -80,22 +83,36 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
         _ = spawn(fn -> handle_connection(client, vsock_uds) end)
         accept_loop(listen_sock, vsock_uds)
 
-      {:error, _} ->
+      # terminate/2 closes the listen socket, which unblocks accept with
+      # {:error, :closed}. That is the expected shutdown path: exit normally
+      # so the linked GenServer is not signalled.
+      {:error, :closed} ->
         :ok
+
+      {:error, reason} ->
+        # Any other accept error while the relay is alive is abnormal. Exit
+        # with a non-:normal reason so the linked GenServer receives an EXIT
+        # signal, calls {:stop, reason, state}, and lets the supervisor restart
+        # the whole relay instead of leaving it zombied with no acceptor.
+        exit({:accept_error, reason})
     end
   end
 
   defp handle_connection(client_sock, vsock_uds) do
     case RelayDialer.dial(vsock_uds, @vsock_port, @dial_timeout_ms) do
       {:ok, upstream_sock} ->
-        p1 = spawn(fn -> pipe_bytes(client_sock, upstream_sock) end)
-        p2 = spawn(fn -> pipe_bytes(upstream_sock, client_sock) end)
+        # spawn_link so that if this handler process dies unexpectedly the
+        # workers are reaped via the link rather than orphaned holding FDs.
+        # pipe_bytes always exits :normal, so normal worker exits do not
+        # propagate to this handler; only unexpected panics would cascade.
+        p1 = spawn_link(fn -> pipe_bytes(client_sock, upstream_sock) end)
+        p2 = spawn_link(fn -> pipe_bytes(upstream_sock, client_sock) end)
         ref1 = Process.monitor(p1)
         ref2 = Process.monitor(p2)
         await_pipe_end(client_sock, upstream_sock, p1, p2, ref1, ref2)
 
       {:error, _} ->
-        :socket.close(client_sock)
+        _ = :socket.close(client_sock)
     end
   end
 
@@ -103,12 +120,16 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     receive do
       {:DOWN, ^ref1, :process, ^p1, _} ->
         _ = Process.demonitor(ref2, [:flush])
+        # Unlink before killing so the resulting :killed exit from p2 does
+        # not propagate back to this handler via the link.
+        _ = Process.unlink(p2)
         _ = Process.exit(p2, :kill)
         _ = :socket.close(client)
         _ = :socket.close(upstream)
 
       {:DOWN, ^ref2, :process, ^p2, _} ->
         _ = Process.demonitor(ref1, [:flush])
+        _ = Process.unlink(p1)
         _ = Process.exit(p1, :kill)
         _ = :socket.close(client)
         _ = :socket.close(upstream)

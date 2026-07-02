@@ -108,4 +108,17 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
     GenServer.stop(relay)
     refute File.exists?(listen_path)
   end
+
+  test "relay stops when the acceptor exits with a non-normal reason", %{relay: relay} do
+    ref = Process.monitor(relay)
+    # Simulate a linked acceptor crashing with a non-:normal reason. Because
+    # the GenServer traps exits, the exit signal becomes an {:EXIT, _, reason}
+    # message; handle_info matches the non-:normal clause and calls
+    # {:stop, reason, state}. We use a synthetic signal rather than corrupting
+    # the real listen socket because triggering a non-:closed accept error
+    # reliably in a test environment requires platform-specific tricks — the
+    # signal path through handle_info is identical regardless of the sender PID.
+    Process.exit(relay, {:accept_error, :emfile})
+    assert_receive {:DOWN, ^ref, :process, ^relay, {:accept_error, :emfile}}, 1_000
+  end
 end
