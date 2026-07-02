@@ -252,10 +252,9 @@ end
 
 defmodule Mix.Tasks.Compile.GrpcGen do
   @moduledoc """
-  Mix compiler that generates the gRPC bindings into
-  `lib/hyper/grpc/v0/hyper.pb.ex` from `proto/hyper/grpc/v0/hyper.proto`, just
-  before the Elixir compiler. Like the Firecracker bindings, the output is
-  gitignored and regenerated rather than committed.
+  Mix compiler that generates the gRPC bindings from all `proto/**/*.proto`
+  files, just before the Elixir compiler. Like the Firecracker bindings, the
+  outputs are gitignored and regenerated rather than committed.
 
   Defined in `mix.exs` (not under `lib/`) so it is loaded before any
   compilation. Unlike the Firecracker generator (pure-Elixir `oapi_generator`),
@@ -266,15 +265,29 @@ defmodule Mix.Tasks.Compile.GrpcGen do
       mix escript.install hex protobuf 0.17.0     # provides protoc-gen-elixir
 
   The plugin escript lives in `~/.mix/escripts`, which this compiler prepends to
-  `PATH` for the `protoc` invocation. The generated file is `mix format`-ed so it
-  passes the formatting gate.
+  `PATH` for the `protoc` invocation. Generated files are `mix format`-ed so
+  they pass the formatting gate.
+
+  Adding a new proto is automatic: drop a `.proto` file anywhere under `proto/`
+  and the compiler picks it up. The convention is that the directory structure
+  mirrors the proto package (e.g. `proto/hyper/agent/v1/agent.proto` declares
+  `package hyper.agent.v1`), which is how protoc-gen-elixir derives the output
+  path under `lib/`.
+
+  ## How protoc-gen-elixir places output files
+
+  protoc-gen-elixir writes each output at:
+  `OUT_DIR / package_as_path / FileDescriptorProto.name_minus_proto_ext .pb.ex`
+
+  `FileDescriptorProto.name` is the proto file's path *relative to `--proto_path`*.
+  To keep the name as a bare filename (e.g. `hyper.proto`) we pass each proto
+  file's own directory as the first `--proto_path`. A second `--proto_path=proto`
+  entry lets protos import siblings from the same tree.
   """
 
   use Mix.Task.Compiler
 
-  @proto "proto/hyper/grpc/v0/hyper.proto"
-  @proto_path "proto/hyper/grpc/v0"
-  @out "lib/hyper/grpc/v0/hyper.pb.ex"
+  @proto_root "proto"
 
   @impl Mix.Task.Compiler
   def run(argv) do
@@ -286,32 +299,59 @@ defmodule Mix.Tasks.Compile.GrpcGen do
   end
 
   defp generate do
-    File.mkdir_p!(Path.dirname(@out))
     escripts = Path.expand("~/.mix/escripts")
     env = [{"PATH", escripts <> ":" <> System.get_env("PATH", "")}]
 
-    args = ["--proto_path=#{@proto_path}", "--elixir_out=plugins=grpc:lib", "hyper.proto"]
+    outputs =
+      Enum.map(proto_files(), fn proto ->
+        out = proto_to_out(proto)
+        File.mkdir_p!(Path.dirname(out))
 
-    case System.cmd("protoc", args, env: env, stderr_to_stdout: true) do
-      {_, 0} ->
-        # protoc-gen-elixir mirrors the package path under the output dir, so the
-        # file lands exactly at @out. Format it to satisfy the formatting gate.
-        Mix.Task.run("format", [@out])
+        args = [
+          "--proto_path=#{Path.dirname(proto)}",
+          "--proto_path=#{@proto_root}",
+          "--elixir_out=plugins=grpc:lib",
+          Path.basename(proto)
+        ]
 
-      {output, code} ->
-        Mix.raise("""
-        protoc failed (exit #{code}) generating #{@out}:
+        case System.cmd("protoc", args, env: env, stderr_to_stdout: true) do
+          {_, 0} ->
+            out
 
-        #{output}
-        Ensure `protoc` and the `protoc-gen-elixir` escript are installed:
-            sudo apt-get install -y protobuf-compiler
-            mix escript.install hex protobuf 0.17.0
-        """)
-    end
+          {output, code} ->
+            Mix.raise("""
+            protoc failed (exit #{code}) generating #{out}:
+
+            #{output}
+            Ensure `protoc` and the `protoc-gen-elixir` escript are installed:
+                sudo apt-get install -y protobuf-compiler
+                mix escript.install hex protobuf 0.17.0
+            """)
+        end
+      end)
+
+    # Format all generated files in one invocation so the formatting gate passes.
+    Mix.Task.run("format", outputs)
   end
 
   defp stale? do
-    not File.exists?(@out) or File.stat!(@proto).mtime > File.stat!(@out).mtime
+    Enum.any?(proto_files(), fn proto ->
+      out = proto_to_out(proto)
+      not File.exists?(out) or File.stat!(proto).mtime > File.stat!(out).mtime
+    end)
+  end
+
+  defp proto_files do
+    Path.wildcard("#{@proto_root}/**/*.proto")
+  end
+
+  # Derives the protoc-gen-elixir output path from the proto source path.
+  # Convention: directory structure mirrors the package declaration, so
+  # proto/hyper/agent/v1/agent.proto -> lib/hyper/agent/v1/agent.pb.ex.
+  defp proto_to_out(proto_path) do
+    proto_path
+    |> String.replace_prefix(@proto_root <> "/", "lib/")
+    |> String.replace_suffix(".proto", ".pb.ex")
   end
 end
 

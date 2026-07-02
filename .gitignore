@@ -41,9 +41,10 @@ docs/superpowers/
 /lib/hyper/firecracker/api/operations/
 /lib/hyper/firecracker/api/schemas/
 
-# gRPC bindings are generated from proto/hyper/grpc/v0/hyper.proto before compile
+# gRPC bindings are generated from proto/**/*.proto before compile
 # -- see the :grpc_gen Mix compiler in mix.exs.
 /lib/hyper/grpc/v0/
+/lib/hyper/agent/v1/
 
 # The expected suidhelper build identity (version + checksum) is captured from
 # the stamped binary's `version` output -- see the :suidhelper_stamp Mix compiler.
