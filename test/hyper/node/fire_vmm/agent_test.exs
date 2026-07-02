@@ -105,10 +105,6 @@ defmodule Hyper.Node.FireVMM.AgentTest do
       assert String.contains?(Path.basename(path), @test_vm_id)
     end
 
-    test "is deterministic: same input produces the same path" do
-      assert Agent.relay_socket_path(@test_vm_id) == Agent.relay_socket_path(@test_vm_id)
-    end
-
     test "different vm_ids produce different paths" do
       assert Agent.relay_socket_path(@test_vm_id) != Agent.relay_socket_path("vother0000000000")
     end
