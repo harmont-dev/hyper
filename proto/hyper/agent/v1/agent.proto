@@ -1,8 +1,10 @@
 // Hyper guest-agent gRPC interface.
 //
 // This contract is spoken over a virtio-vsock channel between the host and the
-// Firecracker guest. The guest runs a tonic server on CID 3, port 50051; the
-// host connects through the vsock device exposed to the VMM process.
+// Firecracker guest. The guest binds a tonic server on vsock port 1024
+// (`VSOCK_PORT` in native/guest-agent/src/main.rs); the host reaches it through
+// the per-VM relay, which performs the `CONNECT 1024` handshake (`@vsock_port`
+// in lib/hyper/node/fire_vmm/agent/relay.ex). Those two literals must agree.
 //
 // Versioning: this is `v1`. The service is internal to hyper; the contract may
 // change between releases. Pin to a specific commit if you depend on it.

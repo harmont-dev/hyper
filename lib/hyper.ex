@@ -47,6 +47,11 @@ defmodule Hyper do
   reachable, `:timeout` if the gRPC deadline expired, `:not_found` if the VM id
   cannot be resolved. `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd`
   (string), `:timeout` (ms, gRPC deadline forwarded to the relay; default 30 000).
+
+  `argv` is executed directly, not through a shell. Use an **absolute** `argv`
+  head (`["/bin/echo", "hi"]`): the guest runs as PID 1 with a near-empty
+  environment, and a non-empty `:env` *replaces* it entirely, so a bare command
+  name has no `PATH` to resolve against and returns exit code 127.
   """
   @spec exec(Hyper.Vm.t(), [String.t()], keyword()) ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
