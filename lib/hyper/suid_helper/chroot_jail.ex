@@ -78,4 +78,24 @@ defmodule Hyper.SuidHelper.ChrootJail do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Hand the firecracker vsock `socket` to the node user so the unprivileged
+  controller can set up the guest AF_VSOCK connection. Firecracker creates the
+  vsock Unix-domain socket inside the jail owned by the per-VM uid/gid; the node
+  (a different uid) gets `EACCES`. The helper chowns just that one socket to its
+  caller and chmods it `0660`, leaving the rest of the per-VM isolation intact.
+
+  Returns `{:error, :socket_pending}` while firecracker has not yet created the
+  vsock socket, so the caller can keep waiting.
+  """
+  @spec grant_vsock(Path.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_vsock", include: [:socket])
+  def grant_vsock(socket) do
+    case SuidHelper.exec(["chroot-jail", "grant-vsock", "--socket", socket]) do
+      {:ok, %{"result" => "granted"}} -> :ok
+      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+      {:error, _} = err -> err
+    end
+  end
 end

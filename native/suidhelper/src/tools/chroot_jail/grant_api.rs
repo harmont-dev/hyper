@@ -31,33 +31,19 @@
 //! the path) is `Pending`, not an error: firecracker has not created it yet, so
 //! the controller keeps probing.
 
+use super::grant::{self, GrantError};
 use crate::config::Config;
 use crate::tools::IsTool;
-use crate::util::safe_dir::{self, SafeDir};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
-use nix::errno::Errno;
-use nix::sys::stat::SFlag;
-use nix::unistd::{getgid, getuid};
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
+
+pub use super::grant::GrantOut;
 
 /// The fixed in-jail socket name firecracker opens (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_socket`).
 const SOCKET_NAME: &str = "api.socket";
-
-/// The socket sits at `<JAIL_BASE>/<exec>/<id>/root/api.socket`: three parent
-/// components (`<exec>`, `<id>`, `root`) before the leaf.
-const SOCKET_PARENT_DEPTH: usize = 3;
-
-/// Mode handed to the node: owner+group read/write, no world access.
-const SOCKET_MODE: u32 = 0o660;
-
-/// Mode set on the jail `root` dir so the node's group can *traverse* it to
-/// reach the socket: owner `rwx` (the per-VM uid, unchanged), group `--x`
-/// (traverse, not list), other none.
-const JAIL_ROOT_MODE: u32 = 0o710;
 
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
@@ -70,19 +56,30 @@ pub enum Error {
     #[error("--socket leaf must be {SOCKET_NAME:?}: {0:?}")]
     SocketName(PathBuf),
     #[error("walking to the jail root: {0}")]
-    Walk(#[source] safe_dir::Error),
+    Walk(#[source] crate::util::safe_dir::Error),
     #[error("api.socket is not a socket (or is a symlink); refusing to touch it")]
     NotASocket,
     #[error("statting the socket: {0}")]
-    Stat(#[source] safe_dir::Error),
+    Stat(#[source] crate::util::safe_dir::Error),
     #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] safe_dir::Error),
+    Chown(#[source] crate::util::safe_dir::Error),
     #[error("chmoding the socket: {0}")]
-    Chmod(#[source] safe_dir::Error),
+    Chmod(#[source] crate::util::safe_dir::Error),
     #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] safe_dir::Error),
+    ChgrpRoot(#[source] crate::util::safe_dir::Error),
     #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] safe_dir::Error),
+    ChmodRoot(#[source] crate::util::safe_dir::Error),
+}
+
+fn map_grant_err(e: GrantError) -> Error {
+    match e {
+        GrantError::NotASocket => Error::NotASocket,
+        GrantError::Stat(e) => Error::Stat(e),
+        GrantError::Chown(e) => Error::Chown(e),
+        GrantError::Chmod(e) => Error::Chmod(e),
+        GrantError::ChgrpRoot(e) => Error::ChgrpRoot(e),
+        GrantError::ChmodRoot(e) => Error::ChmodRoot(e),
+    }
 }
 
 #[derive(Args)]
@@ -91,15 +88,6 @@ pub struct GrantApiArgs {
     /// <JAIL_BASE>/<exec>/<id>/root/api.socket.
     #[arg(long)]
     socket: PathBuf,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "result", rename_all = "snake_case")]
-pub enum GrantOut {
-    /// The socket was handed to the caller (chowned + chmoded).
-    Granted,
-    /// The socket does not exist yet; the caller should keep waiting.
-    Pending,
 }
 
 /// Run the `grant-api` op in its own privileged scope (returns its serialized `Value`).
@@ -131,56 +119,20 @@ impl IsTool for GrantApi {
 pub fn grant_api_under(jail_base: &Path, socket: &Path) -> Result<GrantOut, Error> {
     let path: LexicalPath = socket.to_path_buf().try_into().map_err(Error::SocketPath)?;
     let (parents, leaf) = path.relative_to(jail_base).map_err(Error::SocketPath)?;
-    if parents.len() != SOCKET_PARENT_DEPTH {
+    if parents.len() != grant::SOCKET_PARENT_DEPTH {
         return Err(Error::SocketShape(socket.to_path_buf()));
     }
     if leaf != Path::new(SOCKET_NAME) {
         return Err(Error::SocketName(socket.to_path_buf()));
     }
 
-    let Some(root) = walk(jail_base.to_path_buf(), &parents)? else {
-        return Ok(GrantOut::Pending); // jail not fully created yet
+    let base_path: LexicalPath = jail_base
+        .to_path_buf()
+        .try_into()
+        .map_err(Error::SocketPath)?;
+    let Some(root) = grant::walk_to(&base_path, &parents).map_err(Error::Walk)? else {
+        return Ok(GrantOut::Pending);
     };
 
-    let leaf = Path::new(SOCKET_NAME);
-    let stat = match root.stat(leaf) {
-        Ok(stat) => stat,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(Error::Stat(e)),
-    };
-    // `stat` used AT_SYMLINK_NOFOLLOW, so a symlink reports as S_IFLNK and fails
-    // this check too: only a real socket is accepted, anything else is refused.
-    if stat.st_mode & SFlag::S_IFMT.bits() != SFlag::S_IFSOCK.bits() {
-        return Err(Error::NotASocket);
-    }
-
-    root.chown(leaf, getuid().as_raw(), getgid().as_raw())
-        .map_err(Error::Chown)?;
-    root.chmod(leaf, SOCKET_MODE).map_err(Error::Chmod)?;
-
-    // Open `root` itself to the caller's group so the node can traverse into it
-    // to reach the socket (the jailer leaves it 0700 / per-VM uid). Owner stays
-    // the per-VM uid; only the group and mode move. Operate on the pinned `root`
-    // fd (already opened `O_NOFOLLOW`), never by name - TOCTOU-safe.
-    root.chgrp_self(getgid().as_raw())
-        .map_err(Error::ChgrpRoot)?;
-    root.chmod_self(JAIL_ROOT_MODE).map_err(Error::ChmodRoot)?;
-    Ok(GrantOut::Granted)
-}
-
-/// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
-/// `Ok(None)` if `base` or any parent is not yet present (`ENOENT`), so the
-/// caller can treat a half-built jail as `Pending` rather than an error.
-fn walk(base: PathBuf, parents: &[PathBuf]) -> Result<Option<SafeDir>, Error> {
-    let base_path: LexicalPath = base.try_into().map_err(Error::SocketPath)?;
-    let anchor = match SafeDir::open(&base_path) {
-        Ok(dir) => dir,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
-        Err(e) => return Err(Error::Walk(e)),
-    };
-    match anchor.descend(parents) {
-        Ok(dir) => Ok(Some(dir)),
-        Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
-        Err(e) => Err(Error::Walk(e)),
-    }
+    grant::grant_to_caller(root, Path::new(SOCKET_NAME)).map_err(map_grant_err)
 }

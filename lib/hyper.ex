@@ -39,6 +39,29 @@ defmodule Hyper do
   defp resolve_arch(nil), do: Sys.Arch.current()
   defp resolve_arch(arch), do: {:ok, arch}
 
+  @doc """
+  Run `argv` inside the guest VM `vm` and return its captured output.
+
+  Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`, or
+  `{:error, reason}` — e.g. `:agent_unavailable` if the relay/agent is not yet
+  reachable, `:timeout` if the gRPC deadline expired, `:not_found` if the VM id
+  cannot be resolved. `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd`
+  (string), `:timeout` (ms, gRPC deadline forwarded to the relay; default 30 000).
+  """
+  @spec exec(Hyper.Vm.t(), [String.t()], keyword()) ::
+          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
+          | {:error, term()}
+  def exec(vm, argv, opts \\ []) when is_pid(vm) and is_list(argv) do
+    # v1: assumes the VM is placed on the local node; remote routing is not yet built.
+    case id(vm) do
+      nil ->
+        {:error, :not_found}
+
+      vm_id ->
+        Hyper.Node.FireVMM.Agent.exec(vm_id, argv, opts)
+    end
+  end
+
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)

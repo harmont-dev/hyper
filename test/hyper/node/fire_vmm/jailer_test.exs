@@ -80,4 +80,9 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert Enum.any?(args, &String.starts_with?(&1, "cpu.max="))
     assert Enum.any?(args, &String.starts_with?(&1, "memory.max="))
   end
+
+  test "host_vsock/1 returns the chroot-rooted host path for vsock.sock" do
+    assert Jailer.host_vsock(@vm_id) ==
+             "/srv/hyper/jails/firecracker/#{@vm_id}/root/vsock.sock"
+  end
 end

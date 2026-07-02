@@ -27,7 +27,44 @@ defmodule Hyper.Node.Reclaim do
   def run do
     reclaim_dm()
     reclaim_loops()
+    reclaim_sockets()
     :ok
+  end
+
+  # Exposed with @doc false so tests can invoke it with an isolated socket_dir
+  # (via Hyper.Cfg.Toml.put_cache/1) without also exercising the dm/loop paths
+  # that require the privileged suid helper.
+  @doc false
+  @spec reclaim_sockets() :: :ok
+  def reclaim_sockets do
+    dir = Hyper.Cfg.Dirs.socket_dir()
+    # Ensure the dir exists: the relay bind needs it, and the sweep is a no-op
+    # on a fresh node where it was never created.
+    File.mkdir_p!(dir)
+
+    case File.ls(dir) do
+      {:ok, names} ->
+        for name <- names,
+            String.starts_with?(name, "grpc-") and String.ends_with?(name, ".sock") do
+          path = Path.join(dir, name)
+
+          case File.rm(path) do
+            :ok ->
+              :ok
+
+            {:error, reason} ->
+              Logger.warning(
+                "reclaim: could not remove stale relay socket #{path}: #{inspect(reason)}"
+              )
+          end
+        end
+
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("reclaim: could not list socket dir #{dir}: #{inspect(reason)}")
+        :ok
+    end
   end
 
   defp reclaim_dm do

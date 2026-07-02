@@ -1,0 +1,55 @@
+// Hyper guest-agent gRPC interface.
+//
+// This contract is spoken over a virtio-vsock channel between the host and the
+// Firecracker guest. The guest runs a tonic server on CID 3, port 50051; the
+// host connects through the vsock device exposed to the VMM process.
+//
+// Versioning: this is `v1`. The service is internal to hyper; the contract may
+// change between releases. Pin to a specific commit if you depend on it.
+syntax = "proto3";
+
+package hyper.agent.v1;
+
+// Guest-agent service: executes commands inside the VM and reports liveness.
+service GuestAgent {
+  // Run a command inside the guest and return its exit code and captured output.
+  rpc Exec(ExecRequest) returns (ExecResponse);
+
+  // Check whether the guest agent is alive and ready to accept commands.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// Arguments for a guest command invocation.
+message ExecRequest {
+  // argv[0] is the executable; subsequent elements are its arguments.
+  repeated string argv = 1;
+
+  // Environment variables to set for the command. Merged with (or replacing)
+  // the agent's default environment, depending on server policy.
+  map<string, string> env = 2;
+
+  // Working directory for the command. If absent, the server's default is used.
+  optional string cwd = 3;
+}
+
+// Result of a completed guest command.
+message ExecResponse {
+  // Exit code of the command. Zero means success; non-zero means failure.
+  // Uses sint32 to preserve negative exit codes returned by some shells.
+  sint32 exit_code = 1;
+
+  // Raw bytes captured from the command's standard output.
+  bytes stdout = 2;
+
+  // Raw bytes captured from the command's standard error.
+  bytes stderr = 3;
+}
+
+// No fields — the presence of a successful response indicates liveness.
+message HealthRequest {}
+
+// Result of a health check.
+message HealthResponse {
+  // True when the agent is fully initialized and ready to serve Exec requests.
+  bool ok = 1;
+}

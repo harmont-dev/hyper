@@ -6,5 +6,5 @@
 # image DB + media store. They are opt-in: run with `mix test --include external`.
 ExUnit.start(
   formatters: [ExUnit.CLIFormatter, JUnitFormatter],
-  exclude: [:external]
+  exclude: [:external, :integration]
 )
