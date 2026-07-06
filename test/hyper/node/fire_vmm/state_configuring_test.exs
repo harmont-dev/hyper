@@ -53,6 +53,15 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     tmp = Path.join(System.tmp_dir!(), "cfg-vsock-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
+
+    # The stub script hijacks the global suidhelper path; the live Reaper's
+    # 60s tick calls the real helper through that same key, so a tick landing
+    # mid-test would route a real teardown at the stub. Park it while we run.
+    if reaper = Process.whereis(Hyper.Node.Reaper) do
+      :ok = :sys.suspend(reaper)
+      on_exit(fn -> :sys.resume(reaper) end)
+    end
+
     Map.put(context, :tmp, tmp)
   end
 
