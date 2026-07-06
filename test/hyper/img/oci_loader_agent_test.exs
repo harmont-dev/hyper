@@ -23,4 +23,11 @@ defmodule Hyper.Img.OciLoaderAgentTest do
     %File.Stat{mode: mode} = File.stat!(dest)
     assert (mode &&& 0o111) != 0, "hyper-init must be executable"
   end
+
+  test "a missing agent binary fails the stage instead of shipping a rootfs without init" do
+    missing = Path.join(@tmp, "no-such-agent")
+
+    assert {:error, :enoent} = Hyper.Img.OciLoader.stage_agent_from(@tmp, missing)
+    refute File.exists?(Path.join(@tmp, "hyper-init"))
+  end
 end

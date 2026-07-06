@@ -28,13 +28,17 @@ defmodule Hyper.Node.FireVMM.GuestAgent do
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
     with {:ok, arch} <- Sys.Arch.current() do
-      p = path(arch)
+      check(path(arch), arch)
+    end
+  end
 
-      cond do
-        not File.regular?(p) -> {:error, {:not_installed, arch}}
-        not Sys.Posix.executable?(p) -> {:error, {:not_executable, arch}}
-        true -> :ok
-      end
+  @doc false
+  @spec check(Path.t(), Sys.Arch.t()) :: :ok | {:error, term()}
+  def check(p, arch) do
+    cond do
+      not File.regular?(p) -> {:error, {:not_installed, arch}}
+      not Sys.Posix.executable?(p) -> {:error, {:not_executable, arch}}
+      true -> :ok
     end
   end
 
