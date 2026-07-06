@@ -1,6 +1,23 @@
 defmodule HyperTest do
   use ExUnit.Case, async: true
 
+  setup do
+    # Under `mix test --no-start` (CI: the supervision tree provisions a real
+    # Firecracker host, unavailable there) the app's Routing registry is
+    # absent; start a test-scoped one so the resolution contract is testable
+    # without the full tree. On a dev box with the app running this is a no-op.
+    unless Process.whereis(Hyper.Cluster.Routing) do
+      _ = Application.ensure_all_started(:horde)
+      # The routed test ends in Agent.exec's gRPC connect; without the :grpc
+      # app its client supervisor is down and the connect crashes (:noproc)
+      # instead of returning the {:error, _} the contract expects.
+      _ = Application.ensure_all_started(:grpc)
+      start_supervised!(Hyper.Cluster.Routing)
+    end
+
+    :ok
+  end
+
   # These pin the routing contract: an unresolvable target short-circuits to
   # {:error, :not_found} on both entry clauses (and the vm_id binary clause
   # exists at all — the old pid-only exec/3 raised FunctionClauseError on a

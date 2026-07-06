@@ -62,6 +62,30 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
       on_exit(fn -> :sys.resume(reaper) end)
     end
 
+    # Under `mix test --no-start` (CI) the app's Routing registry is absent;
+    # the granted path resolves the Client stub through it. No-op on a dev box
+    # where the app is running.
+    unless Process.whereis(Hyper.Cluster.Routing) do
+      _ = Application.ensure_all_started(:horde)
+      start_supervised!(Hyper.Cluster.Routing)
+    end
+
+    # Jailer.host_vsock/1 derives the jail path from tools.firecracker —
+    # TOML-only with no default, so a config-less CI runner raises MissingError.
+    # Seed the documented Toml test-hook cache only when the key is absent; a
+    # dev box with /etc/hyper/config.toml keeps its real value.
+    original = Hyper.Cfg.Toml.reload()
+
+    unless get_in(original, ["tools", "firecracker"]) do
+      bin = "/usr/local/bin/firecracker"
+
+      Hyper.Cfg.Toml.put_cache(
+        Map.update(original, "tools", %{"firecracker" => bin}, &Map.put(&1, "firecracker", bin))
+      )
+
+      on_exit(fn -> Hyper.Cfg.Toml.put_cache(original) end)
+    end
+
     Map.put(context, :tmp, tmp)
   end
 
