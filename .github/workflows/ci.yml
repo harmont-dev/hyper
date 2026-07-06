@@ -73,6 +73,18 @@ jobs:
       - name: Install protoc-gen-elixir
         run: mix escript.install hex protobuf 0.17.0 --force
 
+      # The `:guest_agent_build` Mix compiler builds the static musl guest agent
+      # (native/guest-agent) into priv/ on every `mix compile`; the host-arch
+      # build is a hard requirement, so the runner's default toolchain needs the
+      # musl std. Cross arches are best-effort and stay skipped here.
+      - name: Install musl target for the guest-agent build
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Cache guest-agent cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/guest-agent
+
       - name: Compile (warnings as errors)
         # --force matches the `mix check` alias: re-surfaces warnings even on a
         # cached _build, where an unchanged module would otherwise be skipped.
