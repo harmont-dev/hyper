@@ -105,6 +105,18 @@ defmodule Hyper.Node do
     end
   end
 
+  @doc """
+  Run `argv` in a VM hosted **on this node**, identified by `vm_id`, via its
+  relay/agent. The node-local half of `Hyper.exec/3`, which resolves the owning
+  node and `:erpc`-calls this function there.
+  """
+  @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) ::
+          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
+          | {:error, term()}
+  def exec(vm_id, argv, opts \\ []) do
+    Hyper.Node.FireVMM.Agent.exec(vm_id, argv, opts)
+  end
+
   @doc false
   @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()

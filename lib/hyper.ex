@@ -40,31 +40,56 @@ defmodule Hyper do
   defp resolve_arch(arch), do: {:ok, arch}
 
   @doc """
-  Run `argv` inside the guest VM `vm` and return its captured output.
+  Run `argv` inside VM `vm` — a pid (from `create_vm/1`) or a `Hyper.Vm.Id.t()`
+  binary — and return its captured output.
+
+  Cluster-routed: a pid resolves to its owning node directly (`node(pid)`); a
+  vm_id resolves via the routing registry (`whereis/1`). The command runs on
+  whichever node hosts the VM, via that node's `Hyper.Node.exec/3`.
 
   Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`, or
-  `{:error, reason}` — e.g. `:agent_unavailable` if the relay/agent is not yet
-  reachable, `:timeout` if the gRPC deadline expired, `:not_found` if the VM id
-  cannot be resolved. `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd`
-  (string), `:timeout` (ms, gRPC deadline forwarded to the relay; default 30 000).
+  `{:error, reason}` — `:agent_unavailable` if the relay/agent is not yet
+  reachable, `:timeout` if the gRPC deadline expired, `:not_found` if the VM
+  cannot be resolved (unknown vm_id, or a pid whose id/owning node is gone),
+  `:node_unreachable` if the owning node cannot be reached over the cluster.
+  `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd` (string), `:timeout`
+  (ms, gRPC deadline forwarded to the relay; default 30 000).
 
   `argv` is executed directly, not through a shell. Use an **absolute** `argv`
   head (`["/bin/echo", "hi"]`): the guest runs as PID 1 with a near-empty
   environment, and a non-empty `:env` *replaces* it entirely, so a bare command
   name has no `PATH` to resolve against and returns exit code 127.
   """
-  @spec exec(Hyper.Vm.t(), [String.t()], keyword()) ::
+  @spec exec(Hyper.Vm.t() | Hyper.Vm.Id.t(), [String.t()], keyword()) ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
           | {:error, term()}
-  def exec(vm, argv, opts \\ []) when is_pid(vm) and is_list(argv) do
-    # v1: assumes the VM is placed on the local node; remote routing is not yet built.
-    case id(vm) do
-      nil ->
-        {:error, :not_found}
+  def exec(vm, argv, opts \\ [])
 
-      vm_id ->
-        Hyper.Node.FireVMM.Agent.exec(vm_id, argv, opts)
+  def exec(vm, argv, opts) when is_pid(vm) and is_list(argv) do
+    case id(vm) do
+      nil -> {:error, :not_found}
+      vm_id -> route(node(vm), vm_id, argv, opts)
     end
+  end
+
+  def exec(vm_id, argv, opts) when is_binary(vm_id) and is_list(argv) do
+    case whereis(vm_id) do
+      nil -> {:error, :not_found}
+      node -> route(node, vm_id, argv, opts)
+    end
+  end
+
+  # Run the node-local exec on the VM's owning node. A pid already carries its
+  # node; a vm_id was resolved through the routing registry. Transport failures
+  # (owning node down/partitioned) become `:node_unreachable` rather than a raise
+  # in the caller — the VM is unusable from here either way.
+  @spec route(node(), Hyper.Vm.Id.t(), [String.t()], keyword()) ::
+          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
+          | {:error, term()}
+  defp route(node, vm_id, argv, opts) do
+    :erpc.call(node, Hyper.Node, :exec, [vm_id, argv, opts])
+  catch
+    :error, {:erpc, _} -> {:error, :node_unreachable}
   end
 
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
