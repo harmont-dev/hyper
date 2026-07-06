@@ -10,31 +10,40 @@ create, stop, locate, and list microVMs.
 
 ## Configuration
 
-By default, the gRPC interface is **disabled**. You can enable it by editing
-`config/runtime.exs` and setting:
+By default, the gRPC interface is **disabled**. The simplest way to enable it
+is the `[grpc]` table of `/etc/hyper/config.toml`:
+
+```toml
+[grpc]
+enabled = true
+port = 50051
+cred = { cert = "/path/to/cert.pem", key = "/path/to/key.pem" }
+```
+
+Alternatively, configure `Hyper.Cfg.Grpc` from Elixir — in the operator config
+file `/etc/hyper/config.exs` (loaded at runtime), or in your own application's
+`config/runtime.exs` when you embed Hyper as a dependency. Application env
+takes precedence over the TOML table:
 
 ```elixir
-config :hyper, Hyper.Grpc.Config,
+config :hyper, Hyper.Cfg.Grpc,
   enabled: true,
-  port: 50051,
+  port: 50_051,
   cred: GRPC.Credential.new(
     ssl: [certfile: "/path/to/cert.pem", keyfile: "/path/to/key.pem"]
   )
 ```
 
-Note that you can also disable secure mode and use plaintext gRPC:
+Omit `cred` to serve plaintext gRPC.
 
-```elixir
-config :hyper, Hyper.Grpc.Config,
-  enabled: true,
-  port: 50051
-```
-
-> #### TLS Security {: .error}
+> #### No authentication {: .error}
 >
-> It is **strongly** advised you run gRPC with SSL enabled. Running
-> `Hyper.Grpc` without SSL enabled in production could present a security risk
-> and we strongly suggest against it.
+> The gRPC API currently has **no authentication or authorization**: any
+> client that can reach the port has full VM lifecycle control (create, stop,
+> load images). TLS (`cred`) encrypts the transport but does **not**
+> authenticate callers. Only enable the interface on a network you trust —
+> bind it to a private interface or firewall the port so that just your own
+> services can reach it.
 
 ## Client Usage
 

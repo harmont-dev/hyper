@@ -55,6 +55,28 @@ sudo dnf install -y \
 
 <!-- tabs-close -->
 
+### Build Toolchain
+
+Hyper compiles two Rust components as part of `mix compile` — the setuid
+helper and the in-guest agent — and generates its Firecracker/gRPC bindings
+from the shipped specs. Every machine that **compiles** Hyper (including as a
+Mix dependency) therefore needs, besides Elixir `~> 1.20` on OTP 28+:
+
+```sh
+# Rust via rustup (the helper pins its toolchain via rust-toolchain.toml,
+# which rustup auto-installs on first build), plus the static musl target
+# for the guest agent:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add "$(uname -m)-unknown-linux-musl"
+
+# protoc + the protoc-gen-elixir plugin, for the generated gRPC bindings:
+sudo apt install -y protobuf-compiler   # dnf install protobuf-compiler
+mix escript.install hex protobuf 0.17.0
+```
+
+`~/.mix/escripts` does not need to be on your `PATH` — the build finds
+`protoc-gen-elixir` there itself.
+
 ### Device Mapper Config
 
 Hyper relies on `dm-snapshot` and `dm-thin` to build COW filesystems. Load the
@@ -186,7 +208,7 @@ echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control
 > #### Persistence {: .warning}
 >
 > The configuration, as given, will not survive reboots. To persist it, you can
-> use `systemd-tempfiles`:
+> use `systemd-tmpfiles`:
 >
 > ```sh
 > echo 'd /sys/fs/cgroup/hyper 0755 root root -' \
@@ -224,25 +246,98 @@ sudo chown hyper:hyper /srv/hyper
 
 ## Installation
 
+### Hyper Itself
+
+Hyper is a library-first orchestrator: add it to your own Mix project and its
+supervision tree boots with your application, turning the node into a VM
+runner.
+
+```elixir
+def deps do
+  [
+    {:hypervm, "~> 0.1"}
+  ]
+end
+```
+
+Then `mix deps.get && mix compile`. Alternatively, work from a source
+checkout of the [repository](https://github.com/harmont-dev/hyper) — every
+step below is identical.
+
+### Firecracker
+
+Hyper drives [Firecracker](https://firecracker-microvm.github.io/) and its
+jailer, pinned to a known-good version. Download, verify, and install both
+with:
+
+```sh
+mix firecracker.install            # installs to /opt/firecracker
+```
+
+The task installs the binaries under their bare basenames (`firecracker`,
+`jailer` — the setuid helper rejects version-stamped names), marks them
+executable, and prints the `[tools]` snippet for `/etc/hyper/config.toml`.
+After installing, make both binaries root-owned and not group- or
+world-writable (the task prints the exact `chown` command); the helper refuses
+them otherwise.
+
 ### SUID Helper
 
 Hyper does not run as `root`. Running Hyper as root is considered unsafe and an
 anti-pattern. Unfortunately, Hyper needs root for certain classes of system
 operations. This is achieved through a side-car binary called
-`hyper-setuidhelper`, which you must install manually.
+`hyper-suidhelper`, which you must install setuid-root.
 
-> #### Versioning {: .warning}
+> #### Build identity {: .warning}
 >
-> The `hyper-setuidhelper` binary is versioned together with the version of
-> `Hyper`, meaning that mismatched versions between the `hyper-setuidhelper`
-> and `Hyper` itself will not work and Hyper will fail to boot.
+> At boot, Hyper checks that the installed helper is **the exact binary your
+> build produced**: `mix compile` stamps the helper with a BLAKE3 checksum and
+> bakes that identity into the release, and a deployed helper whose version or
+> checksum differs is refused. A binary from another machine or build will not
+> pass — always install the helper from the same tree you compiled.
 
-Installing this binary can be done by downloading it from the [Github Releases
-page](https://github.com/harmont-dev/hyper/releases) and executing:
+Build and install it with:
+
+```sh
+mix suidhelper.install
+```
+
+If `sudo` needs a password, the task builds and stamps the binary, then prints
+the exact privileged copy for you to run yourself:
 
 ```sh
 sudo install -o root -g root -m 4755 \
-  path/to/downloaded/hyper-suidehelper \
+  path/to/built/hyper-suidhelper \
   /usr/local/bin/hyper-suidhelper
 ```
+
+### Database Migrations
+
+With PostgreSQL reachable (see above) and your database credentials configured
+(see the [configuration guide](config.md)), create and migrate the image
+database — once per cluster, from any node:
+
+```sh
+mix ecto.create -r Hyper.Img.Db.Repo
+mix ecto.migrate -r Hyper.Img.Db.Repo
+```
+
+## Booting
+
+Start your application as the `hyper` user — Hyper's supervision tree boots
+with it and the node becomes a VM runner. From a source checkout, an
+interactive session is the quickest smoke test:
+
+```sh
+sudo -u hyper iex -S mix
+```
+
+At boot Hyper validates the node: config file ownership, the setuid helper's
+build identity, and the device-mapper targets. A misconfigured node refuses to
+start with a specific error rather than limping along. Once up, load an image
+and boot a VM — see the [intro](intro.md#usage) for the walkthrough.
+
+For production, run it under a supervisor of your choice (e.g. a systemd unit
+with `User=hyper`). Nodes that join the BEAM cluster become additional VM
+runners automatically.
 

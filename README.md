@@ -25,7 +25,26 @@ same niche as [Daytona](https://github.com/daytonaio/daytona),
 
 ## Quick Start
 
-<!-- TODO(markovejnovic): Deeper quick start -->
+Add Hyper to your Mix project:
+
+```elixir
+def deps do
+  [
+    {:hypervm, "~> 0.1"}
+  ]
+end
+```
+
+Prepare the host (KVM, device-mapper, PostgreSQL, the Firecracker binaries and
+the setuid helper — the [installation
+guide](https://hexdocs.pm/hypervm/install.html) walks through each step), then
+load an OCI image and boot it:
+
+```elixir
+{:ok, img_id} = Hyper.Img.OciLoader.load("docker.io/library/alpine:3.19")
+{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+{:ok, %{stdout: "hello\n"}} = Hyper.exec(vm, ["/bin/echo", "hello"])
+```
 
 Please read the [Hexdocs](https://hexdocs.pm/hypervm/) for guides on using,
 deploying and integrating Hyper.

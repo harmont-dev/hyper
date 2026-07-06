@@ -8,65 +8,53 @@ characteristics at scale, while ensuring extremely high availability and fault
 tolerance.
 
 `Hyper` has been developed completely greenfield, with no reference to any of
-of the aforementioned systems.
+the aforementioned systems.
 
 The absolute best way to understand `Hyper` and how it works is to play around
 with it.
 
 ## Getting Started
 
-The absolute best way to get started with `Hyper` is to play with it.
-
-### Requirements
-
-Hyper requires the following software be installed on each node running it:
-
-  - [`skopeo`](https://github.com/containers/skopeo)
-  - [`e2fsprogs`](https://github.com/tytso/e2fsprogs)
-
-Hyper has more runtime dependencies, but they are automatically redistributed
-by Hyper.
+Running `Hyper` requires a Linux host with KVM, a handful of OS packages, a
+PostgreSQL database, and two privileged artifacts (the Firecracker binaries and
+the setuid helper). The [installation guide](install.md) walks through every
+step; the [configuration guide](config.md) documents every knob. This page
+gives you the shape of things.
 
 ### Installation
 
-<!-- TODO(markovejnovic): Write this out. -->
+Follow the [installation guide](install.md). In short:
+
+1. Prepare the host: KVM, cgroups v2, device-mapper modules, OS packages,
+   PostgreSQL, a dedicated unprivileged `hyper` user.
+2. Add `hypervm` to your Mix project's dependencies (or work from a source
+   checkout).
+3. Install the Firecracker binaries (`mix firecracker.install`) and the setuid
+   helper (`mix suidhelper.install`).
+4. Write `/etc/hyper/config.toml` and run the database migrations.
 
 ### Configuration
 
-Running `Hyper` is involved and requires a large number of pre-requisites. The
-configuration of `:hyper` can be done by creating a `config :hyper` entry in
-your `config.exs`. Refer to the given snippet for details on each
-configuration.
-
-```elixir
-config :hyper,
-  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
-  jailer_bin: "/opt/firecracker/jailer-v1.16.0-x86_64",
-  # TODO(markovejnovic): Remove this after it gets auto-downloaded.
-  firecracker_bin: "/opt/firecracker/firecracker-v1.16.0-x86_64",
-  # You must create a parent cgroup on your system. Continue reading for
-  # further details.
-  cgroup_parent: "hyper",
-  # TODO(markovejnovic): Merge these directories into one.
-  jailer_chroot_base: "/srv/hyper/jails",
-  socket_dir: "/srv/hyper/socks",
-  scratch_dir: "/srv/hyper/scratch",
-  # Hyper requires that each VM you pass 
-  uid_gid_range: {900_000, 999_999},
-  layer_dir: "/srv/hyper/layers"
-```
-
-<!-- TODO(markovejnovic): Update the config section. -->
+All node configuration lives in two root-owned files: `/etc/hyper/config.toml`
+(static settings, shared with the setuid helper) and, optionally,
+`/etc/hyper/config.exs` (runtime Elixir config — secrets, cluster topology).
+The [configuration guide](config.md) documents the full four-layer precedence
+and every table; the [installation guide](install.md#configuration) shows a
+minimal working `config.toml`.
 
 ### Usage
 
-<!-- TODO(markovejnovic): Write out how to boot hyper etc -->
+Hyper is a library-first orchestrator: add it as a dependency and its
+supervision tree boots with your application, turning the node into a VM
+runner. Nodes that join the BEAM cluster become additional runners
+automatically. For non-BEAM consumers there is an optional
+[gRPC interface](../grpc.md).
 
 #### Loading Images
 
-Before an image can be booted, it needs to be loaded into Hyper. Currently, the
-only way to load images is through an OCI image, either natively or through the
-native interface, or through [gRPC](../grpc.md):
+Before an image can be booted, it needs to be loaded into Hyper. Currently,
+the only way to load images is through an OCI image, either through the native
+interface, or through [gRPC](../grpc.md):
 
 ```elixir
 {:ok, img_id} = Hyper.Img.OciLoader.load("docker.io/library/alpine:3.19")
@@ -77,5 +65,18 @@ native interface, or through [gRPC](../grpc.md):
 With the image loaded, and an `img_id` in hand, you can boot it:
 
 ```elixir
-{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{ img_id: img_id })
+{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+```
+
+The VM is scheduled onto the most available node in the cluster, preferring
+nodes that already hold the image's layers.
+
+#### Running Commands
+
+`Hyper.exec/3` runs a command inside the guest and captures its output. Use an
+absolute path for the executable — the guest boots with a near-empty
+environment, so there is no `PATH` to resolve bare names against:
+
+```elixir
+{:ok, %{stdout: out, exit_code: 0}} = Hyper.exec(vm, ["/bin/echo", "hello"])
 ```
