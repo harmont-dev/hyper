@@ -27,7 +27,10 @@ defmodule Mix.Tasks.Suidhelper.Install do
 
   use Mix.Task
 
-  @helper_dir "native/suidhelper"
+  # Anchored to this file (not the cwd) so the task also works when hyper is a
+  # dependency: there the crate lives under deps/hypervm/native/suidhelper, not
+  # under the consumer project's root.
+  @helper_dir Path.expand("../../../native/suidhelper", __DIR__)
   @source Path.join(@helper_dir, "target/release/hyper-suidhelper")
   # Must match `Hyper.Cfg.Tools.suidhelper/0`'s default path and the xtask's
   # `INSTALL_PATH`: a `PATH` location the unprivileged node can exec.

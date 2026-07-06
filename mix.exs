@@ -193,7 +193,37 @@ defmodule Hyper.MixProject do
       # not in `lib`).
       # proto/ ships the gRPC contract so the `:grpc_gen` compiler can regenerate
       # the bindings in a consumer's build (they are gitignored, not in `lib`).
-      files: ~w(lib priv/firecracker proto config mix.exs README.md LICENSE NOTICE CLA.md),
+      # priv/repo ships the migrations so a consumer can `mix ecto.migrate`.
+      # native/ ships the Rust crate *sources* because the `:suidhelper_stamp` and
+      # `:guest_agent_build` compilers build them wherever hyper compiles — the
+      # suidhelper must be built locally anyway (`Hyper.SuidHelper.verify_version/0`
+      # checks the deployed helper's BLAKE3 against this build's stamp, so a
+      # prebuilt binary can never match). Crate subpaths are listed explicitly to
+      # keep local `target/` build dirs out of the tarball; `tests/` must ship
+      # because cargo resolves the declared `[[test]]` target paths at manifest
+      # load even for plain `cargo build`.
+      files: ~w(
+        lib priv/firecracker priv/repo priv/vmlinux proto config mix.exs
+        README.md LICENSE NOTICE CLA.md
+        native/guest-agent/src native/guest-agent/tests native/guest-agent/build.rs
+        native/guest-agent/Cargo.toml native/guest-agent/Cargo.lock
+        native/guest-agent/.cargo
+        native/suidhelper/src native/suidhelper/tests native/suidhelper/meta
+        native/suidhelper/xtask native/suidhelper/build.rs
+        native/suidhelper/Cargo.toml native/suidhelper/Cargo.lock
+        native/suidhelper/rust-toolchain.toml native/suidhelper/README.md
+        native/suidhelper/.cargo native/suidhelper/.config
+      ),
+      # `lib` is included wholesale, so on a dev box the gitignored generated
+      # outputs (bindings, expected.ex) exist on disk and would leak into the
+      # tarball — with a build identity from the packaging machine. Keep the
+      # package deterministic: consumers regenerate all of these at compile.
+      exclude_patterns: [
+        ~r{^lib/hyper/firecracker/api/(operations|schemas)/},
+        ~r{^lib/hyper/grpc/v0/},
+        ~r{^lib/hyper/agent/v1/},
+        ~r{^lib/hyper/suid_helper/expected\.ex$}
+      ],
       links: %{"GitHub" => "https://github.com/harmont-dev/hyper"}
     ]
   end
