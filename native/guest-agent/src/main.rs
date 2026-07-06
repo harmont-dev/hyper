@@ -5,6 +5,17 @@ use hyper_guest_agent::{agent, init, pb};
 const VSOCK_PORT: u32 = 1024;
 
 fn main() -> ! {
+    // MUST be the first statement. When we are PID 1, pid1-rs re-execs this
+    // binary as a child, stays in the parent forwarding SIGTERM/SIGINT and
+    // reaping zombies/orphans, and never returns here. The re-exec'd child runs
+    // with a non-1 PID, so `launch()` returns immediately and it continues
+    // below. When not PID 1 (e.g. under tests) it is a no-op.
+    let mut pid1 = pid1::Pid1Settings::new();
+    pid1.enable_log(true);
+    if let Err(e) = pid1.launch() {
+        eprintln!("hyper-init: pid1 launch failed: {e}");
+    }
+
     if let Err(e) = init::setup() {
         eprintln!("hyper-init: mounts failed: {e}");
     }
@@ -17,17 +28,15 @@ fn main() -> ! {
         }
         Err(e) => eprintln!("hyper-init: runtime failed: {e}"),
     }
-    // PID 1 must never exit; park this thread forever so the kernel does not
-    // panic (panic=1 would reboot-loop the guest).
+    // The re-exec'd child is not PID 1, but if it returned the pid1-rs parent
+    // would exit and the kernel would panic (panic=1 → reboot loop). Park
+    // forever so the agent process never returns.
     loop {
         std::thread::park();
     }
 }
 
 async fn serve() -> Result<(), Box<dyn std::error::Error>> {
-    // Reaper registered before accepting connections: avoids a race where a
-    // child exits between fork and SIGCHLD handler registration.
-    init::spawn_reaper();
     let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, VSOCK_PORT))?;
     tonic::transport::Server::builder()
         .add_service(pb::guest_agent_server::GuestAgentServer::new(agent::Agent))
