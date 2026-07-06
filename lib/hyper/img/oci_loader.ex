@@ -21,6 +21,7 @@ defmodule Hyper.Img.OciLoader do
   use Unit.Operators
 
   alias Hyper.Img.OciLoader.Umoci
+  alias Hyper.Node.FireVMM.GuestAgent
   alias Unit.Information
 
   require Logger
@@ -62,6 +63,7 @@ defmodule Hyper.Img.OciLoader do
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
+             :ok <- stage_agent(rootfs, arch),
              {:ok, {content, files}} <- dir_usage(rootfs),
              params = ext4_params(content, files),
              {:ok, staged} <- build_ext4(rootfs, params) do
@@ -107,6 +109,17 @@ defmodule Hyper.Img.OciLoader do
   @spec goarch(Sys.Arch.t()) :: String.t()
   def goarch(:x86_64), do: "amd64"
   def goarch(:aarch64), do: "arm64"
+
+  @doc false
+  @spec stage_agent(Path.t(), Sys.Arch.t()) :: :ok | {:error, term()}
+  def stage_agent(rootfs, arch), do: stage_agent_from(rootfs, GuestAgent.path(arch))
+
+  @doc false
+  @spec stage_agent_from(Path.t(), Path.t()) :: :ok | {:error, term()}
+  def stage_agent_from(rootfs, agent_bin) do
+    dest = Path.join(rootfs, "hyper-init")
+    with :ok <- File.cp(agent_bin, dest), do: File.chmod(dest, 0o755)
+  end
 
   # `du` apparent bytes undercount ext4 block usage and the default inode ratio
   # starves file-dense trees, so the size carries the inode table plus slack and

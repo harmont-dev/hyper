@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `chroot-jail`: per-VM chroot/jail lifecycle.
 
+mod grant;
 pub mod grant_api;
+pub mod grant_vsock;
 mod prepare;
 pub mod remove;
 
 pub use grant_api::GrantApiArgs;
+pub use grant_vsock::GrantVsockArgs;
 pub use prepare::PrepareArgs;
 pub use remove::RemoveArgs;
 
@@ -19,6 +22,8 @@ pub enum ChrootJailOp {
     Remove(RemoveArgs),
     /// Hand the firecracker API socket to the node user (chown to caller, 0660).
     GrantApi(GrantApiArgs),
+    /// Hand the firecracker vsock socket to the node user (chown to caller, 0660).
+    GrantVsock(GrantVsockArgs),
 }
 
 impl ChrootJailOp {
@@ -30,6 +35,7 @@ impl ChrootJailOp {
             ChrootJailOp::Prepare(args) => prepare::run(args),
             ChrootJailOp::Remove(args) => remove::run(args),
             ChrootJailOp::GrantApi(args) => grant_api::run(args),
+            ChrootJailOp::GrantVsock(args) => grant_vsock::run(args),
         }
     }
 }

@@ -26,6 +26,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   # firecracker's API socket path *inside* the chroot.
   @jail_socket "api.socket"
 
+  # firecracker's vsock Unix-domain socket path *inside* the chroot.
+  @jail_vsock "vsock.sock"
+
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
   defmodule Checks do
@@ -163,6 +166,24 @@ defmodule Hyper.Node.FireVMM.Jailer do
       id,
       "root",
       @jail_socket
+    ])
+  end
+
+  @doc """
+  Host-side path of the vsock Unix-domain socket firecracker opens inside the jail.
+
+  Firecracker creates the vsock UDS at `uds_path` relative to its chroot root,
+  so on the host it lives at `<chroot_root>/vsock.sock`. Deterministic in `id`
+  alone, mirroring `host_socket/1`.
+  """
+  @spec host_vsock(Hyper.Vm.Id.t()) :: Path.t()
+  def host_vsock(id) do
+    Path.join([
+      Hyper.Cfg.Dirs.chroot_base(),
+      exec_name(),
+      id,
+      "root",
+      @jail_vsock
     ])
   end
 

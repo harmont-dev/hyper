@@ -105,6 +105,31 @@ These will be asked to be removed (per `CONTRIBUTING.md`):
 
 Coverage is a side effect of good tests, never the target.
 
+### Answering coverage reports
+
+When codecov (or any coverage tool) flags uncovered lines, do NOT write tests
+to move the number. Triage each uncovered region first:
+
+- **Contract** — behavior a caller or operator relies on: a refusal, a
+  wire/decode boundary, a retry/advance classification, error propagation.
+  Write the behavioral test. Ask: "what realistic mutation of this code
+  should this test kill?" If you cannot name one, it is not a contract.
+- **Mechanical** — 1:1 mappings (`From` impls, delegation wrappers,
+  derive-equivalent code), CLI dispatch arms, `Display`/error strings nothing
+  parses. Decline: a test would restate the code and break on refactor
+  without catching bugs. Record the decline where the work is tracked.
+- **Privileged / integration-only** — paths needing root, a live guest, or a
+  second node. Decline at unit level and name the integration/E2E that
+  covers them.
+
+A patch may legitimately merge below 100%: uncovered mechanical lines cost
+less than tests that pin implementation detail.
+
+**Parametrize by data, not by assertion.** When two or more cases share one
+assertion shape and differ only in inputs/expected values, write one
+table-driven test (or a property) over rows — never copy-paste test bodies.
+If a case needs its own assertions, it is a separate test, not a row.
+
 ### Elixir specifics
 
 - `use ExUnit.Case, async: true` and `use ExUnitProperties` for property suites.

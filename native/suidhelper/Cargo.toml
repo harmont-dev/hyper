@@ -65,6 +65,10 @@ name = "tools_chroot_jail_grant_api"
 path = "tests/tools/chroot_jail_grant_api.rs"
 
 [[test]]
+name = "tools_chroot_jail_grant_vsock"
+path = "tests/tools/chroot_jail_grant_vsock.rs"
+
+[[test]]
 name = "util_chroot_jail"
 path = "tests/util/chroot_jail.rs"
 

@@ -205,10 +205,14 @@ defmodule Hyper.Node.FireVMM.State do
 
     use OpenTelemetryDecorator
 
-    alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations}
-    alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
+    alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations, Vsock}
+    alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Jailer, Opts}
+    alias Unit.Time
 
     require Logger
+
+    # How often to retry the vsock grant while firecracker is still creating the socket.
+    @probe_interval Time.ms(50)
 
     # Stage boot artifacts into the chroot, then issue the pre-boot config and
     # start the guest. Both failure paths end the boot via a supervisor restart,
@@ -221,10 +225,9 @@ defmodule Hyper.Node.FireVMM.State do
         ) do
       case ChrootJail.stage(id, uid, gid, spec) do
         {:ok, jailed_spec} ->
-          case apply_spec(id, jailed_spec) do
+          case configure_devices(id, jailed_spec) do
             :ok ->
-              Logger.info("vm #{id}: configured, guest starting")
-              {:next_state, :running, data}
+              do_grant_vsock(id, data)
 
             {:error, reason} ->
               Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
@@ -237,6 +240,10 @@ defmodule Hyper.Node.FireVMM.State do
       end
     end
 
+    def handle(:state_timeout, :grant_vsock, %{opts: %Opts{vm_id: id}} = data) do
+      do_grant_vsock(id, data)
+    end
+
     def handle({:call, from}, :stop, data) do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
     end
@@ -245,11 +252,11 @@ defmodule Hyper.Node.FireVMM.State do
       {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
     end
 
-    # Cold boot, issued through the Client and aborting at the first error:
-    # machine-config -> boot-source -> each drive -> each NIC -> InstanceStart.
-    @spec apply_spec(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
-    @decorate with_span("Hyper.Node.FireVMM.State.Configuring.apply_spec", include: [:id])
-    defp apply_spec(id, %BootSpec.Cold{} = cold) do
+    # Device PUT sequence: machine-config -> boot-source -> drives -> NICs -> vsock.
+    # InstanceStart is deferred until the vsock UDS grant succeeds.
+    @spec configure_devices(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
+    @decorate with_span("Hyper.Node.FireVMM.State.Configuring.configure_devices", include: [:id])
+    defp configure_devices(id, %BootSpec.Cold{} = cold) do
       via = Client.via(id)
 
       ops =
@@ -265,8 +272,8 @@ defmodule Hyper.Node.FireVMM.State do
           end) ++
           [
             fn opts ->
-              Operations.create_sync_action(
-                %InstanceActionInfo{action_type: "InstanceStart"},
+              Operations.put_guest_vsock(
+                %Vsock{guest_cid: 3, uds_path: "vsock.sock"},
                 opts
               )
             end
@@ -278,6 +285,60 @@ defmodule Hyper.Node.FireVMM.State do
           {:error, _} = err -> {:halt, err}
         end
       end)
+    end
+
+    # Attempt to hand the vsock UDS to the node user. Firecracker may not have
+    # created the socket yet immediately after PUT /vsock, so retry on
+    # :socket_pending at @probe_interval, mirroring AwaitingApi's grant-api shape.
+    @spec do_grant_vsock(Hyper.Vm.Id.t(), State.t()) ::
+            {:next_state, :running, State.t()}
+            | {:keep_state, State.t(), list()}
+            | {:stop, term(), State.t()}
+    defp do_grant_vsock(id, data) do
+      case Hyper.SuidHelper.ChrootJail.grant_vsock(Jailer.host_vsock(id)) do
+        :ok ->
+          case instance_start(id) do
+            :ok ->
+              Logger.info("vm #{id}: configured, guest starting")
+              {:next_state, :running, data}
+
+            {:error, reason} ->
+              Logger.error("vm #{id}: boot failed on InstanceStart: #{inspect(reason)}")
+              {:stop, {:shutdown, {:boot_failed, reason}}, data}
+          end
+
+        {:error, :socket_pending} ->
+          keep_granting(id, data, :socket_pending)
+
+        {:error, reason} ->
+          Logger.warning("vm #{id}: grant-vsock failed: #{inspect(reason)}")
+          keep_granting(id, data, {:grant_vsock, reason})
+      end
+    end
+
+    @spec instance_start(Hyper.Vm.Id.t()) :: :ok | {:error, term()}
+    defp instance_start(id) do
+      Client.run(Client.via(id), fn opts ->
+        Operations.create_sync_action(
+          %InstanceActionInfo{action_type: "InstanceStart"},
+          opts
+        )
+      end)
+    end
+
+    @spec keep_granting(Hyper.Vm.Id.t(), State.t(), term()) ::
+            {:keep_state, State.t(), list()} | {:stop, term(), State.t()}
+    defp keep_granting(id, data, reason) do
+      if System.monotonic_time(:millisecond) >= data.boot_deadline do
+        Logger.warning(
+          "vm #{id}: vsock UDS not available before deadline; " <>
+            "last error: #{inspect(reason)}"
+        )
+
+        {:stop, {:shutdown, {:boot_failed, {:vsock_grant_timeout, reason}}}, data}
+      else
+        {:keep_state, data, [{:state_timeout, Time.as_ms(@probe_interval), :grant_vsock}]}
+      end
     end
   end
 

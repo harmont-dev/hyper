@@ -14,7 +14,12 @@ defmodule Hyper.MixProject do
       # A Mix compiler (not a `compile` alias) is used because Mix honors a
       # dependency's `:compilers` but NOT its aliases or `config/` -- so this is
       # the only hook that also fires when hyper is compiled AS A DEPENDENCY.
-      compilers: [:suidhelper_stamp, :firecracker_gen, :grpc_gen | Mix.compilers()],
+      compilers: [
+        :suidhelper_stamp,
+        :guest_agent_build,
+        :firecracker_gen,
+        :grpc_gen | Mix.compilers()
+      ],
       deps: deps(),
       test_coverage: [tool: ExCoveralls],
       docs: docs(),
@@ -77,6 +82,7 @@ defmodule Hyper.MixProject do
       {:makeup_syntect, "~> 0.1", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
       {:grpc, "~> 1.0"},
+      {:gun, "~> 2.0"},
       {:grpc_server, "~> 1.0"},
       {:horde, "~> 0.9"},
       {:jason, "~> 1.4"},
@@ -246,10 +252,9 @@ end
 
 defmodule Mix.Tasks.Compile.GrpcGen do
   @moduledoc """
-  Mix compiler that generates the gRPC bindings into
-  `lib/hyper/grpc/v0/hyper.pb.ex` from `proto/hyper/grpc/v0/hyper.proto`, just
-  before the Elixir compiler. Like the Firecracker bindings, the output is
-  gitignored and regenerated rather than committed.
+  Mix compiler that generates the gRPC bindings from all `proto/**/*.proto`
+  files, just before the Elixir compiler. Like the Firecracker bindings, the
+  outputs are gitignored and regenerated rather than committed.
 
   Defined in `mix.exs` (not under `lib/`) so it is loaded before any
   compilation. Unlike the Firecracker generator (pure-Elixir `oapi_generator`),
@@ -260,15 +265,29 @@ defmodule Mix.Tasks.Compile.GrpcGen do
       mix escript.install hex protobuf 0.17.0     # provides protoc-gen-elixir
 
   The plugin escript lives in `~/.mix/escripts`, which this compiler prepends to
-  `PATH` for the `protoc` invocation. The generated file is `mix format`-ed so it
-  passes the formatting gate.
+  `PATH` for the `protoc` invocation. Generated files are `mix format`-ed so
+  they pass the formatting gate.
+
+  Adding a new proto is automatic: drop a `.proto` file anywhere under `proto/`
+  and the compiler picks it up. The convention is that the directory structure
+  mirrors the proto package (e.g. `proto/hyper/agent/v1/agent.proto` declares
+  `package hyper.agent.v1`), which is how protoc-gen-elixir derives the output
+  path under `lib/`.
+
+  ## How protoc-gen-elixir places output files
+
+  protoc-gen-elixir writes each output at:
+  `OUT_DIR / package_as_path / FileDescriptorProto.name_minus_proto_ext .pb.ex`
+
+  `FileDescriptorProto.name` is the proto file's path *relative to `--proto_path`*.
+  To keep the name as a bare filename (e.g. `hyper.proto`) we pass each proto
+  file's own directory as the first `--proto_path`. A second `--proto_path=proto`
+  entry lets protos import siblings from the same tree.
   """
 
   use Mix.Task.Compiler
 
-  @proto "proto/hyper/grpc/v0/hyper.proto"
-  @proto_path "proto/hyper/grpc/v0"
-  @out "lib/hyper/grpc/v0/hyper.pb.ex"
+  @proto_root "proto"
 
   @impl Mix.Task.Compiler
   def run(argv) do
@@ -280,32 +299,64 @@ defmodule Mix.Tasks.Compile.GrpcGen do
   end
 
   defp generate do
-    File.mkdir_p!(Path.dirname(@out))
     escripts = Path.expand("~/.mix/escripts")
     env = [{"PATH", escripts <> ":" <> System.get_env("PATH", "")}]
 
-    args = ["--proto_path=#{@proto_path}", "--elixir_out=plugins=grpc:lib", "hyper.proto"]
+    outputs =
+      Enum.map(proto_files(), fn proto ->
+        out = proto_to_out(proto)
+        File.mkdir_p!(Path.dirname(out))
 
-    case System.cmd("protoc", args, env: env, stderr_to_stdout: true) do
-      {_, 0} ->
-        # protoc-gen-elixir mirrors the package path under the output dir, so the
-        # file lands exactly at @out. Format it to satisfy the formatting gate.
-        Mix.Task.run("format", [@out])
+        args = [
+          "--proto_path=#{Path.dirname(proto)}",
+          "--proto_path=#{@proto_root}",
+          "--elixir_out=plugins=grpc:lib",
+          Path.basename(proto)
+        ]
 
-      {output, code} ->
-        Mix.raise("""
-        protoc failed (exit #{code}) generating #{@out}:
+        case System.cmd("protoc", args, env: env, stderr_to_stdout: true) do
+          {_, 0} ->
+            out
 
-        #{output}
-        Ensure `protoc` and the `protoc-gen-elixir` escript are installed:
-            sudo apt-get install -y protobuf-compiler
-            mix escript.install hex protobuf 0.17.0
-        """)
-    end
+          {output, code} ->
+            Mix.raise("""
+            protoc failed (exit #{code}) generating #{out}:
+
+            #{output}
+            Ensure `protoc` and the `protoc-gen-elixir` escript are installed:
+                sudo apt-get install -y protobuf-compiler
+                mix escript.install hex protobuf 0.17.0
+            """)
+        end
+      end)
+
+    # Format each generated file directly rather than via Mix.Task.run("format",
+    # outputs): a Mix task runs once per session, so when mix check runs
+    # "format --check-formatted" before "compile --force", the format task is
+    # already consumed and the Mix.Task.run call would be a no-op.
+    Enum.each(outputs, fn path ->
+      File.write!(path, [Code.format_string!(File.read!(path)), "\n"])
+    end)
   end
 
   defp stale? do
-    not File.exists?(@out) or File.stat!(@proto).mtime > File.stat!(@out).mtime
+    Enum.any?(proto_files(), fn proto ->
+      out = proto_to_out(proto)
+      not File.exists?(out) or File.stat!(proto).mtime > File.stat!(out).mtime
+    end)
+  end
+
+  defp proto_files do
+    Path.wildcard("#{@proto_root}/**/*.proto")
+  end
+
+  # Derives the protoc-gen-elixir output path from the proto source path.
+  # Convention: directory structure mirrors the package declaration, so
+  # proto/hyper/agent/v1/agent.proto -> lib/hyper/agent/v1/agent.pb.ex.
+  defp proto_to_out(proto_path) do
+    proto_path
+    |> String.replace_prefix(@proto_root <> "/", "lib/")
+    |> String.replace_suffix(".proto", ".pb.ex")
   end
 end
 
@@ -468,5 +519,107 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
     # ...)`: a Mix task runs once per session, so invoking it here would consume
     # the single run and leave the later `:grpc_gen` compiler's format a no-op.
     File.write!(@out, [Code.format_string!(source), "\n"])
+  end
+end
+
+defmodule Mix.Tasks.Compile.GuestAgentBuild do
+  @moduledoc """
+  Mix compiler that builds the static `hyper-guest-agent` musl binaries into
+  `priv/guest-agent/`, so the guest agent ships *inside* the app (and its
+  release) with no separate install step -- it is redistributed like the
+  generated bindings, not installed like the privileged suidhelper.
+
+  For each supported arch it runs `cargo build --release --target <musl-triple>`
+  in `native/guest-agent` and copies the binary to
+  `priv/guest-agent/hyper-guest-agent-<arch>`.
+
+  The arch matching the build host is *required* -- a failure there is a hard
+  error (missing `cargo` / musl target). Any *cross* arch is best-effort: it is
+  attempted only when its `rustup` target is installed, and a build/link failure
+  there (e.g. no cross-linker on a dev box) is a warning + skip rather than a
+  compile failure. A node only ever runs its own arch's guests (KVM is
+  same-arch), so the host binary is the sole runtime requirement; the cross copy
+  is redistribution surplus, built wherever the toolchain allows.
+
+  Always runs (cargo is incremental, so a no-op rebuild is cheap).
+  """
+
+  use Mix.Task.Compiler
+
+  @agent_dir "native/guest-agent"
+  @out_dir "priv/guest-agent"
+  @arches [x86_64: "x86_64-unknown-linux-musl", aarch64: "aarch64-unknown-linux-musl"]
+
+  @impl Mix.Task.Compiler
+  def run(_argv) do
+    File.mkdir_p!(@out_dir)
+    host = host_arch()
+    installed = installed_targets()
+
+    Enum.each(@arches, fn {arch, triple} ->
+      cond do
+        arch == host -> build!(arch, triple, required: true)
+        triple in installed -> build!(arch, triple, required: false)
+        # Cross target not installed: nothing to build, and nothing to warn about
+        # -- this host simply does not redistribute that arch.
+        true -> :ok
+      end
+    end)
+
+    {:ok, []}
+  end
+
+  defp build!(arch, triple, required: required?) do
+    case System.cmd("cargo", ["build", "--release", "--target", triple],
+           cd: @agent_dir,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        install(arch, triple)
+
+      {output, code} when required? ->
+        Mix.raise("""
+        Building the guest-agent for the host arch #{arch} (#{triple}) failed (exit #{code}):
+
+        #{output}
+        Ensure `cargo` and the musl target are installed: `rustup target add #{triple}`.
+        """)
+
+      {_output, _code} ->
+        Mix.shell().error(
+          "guest-agent: skipping cross arch #{arch} (#{triple}) -- build failed " <>
+            "(missing cross-linker?). The host arch was built; install the cross " <>
+            "toolchain to also redistribute #{arch}."
+        )
+    end
+  end
+
+  defp install(arch, triple) do
+    src = Path.join(@agent_dir, "target/#{triple}/release/hyper-guest-agent")
+    dest = Path.join(@out_dir, "hyper-guest-agent-#{arch}")
+    File.cp!(src, dest)
+    File.chmod!(dest, 0o755)
+  end
+
+  # Inlined rather than calling `Sys.Arch` because this compiler can run before
+  # the Elixir compiler has built the app modules.
+  defp host_arch do
+    sys = to_string(:erlang.system_info(:system_architecture))
+
+    cond do
+      String.contains?(sys, "x86_64") or String.contains?(sys, "amd64") -> :x86_64
+      String.contains?(sys, "aarch64") or String.contains?(sys, "arm64") -> :aarch64
+      # Fall back to x86_64 so `build!(required: true)` surfaces a clear cargo
+      # error for the real target rather than this compiler guessing.
+      true -> :x86_64
+    end
+  end
+
+  defp installed_targets do
+    case System.cmd("rustup", ["target", "list", "--installed"], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
+      # No rustup / unknown: build only the host arch (never attempt a cross build).
+      _ -> []
+    end
   end
 end

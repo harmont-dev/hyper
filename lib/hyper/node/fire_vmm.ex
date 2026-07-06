@@ -1,7 +1,7 @@
 defmodule Hyper.Node.FireVMM do
   @moduledoc """
-  Supervises a single Firecracker microVM, split into two independent subtrees so
-  no lifecycle invariant rides on the ordering of a flat child list:
+  Supervises a single Firecracker microVM, split into three independent children
+  so no lifecycle invariant rides on the ordering of a flat child list:
 
     1. `Hyper.Node.FireVMM.Core` - the daemon container + `:gen_statem`
        controller, coupled under `:one_for_all` (a controller crash also discards
@@ -10,14 +10,21 @@ defmodule Hyper.Node.FireVMM do
        (it derives the socket itself) and on nothing else in the tree, so it is
        an independent peer: its crashes don't disturb the core, and a core
        restart doesn't cycle it.
+    3. `Hyper.Node.FireVMM.Agent.Relay` - the host-side gRPC relay that bridges
+       inbound Unix-socket connections to the in-guest agent over vsock. Restart
+       is `:transient`: an abnormal crash (unexpected accept error) is restarted;
+       a clean stop (`:shutdown` from the supervisor) is not.
 
-  Strategy is `:one_for_one`: the two subtrees are restarted independently.
+  Strategy is `:one_for_one`: the three children are restarted independently.
   """
 
   use Supervisor
 
+  alias Hyper.Node.FireVMM.Agent
+  alias Hyper.Node.FireVMM.Agent.Relay
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.Core
+  alias Hyper.Node.FireVMM.Jailer
 
   @doc "The scheduler period of each VM."
   @spec cpu_period() :: Unit.Time.t()
@@ -75,7 +82,13 @@ defmodule Hyper.Node.FireVMM do
           # which calls Client.run while waiting for the daemon's API. Client
           # depends only on vm_id (an independent peer), so no reverse dependency.
           {Client, %Client.Opts{vm_id: opts.vm_id}},
-          {Core, opts}
+          {Core, opts},
+          {Relay,
+           %{
+             vm_id: opts.vm_id,
+             vsock_uds: Jailer.host_vsock(opts.vm_id),
+             listen_path: Agent.relay_socket_path(opts.vm_id)
+           }}
         ]
 
         Supervisor.init(children, strategy: :one_for_one)
@@ -88,6 +101,6 @@ defmodule Hyper.Node.FireVMM do
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}
   def test_system do
-    Hyper.Node.FireVMM.Jailer.test_system()
+    Jailer.test_system()
   end
 end
