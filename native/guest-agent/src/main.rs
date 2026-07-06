@@ -5,20 +5,28 @@ use hyper_guest_agent::{agent, init, pb};
 const VSOCK_PORT: u32 = 1024;
 
 fn main() -> ! {
-    // MUST be the first statement. When we are PID 1, pid1-rs re-execs this
-    // binary as a child, stays in the parent forwarding SIGTERM/SIGINT and
-    // reaping zombies/orphans, and never returns here. The re-exec'd child runs
-    // with a non-1 PID, so `launch()` returns immediately and it continues
-    // below. When not PID 1 (e.g. under tests) it is a no-op.
+    // Mount /proc, /sys, /dev BEFORE handing off to pid1. When we are PID 1,
+    // pid1's launch() re-execs this binary via std::env::current_exe(), which
+    // reads /proc/self/exe — /proc must already be mounted or that read fails,
+    // pid1 unwraps the error and panics, and (panic=abort) PID 1 aborts into a
+    // panic=1 reboot loop. We are PID 1 here (or a non-1 test process); the
+    // re-exec'd child shares this mount namespace and inherits these mounts, so
+    // setup() runs exactly once and is not repeated below.
+    if let Err(e) = init::setup() {
+        eprintln!("hyper-init: mounts failed: {e}");
+    }
+
+    // When run as PID 1, pid1-rs re-execs this binary as a child, stays in the
+    // parent forwarding SIGTERM/SIGINT and reaping zombies/orphans, and never
+    // returns here. The re-exec'd child runs with a non-1 PID, so launch()
+    // returns immediately and it continues below. When not PID 1 (e.g. under
+    // tests) it is a no-op.
     let mut pid1 = pid1::Pid1Settings::new();
     pid1.enable_log(true);
     if let Err(e) = pid1.launch() {
         eprintln!("hyper-init: pid1 launch failed: {e}");
     }
 
-    if let Err(e) = init::setup() {
-        eprintln!("hyper-init: mounts failed: {e}");
-    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build();
