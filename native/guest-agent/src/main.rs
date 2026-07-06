@@ -9,9 +9,9 @@ fn main() -> ! {
     // pid1's launch() re-execs this binary via std::env::current_exe(), which
     // reads /proc/self/exe — /proc must already be mounted or that read fails,
     // pid1 unwraps the error and panics, and (panic=abort) PID 1 aborts into a
-    // panic=1 reboot loop. We are PID 1 here (or a non-1 test process); the
-    // re-exec'd child shares this mount namespace and inherits these mounts, so
-    // setup() runs exactly once and is not repeated below.
+    // panic=1 reboot loop. The re-exec'd child re-enters main() and runs setup()
+    // again, but that is a harmless best-effort re-mount over the mounts it
+    // already inherited through the shared mount namespace.
     if let Err(e) = init::setup() {
         eprintln!("hyper-init: mounts failed: {e}");
     }
