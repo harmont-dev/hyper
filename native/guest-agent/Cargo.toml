@@ -31,10 +31,6 @@ tokio-stream = "0.1"
 name = "exec"
 path = "tests/exec.rs"
 
-[[example]]
-name = "health_uds"
-path = "examples/health_uds.rs"
-
 [profile.release]
 opt-level = "z"
 lto = true
