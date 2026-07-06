@@ -19,21 +19,23 @@ defmodule HyperTest do
     assert Hyper.exec(self(), ["/bin/true"]) == {:error, :not_found}
   end
 
-  test "exec/3 routes a resolvable vm_id into the owning node's Hyper.Node.exec/3" do
-    # Register a stand-in {vm_id, :supervisor} (this test pid) so whereis/1
-    # resolves the vm_id to the local node. No relay socket exists for this
-    # vm_id, so the call routes all the way through route/4 -> Hyper.Node.exec
-    # -> Agent.exec and returns the agent's connect error. The point is that it
-    # is NOT a :not_found (resolution succeeded) and NOT :node_unreachable (the
-    # local erpc dispatched), which distinguishes a real route from the
-    # short-circuit above.
+  test "exec/3 routes a resolvable VM into the owning node's Hyper.Node.exec/3, by vm_id and by pid" do
+    # Register a stand-in {vm_id, :supervisor} (this test pid) so both entry
+    # forms resolve: the vm_id via whereis/1, the pid via id/1's reverse
+    # lookup. No relay socket exists for this vm_id, so the call routes all
+    # the way through route/4 -> Hyper.Node.exec -> Agent.exec and returns the
+    # agent's connect error. The point is that it is NOT :not_found
+    # (resolution succeeded) and NOT :node_unreachable (the erpc dispatched),
+    # which distinguishes a real route from the short-circuits above.
     vm_id = Hyper.Vm.Id.generate()
     :ok = Hyper.Cluster.Routing.register_self({vm_id, :supervisor})
     await_route(vm_id)
 
-    assert {:error, reason} = Hyper.exec(vm_id, ["/bin/true"])
-    refute reason == :not_found
-    refute reason == :node_unreachable
+    for entry <- [vm_id, self()] do
+      assert {:error, reason} = Hyper.exec(entry, ["/bin/true"])
+      refute reason == :not_found, "#{inspect(entry)} must resolve, got :not_found"
+      refute reason == :node_unreachable, "#{inspect(entry)} dispatched locally"
+    end
   end
 
   # Horde materialises a registration into the local replica asynchronously, so
