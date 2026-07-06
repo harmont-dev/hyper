@@ -1,0 +1,9 @@
+# Cross-link the aarch64 static-musl guest-agent with the Ubuntu/Debian
+# `gcc-aarch64-linux-gnu` cross toolchain. Only affects the aarch64 target, and
+# only when it is actually built (the `:guest_agent_build` Mix compiler attempts
+# it solely when the rustup target is installed). On a host without this
+# cross-linker the aarch64 build fails and is warn-and-skipped — best-effort, so
+# committing this is safe for x86_64-only build hosts. The x86_64 host build
+# needs no entry: cargo's default `cc` links its own arch's musl target fine.
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-gnu-gcc"
