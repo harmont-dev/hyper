@@ -229,6 +229,51 @@ fn symlinked_component_does_not_escape() {
     );
 }
 
+#[test]
+fn symlink_to_real_socket_at_leaf_is_refused_and_target_untouched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jail = tmp.path();
+    let root = make_root(jail);
+    // The link target IS a genuine socket outside the jail: a stat that
+    // follows the link sees S_IFSOCK and would wrongly grant (chmodding the
+    // outside socket). Only the AT_SYMLINK_NOFOLLOW stat (S_IFLNK) refuses.
+    let outside = tmp.path().join("outside.sock");
+    let _listener = UnixListener::bind(&outside).unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+    let link = root.join("vsock.sock");
+    symlink(&outside, &link).unwrap();
+
+    let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
+    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert_eq!(
+        fs::symlink_metadata(&outside).unwrap().mode() & 0o777,
+        0o700,
+        "grant must never reach through the leaf symlink to the real socket",
+    );
+}
+
+#[test]
+fn unreadable_jail_base_is_a_hard_walk_error_not_pending() {
+    // Root bypasses permission checks, so the refusal cannot fire; skip.
+    if nix::unistd::geteuid().is_root() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let jail = tmp.path().join("jail");
+    fs::create_dir(&jail).unwrap();
+    let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
+    fs::set_permissions(&jail, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let res = grant_vsock_under(&jail, &sock(&socket));
+    // Restore before asserting so the tempdir can clean up even on failure.
+    fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        matches!(res, Err(Error::Walk(_))),
+        "EACCES must be a hard Walk error, never Ok(Pending): got {res:?}",
+    );
+}
+
 proptest! {
     // For a socket `depth` components below the jail base with leaf `vsock.sock`
     // (target never created), grant_vsock_under returns Ok(Pending) iff depth == 4
