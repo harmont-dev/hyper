@@ -97,16 +97,6 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
   def to_grpc({:error, reason}), do: rpc_error(reason)
 
-  # A :gen_statem call exit from State.stop/1: :noproc (unknown vm_id) -> NOT_FOUND,
-  # :nodedown (downed host) -> UNAVAILABLE, anything else is a real controller
-  # failure -> INTERNAL, so a genuine crash is never masked as a clean NOT_FOUND.
-  @spec to_grpc({:exit, term()}) :: GRPC.RPCError.t()
-  def to_grpc({:exit, :noproc}), do: rpc_error(:not_found)
-  def to_grpc({:exit, {:noproc, _}}), do: rpc_error(:not_found)
-  def to_grpc({:exit, :nodedown}), do: rpc_error(:machine_unreachable)
-  def to_grpc({:exit, {:nodedown, _}}), do: rpc_error(:machine_unreachable)
-  def to_grpc({:exit, reason}), do: rpc_error({:stop_failed, reason})
-
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
