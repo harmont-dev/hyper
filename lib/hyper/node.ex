@@ -209,6 +209,33 @@ defmodule Hyper.Node do
     :ok
   end
 
+  @doc """
+  Publish the running VM `vm_id`'s disk state as a new derived image and return
+  what a remote node needs to boot a fork of it: the new `img_id` plus the
+  parent's instance `type`, `arch`, and `boot_args`. The slow-fork half of
+  `Hyper.Vm.fork/1`; the parent keeps running throughout.
+  """
+  @spec publish_fork_image(Hyper.Vm.Id.t()) ::
+          {:ok,
+           %{
+             img_id: Hyper.Img.id(),
+             type: Hyper.Vm.Instance.t(),
+             arch: Hyper.Vm.Instance.arch(),
+             boot_args: String.t() | nil
+           }}
+          | {:error, term()}
+  @decorate with_span("Hyper.Node.publish_fork_image", include: [:vm_id])
+  def publish_fork_image(vm_id) do
+    with {:ok, parent} <- describe_vm(vm_id) do
+      _ = quiesce(vm_id)
+
+      with {:ok, img_id} <- Img.Publish.fork_image(vm_id, parent.img_id) do
+        {:ok,
+         %{img_id: img_id, type: parent.type, arch: parent.arch, boot_args: parent.boot_args}}
+      end
+    end
+  end
+
   @doc false
   @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
