@@ -43,6 +43,25 @@ defmodule Hyper.Metering.UsageTest do
     assert Time.as_ms(Usage.total(vm_id, from, to)) == 200
   end
 
+  test "consecutive half-open ranges partition the lifetime total" do
+    vm_id = Hyper.Vm.Id.generate()
+    base = ~U[2026-07-07 00:00:00.000000Z]
+    record!(vm_id, 0, 60, Time.ms(100))
+    record!(vm_id, 60, 120, Time.ms(200))
+    record!(vm_id, 120, 180, Time.ms(400))
+
+    # Cuts land exactly ON window_starts — the case a <=/< mix-up double-counts.
+    cuts = Enum.map([0, 60, 120, 121], &DateTime.add(base, &1, :second))
+
+    part_sum =
+      cuts
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.map(fn [from, to] -> Time.as_ms(Usage.total(vm_id, from, to)) end)
+      |> Enum.sum()
+
+    assert part_sum == Time.as_ms(Usage.total(vm_id))
+  end
+
   test "a retried flush for the same window is dropped, not double-billed" do
     vm_id = Hyper.Vm.Id.generate()
     record!(vm_id, 0, 60, Time.ms(1_000))
