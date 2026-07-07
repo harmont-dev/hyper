@@ -185,18 +185,19 @@ headers = { "authorization" = "Bearer YOUR_TOKEN" }
 ## Budget Configuration
 
 Hyper allows you to control the absolute maximal budgets that are available to
-all VMs on a particular node. Every field is required except `cpu_max_cap`.
+all VMs on a particular node. Every field has a built-in default; set only the
+keys you need to change.
 
-| Config Key         | `config.exs`        | `config.toml`       | Default | Notes |
-| ------------------ | ------------------- | ------------------- | ------- | ----- |
-| `mem_max`          | `.mem_max`          | `.mem_max`          | -       | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of RAM the node offers VMs. Must not exceed available system memory. |
-| `disk_max`         | `.disk_max`         | `.disk_max`         | -       | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Must not exceed available system disk. |
-| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | -       | [$\beta$ (soft) budget](./architecture.md#budgets): instantaneous CPU load threshold, a fraction `0.0`–`1.0` of the cap. |
-| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `nil`   | [$\beta$ (soft) budget](./architecture.md#budgets): soft CPU capacity in cores (a float). Optional. |
-| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | -       | [$\beta$ (soft) budget](./architecture.md#budgets): soft disk-bandwidth capacity ([unit](#unit)). |
-| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | -       | [$\beta$ (soft) budget](./architecture.md#budgets): disk-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
-| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | -       | [$\beta$ (soft) budget](./architecture.md#budgets): soft network-bandwidth capacity ([unit](#unit)). |
-| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | -       | [$\beta$ (soft) budget](./architecture.md#budgets): network-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
+| Config Key         | `config.exs`        | `config.toml`       | Default   | Notes |
+| ------------------ | ------------------- | ------------------- | --------- | ----- |
+| `mem_max`          | `.mem_max`          | `.mem_max`          | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of RAM the node offers VMs. Must not exceed available system memory. |
+| `disk_max`         | `.disk_max`         | `.disk_max`         | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Must not exceed available system disk. |
+| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): instantaneous CPU load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `4.0`     | [$\beta$ (soft) budget](./architecture.md#budgets): soft CPU capacity in cores (a float). Optional — an explicit `nil` in `config.exs` disables the cap. |
+| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft disk-bandwidth capacity ([unit](#unit)). |
+| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): disk-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft network-bandwidth capacity ([unit](#unit)). |
+| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): network-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
 
 <!-- tabs open -->
 ### `config.exs`

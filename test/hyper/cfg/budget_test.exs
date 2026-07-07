@@ -11,6 +11,9 @@ defmodule Hyper.Cfg.BudgetTest do
     on_exit(fn ->
       Application.delete_env(:hyper, Budget)
       Toml.reload()
+      # load/0 caches the struct; erase it so no later test observes this
+      # test's budget by accident.
+      :persistent_term.erase(Budget)
     end)
 
     :ok
