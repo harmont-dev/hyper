@@ -1,6 +1,7 @@
 {
   "skip_files": [
     "lib/hyper/firecracker/api/operations/",
-    "lib/hyper/firecracker/api/schemas/"
+    "lib/hyper/firecracker/api/schemas/",
+    "lib/mix/"
   ]
 }
