@@ -48,7 +48,7 @@ defmodule Hyper.E2e.GrpcContractTest do
     e in ErlangError ->
       flunk("""
       npm is unavailable (#{inspect(e.original)}). The gRPC contract suite
-      needs Node.js and npm on PATH — see test/grpc/README.md.
+      (test/grpc) needs Node.js and npm on PATH.
       """)
   end
 end
