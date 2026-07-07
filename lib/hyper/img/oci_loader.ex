@@ -62,7 +62,7 @@ defmodule Hyper.Img.OciLoader do
          :ok <- test_system(),
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
-        with {:ok, rootfs} <- pull_and_unpack(source, goarch(arch), tmp),
+        with {:ok, rootfs} <- pull_and_unpack(source, Sys.Arch.goarch(arch), tmp),
              :ok <- stage_agent(rootfs, arch),
              {:ok, {content, files}} <- dir_usage(rootfs),
              params = ext4_params(content, files),
@@ -103,12 +103,6 @@ defmodule Hyper.Img.OciLoader do
       do: {:ok, "docker://" <> ref},
       else: {:error, :invalid_ref}
   end
-
-  # Map a Hyper architecture to the Go/OCI arch name `skopeo --override-arch` wants.
-  @doc false
-  @spec goarch(Sys.Arch.t()) :: String.t()
-  def goarch(:x86_64), do: "amd64"
-  def goarch(:aarch64), do: "arm64"
 
   @doc false
   @spec stage_agent(Path.t(), Sys.Arch.t()) :: :ok | {:error, term()}
