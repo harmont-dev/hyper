@@ -17,6 +17,8 @@ defmodule Hyper.Grpc.Server do
     CreateVmResponse,
     GetVmRequest,
     GetVmResponse,
+    GetVmUsageRequest,
+    GetVmUsageResponse,
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
@@ -63,6 +65,15 @@ defmodule Hyper.Grpc.Server do
     case Hyper.whereis(vm_id) do
       nil -> raise Codec.to_grpc({:error, :not_found})
       node -> Codec.to_grpc({:located, vm_id, node})
+    end
+  end
+
+  @spec get_vm_usage(GetVmUsageRequest.t(), GRPC.Server.Stream.t()) :: GetVmUsageResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.get_vm_usage", include: [:vm_id])
+  def get_vm_usage(%GetVmUsageRequest{vm_id: vm_id}, _stream) do
+    case Hyper.usage(vm_id) do
+      {:ok, cpu_time} -> Codec.to_grpc({:usage, vm_id, cpu_time})
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
   end
 
