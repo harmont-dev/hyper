@@ -23,11 +23,22 @@ mix check        # THE gate. Must pass before any PR. Runs, in order:
                  #   dialyzer                    (strict; @specs required)
 mix test                              # Elixir suite (needs Postgres for DB tests)
 mix test test/unit test/controls      # pure tests, no Postgres/Firecracker needed
+mix test --only integration --only external
+                 # live E2E: boots real Firecracker VMs. Needs a provisioned
+                 # KVM host (docs/cookbook/install.md) + passwordless sudo.
+                 # CI runs this in ci.yml's `integration` job on ubuntu-latest.
 cargo nextest run                     # Rust suite (run inside native/suidhelper/)
 ```
 
 Pure tests under `test/unit` and `test/controls` need neither Postgres nor
 Firecracker. DB-backed tests need `mix ecto.create && mix ecto.migrate` first.
+
+The `:integration` suite (`test/e2e/`) is the live Firecracker E2E: it starts
+the full supervision tree (never combine with `--no-start`) and drives real
+VMs. `:external` tests pull real OCI images. Both are excluded by default and
+run in CI's `integration` job, which provisions the GitHub-hosted runner via
+`.github/scripts/provision-kvm-host.sh` — keep that script in lockstep with
+`docs/cookbook/install.md`.
 
 ## Layout
 

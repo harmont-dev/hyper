@@ -83,7 +83,7 @@ Hyper relies on `dm-snapshot` and `dm-thin` to build COW filesystems. Load the
 modules and confirm the targets are present:
 
 ```sh
-sudo modprobe dm_snapshot dm_thin_pool loop
+sudo modprobe -a dm_snapshot dm_thin_pool loop
 sudo dmsetup targets # must list snapshot, thin, and thin-pool
 ```
 
