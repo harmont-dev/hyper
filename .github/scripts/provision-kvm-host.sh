@@ -19,8 +19,12 @@ sudo apt-get install -y \
   coreutils e2fsprogs libc-bin lvm2 skopeo util-linux \
   "linux-modules-extra-$(uname -r)"
 
-sudo modprobe dm_snapshot dm_thin_pool loop
-sudo dmsetup targets | grep -q thin-pool
+# -a is load-bearing: without it modprobe reads the 2nd+ names as module
+# PARAMETERS of the first, and the load fails.
+sudo modprobe -av dm_snapshot dm_thin_pool loop
+targets="$(sudo dmsetup targets)"
+echo "dmsetup targets: ${targets}"
+grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'
