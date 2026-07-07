@@ -13,7 +13,9 @@ defmodule Hyper.Node.FireVMM.Meter do
       a cgroup recreated by a Core restart re-baselines instead of going
       negative;
     * a failed flush keeps the accrued time and retries with the window
-      extended — a transient DB error never drops recorded usage;
+      extended; the retry is idempotent on `(vm_id, window_start)`, so an
+      insert that committed but errored client-side is dropped, not
+      double-billed — recorded usage can never be counted twice;
     * every failure mode (meter crash, node crash, unreadable cgroup) loses at
       most the unflushed window: metering only ever under-counts, never
       over-counts.

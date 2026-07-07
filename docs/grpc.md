@@ -119,7 +119,9 @@ You can read a VM's metered compute with `GetVmUsage`. It reports the
 cumulative CPU time the VM has *actually executed* — measured from its
 cgroup, so an idle VM accrues (almost) nothing. This is the counter to bill
 on: compute performed, not compute allocated. Stopped VMs report their
-recorded lifetime total.
+recorded lifetime total. A VM that never accrued any compute (for example,
+created and stopped while fully idle) has no recorded usage and returns
+`NOT_FOUND`.
 
 ```python
 usage = await client.GetVmUsage(hyper_pb2.GetVmUsageRequest(vm_id=created.vm_id))

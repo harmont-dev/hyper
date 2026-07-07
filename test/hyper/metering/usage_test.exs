@@ -43,6 +43,15 @@ defmodule Hyper.Metering.UsageTest do
     assert Time.as_ms(Usage.total(vm_id, from, to)) == 200
   end
 
+  test "a retried flush for the same window is dropped, not double-billed" do
+    vm_id = Hyper.Vm.Id.generate()
+    record!(vm_id, 0, 60, Time.ms(1_000))
+    # Same (vm_id, window_start): a retry whose first attempt committed.
+    record!(vm_id, 0, 90, Time.ms(1_500))
+
+    assert Time.as_ms(Usage.total(vm_id)) == 1_000
+  end
+
   test "an unmetered VM totals nil, and zero windows are refused" do
     vm_id = Hyper.Vm.Id.generate()
     assert Usage.total(vm_id) == nil

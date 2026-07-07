@@ -13,8 +13,11 @@ defmodule Hyper.Img.Db.Repo.Migrations.CreateVmUsage do
       timestamps(updated_at: false, type: :utc_datetime_usec)
     end
 
-    # The billing access path: all windows for a VM, optionally range-bounded
-    # by window_start.
-    create index(:vm_usage, [:vm_id, :window_start])
+    # Both the billing access path (all windows for a VM, optionally
+    # range-bounded by window_start) and the idempotency key for flush
+    # retries: window_start does not advance on a failed flush, so a retry
+    # carries the same (vm_id, window_start) and is dropped as a conflict
+    # instead of double-billed.
+    create unique_index(:vm_usage, [:vm_id, :window_start])
   end
 end

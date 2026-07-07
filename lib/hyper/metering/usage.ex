@@ -42,8 +42,16 @@ defmodule Hyper.Metering.Usage do
           cpu_time: Time.t()
         }
 
-  @doc "Record one usage window. Zero-consumption windows are refused, not stored."
-  @spec record(attrs()) :: :ok | {:error, Ecto.Changeset.t()}
+  @doc """
+  Record one usage window. Zero-consumption windows are refused, not stored.
+
+  Idempotent on `(vm_id, window_start)`: a retried flush whose earlier attempt
+  actually committed (the insert succeeded server-side but the client saw an
+  error) is dropped by the unique index rather than double-billed. DB failures
+  (connection loss, timeouts) are returned as `{:error, exception}`, never
+  raised — the meter's keep-and-retry loop depends on that.
+  """
+  @spec record(attrs()) :: :ok | {:error, Ecto.Changeset.t() | Exception.t()}
   @decorate with_span("Hyper.Metering.Usage.record", include: [:vm_id])
   def record(%{vm_id: vm_id, cpu_time: cpu_time} = attrs) do
     changeset =
@@ -61,7 +69,21 @@ defmodule Hyper.Metering.Usage do
       |> validate_required([:vm_id, :node_id, :window_start, :window_end, :cpu_usec])
       |> validate_number(:cpu_usec, greater_than: 0)
 
-    with {:ok, _row} <- Repo.insert(changeset), do: :ok
+    with {:ok, _row} <- insert(changeset), do: :ok
+  end
+
+  # A conflict means an earlier attempt at this exact window already committed
+  # (`on_conflict: :nothing` still returns `{:ok, _}`): dropping the retry loses
+  # only the window-extension delta — an under-count, the safe direction.
+  @spec insert(Ecto.Changeset.t()) ::
+          {:ok, %__MODULE__{}} | {:error, Ecto.Changeset.t() | Exception.t()}
+  defp insert(changeset) do
+    Repo.insert(changeset,
+      on_conflict: :nothing,
+      conflict_target: [:vm_id, :window_start]
+    )
+  rescue
+    e in [Postgrex.Error, DBConnection.ConnectionError] -> {:error, e}
   end
 
   @doc "A VM's lifetime metered compute; `nil` when the VM was never metered."
