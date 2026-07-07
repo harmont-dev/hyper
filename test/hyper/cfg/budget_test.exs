@@ -1,0 +1,58 @@
+defmodule Hyper.Cfg.BudgetTest do
+  use ExUnit.Case, async: false
+
+  alias Hyper.Cfg.Budget
+  alias Hyper.Cfg.Toml
+
+  setup do
+    Application.delete_env(:hyper, Budget)
+    Toml.put_cache(%{})
+
+    on_exit(fn ->
+      Application.delete_env(:hyper, Budget)
+      Toml.reload()
+    end)
+
+    :ok
+  end
+
+  test "load/0 with no app env and no TOML table returns the documented built-in defaults" do
+    assert {:ok, config} = Budget.load()
+
+    assert config == %Budget{
+             mem_max: Unit.Information.gib(4),
+             disk_max: Unit.Information.gib(4),
+             cpu_max_load: 0.8,
+             cpu_max_cap: 4.0,
+             disk_bw_cap: Unit.Bandwidth.gibps(1),
+             disk_bw_max_load: 0.8,
+             net_bw_cap: Unit.Bandwidth.gibps(1),
+             net_bw_max_load: 0.8
+           }
+  end
+
+  test "a [budget] TOML table overrides the built-in default" do
+    Toml.put_cache(%{"budget" => %{"cpu_max_load" => 0.5, "mem_max" => "2GiB"}})
+
+    assert {:ok, config} = Budget.load()
+    assert config.cpu_max_load == 0.5
+    assert config.mem_max == Unit.Information.gib(2)
+    # Fields absent from the TOML table still fall back to their defaults.
+    assert config.disk_max == Unit.Information.gib(4)
+  end
+
+  test "an app-env override (config.exs) wins over a conflicting TOML value" do
+    Toml.put_cache(%{"budget" => %{"cpu_max_load" => 0.5}})
+    Application.put_env(:hyper, Budget, cpu_max_load: 0.9)
+
+    assert {:ok, config} = Budget.load()
+    assert config.cpu_max_load == 0.9
+  end
+
+  test "cpu_max_cap can be explicitly disabled via app env, overriding its default" do
+    Application.put_env(:hyper, Budget, cpu_max_cap: nil)
+
+    assert {:ok, config} = Budget.load()
+    assert config.cpu_max_cap == nil
+  end
+end
