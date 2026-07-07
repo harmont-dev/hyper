@@ -21,6 +21,38 @@ defmodule Hyper.E2e do
     |> MapSet.new()
   end
 
+  @typedoc "Cluster-visible VM side-effect surface: dm devices + routing entries."
+  @type snapshot :: %{dm: MapSet.t(String.t()), routing: MapSet.t(Hyper.Vm.Id.t())}
+
+  @doc """
+  Snapshot of every observable side effect a VM creation leaves behind:
+  live device-mapper devices and registered routing entries. Take one before
+  an operation that must be refused; `leaks_since/1` then reports anything
+  the refusal leaked.
+  """
+  @spec snapshot() :: snapshot()
+  def snapshot do
+    %{
+      dm: dm_devices(),
+      routing: MapSet.new(Hyper.Cluster.Routing.all(), fn {vm_id, _node} -> vm_id end)
+    }
+  end
+
+  @doc """
+  Entries present now but absent from `before` — the leaks. Set difference,
+  not equality: concurrent reaping/deregistration may shrink either set
+  between snapshots, and shrinkage is not a leak.
+  """
+  @spec leaks_since(snapshot()) :: snapshot()
+  def leaks_since(before) do
+    now = snapshot()
+
+    %{
+      dm: MapSet.difference(now.dm, before.dm),
+      routing: MapSet.difference(now.routing, before.routing)
+    }
+  end
+
   @doc "Polls `fun` every 500 ms until it returns truthy or `deadline_ms` elapses."
   @spec poll_until((-> boolean()), non_neg_integer()) :: boolean()
   def poll_until(fun, deadline_ms) do
