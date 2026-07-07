@@ -143,7 +143,7 @@ defmodule Hyper.Node.Img.Mutable do
          {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
          {:ok, %{dev: dev, id: id}} <-
            ThinPool.snapshot(name, origin_name, origin_id, sectors, ro_dev) do
-      :ok = release(parent)
+      release_parent(parent)
 
       state = %State{
         img_id: img_id,
@@ -167,6 +167,17 @@ defmodule Hyper.Node.Img.Mutable do
       [{pid, _}] -> {:ok, pid}
       [] -> {:error, {:parent_mutable_not_found, vm_id}}
     end
+  end
+
+  # Dropping our hold on the parent after the snapshot is best-effort: a parent
+  # that died in the meantime needs no release (its holder map died with it),
+  # and the child's snapshot is already independent — aborting init here would
+  # strand the volume we just created until the Reaper collects it.
+  @spec release_parent(pid()) :: :ok
+  defp release_parent(parent) do
+    release(parent)
+  catch
+    :exit, _ -> :ok
   end
 
   @impl true
