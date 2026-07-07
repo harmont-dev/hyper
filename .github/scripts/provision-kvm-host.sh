@@ -37,6 +37,12 @@ jailer = "/opt/firecracker/jailer"
 [jails]
 uid_gid_range = [900000, 999999]
 cgroup = "hyper"
+
+# The runner is a dedicated ephemeral host: the soft budget's default
+# cpu_max_load (0.8) refuses VMs with :no_capacity while compile/provision
+# load is still decaying, and nothing else runs here worth protecting.
+[budget]
+cpu_max_load = 4.0
 EOF
 sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml
