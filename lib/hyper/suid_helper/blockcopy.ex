@@ -28,9 +28,7 @@ defmodule Hyper.SuidHelper.Blockcopy do
           | {:error, err() | File.posix()}
   @decorate with_span("Hyper.SuidHelper.Blockcopy.copy", include: [:src, :dst])
   def copy(src, dst, %{block_sectors: _, ranges: _} = ranges_spec) do
-    Sys.Tmp.with_tempdir("blockcopy-ranges", fn dir ->
-      path = Path.join(dir, "ranges.json")
-
+    Sys.Tmp.with_tmpfile("blockcopy-ranges", fn path ->
       with :ok <- File.write(path, Jason.encode!(ranges_spec)) do
         run(src, dst, path)
       end
