@@ -113,6 +113,8 @@ happy path is often enough. Do **not** add mechanical, one-assertion-per-getter
 tests that exist only to inflate the count -- they will be asked to be removed.
 Match the style of the tests already in `test/`.
 
+The `:integration` and `:external` test suites are excluded by default. The `:integration` suite (`test/e2e/`) contains live Firecracker E2E tests that boot real VMs and require a provisioned KVM host (see `docs/cookbook/install.md`) and passwordless sudo. The `:external` suite pulls real OCI images. Both run automatically in CI's `integration` job on every PR, so you do not need to run them locally unless you are developing them -- `mix check` runs the default test set, which is sufficient for most contributions.
+
 ## Generated code
 
 The Firecracker API bindings under
