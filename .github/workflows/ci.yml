@@ -259,7 +259,11 @@ jobs:
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
     # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery) plus
+    # ~4 minutes of provisioning/compile/setup. 25 could cancel the job right
+    # as it finishes, and `!cancelled()` steps then skip result uploads —
+    # exactly when flake history matters most.
+    timeout-minutes: 35
     env:
       MIX_ENV: test
     services:
