@@ -11,7 +11,9 @@ defmodule Hyper.E2e.CrashRecoveryTest do
   survives if the underlying block device itself was preserved. Reclaim
   happens only on explicit stop: `stop_image_vm/1` must then remove the
   volume — the crash/recover cycle must not leak the device or the routing
-  entry past the stop.
+  entry past the stop. Metering must survive the cycle too: the recreated
+  cgroup's counter reset re-baselines the accumulator instead of going
+  negative, so the final flush at stop still lands a positive usage total.
 
   Runs only under `--only integration` on a provisioned host (see
   VmLifecycleTest for the environment contract).
@@ -19,6 +21,9 @@ defmodule Hyper.E2e.CrashRecoveryTest do
   use ExUnit.Case, async: false
 
   import Hyper.E2e
+
+  alias Hyper.Metering.Usage
+  alias Unit.Time
 
   @moduletag :integration
   @moduletag timeout: :timer.minutes(10)
@@ -86,5 +91,15 @@ defmodule Hyper.E2e.CrashRecoveryTest do
 
     assert poll_until(fn -> Hyper.whereis(vm_id) == nil end, :timer.minutes(1)),
            "routing entry for #{vm_id} survived stop_image_vm"
+
+    # The crash recreated the VM's cgroup, resetting cpu.stat to zero. A
+    # naive delta would go negative, every flush would then be refused by
+    # the cpu_usec > 0 validation, and no usage row would ever land — so a
+    # positive lifetime total proves the accumulator re-baselined and the
+    # meter kept billing across the crash.
+    assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
+           "no usage recorded across the crash/recovery cycle"
+
+    assert Time.as_us(Usage.total(vm_id)) > 0
   end
 end
