@@ -2,9 +2,10 @@ defmodule Controls.AccumulatorPropertiesTest do
   @moduledoc """
   Laws for the monotonic-counter accumulator: folding a monotone sequence
   accrues exactly `last - first`; the total is never negative for any
-  sequence (resets included); observing the same reading twice adds nothing;
-  and interleaving `flush/1` at arbitrary points conserves the grand total —
-  nothing is lost or double-counted across flushes.
+  sequence (resets included); a reading below the previous accrues exactly the
+  new reading; observing the same reading twice adds nothing; and interleaving
+  `flush/1` at arbitrary points conserves the grand total — nothing is lost or
+  double-counted across flushes.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -32,6 +33,19 @@ defmodule Controls.AccumulatorPropertiesTest do
     check all(values <- readings()) do
       acc = fold(Accumulator.new(Time.zero()), values)
       assert Time.as_us(Accumulator.total(acc)) >= 0
+    end
+  end
+
+  property "a reset accrues exactly the new reading" do
+    check all(first <- integer(1..1_000_000_000), salt <- integer(0..1_000_000_000)) do
+      reset = rem(salt, first)
+
+      acc =
+        Accumulator.new(Time.zero())
+        |> Accumulator.observe(Time.us(first))
+        |> Accumulator.observe(Time.us(reset))
+
+      assert Time.as_us(Accumulator.total(acc)) == reset
     end
   end
 
