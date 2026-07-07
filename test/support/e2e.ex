@@ -37,9 +37,12 @@ defmodule Hyper.E2e do
   end
 
   @doc """
-  `Hyper.exec/3`, retried while the guest agent is still coming up
-  (`:agent_unavailable` / `:timeout` are the boot-race errors; anything else
-  returns immediately).
+  `Hyper.exec/3`, retried while the guest agent is still coming up.
+
+  Boot-race errors that get retried: `:agent_unavailable`, `:timeout`, and
+  `GRPC.RPCError` — the relay's vsock stream can connect and drop while the
+  in-guest agent is still starting, which surfaces as a gRPC stream error
+  rather than `:agent_unavailable`. Anything else returns immediately.
   """
   @spec await_exec(pid() | binary(), [String.t()], non_neg_integer()) ::
           {:ok, map()} | {:error, term()}
@@ -50,16 +53,23 @@ defmodule Hyper.E2e do
 
   defp do_await_exec(vm, argv, deadline) do
     case Hyper.exec(vm, argv) do
-      {:error, reason} when reason in [:agent_unavailable, :timeout] ->
-        if System.monotonic_time(:millisecond) > deadline do
-          {:error, reason}
-        else
-          Process.sleep(1_000)
-          do_await_exec(vm, argv, deadline)
-        end
+      {:error, reason} = err when reason in [:agent_unavailable, :timeout] ->
+        retry_or_return(err, vm, argv, deadline)
+
+      {:error, %GRPC.RPCError{}} = err ->
+        retry_or_return(err, vm, argv, deadline)
 
       other ->
         other
+    end
+  end
+
+  defp retry_or_return(err, vm, argv, deadline) do
+    if System.monotonic_time(:millisecond) > deadline do
+      err
+    else
+      Process.sleep(1_000)
+      do_await_exec(vm, argv, deadline)
     end
   end
 end
