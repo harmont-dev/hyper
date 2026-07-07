@@ -10,6 +10,7 @@ pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
 mod losetup;
+pub mod thin_dump;
 
 pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
