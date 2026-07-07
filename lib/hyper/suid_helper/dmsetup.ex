@@ -65,6 +65,40 @@ defmodule Hyper.SuidHelper.Dmsetup do
     end
   end
 
+  @doc "Suspend dm device `name`, flushing queued I/O. Pair with `resume/1`."
+  @spec suspend(String.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.suspend", include: [:name])
+  def suspend(name) do
+    case SuidHelper.exec(["dmsetup", "suspend", name]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc "Resume the suspended dm device `name`."
+  @spec resume(String.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.resume", include: [:name])
+  def resume(name) do
+    case SuidHelper.exec(["dmsetup", "resume", name]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Create a *writable* dm-snapshot device named `name` over `origin_dev`, with
+  `cow_dev` as its exception store. Writes to the device land in `cow_dev`,
+  which is how a fork's delta layer file is populated. Same table as
+  `create_snapshot/4`, minus `--readonly`.
+  """
+  @spec create_snapshot_rw(String.t(), Path.t(), Path.t(), pos_integer()) ::
+          {:ok, Path.t()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot_rw", include: [:name])
+  def create_snapshot_rw(name, origin_dev, cow_dev, sectors) do
+    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Cfg.Img.chunk_sectors())
+    create(name, table, [])
+  end
+
   @doc "Send a thin-pool `message` to dm device `name`."
   @spec message(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])
