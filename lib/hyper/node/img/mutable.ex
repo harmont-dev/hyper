@@ -31,17 +31,32 @@ defmodule Hyper.Node.Img.Mutable do
   defmodule Opts do
     @moduledoc false
     @enforce_keys [:img_id, :vm_id]
-    defstruct [:img_id, :vm_id]
+    defstruct [:img_id, :vm_id, fork_of: nil]
 
-    @type t :: %__MODULE__{img_id: Hyper.Img.id(), vm_id: Hyper.Vm.Id.t()}
+    @type t :: %__MODULE__{
+            img_id: Hyper.Img.id(),
+            vm_id: Hyper.Vm.Id.t(),
+            fork_of: Hyper.Vm.Id.t() | nil
+          }
   end
 
   defmodule State do
     @moduledoc false
-    defstruct [:img_server, :thin_name, :thin_id, :blk_path, holders: %{}, idle_ref: nil]
+    defstruct [
+      :img_id,
+      :img_server,
+      :origin_dev,
+      :thin_name,
+      :thin_id,
+      :blk_path,
+      holders: %{},
+      idle_ref: nil
+    ]
 
     @type t :: %__MODULE__{
+            img_id: Hyper.Img.id(),
             img_server: GenServer.server(),
+            origin_dev: Path.t(),
             thin_name: String.t(),
             thin_id: non_neg_integer(),
             blk_path: Path.t(),
@@ -56,6 +71,19 @@ defmodule Hyper.Node.Img.Mutable do
 
   @spec blk_path(GenServer.server()) :: Path.t()
   def blk_path(server), do: GenServer.call(server, :blk_path)
+
+  @doc """
+  The volume's identity for forking: which image it serves, its thin name/id in
+  the node pool, its device path, and the composed RO origin it reads through.
+  """
+  @spec describe(GenServer.server()) :: %{
+          img_id: Hyper.Img.id(),
+          thin_name: String.t(),
+          thin_id: non_neg_integer(),
+          blk_path: Path.t(),
+          origin_dev: Path.t()
+        }
+  def describe(server), do: GenServer.call(server, :describe)
 
   @spec acquire(GenServer.server()) :: :ok
   def acquire(server), do: acquire(server, self())
@@ -73,7 +101,7 @@ defmodule Hyper.Node.Img.Mutable do
 
   @impl true
   @decorate with_span("Hyper.Node.Img.Mutable.init", include: [:img_id, :vm_id])
-  def init(%Opts{img_id: img_id, vm_id: vm_id}) do
+  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: nil}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)
 
@@ -83,7 +111,9 @@ defmodule Hyper.Node.Img.Mutable do
          {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
          {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev, sectors) do
       state = %State{
+        img_id: img_id,
         img_server: img_server,
+        origin_dev: ro_dev,
         thin_name: name,
         thin_id: id,
         blk_path: dev
@@ -95,8 +125,65 @@ defmodule Hyper.Node.Img.Mutable do
     end
   end
 
+  @decorate with_span("Hyper.Node.Img.Mutable.init_fork",
+              include: [:img_id, :vm_id, :parent_vm_id]
+            )
+  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: parent_vm_id}) do
+    Process.flag(:trap_exit, true)
+    name = dm_name(vm_id)
+
+    with {:ok, parent} <- lookup(parent_vm_id),
+         # Hold the parent so it cannot idle-reap (freeing its thin id) between
+         # describe and create_snap; released once the snapshot is independent.
+         :ok <- acquire(parent, self()),
+         %{thin_name: origin_name, thin_id: origin_id} = describe(parent),
+         {:ok, img_server} <- Img.activate(img_id),
+         :ok <- Server.acquire(img_server),
+         ro_dev = Server.blk_path(img_server),
+         {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+         {:ok, %{dev: dev, id: id}} <-
+           ThinPool.snapshot(name, origin_name, origin_id, sectors, ro_dev) do
+      :ok = release(parent)
+
+      state = %State{
+        img_id: img_id,
+        img_server: img_server,
+        origin_dev: ro_dev,
+        thin_name: name,
+        thin_id: id,
+        blk_path: dev
+      }
+
+      {:ok, arm_idle(state)}
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  @spec lookup(Hyper.Vm.Id.t()) ::
+          {:ok, pid()} | {:error, {:parent_mutable_not_found, Hyper.Vm.Id.t()}}
+  defp lookup(vm_id) do
+    case Registry.lookup(Img.mutable_registry(), vm_id) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> {:error, {:parent_mutable_not_found, vm_id}}
+    end
+  end
+
   @impl true
   def handle_call(:blk_path, _from, state), do: {:reply, state.blk_path, state}
+
+  @impl true
+  def handle_call(:describe, _from, state) do
+    reply = %{
+      img_id: state.img_id,
+      thin_name: state.thin_name,
+      thin_id: state.thin_id,
+      blk_path: state.blk_path,
+      origin_dev: state.origin_dev
+    }
+
+    {:reply, reply, state}
+  end
 
   @impl true
   def handle_call({:acquire, pid}, _from, %State{holders: holders} = state) do

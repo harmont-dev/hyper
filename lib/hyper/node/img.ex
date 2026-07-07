@@ -73,6 +73,22 @@ defmodule Hyper.Node.Img do
     end
   end
 
+  @doc """
+  Create `child_vm_id`'s mutable layer as a thin snapshot of `parent_vm_id`'s
+  live volume — same `img_id` lineage, blocks shared COW-style in the node pool.
+  """
+  @spec create_fork(Hyper.Img.id(), Hyper.Vm.Id.t(), Hyper.Vm.Id.t()) ::
+          {:ok, pid()} | {:error, term()}
+  def create_fork(img_id, parent_vm_id, child_vm_id) do
+    case DynamicSupervisor.start_child(
+           @mutable_sup,
+           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: child_vm_id, fork_of: parent_vm_id}}
+         ) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, _} = err -> err
+    end
+  end
+
   @doc "Every image id currently active on this node."
   @spec active() :: [Hyper.Img.id()]
   def active do
