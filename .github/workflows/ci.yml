@@ -259,11 +259,12 @@ jobs:
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
     # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
     runs-on: ubuntu-latest
-    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery) plus
-    # ~4 minutes of provisioning/compile/setup. 25 could cancel the job right
-    # as it finishes, and `!cancelled()` steps then skip result uploads —
-    # exactly when flake history matters most.
-    timeout-minutes: 35
+    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery), the
+    # gRPC contract suite (~10 min: image load + VM boot/stop over the wire),
+    # plus ~5 minutes of provisioning/compile/npm setup. A tight budget could
+    # cancel the job right as it finishes, and `!cancelled()` steps then skip
+    # result uploads — exactly when flake history matters most.
+    timeout-minutes: 50
     env:
       MIX_ENV: test
     services:
@@ -286,6 +287,18 @@ jobs:
       # than timing out inside a VM boot.
       - name: Assert KVM is available
         run: '[ -e /dev/kvm ]'
+
+      # Node for the TypeScript gRPC contract suite (test/grpc), which the
+      # :integration wrapper test shells out to.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: test/grpc/package-lock.json
+
+      - name: Install gRPC contract suite deps
+        run: npm ci
+        working-directory: test/grpc
 
       - uses: erlef/setup-beam@v1
         id: beam
@@ -342,8 +355,11 @@ jobs:
       # No --no-start: the app boots its real supervision tree, which runs
       # Hyper.Node.test_system/0 host validation before any test executes.
       # Multiple --only flags OR together: this runs ONLY the gated tags.
+      # coveralls.json wraps `mix test` (flags pass through) and writes
+      # cover/excoveralls.json -- the E2E suite's server-side coverage, which
+      # the elixir job's unit run cannot see (it runs --no-start).
       - name: Integration + external tests
-        run: mix test --only integration --only external --warnings-as-errors
+        run: mix coveralls.json --only integration --only external --warnings-as-errors
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
@@ -362,6 +378,32 @@ jobs:
         with:
           name: integration-test-results
           path: _build/test/junit.xml
+
+      - name: Upload TS contract test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: test/grpc/junit.xml
+          flags: grpc-ts
+          report_type: test_results
+
+      # test-results.yml globs artifacts/**/*.xml, so the vitest report joins
+      # the unified Test Results check automatically.
+      - name: Upload TS contract test results artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: grpc-ts-test-results
+          path: test/grpc/junit.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cover/excoveralls.json
+          flags: integration
+          fail_ci_if_error: true
 
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required
