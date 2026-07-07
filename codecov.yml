@@ -1,7 +1,8 @@
-# Codecov configuration for the hyper monorepo. Two components upload under
-# distinct flags from separate CI jobs (see .github/workflows/ci.yml):
-#   elixir -> cover/excoveralls.json   (ExCoveralls / mix coveralls.json)
-#   rust   -> native/suidhelper/lcov.info  (cargo llvm-cov)
+# Codecov configuration for the hyper monorepo. Three uploads under distinct
+# flags from separate CI jobs (see .github/workflows/ci.yml):
+#   elixir      -> cover/excoveralls.json  (ExCoveralls, unit/DB suites, --no-start)
+#   integration -> cover/excoveralls.json  (ExCoveralls, live KVM E2E suite)
+#   rust        -> native/suidhelper/lcov.info  (cargo llvm-cov)
 coverage:
   status:
     project:
@@ -15,6 +16,10 @@ coverage:
 
 flags:
   elixir:
+    paths:
+      - lib/
+    carryforward: true
+  integration:
     paths:
       - lib/
     carryforward: true
