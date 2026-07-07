@@ -92,6 +92,51 @@ defmodule Hyper do
     :error, {:erpc, _} -> {:error, :node_unreachable}
   end
 
+  @doc """
+  Total CPU time `vm` has **actually executed**, metered from its cgroup: the
+  sum of its flushed usage windows (`Hyper.Metering.Usage`) plus the owning
+  node's not-yet-flushed remainder. An idle VM accrues (almost) nothing — this
+  measures compute performed, not compute allocated, and is the billing
+  counter.
+
+  Works for live and stopped VMs alike; a stopped VM reports its recorded
+  lifetime total. Returns `{:error, :not_found}` only when `vm` is entirely
+  unknown: not running anywhere and never metered. If the owning node is
+  unreachable, the flushed total alone is returned — an under-count of at most
+  one flush window (~60s), consistent with metering's crash guarantee.
+  """
+  @spec usage(Hyper.Vm.t() | Hyper.Vm.Id.t()) :: {:ok, Unit.Time.t()} | {:error, :not_found}
+  def usage(vm) when is_pid(vm) do
+    case id(vm) do
+      nil -> {:error, :not_found}
+      vm_id -> usage(vm_id)
+    end
+  end
+
+  def usage(vm_id) when is_binary(vm_id) do
+    case {Hyper.Metering.Usage.total(vm_id), whereis(vm_id)} do
+      {nil, nil} ->
+        {:error, :not_found}
+
+      {flushed, node} ->
+        {:ok, sum_time(flushed || Unit.Time.zero(), unflushed_on(node, vm_id))}
+    end
+  end
+
+  @spec unflushed_on(node() | nil, Hyper.Vm.Id.t()) :: Unit.Time.t()
+  defp unflushed_on(nil, _vm_id), do: Unit.Time.zero()
+
+  defp unflushed_on(node, vm_id) do
+    :erpc.call(node, Hyper.Node, :unflushed_usage, [vm_id])
+  catch
+    :error, {:erpc, _} -> Unit.Time.zero()
+  end
+
+  # Not `use Unit.Operators`: that would shadow Kernel.+/- for this whole
+  # public-API module for one addition.
+  @spec sum_time(Unit.Time.t(), Unit.Time.t()) :: Unit.Time.t()
+  defp sum_time(a, b), do: Unit.Time.ns(Unit.Time.as_ns(a) + Unit.Time.as_ns(b))
+
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
