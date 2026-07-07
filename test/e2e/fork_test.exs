@@ -33,8 +33,14 @@ defmodule Hyper.E2e.ForkTest do
     assert {:ok, parent} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(parent) end)
 
+    # First exec after a boot gets 3 minutes: later guests of a run have come
+    # up slower than the first on nested-virt CI runners (see crash_recovery).
     assert {:ok, %{exit_code: 0}} =
-             await_exec(parent, ["/bin/sh", "-c", "echo prefork > /marker && sync"])
+             await_exec(
+               parent,
+               ["/bin/sh", "-c", "echo prefork > /marker && sync"],
+               :timer.minutes(3)
+             )
 
     assert {:ok, child} = Hyper.Vm.fast_fork(parent)
     on_exit(fn -> Hyper.Node.stop_image_vm(child) end)
@@ -44,7 +50,9 @@ defmodule Hyper.E2e.ForkTest do
     child_rw = Hyper.Node.Img.Mutable.dm_name(child_id)
 
     # The snapshot is a point-in-time copy: the pre-fork write is visible.
-    assert {:ok, %{stdout: seen, exit_code: 0}} = await_exec(child, ["/bin/cat", "/marker"])
+    assert {:ok, %{stdout: seen, exit_code: 0}} =
+             await_exec(child, ["/bin/cat", "/marker"], :timer.minutes(3))
+
     assert seen =~ "prefork"
 
     # COW isolation, both directions: post-fork writes do not cross.
@@ -87,7 +95,9 @@ defmodule Hyper.E2e.ForkTest do
     assert {:ok, cousin} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: derived, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(cousin) end)
 
-    assert {:ok, %{stdout: marker, exit_code: 0}} = await_exec(cousin, ["/bin/cat", "/marker"])
+    assert {:ok, %{stdout: marker, exit_code: 0}} =
+             await_exec(cousin, ["/bin/cat", "/marker"], :timer.minutes(3))
+
     assert marker =~ "prefork"
 
     assert {:ok, %{stdout: pw, exit_code: 0}} = await_exec(cousin, ["/bin/cat", "/parentfile"])
