@@ -17,6 +17,7 @@ pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
 pub use losetup::{Losetup, LosetupArgs};
+pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
 use crate::util::setuid_privileged::{self, Privileged};
@@ -100,6 +101,11 @@ pub enum Tool {
         #[command(subcommand)]
         op: ChrootJailOp,
     },
+    /// Dump a thin device's provisioned ranges from the pool metadata.
+    ThinDump {
+        #[command(flatten)]
+        args: ThinDumpArgs,
+    },
 }
 
 impl Tool {
@@ -124,6 +130,10 @@ impl Tool {
             }
             Tool::Blockcopy { args } => Blockcopy::new(args).run(),
             Tool::ChrootJail { op } => op.run(),
+            Tool::ThinDump { args } => {
+                let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
+                ThinDump::new(bin.into(), args).run()
+            }
         }
     }
 }

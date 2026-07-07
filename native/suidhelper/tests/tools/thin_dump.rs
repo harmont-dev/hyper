@@ -6,7 +6,13 @@
 //!     the target's ranges (kills a lost `</device>` transition);
 //!   * refusal: a dump without the target dev_id is an error, never an empty
 //!     success (an empty result must mean "device exists, no writes");
-//!   * a missing superblock is an error.
+//!   * a missing superblock is an error;
+//!   * integrity: the parsed ranges' total length must equal the target
+//!     device's own `mapped_blocks` attribute, so a dump truncated mid-device
+//!     is an error, never a silently short success;
+//!   * anchoring: every attribute lookup is anchored on a leading space, so a
+//!     key can never match as the suffix of another attribute's name (e.g.
+//!     `dev_id` inside `snap_dev_id`).
 
 use hyper_suidhelper::tools::thin_dump::{parse_mappings, Error, ThinMappings};
 use proptest::prelude::*;
@@ -30,7 +36,15 @@ fn render_device(dev_id: u64, maps: &[M]) -> String {
         return format!("  <device dev_id=\"{dev_id}\" mapped_blocks=\"0\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\"/>\n");
     }
 
-    let mut s = format!("  <device dev_id=\"{dev_id}\" mapped_blocks=\"9\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n");
+    let mapped: u64 = maps
+        .iter()
+        .map(|m| match m {
+            M::Range { len, .. } => *len,
+            M::Single { .. } => 1,
+        })
+        .sum();
+
+    let mut s = format!("  <device dev_id=\"{dev_id}\" mapped_blocks=\"{mapped}\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n");
     for m in maps {
         match m {
             M::Range { begin, len } => s.push_str(&format!(
@@ -88,12 +102,33 @@ proptest! {
         let xml = render(128, &[(1, maps)]);
         prop_assert!(matches!(parse_mappings(&xml, 99), Err(Error::DeviceNotFound(99))));
     }
+
+    #[test]
+    fn truncated_target_device_is_an_error(
+        block_sectors in 1u64..4096,
+        target_maps in proptest::collection::vec(mapping(), 1..64),
+    ) {
+        let xml = render(block_sectors, &[(3, target_maps)]);
+        // Cut inside the target device: drop the final mapping line together
+        // with </device> and </superblock>.
+        let cut: String = xml
+            .lines()
+            .rev()
+            .skip(3)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let is_truncated = matches!(parse_mappings(&cut, 3), Err(Error::Truncated { .. }));
+        prop_assert!(is_truncated);
+    }
 }
 
 #[test]
 fn missing_superblock_is_an_error() {
     assert!(matches!(
-        parse_mappings("<device dev_id=\"3\"></device>", 3),
+        parse_mappings("<device dev_id=\"3\" mapped_blocks=\"0\"></device>", 3),
         Err(Error::NoSuperblock)
     ));
 }
@@ -108,4 +143,12 @@ fn empty_self_closing_device_parses_to_no_ranges() {
             ranges: vec![]
         }
     );
+}
+
+#[test]
+fn attribute_lookup_is_anchored_not_suffix_matched() {
+    // `snap_dev_id` is a decoy: an unanchored lookup for `dev_id` would match
+    // inside it, read 9, and report the real device 3 as missing.
+    let xml = "<superblock uuid=\"\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\" data_block_size=\"128\" nr_data_blocks=\"1\">\n  <device snap_dev_id=\"9\" dev_id=\"3\" mapped_blocks=\"1\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n    <range_mapping origin_begin=\"0\" data_begin=\"0\" length=\"1\" time=\"0\"/>\n  </device>\n</superblock>\n";
+    assert_eq!(parse_mappings(xml, 3).unwrap().ranges, vec![(0, 1)]);
 }
