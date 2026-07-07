@@ -9,6 +9,7 @@
   <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
   <a href="https://codecov.io/gh/harmont-dev/hyper"><img src="https://codecov.io/gh/harmont-dev/hyper/branch/main/graph/badge.svg" alt="Coverage" /></a>
   <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
+  <a href="https://deepwiki.com/harmont-dev/hyper"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <img src="https://img.shields.io/badge/elixir-~%3E%201.20-4B275F.svg" alt="Elixir ~> 1.20" />
 </p>
 
@@ -76,7 +77,11 @@ deploying and integrating Hyper.
 ## Docs
 
 Full docs on getting started, as well as useful diagrams are available on
-[Hexdocs](https://hexdocs.pm/hypervm/).
+[Hexdocs](https://hexdocs.pm/hypervm/). There exists a
+[Deepwiki](http://deepwiki.com/harmont-dev/hyper) **but this is AI-generated
+and is not the source of truth.** Use the Deepwiki to fill in the blanks where
+the Hexdocs are lacking. **We actively urge you to open issues/PRs for missing
+Hexdocs documentation.**
 
 ## Why?
 
