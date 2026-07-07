@@ -5,10 +5,12 @@
 # and suidhelper install tasks are mix tasks), MIX_ENV matching the test run.
 set -euo pipefail
 
+export DEBIAN_FRONTEND=noninteractive
+
 # The jailed VM uid (900000+) opens /dev/kvm; 0666 is GitHub's own documented
 # rule for KVM access on hosted runners.
 echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-  | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+  | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
 sudo udevadm control --reload-rules
 sudo udevadm trigger --name-match=kvm
 
@@ -36,7 +38,7 @@ sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml
 
 sudo mkdir -p /sys/fs/cgroup/hyper
-echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control
+echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control >/dev/null
 
 # The BEAM (the `runner` user — Hyper refuses to run as root) owns work_dir.
 sudo mkdir -p /srv/hyper
