@@ -38,7 +38,7 @@ defmodule Hyper.Node.FireVMM do
     VM can only be booted from a mutable layer - never a bare `Hyper.Img`.
     """
 
-    defstruct [:vm_id, :uid, :gid, :type, :arch, :mutable, :kernel, :boot_args]
+    defstruct [:vm_id, :uid, :gid, :type, :arch, :img_id, :mutable, :kernel, :boot_args]
 
     @type t :: %__MODULE__{
             vm_id: Hyper.Vm.Id.t(),
@@ -46,6 +46,7 @@ defmodule Hyper.Node.FireVMM do
             gid: Hyper.Node.Users.id(),
             type: Hyper.Vm.Instance.t(),
             arch: Hyper.Vm.Instance.arch(),
+            img_id: Hyper.Img.id(),
             mutable: pid(),
             kernel: Path.t(),
             boot_args: String.t() | nil

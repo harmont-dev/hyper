@@ -127,6 +127,7 @@ defmodule Hyper.Node do
       gid: uid,
       type: spec.type,
       arch: spec.arch,
+      img_id: spec.img_id,
       mutable: mutable,
       kernel: kernel,
       boot_args: spec.boot_args
