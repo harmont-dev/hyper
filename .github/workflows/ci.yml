@@ -342,10 +342,11 @@ jobs:
       # No --no-start: the app boots its real supervision tree, which runs
       # Hyper.Node.test_system/0 host validation before any test executes.
       # Multiple --only flags OR together: this runs ONLY the gated tags.
-      # coveralls.json wraps `mix test` (same flags apply) and writes
-      # cover/excoveralls.json, so integration-exercised lines reach Codecov
-      # instead of reporting as uncovered from the unit job alone.
-      - name: Integration + external tests (+ coverage)
+      # coveralls.json wraps `mix test`, so the tag filters and
+      # --warnings-as-errors pass through; it writes cover/excoveralls.json,
+      # which is this job's Codecov upload — without it the integration-only
+      # modules (e.g. Hyper.Metering.Usage) report zero coverage.
+      - name: Integration + external tests
         run: mix coveralls.json --only integration --only external --warnings-as-errors
 
       - name: Upload test results to Codecov

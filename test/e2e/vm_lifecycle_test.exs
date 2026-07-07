@@ -6,14 +6,22 @@ defmodule Hyper.E2e.VmLifecycleTest do
   - `create_vm/1` boots a guest whose per-VM writable dm volume
     (`Mutable.dm_name/1`) exists while the VM runs;
   - the guest agent answers `exec` with the command's captured output;
-  - `stop_image_vm/1` reclaims the writable volume (no dm leak).
+  - `stop_image_vm/1` reclaims the writable volume (no dm leak);
+  - stopping flushes a final metering window: the VM's recorded compute
+    (`Usage.total/1`) is positive, every `vm_usage` row is well-formed, and
+    `total/3` over a range covering all windows equals the lifetime total.
 
   Runs only under `--only integration` / `--include integration` on a host
   provisioned per docs/cookbook/install.md (CI: the `integration` job).
   """
   use ExUnit.Case, async: false
 
+  import Ecto.Query
   import Hyper.E2e
+
+  alias Hyper.Img.Db.Repo
+  alias Hyper.Metering.Usage
+  alias Unit.Time
 
   @moduletag :integration
   @moduletag timeout: :timer.minutes(10)
@@ -50,5 +58,33 @@ defmodule Hyper.E2e.VmLifecycleTest do
 
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),
            "writable dm volume #{rw_dev} leaked after stop_image_vm"
+
+    # The Meter is the FireVMM supervisor's LAST child: at stop it terminates
+    # first and flushes a final usage window while the cgroup still exists.
+    # stop_image_vm/1 has returned, so the row should already be committed;
+    # the poll only absorbs distributed-registry teardown stragglers.
+    assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
+           "no usage row after stop_image_vm — the teardown flush never landed"
+
+    total = Usage.total(vm_id)
+    assert Time.as_us(total) > 0
+
+    rows = Repo.all(from(u in Usage, where: u.vm_id == ^vm_id))
+
+    for row <- rows do
+      assert DateTime.compare(row.window_start, row.window_end) == :lt,
+             "usage window does not advance: #{inspect(row)}"
+
+      assert row.cpu_usec > 0, "zero/negative usage window was recorded: #{inspect(row)}"
+      assert row.node_id == to_string(node())
+    end
+
+    # total/3 buckets by window_start over a half-open range: a range covering
+    # every window_start must reproduce the lifetime total exactly — an
+    # off-by-one in the range predicate would double- or under-bill.
+    starts = Enum.map(rows, & &1.window_start)
+    from_ts = Enum.min(starts, DateTime)
+    to_ts = DateTime.add(Enum.max(starts, DateTime), 1, :microsecond)
+    assert Time.as_us(Usage.total(vm_id, from_ts, to_ts)) == Time.as_us(total)
   end
 end
