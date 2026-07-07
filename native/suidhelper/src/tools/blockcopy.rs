@@ -1,7 +1,7 @@
 //! Chunked ranged copy between block devices. Only the block ranges listed in
 //! a metadata-supplied range file are copied from `src` into `dst` — the
 //! workhorse for materializing a fork's delta layer: `dst` is a writable
-//! dm-snapshot over the reference, so every written chunk lands in its COW
+//! dm-snapshot over the origin, so every written chunk lands in its COW
 //! exception store and nothing else does. No comparison mode exists; the
 //! ranges are trusted as the exact divergence.
 
