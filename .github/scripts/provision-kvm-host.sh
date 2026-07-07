@@ -30,7 +30,7 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo util-linux \
+  coreutils e2fsprogs libc-bin lvm2 skopeo thin-provisioning-tools util-linux \
   "linux-modules-extra-$(uname -r)"
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
@@ -39,6 +39,7 @@ sudo modprobe -av dm_snapshot dm_thin_pool loop
 targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
+command -v thin_dump >/dev/null || { echo "ERROR: thin_dump missing (thin-provisioning-tools)" >&2; exit 1; }
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'

@@ -31,6 +31,7 @@ sudo apt update && sudo apt install -y \
   linux-modules-extra-$(uname -r) \
   lvm2 \
   skopeo \
+  thin-provisioning-tools \
   util-linux
 ```
 
@@ -41,6 +42,7 @@ You can install the required packages by running:
 ```sh
 sudo dnf install -y \
   coreutils \
+  device-mapper-persistent-data \
   e2fsprogs \ 
   glibc-common \
   kernel-modules-extra-$(uname -r) \
@@ -52,6 +54,13 @@ sudo dnf install -y \
 > #### Untested {: .warning}
 >
 > Rocky has not been tested, but should work.
+
+> #### Optional: `thin_dump` {: .info}
+>
+> `thin-provisioning-tools` (`device-mapper-persistent-data` on Rocky) provides
+> `thin_dump`, which fork publish uses to read a thin snapshot's provisioned
+> ranges straight from the pool's metadata. It is optional: without it, fork
+> publish falls back to a slower full compare-scan against the origin device.
 
 <!-- tabs-close -->
 

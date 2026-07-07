@@ -324,13 +324,15 @@ Forking clones a running VM's disk at a point in time. Two paths exist:
     (memory, disk, or load), fast fork errors gracefully.
 
   - **Fork** (`Hyper.Vm.fork/1`) — fast fork first; on local refusal the
-    parent's divergence is *materialized*: a temporary thin snapshot is
-    diff-copied against the read-only origin into a fresh `dm-snapshot`
-    exception store, which is published to the layer storage medium as an
-    intermediate (`:delta`) layer and recorded as a derived image (the
-    parent's chain plus the new layer). The child is then scheduled normally;
-    colocation scoring prefers nodes that already hold the parent's base
-    layers, so only the delta travels.
+    parent's divergence is *materialized*: a temporary thin snapshot's
+    provisioned ranges — read from the pool's own metadata, and with an
+    external origin exactly the blocks ever written — are copied into a fresh
+    `dm-snapshot` exception store (hosts without thin-provisioning-tools fall
+    back to a full compare-scan), which is published to the layer storage
+    medium as an intermediate (`:delta`) layer and recorded as a derived image
+    (the parent's chain plus the new layer). The child is then scheduled
+    normally; colocation scoring prefers nodes that already hold the parent's
+    base layers, so only the delta travels.
 
 Both paths are **disk-only**: the child cold-boots a fresh kernel over the
 forked rootfs. The snapshot is crash-consistent (the guest is asked to `sync`

@@ -110,7 +110,7 @@ defmodule Hyper.Node.Img.Publish do
   # provisioned blocks ARE the divergence, so the copy is O(bytes written).
   # When the metadata path is unavailable (thin_dump not installed, dump
   # failure), fall back to the full compare-scan against the origin — slower
-  # but byte-identical output, and never silent.
+  # but content-identical output, and never silent.
   @spec copy_divergence(String.t(), Path.t(), non_neg_integer(), Path.t(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
   defp copy_divergence(tmp, snap_dev, snap_id, write_dev, ro_dev) do
