@@ -237,11 +237,14 @@ and the ones it deliberately does **not**.
 
 The node builds its entire on-disk tree (`jails`, `socks`, `scratch`, `layers`,
 `redist`) under `work_dir` (from `/etc/hyper/config.toml`, default `/srv/hyper`)
-**as this user**. It must therefore own that directory:
+**as this user**. It must therefore own that directory. Boot validation
+(`Hyper.Node.Layer.Repo.test_system/0`) refuses to start unless the `layers`
+subdirectory already exists — the node only creates it lazily on first image
+load, so pre-create it now:
 
 ```sh
-sudo mkdir -p /srv/hyper
-sudo chown hyper:hyper /srv/hyper
+sudo mkdir -p /srv/hyper/layers
+sudo chown -R hyper:hyper /srv/hyper
 ```
 
 ## Installation
