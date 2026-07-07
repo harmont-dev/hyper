@@ -1,8 +1,9 @@
-//! Chunked diff-copy between block devices. With a `reference` device given,
-//! only chunks of `src` that differ from `reference` are written into `dst` —
-//! the workhorse for materializing a fork's delta layer: `dst` is a writable
+//! Chunked ranged copy between block devices. Only the block ranges listed in
+//! a metadata-supplied range file are copied from `src` into `dst` — the
+//! workhorse for materializing a fork's delta layer: `dst` is a writable
 //! dm-snapshot over the reference, so every written chunk lands in its COW
-//! exception store and nothing else does.
+//! exception store and nothing else does. No comparison mode exists; the
+//! ranges are trusted as the exact divergence.
 
 use super::IsTool;
 use crate::util::safe_dev::BlockDev;
@@ -32,17 +33,13 @@ pub struct BlockcopyArgs {
     /// Device to copy from (the fork's point-in-time snapshot).
     #[arg(long)]
     src: BlockDev,
-    /// Device to copy into (a writable dm-snapshot over `reference`).
+    /// Device to copy into (a writable dm-snapshot over the origin).
     #[arg(long)]
     dst: BlockDev,
-    /// Only chunks differing from this device are written.
-    #[arg(long)]
-    reference: Option<BlockDev>,
-    /// Copy only these block ranges (JSON file from `thin-dump`); no
-    /// comparison reads at all.
-    #[arg(long, value_parser = range_spec_from_file, conflicts_with = "reference")]
-    ranges: Option<RangeSpec>,
-    /// Compare/copy granularity in bytes.
+    /// Copy only these block ranges (JSON file from `thin-dump`).
+    #[arg(long, value_parser = range_spec_from_file)]
+    ranges: RangeSpec,
+    /// Copy granularity in bytes.
     #[arg(long, default_value_t = 1 << 20, value_parser = clap::value_parser!(u64).range(512..))]
     chunk_bytes: u64,
 }
@@ -53,54 +50,9 @@ pub struct CopyStats {
     pub written_chunks: u64,
 }
 
-/// Copy `src` into `dst` chunk-by-chunk, skipping chunks equal to `reference`.
-/// `dst` is only ever written at offsets where content differs, so a dm-snapshot
-/// `dst` records exactly the divergence.
-pub fn diff_copy(
-    src: &mut impl Read,
-    mut reference: Option<&mut dyn Read>,
-    dst: &mut (impl Write + Seek),
-    chunk_bytes: usize,
-) -> io::Result<CopyStats> {
-    let mut src_buf = vec![0u8; chunk_bytes];
-    let mut ref_buf = vec![0u8; chunk_bytes];
-    let mut offset: u64 = 0;
-    let mut stats = CopyStats {
-        scanned_chunks: 0,
-        written_chunks: 0,
-    };
-
-    loop {
-        let n = read_full(src, &mut src_buf)?;
-        if n == 0 {
-            break;
-        }
-        stats.scanned_chunks += 1;
-
-        let same = match reference.as_mut() {
-            Some(r) => read_full(*r, &mut ref_buf)? == n && ref_buf[..n] == src_buf[..n],
-            None => false,
-        };
-
-        if !same {
-            dst.seek(SeekFrom::Start(offset))?;
-            dst.write_all(&src_buf[..n])?;
-            stats.written_chunks += 1;
-        }
-
-        offset += n as u64;
-        if n < chunk_bytes {
-            break;
-        }
-    }
-
-    dst.flush()?;
-    Ok(stats)
-}
-
 /// Copy exactly `spec`'s block ranges from `src` into `dst` at identical
 /// offsets. The dm-thin metadata already told us where the divergence is, so
-/// unlike `diff_copy` nothing is read outside the listed ranges.
+/// nothing is read outside the listed ranges.
 pub fn copy_ranges(
     src: &mut (impl Read + Seek),
     dst: &mut (impl Write + Seek),
@@ -142,9 +94,8 @@ pub fn copy_ranges(
     Ok(stats)
 }
 
-// `Read::read` may return short counts on block devices; fill the buffer or hit
-// EOF. `?Sized` so the `&mut dyn Read` reference arm can call it too.
-fn read_full(r: &mut (impl Read + ?Sized), buf: &mut [u8]) -> io::Result<usize> {
+// `Read::read` may return short counts on block devices; fill the buffer or hit EOF.
+fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
         match r.read(&mut buf[filled..])? {
@@ -175,17 +126,7 @@ impl IsTool for Blockcopy {
         let mut dst = OpenOptions::new().write(true).open(&self.args.dst)?;
         let chunk = self.args.chunk_bytes as usize;
 
-        if let Some(spec) = &self.args.ranges {
-            return copy_ranges(&mut src, &mut dst, spec, chunk);
-        }
-
-        match &self.args.reference {
-            Some(r) => {
-                let mut reference = File::open(r)?;
-                diff_copy(&mut src, Some(&mut reference), &mut dst, chunk)
-            }
-            None => diff_copy(&mut src, None, &mut dst, chunk),
-        }
+        copy_ranges(&mut src, &mut dst, &self.args.ranges, chunk)
     }
 
     fn parse(&self, res: Self::RunT) -> Result<CopyStats, Box<dyn std::error::Error>> {

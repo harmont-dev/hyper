@@ -327,8 +327,7 @@ Forking clones a running VM's disk at a point in time. Two paths exist:
     parent's divergence is *materialized*: a temporary thin snapshot's
     provisioned ranges — read from the pool's own metadata, and with an
     external origin exactly the blocks ever written — are copied into a fresh
-    `dm-snapshot` exception store (hosts without thin-provisioning-tools fall
-    back to a full compare-scan), which is published to the layer storage
+    `dm-snapshot` exception store, which is published to the layer storage
     medium as an intermediate (`:delta`) layer and recorded as a derived image
     (the parent's chain plus the new layer). The child is then scheduled
     normally; colocation scoring prefers nodes that already hold the parent's

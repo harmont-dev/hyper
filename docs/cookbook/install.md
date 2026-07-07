@@ -55,12 +55,13 @@ sudo dnf install -y \
 >
 > Rocky has not been tested, but should work.
 
-> #### Optional: `thin_dump` {: .info}
+> #### `thin_dump` {: .info}
 >
 > `thin-provisioning-tools` (`device-mapper-persistent-data` on Rocky) provides
-> `thin_dump`, which fork publish uses to read a thin snapshot's provisioned
-> ranges straight from the pool's metadata. It is optional: without it, fork
-> publish falls back to a slower full compare-scan against the origin device.
+> `thin_dump`, which fork publish requires to read a thin snapshot's
+> provisioned ranges straight from the pool's metadata. Without it,
+> `Hyper.Vm.fork/1`'s cross-node path fails; same-node `fast_fork/1` is
+> unaffected.
 
 <!-- tabs-close -->
 

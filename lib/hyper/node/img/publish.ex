@@ -7,10 +7,8 @@ defmodule Hyper.Node.Img.Publish do
   composed RO image device, backed by a fresh sparse COW file → copy the
   snapshot's provisioned ranges (read from the pool metadata — with an
   external origin they are exactly the divergence) into it, so exactly the
-  divergent chunks land in the COW exception store; hosts without
-  thin-provisioning-tools fall back to a full compare-scan → tear the devices
-  down (flushing the store) → ingest the COW file via
-  `Hyper.Img.create_derived/3`.
+  divergent chunks land in the COW exception store → tear the devices down
+  (flushing the store) → ingest the COW file via `Hyper.Img.create_derived/3`.
 
   The result is a `kind: :delta` blob any node can stack with
   `Dmsetup.create_snapshot/4` — the same format `Img.Server.build_chain/2`
@@ -21,8 +19,6 @@ defmodule Hyper.Node.Img.Publish do
   alias Hyper.Node.Img.{Mutable, ThinPool}
   alias Hyper.SuidHelper
   alias Unit.Information
-
-  require Logger
 
   use OpenTelemetryDecorator
 
@@ -86,7 +82,7 @@ defmodule Hyper.Node.Img.Publish do
       try do
         with {:ok, write_dev} <-
                SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors),
-             {:ok, _stats} <- copy_divergence(tmp, snap_dev, snap_id, write_dev, ro_dev),
+             {:ok, _stats} <- copy_divergence(tmp, snap_dev, snap_id, write_dev),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
              :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)),
@@ -106,25 +102,16 @@ defmodule Hyper.Node.Img.Publish do
     end
   end
 
-  # Prefer the pool's own metadata: with an external origin, the snapshot's
-  # provisioned blocks ARE the divergence, so the copy is O(bytes written).
-  # When the metadata path is unavailable (thin_dump not installed, dump
-  # failure), fall back to the full compare-scan against the origin — slower
-  # but content-identical output, and never silent.
-  @spec copy_divergence(String.t(), Path.t(), non_neg_integer(), Path.t(), Path.t()) ::
+  # The pool's own metadata is authoritative: with an external origin, the
+  # snapshot's provisioned blocks ARE the divergence, so the copy is O(bytes
+  # written). No scan fallback — a host that cannot read its pool metadata
+  # (thin-provisioning-tools missing/broken) must fail the publish loudly
+  # rather than degrade to an O(device) scan.
+  @spec copy_divergence(String.t(), Path.t(), non_neg_integer(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  defp copy_divergence(tmp, snap_dev, snap_id, write_dev, ro_dev) do
-    case ThinPool.mappings(snap_id) do
-      {:ok, spec} ->
-        ranged_copy(tmp, snap_dev, write_dev, spec)
-
-      {:error, reason} ->
-        Logger.warning(
-          "fork publish: thin metadata unavailable (#{inspect(reason)}); " <>
-            "falling back to full compare-scan"
-        )
-
-        SuidHelper.Blockcopy.copy(snap_dev, write_dev, reference: ro_dev)
+  defp copy_divergence(tmp, snap_dev, snap_id, write_dev) do
+    with {:ok, spec} <- ThinPool.mappings(snap_id) do
+      ranged_copy(tmp, snap_dev, write_dev, spec)
     end
   end
 
@@ -137,7 +124,7 @@ defmodule Hyper.Node.Img.Publish do
 
     try do
       with :ok <- File.write(ranges_path, Jason.encode!(spec)) do
-        SuidHelper.Blockcopy.copy(snap_dev, write_dev, ranges: ranges_path)
+        SuidHelper.Blockcopy.copy(snap_dev, write_dev, ranges_path)
       end
     after
       _ = File.rm(ranges_path)
