@@ -40,6 +40,27 @@ defmodule Hyper.Node.Img.ThinPool do
     GenServer.call(__MODULE__, {:create_external, name, origin_dev, sectors})
   end
 
+  @doc """
+  Take an internal snapshot of live thin volume `origin_name` (thin id
+  `origin_id`) and activate it as `name`, sharing the pool's blocks COW-style.
+
+  dm-thin requires the origin suspended while `create_snap` is sent; the origin
+  is resumed on *every* path out, so a failed snapshot never leaves the parent
+  VM's I/O frozen. The snapshot is activated with the same external origin
+  (`origin_dev`) as its parent — unprovisioned reads must keep resolving
+  through the composed RO image chain.
+  """
+  @spec snapshot(String.t(), String.t(), non_neg_integer(), pos_integer(), Path.t()) ::
+          {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
+  @decorate with_span("Hyper.Node.Img.ThinPool.snapshot", include: [:name, :origin_name])
+  def snapshot(name, origin_name, origin_id, sectors, origin_dev) do
+    GenServer.call(
+      __MODULE__,
+      {:snapshot, name, origin_name, origin_id, sectors, origin_dev},
+      :timer.seconds(30)
+    )
+  end
+
   @doc "Remove thin volume `name` and free its thin device `id`."
   @spec destroy(String.t(), non_neg_integer()) :: :ok
   @decorate with_span("Hyper.Node.Img.ThinPool.destroy", include: [:name, :id])
@@ -83,6 +104,27 @@ defmodule Hyper.Node.Img.ThinPool do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->
+        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
+        {:reply, {:error, reason}, id_free(state, id)}
+    end
+  end
+
+  @impl true
+  def handle_call({:snapshot, name, origin_name, origin_id, sectors, origin_dev}, _from, state) do
+    {id, state} = id_alloc(state)
+
+    with :ok <- SuidHelper.Dmsetup.suspend(origin_name),
+         :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_snap #{id} #{origin_id}"),
+         :ok <- SuidHelper.Dmsetup.resume(origin_name),
+         {:ok, dev} <-
+           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
+      {:reply, {:ok, %{dev: dev, id: id}}, state}
+    else
+      {:error, reason} ->
+        # Unconditional resume: suspend may or may not have taken effect, and
+        # resuming a non-suspended device is harmless — but leaving the parent
+        # VM's rootfs frozen is not.
+        _ = SuidHelper.Dmsetup.resume(origin_name)
         _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
         {:reply, {:error, reason}, id_free(state, id)}
     end
