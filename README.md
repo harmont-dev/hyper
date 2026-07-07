@@ -78,7 +78,7 @@ deploying and integrating Hyper.
 
 Full docs on getting started, as well as useful diagrams are available on
 [Hexdocs](https://hexdocs.pm/hypervm/). There exists a
-[Deepwiki](http://deepwiki.com/harmont-dev/hyper) **but this is AI-generated
+[Deepwiki](https://deepwiki.com/harmont-dev/hyper) **but this is AI-generated
 and is not the source of truth.** Use the Deepwiki to fill in the blanks where
 the Hexdocs are lacking. **We actively urge you to open issues/PRs for missing
 Hexdocs documentation.**
