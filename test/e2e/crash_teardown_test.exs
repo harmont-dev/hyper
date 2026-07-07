@@ -37,9 +37,12 @@ defmodule Hyper.E2e.CrashTeardownTest do
     assert {:ok, %{exit_code: 0}} = await_exec(vm, ["/bin/true"])
     assert MapSet.member?(dm_devices(), rw_dev)
 
-    # The jailer/firecracker cmdline carries the vm_id (--id); the BEAM's
-    # own cmdline does not, so -f cannot match the test runner itself.
-    assert {_, 0} = System.cmd("sudo", ["pkill", "-9", "-f", vm_id])
+    # The jailer/firecracker cmdline carries the vm_id (--id). The [v]...
+    # bracket regex still matches it, but not this command's own sudo wrapper —
+    # whose cmdline contains the pattern text, not the raw id (a bare -f vm_id
+    # SIGKILLs its own sudo and System.cmd reports 137 instead of 0).
+    kill_pattern = "[" <> String.first(vm_id) <> "]" <> String.slice(vm_id, 1..-1//1)
+    assert {_, 0} = System.cmd("sudo", ["pkill", "-9", "-f", kill_pattern])
 
     # Monitor-driven teardown is immediate; the Reaper backstop is 60 s ticks
     # with two-strike confirmation, hence the generous deadline.
