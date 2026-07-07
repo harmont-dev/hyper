@@ -4,6 +4,7 @@
 //!   * no-reference copy: `diff_copy(src, None, dst)` makes dst equal `src`;
 //!   * frugality: `written_chunks <= scanned_chunks`, and when `src == reference`
 //!     nothing is written at all (the COW store must not absorb no-op chunks).
+//!   * reference EOF: chunks past a shorter reference always count as differing and are written.
 
 use hyper_suidhelper::tools::blockcopy::diff_copy;
 use proptest::prelude::*;
@@ -57,5 +58,30 @@ proptest! {
             chunk as usize,
         ).unwrap();
         prop_assert_eq!(stats.written_chunks, 0);
+    }
+
+    #[test]
+    fn truncated_reference_tail_is_always_written(
+        src in proptest::collection::vec(any::<u8>(), 1..8192),
+        cut in any::<prop::sample::Index>(),
+        chunk in 1u64..600,
+    ) {
+        // A reference that is a strict prefix of src: identical up to ref_len,
+        // then EOF. dst starts as the reference padded with a sentinel — the
+        // state a dm-snapshot over the reference would read back.
+        let ref_len = cut.index(src.len());
+        let reference = src[..ref_len].to_vec();
+        let mut dst_init = reference.clone();
+        dst_init.resize(src.len(), 0xAA);
+        let mut dst = Cursor::new(dst_init);
+
+        diff_copy(
+            &mut Cursor::new(&src),
+            Some(&mut Cursor::new(&reference)),
+            &mut dst,
+            chunk as usize,
+        ).unwrap();
+
+        prop_assert_eq!(dst.into_inner(), src);
     }
 }
