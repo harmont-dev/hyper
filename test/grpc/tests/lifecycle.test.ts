@@ -64,8 +64,13 @@ test(
       expect(usage.vmId).toBe(created.vmId);
       expect(usage.cpuUsec).toBeGreaterThanOrEqual(0);
     } finally {
-      // A failed assertion must not leak a live VM into later tests.
-      await call(client, client.stopVm, { vmId: created.vmId }, 2 * MIN);
+      // A failed assertion must not leak a live VM into later tests; a VM
+      // already gone (NOT_FOUND) is fine — rethrowing here would mask the
+      // try block's original failure.
+      const stopped = await statusOf(call(client, client.stopVm, { vmId: created.vmId }, 2 * MIN));
+      if (stopped !== null && stopped !== status.NOT_FOUND) {
+        throw new Error(`cleanup StopVm failed with gRPC status ${status[stopped]}`);
+      }
     }
 
     const gone = await eventually(

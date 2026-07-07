@@ -14,7 +14,7 @@ defmodule Hyper.E2e.GrpcContractTest do
   use ExUnit.Case, async: false
 
   @moduletag :integration
-  @moduletag timeout: :timer.minutes(30)
+  @moduletag timeout: :timer.minutes(25)
 
   @port 50_061
   @suite_dir Path.expand("../grpc", __DIR__)
@@ -28,14 +28,14 @@ defmodule Hyper.E2e.GrpcContractTest do
   test "TypeScript contract suite passes against the live server" do
     ensure_node_deps!()
 
-    {out, status} =
+    {_streamed, status} =
       System.cmd("npm", ["test"],
         cd: @suite_dir,
         env: [{"HYPER_GRPC_ADDR", "127.0.0.1:#{@port}"}],
-        stderr_to_stdout: true
+        stderr_to_stdout: true,
+        into: IO.stream()
       )
 
-    IO.write(out)
     assert status == 0, "TypeScript gRPC contract suite failed (exit #{status}); see output above"
   end
 
