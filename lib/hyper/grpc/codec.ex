@@ -42,21 +42,6 @@ defmodule Hyper.Grpc.Codec do
     ARCHITECTURE_AARCH64: :aarch64
   }
 
-  @typep instance_enum ::
-           :INSTANCE_TYPE_MICRO
-           | :INSTANCE_TYPE_MILLI
-           | :INSTANCE_TYPE_CENTI
-           | :INSTANCE_TYPE_DECI
-           | :INSTANCE_TYPE_BASE
-           | :INSTANCE_TYPE_DECA
-           | :INSTANCE_TYPE_HECTO
-           | :INSTANCE_TYPE_KILO
-           | :INSTANCE_TYPE_MEGA
-           | :INSTANCE_TYPE_GIGA
-           | :INSTANCE_TYPE_TERA
-
-  @typep arch_enum :: :ARCHITECTURE_X86_64 | :ARCHITECTURE_AARCH64
-
   @doc "Convert an inbound request message to a domain value."
   @spec from_grpc(CreateVmRequest.t()) :: {:ok, Spec.t()} | {:error, term()}
   def from_grpc(%CreateVmRequest{img_id: img_id}) when img_id in [nil, ""],
@@ -125,16 +110,25 @@ defmodule Hyper.Grpc.Codec do
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
-  @spec instance_type(instance_enum()) :: {:ok, Hyper.Vm.Instance.t()}
+  @spec instance_type(term()) :: {:ok, Hyper.Vm.Instance.t()} | {:error, :bad_instance_type}
   defp instance_type(enum) when is_map_key(@instance_types, enum),
     do: {:ok, @instance_types[enum]}
 
-  @spec arch(arch_enum()) :: {:ok, Hyper.Vm.Instance.arch()}
+  defp instance_type(_unrecognised), do: {:error, :bad_instance_type}
+
+  @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :bad_arch}
   defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
+  defp arch(_unrecognised), do: {:error, :bad_arch}
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
+
+  defp rpc_error(:bad_instance_type),
+    do: GRPC.RPCError.exception(:invalid_argument, "instance_type holds an unrecognised value")
+
+  defp rpc_error(:bad_arch),
+    do: GRPC.RPCError.exception(:invalid_argument, "arch holds an unrecognised value")
 
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such VM")
