@@ -46,6 +46,7 @@ defmodule Hyper.Vm do
 
   @capacity_errors [
     :no_capacity,
+    :exhausted,
     :cpu_saturated,
     :disk_bw_saturated,
     :net_bw_saturated,
@@ -59,7 +60,7 @@ defmodule Hyper.Vm do
   new immutable delta layer and the child is scheduled cluster-wide, preferring
   nodes that already hold the image's layers. Never refuses for lack of *local*
   resources; can still error on faults (unknown VM, unreachable node, storage
-  errors) or a cluster-wide `:no_capacity`.
+  errors) or a cluster-wide `:no_capacity` or `:exhausted`.
   """
   @spec fork(t()) :: {:ok, t()} | {:error, term()}
   @decorate with_span("Hyper.Vm.fork", include: [:vm])

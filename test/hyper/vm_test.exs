@@ -13,6 +13,7 @@ defmodule Hyper.VmTest do
   test "admission refusals trigger the slow-fork fallback" do
     for reason <- [
           :no_capacity,
+          :exhausted,
           :cpu_saturated,
           :disk_bw_saturated,
           :net_bw_saturated,

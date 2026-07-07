@@ -28,6 +28,7 @@ defmodule Hyper.ImgTest do
     check all(a <- id_gen(), b <- id_gen(), delta <- id_gen(), a != b) do
       assert Img.derived_image_id(a, delta) != Img.derived_image_id(b, delta)
       assert Img.derived_image_id(a, delta) != Img.derived_image_id(a, "#{delta}0")
+      assert Img.derived_image_id("ab", "c") != Img.derived_image_id("a", "bc")
     end
   end
 
