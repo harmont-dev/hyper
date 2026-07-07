@@ -21,6 +21,14 @@ defmodule Hyper.Node.Img.Publish do
   alias Unit.Information
 
   use OpenTelemetryDecorator
+  use Unit.Operators
+
+  # dm-snapshot's persistent exception store records one entry (two
+  # little-endian u64 chunk addresses) per exception chunk.
+  @exception_entry_bytes 16
+
+  # Store header plus allocation-rounding headroom.
+  @cow_slack Information.mib(4)
 
   @doc """
   Publish `parent_vm_id`'s current rootfs divergence over `parent_img_id`.
@@ -135,13 +143,10 @@ defmodule Hyper.Node.Img.Publish do
   # metadata; it is sparse, so apparent size costs nothing.
   @spec cow_size(pos_integer()) :: Information.t()
   defp cow_size(sectors) do
-    data = Information.bytes(sectors * 512)
-    per_chunk = Information.bytes(div(sectors, Hyper.Cfg.Img.chunk_sectors()) * 16)
+    entries = div(sectors, Hyper.Cfg.Img.chunk_sectors())
 
-    Information.bytes(
-      Information.as_bytes(data) + Information.as_bytes(per_chunk) +
-        Information.as_bytes(Information.mib(4))
-    )
+    Information.sectors(sectors) + Information.bytes(entries * @exception_entry_bytes) +
+      @cow_slack
   end
 
   @spec create_sparse(Path.t(), Information.t()) :: :ok | {:error, term()}

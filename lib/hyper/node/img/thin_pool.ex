@@ -96,7 +96,7 @@ defmodule Hyper.Node.Img.ThinPool do
          :ok <- zero_metadata(meta),
          {:ok, meta_loop} <- SuidHelper.Losetup.attach_rw(meta),
          {:ok, data_loop} <- SuidHelper.Losetup.attach_rw(data),
-         sectors = div(Information.as_bytes(ImgConfig.thin_pool_data_size()), 512),
+         sectors = Information.as_sectors(ImgConfig.thin_pool_data_size()),
          {:ok, pool_dev} <-
            SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,

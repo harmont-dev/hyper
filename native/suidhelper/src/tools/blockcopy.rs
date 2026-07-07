@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
+/// A disk sector is 512 bytes by kernel convention, independent of the
+/// device's physical sector size.
+const SECTOR_BYTES: u64 = 512;
+
 /// A provisioned-range list, the JSON `thin-dump` emits: pool block size in
 /// 512-byte sectors, and `(begin, length)` ranges in pool blocks.
 #[derive(Debug, Clone, Deserialize)]
@@ -40,7 +44,7 @@ pub struct BlockcopyArgs {
     #[arg(long, value_parser = range_spec_from_file)]
     ranges: RangeSpec,
     /// Copy granularity in bytes.
-    #[arg(long, default_value_t = 1 << 20, value_parser = clap::value_parser!(u64).range(512..))]
+    #[arg(long, default_value_t = 1 << 20, value_parser = clap::value_parser!(u64).range(SECTOR_BYTES..))]
     chunk_bytes: u64,
 }
 
@@ -60,7 +64,10 @@ pub fn copy_ranges(
     chunk_bytes: usize,
 ) -> io::Result<CopyStats> {
     let overflow = || io::Error::new(io::ErrorKind::InvalidInput, "range offset overflows u64");
-    let block_bytes = spec.block_sectors.checked_mul(512).ok_or_else(overflow)?;
+    let block_bytes = spec
+        .block_sectors
+        .checked_mul(SECTOR_BYTES)
+        .ok_or_else(overflow)?;
     let mut buf = vec![0u8; chunk_bytes];
     let mut stats = CopyStats {
         scanned_chunks: 0,
