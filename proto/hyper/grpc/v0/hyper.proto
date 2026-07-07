@@ -50,6 +50,15 @@ service Hyper {
   //   NOT_FOUND -- no VM with this `vm_id` is known to the cluster.
   rpc GetVm(GetVmRequest) returns (GetVmResponse);
 
+  // Report a microVM's metered compute: the cumulative CPU time it has
+  // actually executed, measured from its cgroup. An idle VM accrues (almost)
+  // none -- this is compute performed, not compute allocated. Works for
+  // stopped VMs too, reporting the recorded lifetime total.
+  //
+  // Errors:
+  //   NOT_FOUND -- no VM with this `vm_id` is running and none was ever metered.
+  rpc GetVmUsage(GetVmUsageRequest) returns (GetVmUsageResponse);
+
   // List every microVM currently known to the cluster, across all nodes.
   rpc ListVms(google.protobuf.Empty) returns (ListVmsResponse);
 
@@ -140,6 +149,21 @@ message GetVmResponse {
 
   // The cluster node (Erlang node name) the VM currently runs on.
   string node = 2;
+}
+
+// Request a VM's metered compute.
+message GetVmUsageRequest {
+  // The id of the VM to report on.
+  string vm_id = 1;
+}
+
+// Result of a successful GetVmUsage.
+message GetVmUsageResponse {
+  // Echoes the requested id.
+  string vm_id = 1;
+
+  // Cumulative CPU time the VM has actually executed, in microseconds.
+  uint64 cpu_usec = 2;
 }
 
 // Result of ListVms.

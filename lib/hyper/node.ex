@@ -117,6 +117,14 @@ defmodule Hyper.Node do
     Hyper.Node.FireVMM.Agent.exec(vm_id, argv, opts)
   end
 
+  @doc """
+  CPU time accrued by `vm_id`'s meter **on this node** but not yet flushed to
+  the usage table. The node-local half of `Hyper.usage/1`, which resolves the
+  owning node and `:erpc`-calls this function there.
+  """
+  @spec unflushed_usage(Hyper.Vm.Id.t()) :: Unit.Time.t()
+  def unflushed_usage(vm_id), do: FireVMM.Meter.unflushed(vm_id)
+
   @doc false
   @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
