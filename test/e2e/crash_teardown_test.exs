@@ -21,6 +21,9 @@ defmodule Hyper.E2e.CrashTeardownTest do
   test "SIGKILL of firecracker reclaims the dm volume and the routing entry" do
     assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
     assert {:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+    # A failed assertion before (or after) the SIGKILL must not leak a live VM
+    # into other tests in the same run; stop_image_vm/1 treats :not_found as
+    # :ok, so this is safe even after crash-reclaim already tore the VM down.
     on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
     vm_id = Hyper.id(vm)
     assert vm_id, "Hyper.id/1 returned nil for a freshly-created VM"
