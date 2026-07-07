@@ -90,7 +90,7 @@ defmodule Hyper.Node.Img.Publish do
       try do
         with {:ok, write_dev} <-
                SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors),
-             {:ok, _stats} <- copy_divergence(tmp, snap_dev, snap_id, write_dev),
+             {:ok, _stats} <- copy_divergence(snap_dev, snap_id, write_dev),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
              :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)),
@@ -115,27 +115,11 @@ defmodule Hyper.Node.Img.Publish do
   # written). No scan fallback — a host that cannot read its pool metadata
   # (thin-provisioning-tools missing/broken) must fail the publish loudly
   # rather than degrade to an O(device) scan.
-  @spec copy_divergence(String.t(), Path.t(), non_neg_integer(), Path.t()) ::
+  @spec copy_divergence(Path.t(), non_neg_integer(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  defp copy_divergence(tmp, snap_dev, snap_id, write_dev) do
+  defp copy_divergence(snap_dev, snap_id, write_dev) do
     with {:ok, spec} <- ThinPool.mappings(snap_id) do
-      ranged_copy(tmp, snap_dev, write_dev, spec)
-    end
-  end
-
-  # The range list rides to the helper as a scratch file: it can be thousands
-  # of entries, far past argv limits, and the helper validates it pre-privilege.
-  @spec ranged_copy(String.t(), Path.t(), Path.t(), map()) ::
-          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  defp ranged_copy(tmp, snap_dev, write_dev, spec) do
-    ranges_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-ranges-#{tmp}.json")
-
-    try do
-      with :ok <- File.write(ranges_path, Jason.encode!(spec)) do
-        SuidHelper.Blockcopy.copy(snap_dev, write_dev, ranges_path)
-      end
-    after
-      _ = File.rm(ranges_path)
+      SuidHelper.Blockcopy.copy(snap_dev, write_dev, spec)
     end
   end
 

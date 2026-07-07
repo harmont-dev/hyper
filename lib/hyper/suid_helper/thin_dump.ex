@@ -15,7 +15,7 @@ defmodule Hyper.SuidHelper.ThinDump do
   @doc """
   Provisioned `[begin, length]` ranges of thin device `dev_id` in pool blocks,
   plus the pool block size in 512-byte sectors — the shape
-  `Hyper.SuidHelper.Blockcopy.copy/3`'s `ranges_path` file consumes verbatim.
+  `Hyper.SuidHelper.Blockcopy.copy/3` consumes verbatim as `ranges_spec`.
   """
   @spec mappings(Path.t(), non_neg_integer()) ::
           {:ok, %{block_sectors: pos_integer(), ranges: [[non_neg_integer()]]}}
