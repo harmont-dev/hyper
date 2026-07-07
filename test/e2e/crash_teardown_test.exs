@@ -33,8 +33,10 @@ defmodule Hyper.E2e.CrashTeardownTest do
     rw_dev = Hyper.Node.Img.Mutable.dm_name(vm_id)
 
     # Prove the VM is fully live first — otherwise the kill would race boot
-    # and the test could pass without exercising crash reclaim at all.
-    assert {:ok, %{exit_code: 0}} = await_exec(vm, ["/bin/true"])
+    # and the test could pass without exercising crash reclaim at all. The
+    # second guest of a run has come up slower than the first on nested-virt
+    # CI runners, hence the extended deadline.
+    assert {:ok, %{exit_code: 0}} = await_exec(vm, ["/bin/true"], :timer.minutes(3))
     assert MapSet.member?(dm_devices(), rw_dev)
 
     # The jailer/firecracker cmdline carries the vm_id (--id). The [v]...
