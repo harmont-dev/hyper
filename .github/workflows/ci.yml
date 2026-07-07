@@ -355,9 +355,10 @@ jobs:
       # No --no-start: the app boots its real supervision tree, which runs
       # Hyper.Node.test_system/0 host validation before any test executes.
       # Multiple --only flags OR together: this runs ONLY the gated tags.
-      # coveralls.json wraps `mix test` (flags pass through) and writes
-      # cover/excoveralls.json -- the E2E suite's server-side coverage, which
-      # the elixir job's unit run cannot see (it runs --no-start).
+      # coveralls.json wraps `mix test`, so the tag filters and
+      # --warnings-as-errors pass through; it writes cover/excoveralls.json,
+      # which is this job's Codecov upload — without it the integration-only
+      # modules (e.g. Hyper.Metering.Usage) report zero coverage.
       - name: Integration + external tests
         run: mix coveralls.json --only integration --only external --warnings-as-errors
 

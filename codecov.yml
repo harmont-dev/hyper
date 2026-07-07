@@ -1,8 +1,7 @@
-# Codecov configuration for the hyper monorepo. Coverage uploads under three
+# Codecov configuration for the hyper monorepo. Three uploads under distinct
 # flags from separate CI jobs (see .github/workflows/ci.yml):
-#   elixir      -> cover/excoveralls.json  (unit suite, mix coveralls.json --no-start)
-#   integration -> cover/excoveralls.json  (KVM E2E suite incl. the TS gRPC
-#                  contract tests, which cover the server-side gRPC stack)
+#   elixir      -> cover/excoveralls.json  (ExCoveralls, default suite, --no-start)
+#   integration -> cover/excoveralls.json  (ExCoveralls, KVM E2E job, live tree)
 #   rust        -> native/suidhelper/lcov.info  (cargo llvm-cov)
 coverage:
   status:
@@ -29,10 +28,13 @@ flags:
       - native/suidhelper/src/
     carryforward: true
 
-# Generated bindings, deps, and test code never count toward coverage.
+# Generated bindings, Mix tasks, deps, and test code never count toward
+# coverage. Mix tasks are operator-facing glue (install/codegen) exercised by
+# running them, not by unit tests.
 ignore:
   - "lib/hyper/firecracker/api/operations"
   - "lib/hyper/firecracker/api/schemas"
+  - "lib/mix"
   - "test"
   - "deps"
   - "native/suidhelper/target"
