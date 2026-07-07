@@ -259,11 +259,11 @@ jobs:
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
     # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
     runs-on: ubuntu-latest
-    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery) plus
-    # ~4 minutes of provisioning/compile/setup. 25 could cancel the job right
-    # as it finishes, and `!cancelled()` steps then skip result uploads —
+    # Worst case: three 10-minute tests (vm_lifecycle + crash_recovery + fork)
+    # plus ~4 minutes of provisioning/compile/setup. 35 could cancel the job
+    # right as it finishes, and `!cancelled()` steps then skip result uploads —
     # exactly when flake history matters most.
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       MIX_ENV: test
     services:
@@ -342,8 +342,11 @@ jobs:
       # No --no-start: the app boots its real supervision tree, which runs
       # Hyper.Node.test_system/0 host validation before any test executes.
       # Multiple --only flags OR together: this runs ONLY the gated tags.
-      - name: Integration + external tests
-        run: mix test --only integration --only external --warnings-as-errors
+      # coveralls.json wraps `mix test` (same flags apply) and writes
+      # cover/excoveralls.json, so integration-exercised lines reach Codecov
+      # instead of reporting as uncovered from the unit job alone.
+      - name: Integration + external tests (+ coverage)
+        run: mix coveralls.json --only integration --only external --warnings-as-errors
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
@@ -362,6 +365,14 @@ jobs:
         with:
           name: integration-test-results
           path: _build/test/junit.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cover/excoveralls.json
+          flags: integration
+          fail_ci_if_error: true
 
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required
