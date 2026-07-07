@@ -84,6 +84,16 @@ defmodule Hyper.E2e.CrashRecoveryTest do
     assert MapSet.member?(dm_devices(), rw_dev),
            "writable dm volume #{rw_dev} vanished across the crash/recovery cycle"
 
+    # A pre-crash periodic flush (60s cadence) may already have landed rows on
+    # a slow nested-virt boot, so a bare non-nil total could pass even if the
+    # accumulator went negative after the crash and every later flush was
+    # refused. Snapshot here: the teardown flush must strictly grow the total.
+    pre_stop_us =
+      case Usage.total(vm_id) do
+        nil -> 0
+        total -> Time.as_us(total)
+      end
+
     assert :ok = Hyper.Node.stop_image_vm(vm)
 
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),
@@ -93,13 +103,14 @@ defmodule Hyper.E2e.CrashRecoveryTest do
            "routing entry for #{vm_id} survived stop_image_vm"
 
     # The crash recreated the VM's cgroup, resetting cpu.stat to zero. A
-    # naive delta would go negative, every flush would then be refused by
-    # the cpu_usec > 0 validation, and no usage row would ever land — so a
-    # positive lifetime total proves the accumulator re-baselined and the
-    # meter kept billing across the crash.
+    # naive delta would go negative and every later flush would be refused
+    # by the cpu_usec > 0 validation — the total would freeze at its
+    # pre-stop snapshot. A total that strictly grows past the snapshot
+    # proves the accumulator re-baselined and kept billing across the crash.
     assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
            "no usage recorded across the crash/recovery cycle"
 
-    assert Time.as_us(Usage.total(vm_id)) > 0
+    assert Time.as_us(Usage.total(vm_id)) > pre_stop_us,
+           "teardown flush added no post-crash usage — accrual lost across recovery"
   end
 end
