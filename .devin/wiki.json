@@ -1,0 +1,24 @@
+{
+  "repo_notes": [
+    {
+      "content": "Hyper is a distributed orchestrator for Firecracker microVMs written in Elixir (~> 1.20, OTP 28+) on the BEAM, with two Rust components under native/: suidhelper (a privileged setuid helper, crate hyper_suidhelper, that performs Linux operations the BEAM cannot do safely: losetup, dmsetup, chroot jails, device nodes, cgroup.kill) and guest-agent (a PID-1 agent inside the guest VM that serves command execution over vsock via gRPC). PostgreSQL is the only external runtime dependency (the image database). Document the Elixir/Rust privilege boundary explicitly: the BEAM never runs privileged operations directly; it shells out to the setuid helper.",
+      "author": "Marko Vejnovic"
+    },
+    {
+      "content": "Key subsystems and where they live: lib/hyper/vm and lib/hyper/firecracker (per-VM lifecycle: state machine, Firecracker daemon supervision, jailer); lib/hyper/img (OCI image loading and dm-thin copy-on-write layered storage — VM forking creates thin COW layers, not full snapshots); lib/redist (distributed placement: rendezvous hashing, affinity-based scheduling); lib/hyper/grpc (external gRPC API); lib/hyper/cfg (4-layer TOML config precedence: operator config > TOML > defaults); lib/hyper/metering (per-VM compute-hour tracking from cgroup cpu.stat for billing); lib/hyper/agent (host side of guest exec over vsock, Hyper.exec/3); lib/hyper/cluster and lib/hyper/node (cluster membership; nodes added to the cluster automatically become VM runners); lib/unit (type-safe quantities algebra: Information/Time/Bandwidth — the codebase never uses bare byte counts); lib/controls (EWMA and rate-control math); lib/sys (Linux /proc parsers and system introspection).",
+      "author": "Marko Vejnovic"
+    },
+    {
+      "content": "Generated code is gitignored and absent from this repository: lib/hyper/firecracker/api/operations and lib/hyper/firecracker/api/schemas are generated from the Firecracker OpenAPI spec by `mix firecracker.gen`, and lib/hyper/grpc/v0/hyper.pb.ex is generated from the .proto by `mix grpc.gen`. Both are rebuilt by custom Mix compilers at build time. Do not report these modules as missing or the API layer as incomplete — document the generation pipeline instead (the committed source artifacts are the OpenAPI spec and the .proto files).",
+      "author": "Marko Vejnovic"
+    },
+    {
+      "content": "Test taxonomy matters for contributors: test/unit and test/controls are pure (no Postgres, no Firecracker; heavy use of StreamData property-based tests — round-trip, algebraic-law, oracle, and refusal-contract properties); DB-backed tests need Postgres via `mix ecto.create && mix ecto.migrate`; test/e2e is the live :integration suite that boots real Firecracker VMs on a provisioned KVM host (provisioned in CI by .github/scripts/provision-kvm-host.sh, kept in lockstep with docs/cookbook/install.md); :external tests pull real OCI images. Rust tests live in native/suidhelper/tests/ (never inline #[cfg(test)]) and run with `cargo nextest run`. The single quality gate is `mix check` (format, compile --warnings-as-errors, credo --strict, test, dialyzer).",
+      "author": "Marko Vejnovic"
+    },
+    {
+      "content": "Canonical operator documentation lives in docs/cookbook/ (especially install.md for host provisioning: KVM, device-mapper thin pools, the setuid helper) and is published to https://hexdocs.pm/hypervm/. Prefer citing those guides for installation and configuration rather than inferring procedures from code. The package is published on Hex as `hypervm`. License is AGPL-3.0-or-later.",
+      "author": "Marko Vejnovic"
+    }
+  ]
+}
