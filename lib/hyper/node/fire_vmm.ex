@@ -1,6 +1,6 @@
 defmodule Hyper.Node.FireVMM do
   @moduledoc """
-  Supervises a single Firecracker microVM, split into three independent children
+  Supervises a single Firecracker microVM, split into four independent children
   so no lifecycle invariant rides on the ordering of a flat child list:
 
     1. `Hyper.Node.FireVMM.Core` - the daemon container + `:gen_statem`
@@ -14,8 +14,12 @@ defmodule Hyper.Node.FireVMM do
        inbound Unix-socket connections to the in-guest agent over vsock. Restart
        is `:transient`: an abnormal crash (unexpected accept error) is restarted;
        a clean stop (`:shutdown` from the supervisor) is not.
+    4. `Hyper.Node.FireVMM.Meter` - the per-VM compute meter, sampling the
+       VM's cgroup `cpu.stat` into `Hyper.Metering.Usage` billing windows.
+       Deliberately the last child: it stops first at teardown, capturing the
+       final usage window before the daemon removes the cgroup.
 
-  Strategy is `:one_for_one`: the three children are restarted independently.
+  Strategy is `:one_for_one`: the four children are restarted independently.
   """
 
   use Supervisor
@@ -25,6 +29,7 @@ defmodule Hyper.Node.FireVMM do
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.Core
   alias Hyper.Node.FireVMM.Jailer
+  alias Hyper.Node.FireVMM.Meter
 
   @doc "The scheduler period of each VM."
   @spec cpu_period() :: Unit.Time.t()
@@ -89,7 +94,11 @@ defmodule Hyper.Node.FireVMM do
              vm_id: opts.vm_id,
              vsock_uds: Jailer.host_vsock(opts.vm_id),
              listen_path: Agent.relay_socket_path(opts.vm_id)
-           }}
+           }},
+          # Last on purpose: children stop in reverse start order, so the meter
+          # stops first at teardown and flushes its final usage window while
+          # Core's Daemon (and the cgroup it removes) is still alive.
+          {Meter, %Meter.Opts{vm_id: opts.vm_id, cgroup_dir: Jailer.cgroup_dir(opts.vm_id)}}
         ]
 
         Supervisor.init(children, strategy: :one_for_one)

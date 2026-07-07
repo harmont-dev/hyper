@@ -113,6 +113,25 @@ info = await client.GetVm(hyper_pb2.GetVmRequest(vm_id=created.vm_id))
 print(info.vm_id, info.node)
 ```
 
+### Reading VM Usage
+
+You can read a VM's metered compute with `GetVmUsage`. It reports the
+cumulative CPU time the VM has *actually executed* — measured from its
+cgroup, so an idle VM accrues (almost) nothing. This is the counter to bill
+on: compute performed, not compute allocated. Stopped VMs report their
+recorded lifetime total. A VM that never accrued any compute (for example,
+created and stopped while fully idle) has no recorded usage and returns
+`NOT_FOUND`.
+
+```python
+usage = await client.GetVmUsage(hyper_pb2.GetVmUsageRequest(vm_id=created.vm_id))
+print(f"{usage.vm_id} consumed {usage.cpu_usec / 1e6:.2f} CPU-seconds")
+```
+
+Under the hood, usage is persisted once a minute as append-only windows in
+the `vm_usage` Postgres table (`vm_id`, `window_start`, `window_end`,
+`cpu_usec`), so billing pipelines can also aggregate ranges with SQL directly.
+
 ### Stopping a VM
 
 You can stop a running VM with `StopVm`, which returns a

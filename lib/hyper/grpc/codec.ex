@@ -14,6 +14,7 @@ defmodule Hyper.Grpc.Codec do
     CreateVmRequest,
     CreateVmResponse,
     GetVmResponse,
+    GetVmUsageResponse,
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
@@ -92,6 +93,10 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc({:located, Hyper.Vm.Id.t(), node()}) :: GetVmResponse.t()
   def to_grpc({:located, vm_id, node}),
     do: %GetVmResponse{vm_id: vm_id, node: to_string(node)}
+
+  @spec to_grpc({:usage, Hyper.Vm.Id.t(), Unit.Time.t()}) :: GetVmUsageResponse.t()
+  def to_grpc({:usage, vm_id, cpu_time}),
+    do: %GetVmUsageResponse{vm_id: vm_id, cpu_usec: Unit.Time.as_us(cpu_time)}
 
   @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}]}) :: ListVmsResponse.t()
   def to_grpc({:vms, vms}),
