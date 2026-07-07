@@ -59,6 +59,10 @@ defmodule Hyper.E2e.VmLifecycleTest do
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),
            "writable dm volume #{rw_dev} leaked after stop_image_vm"
 
+    # The Meter is the FireVMM supervisor's LAST child: at stop it terminates
+    # first and flushes a final usage window while the cgroup still exists.
+    # stop_image_vm/1 has returned, so the row should already be committed;
+    # the poll only absorbs distributed-registry teardown stragglers.
     assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
            "no usage row after stop_image_vm — the teardown flush never landed"
 
@@ -75,6 +79,9 @@ defmodule Hyper.E2e.VmLifecycleTest do
       assert row.node_id == to_string(node())
     end
 
+    # total/3 buckets by window_start over a half-open range: a range covering
+    # every window_start must reproduce the lifetime total exactly — an
+    # off-by-one in the range predicate would double- or under-bill.
     starts = Enum.map(rows, & &1.window_start)
     from_ts = Enum.min(starts, DateTime)
     to_ts = DateTime.add(Enum.max(starts, DateTime), 1, :microsecond)
