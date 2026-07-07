@@ -254,6 +254,111 @@ jobs:
           sudo -E env "PATH=$PATH" \
             cargo nextest run --features insecure_test_seams -E 'test(/_as_root$/)'
 
+  integration:
+    name: Integration (KVM E2E)
+    # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
+    # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      MIX_ENV: test
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Fail fast and loudly if GitHub ever withdraws nested virt, rather
+      # than timing out inside a VM boot.
+      - name: Assert KVM is available
+        run: '[ -e /dev/kvm ]'
+
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          elixir-version: "1.20"
+          otp-version: "28"
+
+      # Separate cache key from the elixir job: this _build is test-env only
+      # and the two jobs would otherwise race the same cache entry.
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-integration-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-integration-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      # protoc + protoc-gen-elixir drive the :grpc_gen Mix compiler (same as
+      # the elixir job).
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-elixir
+        run: mix escript.install hex protobuf 0.17.0 --force
+
+      - name: Install musl target for the guest-agent build
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Cache rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/guest-agent
+            native/suidhelper
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      # After compile: firecracker.install / suidhelper.install are mix tasks,
+      # and the helper's checksum stamp must come from this build.
+      - name: Provision Firecracker host
+        run: .github/scripts/provision-kvm-host.sh
+
+      - name: Create and migrate test DB
+        run: |
+          mix ecto.create -r Hyper.Img.Db.Repo
+          mix ecto.migrate -r Hyper.Img.Db.Repo
+
+      # No --no-start: the app boots its real supervision tree, which runs
+      # Hyper.Node.test_system/0 host validation before any test executes.
+      # Multiple --only flags OR together: this runs ONLY the gated tags.
+      - name: Integration + external tests
+        run: mix test --only integration --only external --warnings-as-errors
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: _build/test/junit.xml
+          flags: integration
+          report_type: test_results
+
+      # test-results.yml globs artifacts/**/*.xml, so this artifact joins the
+      # unified Test Results check automatically.
+      - name: Upload integration test results artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-test-results
+          path: _build/test/junit.xml
+
   # Uploads the triggering event payload so the workflow_run publisher
   # (test-results.yml) can map results back to the originating PR -- required
   # for PR comments on fork PRs. Tiny job, always runs.
