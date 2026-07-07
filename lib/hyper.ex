@@ -157,13 +157,8 @@ defmodule Hyper do
   def stop_vm(vm_id) when is_binary(vm_id) do
     case Hyper.Cluster.Routing.supervisor_of(vm_id) do
       nil -> {:error, :not_found}
-      pid -> stop_on_owner(pid)
+      pid -> :erpc.call(node(pid), Hyper.Node, :stop_image_vm, [pid])
     end
-  end
-
-  @spec stop_on_owner(pid()) :: :ok | {:error, :machine_unreachable}
-  defp stop_on_owner(pid) do
-    :erpc.call(node(pid), Hyper.Node, :stop_image_vm, [pid])
   catch
     :error, {:erpc, _} -> {:error, :machine_unreachable}
   end
