@@ -23,10 +23,13 @@ flags:
       - native/suidhelper/src/
     carryforward: true
 
-# Generated bindings, deps, and test code never count toward coverage.
+# Generated bindings, Mix tasks, deps, and test code never count toward
+# coverage. Mix tasks are operator-facing glue (install/codegen) exercised by
+# running them, not by unit tests.
 ignore:
   - "lib/hyper/firecracker/api/operations"
   - "lib/hyper/firecracker/api/schemas"
+  - "lib/mix"
   - "test"
   - "deps"
   - "native/suidhelper/target"
