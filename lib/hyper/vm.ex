@@ -3,11 +3,8 @@ defmodule Hyper.Vm do
 
   use OpenTelemetryDecorator
 
-  # Aspirational @specs for as-yet unimplemented stubs: `fast_fork/1` only returns
-  # `{:error, :not_implemented}` and `fork/1` raises, so their success typings are
-  # narrower than the public contracts. Suppress until they are built out.
-  # TODO: implement fast_fork/1 and fork/1 and drop this @dialyzer suppression.
-  @dialyzer {:nowarn_function, [fast_fork: 1, fork: 1]}
+  # TODO: implement fork/1 and drop this @dialyzer suppression.
+  @dialyzer {:nowarn_function, [fork: 1]}
 
   @type t :: pid()
 
@@ -36,8 +33,18 @@ defmodule Hyper.Vm do
   """
   @spec fast_fork(t()) :: {:ok, t()} | {:error, term()}
   @decorate with_span("Hyper.Vm.fast_fork")
-  def fast_fork(_vm) do
-    {:error, :not_implemented}
+  def fast_fork(vm) when is_pid(vm) do
+    case Hyper.id(vm) do
+      nil ->
+        {:error, :not_found}
+
+      vm_id ->
+        try do
+          :erpc.call(node(vm), Hyper.Node, :fork_vm_local, [vm_id])
+        catch
+          :error, {:erpc, _} -> {:error, :node_unreachable}
+        end
+    end
   end
 
   @doc """
