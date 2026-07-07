@@ -26,7 +26,13 @@ defmodule Hyper.E2e.VmLifecycleTest do
     assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
 
     assert {:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+    # A failed assertion must not leak a live VM into the next E2E test in
+    # the same run; stop_image_vm/1 is idempotent, so this is safe alongside
+    # the explicit stop below (which is itself the behavior under test).
+    on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
+
     vm_id = Hyper.id(vm)
+    assert vm_id, "Hyper.id/1 returned nil for a freshly-created VM"
     rw_dev = Hyper.Node.Img.Mutable.dm_name(vm_id)
 
     assert MapSet.member?(dm_devices(), rw_dev),
