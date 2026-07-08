@@ -89,6 +89,10 @@ name = "e2e_chroot_jail"
 path = "tests/e2e/chroot_jail.rs"
 
 [[test]]
+name = "e2e_version"
+path = "tests/e2e/version.rs"
+
+[[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
