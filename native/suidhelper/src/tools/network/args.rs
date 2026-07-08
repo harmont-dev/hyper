@@ -12,9 +12,11 @@
 //!   route target must already be reachable when the route is added.
 //! - `teardown_commands` always deletes the netns, which reclaims the ns-side
 //!   veth peer, the TAP device, and any in-netns nftables state.
-//! - `host_init_commands` masquerades the clone pool out the configured uplink
-//!   and drops guest traffic addressed to the cloud metadata IP
-//!   (`169.254.169.254`), so no VM can ever reach it.
+//! - `host_init_commands` masquerades the clone pool out the configured uplink,
+//!   drops guest traffic addressed to the cloud metadata IP
+//!   (`169.254.169.254`), and drops all clone-pool-sourced traffic addressed to
+//!   the host itself on the INPUT hook (distinct from FORWARD — see that
+//!   function's doc), so no VM can ever reach it or a host-local service.
 use super::addr::{self, Plan};
 
 /// Which privileged binary a [`Command`] invokes. Kept to exactly two — `ip`
@@ -252,9 +254,24 @@ pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
 }
 
 /// One-time host setup: a `hyper` nftables table that masquerades the clone
-/// pool out `uplink`, and a forward-chain default-drop policy that only admits
+/// pool out `uplink`, a forward-chain default-drop policy that only admits
 /// the pool's own traffic — explicitly dropping anything addressed to the
-/// cloud metadata IP (`169.254.169.254`), so no VM can ever reach it.
+/// cloud metadata IP (`169.254.169.254`), so no VM can ever reach it — and an
+/// input-chain rule that drops all clone-pool-sourced traffic addressed to
+/// the host itself.
+///
+/// The input-chain drop closes a distinct hook from the forward-chain policy:
+/// a guest packet addressed to a *host-owned* IP (the guest's own gateway
+/// address, or any other address the host answers for) is locally delivered
+/// and hits the kernel's INPUT hook, never FORWARD — so without this rule a
+/// guest could reach host-local services (epmd, distribution, Postgres, the
+/// gRPC listener) regardless of the forward-chain policy above. The input
+/// chain's own policy stays `accept` so unrelated host traffic (SSH, other
+/// subnets) is untouched; only clone-pool-sourced packets are dropped. This
+/// does not affect guest egress (which is FORWARDed, never delivered to
+/// INPUT) or ARP (an L2 protocol the `ip` family's INPUT hook never sees), and
+/// the guest's DNS queries are forwarded to an external resolver, not
+/// terminated on the host, so they are unaffected too.
 ///
 /// Reconciles to desired state rather than diffing: the first command
 /// unconditionally deletes the `hyper` table (tolerating "no such file" when
@@ -262,7 +279,8 @@ pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
 /// scratch. This makes host-init idempotent by construction — the table is
 /// always either absent or complete, never partially applied — so a
 /// crash/interruption mid-sequence on one run can never strand a later run
-/// with, say, NAT but no forward-chain drop policy.
+/// with, say, NAT but no forward-chain drop policy (or no input-chain
+/// isolation).
 pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
     vec![
         Command::nft_allow_failure(argv!["delete", "table", "ip", "hyper"]),
@@ -335,6 +353,13 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
             "state",
             "established,related",
             "accept"
+        ]),
+        Command::nft(argv![
+            "add", "chain", "ip", "hyper", "input", "{", "type", "filter", "hook", "input",
+            "priority", "0", ";", "policy", "accept", ";", "}"
+        ]),
+        Command::nft(argv![
+            "add", "rule", "ip", "hyper", "input", "ip", "saddr", clone_pool, "drop"
         ]),
     ]
 }

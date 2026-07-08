@@ -69,7 +69,13 @@ impl HostInit {
         let config = Config::get();
         let network = super::resolve_network(config.network())?;
         Ok(Self {
-            uplink: network.uplink.clone(),
+            // `Config::network()` only ever returns `Some` when `uplink` is
+            // set (see its doc), so `resolve_network`'s `Ok` carries that same
+            // guarantee.
+            uplink: network
+                .uplink
+                .clone()
+                .expect("Config::network() guarantees uplink is set"),
             clone_pool: network.clone_pool.clone(),
             nft: config.nft()?.into(),
         })

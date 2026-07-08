@@ -15,3 +15,16 @@ fn present_table_with_only_uplink_defaults_clone_pool() {
     let network: Network = toml::from_str("uplink = \"eth0\"\n").expect("valid TOML");
     assert_eq!(network.clone_pool, "172.31.0.0/16");
 }
+
+#[test]
+fn partial_network_table_without_uplink_disables_not_bricks() {
+    // A `[network]` table with `clone_pool` set but `uplink` omitted must
+    // parse the WHOLE config successfully (not fail the process-wide,
+    // exit-on-error `Config` load that every subcommand — dmsetup, losetup,
+    // chroot-jail, jailer, not just networking — depends on) and must resolve
+    // to networking-disabled, mirroring Elixir's Hyper.Cfg.Network.enabled?/0
+    // (uplink absent ⇒ disabled, not an error).
+    let toml_str = "work_dir = \"/srv/hyper\"\n[network]\nclone_pool = \"10.0.0.0/8\"\n";
+    let config: Config = toml::from_str(toml_str).expect("a partial [network] table must parse");
+    assert!(config.network().is_none());
+}

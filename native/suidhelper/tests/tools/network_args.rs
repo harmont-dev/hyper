@@ -72,6 +72,23 @@ fn host_init_masquerades_pool_out_uplink() {
         .any(|c| c.argv.contains(&"169.254.169.254".to_string())));
 }
 
+#[test]
+fn host_init_drops_guest_traffic_to_host() {
+    // The INPUT hook is a distinct chain from FORWARD: a guest packet
+    // addressed to a host-owned IP (its own gateway, or any other host IP) is
+    // locally delivered, never forwarded, so without an explicit input-chain
+    // drop a guest could reach host-local services (epmd, distribution,
+    // Postgres, gRPC) regardless of the forward-chain policy. Pinned as its
+    // own assertion so a future edit to the forward chain can't silently drop
+    // this isolation.
+    let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
+    assert!(cmds.iter().any(|c| c.bin == Which::Nft
+        && c.argv.contains(&"input".to_string())
+        && c.argv.contains(&"saddr".to_string())
+        && c.argv.contains(&"172.31.0.0/16".to_string())
+        && c.argv.contains(&"drop".to_string())));
+}
+
 fn cmd(bin: Which, argv: &[&str]) -> args::Command {
     args::Command {
         bin,
@@ -223,8 +240,10 @@ fn prepare_commands_golden_sequence() {
 /// step — see `host_init.rs`'s module doc), the metadata-IP drop rule
 /// immediately after the forward chain is created and before the broad
 /// egress accept (since `accept` is a terminating verdict in nftables and a
-/// drop reachable only after it would never fire), and that every command
-/// after the delete is *not* failure-tolerant.
+/// drop reachable only after it would never fire), the trailing input-chain
+/// isolation (drops all clone-pool-sourced traffic addressed to the host
+/// itself, on the INPUT hook FORWARD never sees — see `host_init_commands`'s
+/// doc), and that every command after the delete is *not* failure-tolerant.
 #[test]
 fn host_init_commands_golden_sequence() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
@@ -323,6 +342,27 @@ fn host_init_commands_golden_sequence() {
                 "accept",
             ],
         ),
+        cmd(
+            Which::Nft,
+            &[
+                "add", "chain", "ip", "hyper", "input", "{", "type", "filter", "hook", "input",
+                "priority", "0", ";", "policy", "accept", ";", "}",
+            ],
+        ),
+        cmd(
+            Which::Nft,
+            &[
+                "add",
+                "rule",
+                "ip",
+                "hyper",
+                "input",
+                "ip",
+                "saddr",
+                "172.31.0.0/16",
+                "drop",
+            ],
+        ),
     ];
     assert_eq!(cmds, expected);
 }
@@ -371,10 +411,10 @@ fn resolve_network_refuses_when_networking_disabled() {
 #[test]
 fn resolve_network_returns_the_configured_network_when_present() {
     let network = Network {
-        uplink: "eth0".to_string(),
+        uplink: Some("eth0".to_string()),
         clone_pool: "172.31.0.0/16".to_string(),
     };
     let resolved = resolve_network(Some(&network)).unwrap();
-    assert_eq!(resolved.uplink, "eth0");
+    assert_eq!(resolved.uplink.as_deref(), Some("eth0"));
     assert_eq!(resolved.clone_pool, "172.31.0.0/16");
 }
