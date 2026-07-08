@@ -18,7 +18,7 @@ fn plan0() -> Plan {
 
 #[test]
 fn prepare_creates_netns_first_and_default_route_last() {
-    let cmds = args::prepare_commands(&plan0());
+    let cmds = args::prepare_commands(&plan0(), "/usr/sbin/nft");
     let first = &cmds[0];
     assert!(matches!(first.bin, Which::Ip));
     assert_eq!(
@@ -110,7 +110,10 @@ fn cmd_allow_failure(bin: Which, argv: &[&str]) -> args::Command {
 #[test]
 fn prepare_commands_golden_sequence() {
     let netns = "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    let cmds = args::prepare_commands(&plan0());
+    // In-netns nft runs via `ip netns exec <ns> <abs nft path>` — the absolute
+    // path, since the helper clears PATH before spawning (see nft_ns).
+    let nft = "/usr/sbin/nft";
+    let cmds = args::prepare_commands(&plan0(), nft);
     let expected = vec![
         cmd(Which::Ip, &["netns", "add", netns]),
         cmd(
@@ -141,7 +144,7 @@ fn prepare_commands_golden_sequence() {
         ),
         cmd(
             Which::Ip,
-            &["netns", "exec", netns, "nft", "add", "table", "ip", "nat"],
+            &["netns", "exec", netns, nft, "add", "table", "ip", "nat"],
         ),
         cmd(
             Which::Ip,
@@ -149,7 +152,7 @@ fn prepare_commands_golden_sequence() {
                 "netns",
                 "exec",
                 netns,
-                "nft",
+                nft,
                 "add",
                 "chain",
                 "ip",
@@ -172,7 +175,7 @@ fn prepare_commands_golden_sequence() {
                 "netns",
                 "exec",
                 netns,
-                "nft",
+                nft,
                 "add",
                 "rule",
                 "ip",
@@ -194,7 +197,7 @@ fn prepare_commands_golden_sequence() {
                 "netns",
                 "exec",
                 netns,
-                "nft",
+                nft,
                 "add",
                 "chain",
                 "ip",
@@ -217,7 +220,7 @@ fn prepare_commands_golden_sequence() {
                 "netns",
                 "exec",
                 netns,
-                "nft",
+                nft,
                 "add",
                 "rule",
                 "ip",

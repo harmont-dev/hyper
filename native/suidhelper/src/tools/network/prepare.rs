@@ -114,7 +114,7 @@ impl IsTool for Prepare {
     type RunT = Result<(), Error>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let commands = args::prepare_commands(&self.plan);
+        let commands = args::prepare_commands(&self.plan, &self.nft.to_string_lossy());
         exec::run_all(&commands, |which| match which {
             args::Which::Ip => self.ip.as_path(),
             args::Which::Nft => self.nft.as_path(),

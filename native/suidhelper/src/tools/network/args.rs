@@ -81,11 +81,14 @@ impl Command {
         }
     }
 
-    /// `ip netns exec <netns> nft ...` — runs an `nft` operation inside the
+    /// `ip netns exec <netns> <nft> ...` — runs an `nft` operation inside the
     /// VM's netns, kept as a [`Which::Ip`] command so only `ip` and `nft` are
-    /// ever the privileged binary named directly.
-    fn nft_ns(netns: &str, argv: Vec<String>) -> Self {
-        let mut full = argv!["netns", "exec", netns, "nft"];
+    /// ever the privileged binary named directly. `nft` is the *absolute* path
+    /// to the nft binary, not the bare name: the helper spawns every command
+    /// with a cleared environment (no `PATH`), so `ip netns exec` could not
+    /// resolve a bare `nft`, and the config names the exact binary anyway.
+    fn nft_ns(netns: &str, nft: &str, argv: Vec<String>) -> Self {
+        let mut full = argv!["netns", "exec", netns, nft];
         full.extend(argv);
         Self::ip(full)
     }
@@ -95,7 +98,7 @@ impl Command {
 /// the guest's inner address (`addr::INNER_GUEST_IP`) can reach the host's
 /// uplink. The default route is requested last, after the host veth end
 /// (`hv<slot>`) is up, so the route's target is already reachable.
-pub fn prepare_commands(plan: &Plan) -> Vec<Command> {
+pub fn prepare_commands(plan: &Plan, nft: &str) -> Vec<Command> {
     let netns = plan.netns.as_str();
     let veth_host = plan.veth_host.as_str();
     let veth_ns = plan.veth_ns.as_str();
@@ -142,7 +145,7 @@ pub fn prepare_commands(plan: &Plan) -> Vec<Command> {
         Command::ip_ns(netns, argv!["link", "set", "lo", "up"]),
         Command::ip_ns(netns, argv!["route", "add", "default", "via", veth_host_ip]),
     ];
-    commands.extend(nft_prepare_commands(netns, veth_ns, veth_ns_ip));
+    commands.extend(nft_prepare_commands(netns, veth_ns, veth_ns_ip, nft));
     commands
 }
 
@@ -153,11 +156,13 @@ fn nft_prepare_commands(
     netns: &str,
     veth_ns: &str,
     veth_ns_ip: std::net::Ipv4Addr,
+    nft: &str,
 ) -> Vec<Command> {
     vec![
-        Command::nft_ns(netns, argv!["add", "table", "ip", "nat"]),
+        Command::nft_ns(netns, nft, argv!["add", "table", "ip", "nat"]),
         Command::nft_ns(
             netns,
+            nft,
             argv![
                 "add",
                 "chain",
@@ -177,6 +182,7 @@ fn nft_prepare_commands(
         ),
         Command::nft_ns(
             netns,
+            nft,
             argv![
                 "add",
                 "rule",
@@ -195,6 +201,7 @@ fn nft_prepare_commands(
         ),
         Command::nft_ns(
             netns,
+            nft,
             argv![
                 "add",
                 "chain",
@@ -214,6 +221,7 @@ fn nft_prepare_commands(
         ),
         Command::nft_ns(
             netns,
+            nft,
             argv![
                 "add",
                 "rule",
