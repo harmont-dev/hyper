@@ -1,34 +1,34 @@
 {
-  "sha" : "54d6c3f843c01fb55107a024cca5bf60af235c42",
+  "sha" : "bab2b3a92382df318e60b6b52376d2a9f5b5456c",
   "builds" : [ {
     "name" : "x86_64-5.10",
     "arch" : "x86_64",
     "version" : "5.10.259",
     "asset" : "vmlinux-x86_64-5.10",
-    "sha256" : "96b8f6a665536e560777f9634773b0ff01a41c24dda2e4ecd0f395b18f5cfa62"
+    "sha256" : "50b1a0b00d10b4e02ddcbe9e9860328968d400e86cbda4c0ed2bd2919947e315"
   }, {
     "name" : "x86_64-6.1",
     "arch" : "x86_64",
     "version" : "6.1.176",
     "asset" : "vmlinux-x86_64-6.1",
-    "sha256" : "3a9a115ce4c07951dd83f9ba048607a890e59118d21d23f5f3135e41ef2ff05f"
+    "sha256" : "fd24f0ce7c5d6f23d86c9cf7c63a140b46bcf5e7756a9d522756a80ea89ce5e4"
   }, {
     "name" : "aarch64-5.10",
     "arch" : "aarch64",
     "version" : "5.10.259",
     "asset" : "vmlinux-aarch64-5.10",
-    "sha256" : "853306d4d1c9110208c5df21c8602bc40d68556ce7fd3519e2f08e296460606a"
+    "sha256" : "de5009cb24e6204a6dedc3baf1790c8f3016bd724d4745e36e12f2ea45ce5bd2"
   }, {
     "name" : "aarch64-6.1",
     "arch" : "aarch64",
     "version" : "6.1.176",
     "asset" : "vmlinux-aarch64-6.1",
-    "sha256" : "d7ecc631a3b59e0d66c8960b35a3374f402e45fb46179507c5aa48b4629e3017"
+    "sha256" : "f324c34ee5536690e39e65991393d5813ad34b4a991cfb85ca65440fba9ec6fa"
   }, {
     "name" : "x86_64-5.10-no-acpi",
     "arch" : "x86_64",
     "version" : "5.10.259",
     "asset" : "vmlinux-x86_64-5.10-no-acpi",
-    "sha256" : "1b8bea12ee405322cad329f0a3ff20e36bb801bc11baabde9832b69f29072709"
+    "sha256" : "8c1cea3bd8b54f05a1fa13dbbc3c46b17b1df28875720a5b59a06971daaf32f7"
   } ]
 }
