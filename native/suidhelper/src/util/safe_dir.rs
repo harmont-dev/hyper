@@ -206,17 +206,25 @@ impl SafeDir {
     /// which would yield `0644`), so the exact `0666` is set with an explicit
     /// `chmod` afterwards — `fchmodat` ignores the umask.
     pub fn mknod_char(&self, name: &Path, rdev: dev_t, uid: u32, gid: u32) -> Result<(), Error> {
-        mknodat(
+        // Tolerate EEXIST: jail staging is re-run when a VM cold-boots after a
+        // failed attempt, so the node may survive from the prior attempt. The
+        // chown+chmod below re-assert the exact ownership and mode regardless,
+        // so a pre-existing node ends up identical to a freshly-created one.
+        match mknodat(
             Some(self.0.as_raw_fd()),
             name,
             SFlag::S_IFCHR,
             Mode::from_bits_truncate(0o666),
             rdev,
-        )
-        .map_err(|source| Error::Mknod {
-            name: name.to_path_buf(),
-            source,
-        })?;
+        ) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(source) => {
+                return Err(Error::Mknod {
+                    name: name.to_path_buf(),
+                    source,
+                })
+            }
+        }
         self.chown(name, uid, gid)?;
         self.chmod(name, 0o666)
     }
