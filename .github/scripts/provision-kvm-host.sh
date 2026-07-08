@@ -64,6 +64,22 @@ sudo sysctl -w net.ipv4.ip_forward=1
 echo 'net.ipv4.ip_forward=1' \
   | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf >/dev/null
 
+# GitHub-hosted runners ship Docker, which sets the iptables `filter` FORWARD
+# policy to DROP and only admits its own bridge traffic. Hyper's guest egress is
+# *forwarded* (per-VM netns veth -> uplink), so Docker's drop silently eats
+# every packet the guest sends — the guest configures its NIC fine but nothing
+# ever returns. Admit the clone pool (172.31.0.0/16, the helper's default) both
+# directions via DOCKER-USER, which Docker evaluates before its own drops; the
+# `hyper` nftables forward chain still enforces guest isolation. Fall back to an
+# accepting FORWARD policy on a host without Docker's chain.
+clone_pool="172.31.0.0/16"
+if sudo iptables -L DOCKER-USER >/dev/null 2>&1; then
+  sudo iptables -I DOCKER-USER -s "${clone_pool}" -j ACCEPT
+  sudo iptables -I DOCKER-USER -d "${clone_pool}" -j ACCEPT
+else
+  sudo iptables -P FORWARD ACCEPT
+fi
+
 # The default-route interface is the uplink guests NAT egress through.
 uplink="$(ip route show default | awk '{print $5; exit}')"
 [ -n "${uplink}" ] || { echo "ERROR: could not detect default-route uplink interface" >&2; exit 1; }
