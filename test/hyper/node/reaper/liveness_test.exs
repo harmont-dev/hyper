@@ -1,5 +1,5 @@
 defmodule Hyper.Node.Reaper.LivenessTest do
-  # Guards the Img.Mutable.active_vm_ids/0 + Plan.orphans/3 contract: a live mutable
+  # Guards the Img.Mutable.active_vm_ids/0 + Plan.orphans/4 contract: a live mutable
   # layer protects its vm_id from reaping. The gather_live/0 union of this source into
   # the full live set is verified by manual live-node testing (Task 4), not CI.
   use ExUnit.Case, async: false
@@ -38,6 +38,14 @@ defmodule Hyper.Node.Reaper.LivenessTest do
 
     # The reaper would see hyper-rw-vm-live in `dmsetup ls` (rw candidate) and no
     # cgroup leaf, yet the live mutable owner must protect it from reaping.
-    assert Plan.orphans(live, [], ["vm-live"]) == MapSet.new([])
+    assert Plan.orphans(live, [], ["vm-live"], []) == MapSet.new([])
+  end
+
+  test "a vm with a live mutable layer is never an orphan, even with a leftover netns" do
+    register_live("vm-live-netns")
+
+    live = MapSet.new(Mutable.active_vm_ids())
+
+    assert Plan.orphans(live, [], [], ["vm-live-netns"]) == MapSet.new([])
   end
 end

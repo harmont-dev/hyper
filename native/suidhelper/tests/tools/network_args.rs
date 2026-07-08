@@ -46,6 +46,21 @@ fn teardown_deletes_netns() {
 }
 
 #[test]
+fn teardown_orphan_is_exactly_ip_netns_del_by_id_alone() {
+    // No uid, no veth cleanup: an orphan's teardown has only the vm_id to work
+    // from (see `teardown_orphan`'s module doc), and `ip netns del` alone is
+    // sufficient to reclaim the veth peer, TAP, and in-netns nftables state.
+    let cmds = args::teardown_orphan_commands("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assert_eq!(
+        cmds,
+        vec![cmd(
+            Which::Ip,
+            &["netns", "del", "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+        )]
+    );
+}
+
+#[test]
 fn host_init_masquerades_pool_out_uplink() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
     assert!(cmds.iter().any(

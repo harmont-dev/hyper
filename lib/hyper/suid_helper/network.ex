@@ -15,6 +15,10 @@ defmodule Hyper.SuidHelper.Network do
   def argv(op, vm_id, uid),
     do: ["network", Atom.to_string(op), "--vm-id", vm_id, "--uid", to_string(uid)]
 
+  @doc false
+  @spec argv(:teardown_orphan, Hyper.Vm.Id.t()) :: [String.t()]
+  def argv(:teardown_orphan, vm_id), do: ["network", "teardown-orphan", "--vm-id", vm_id]
+
   @doc "Create `vm_id`'s netns, veth pair, TAP, and NAT rules. Idempotent-safe on relaunch."
   @spec prepare(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Network.prepare", include: [:vm_id, :uid])
@@ -24,6 +28,16 @@ defmodule Hyper.SuidHelper.Network do
   @spec teardown(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Network.teardown", include: [:vm_id, :uid])
   def teardown(vm_id, uid), do: run(argv(:teardown, vm_id, uid))
+
+  @doc """
+  Remove `vm_id`'s netns by id alone, with no `uid` — for the `Reaper`'s
+  crashed-node backstop, where the owning node never persisted a uid to derive
+  the clone-pool slot from. Idempotent: a netns already gone (raced with a
+  normal `teardown/2`, or never fully created) is not an error.
+  """
+  @spec teardown_orphan(Hyper.Vm.Id.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Network.teardown_orphan", include: [:vm_id])
+  def teardown_orphan(vm_id), do: run(argv(:teardown_orphan, vm_id))
 
   @doc "Ensure the host-wide `hyper` nft table (masquerade + forward policy) exists. Idempotent."
   @spec host_init() :: :ok | {:error, err()}

@@ -11,4 +11,9 @@ defmodule Hyper.SuidHelper.NetworkTest do
     assert Network.argv(:teardown, "vabc", 900_100) ==
              ["network", "teardown", "--vm-id", "vabc", "--uid", "900100"]
   end
+
+  test "teardown_orphan/1 builds the network teardown-orphan argv, with no uid" do
+    assert Network.argv(:teardown_orphan, "vabc") ==
+             ["network", "teardown-orphan", "--vm-id", "vabc"]
+  end
 end

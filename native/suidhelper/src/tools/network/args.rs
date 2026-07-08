@@ -240,6 +240,17 @@ pub fn teardown_commands(plan: &Plan) -> Vec<Command> {
     ]
 }
 
+/// Tear down an *orphan* VM's netns by vm_id alone — no `uid`, so no [`Plan`]
+/// and no host-veth `link del` (that command needs the derived `hv<slot>`
+/// name, which needs the uid). Deleting the netns is sufficient on its own:
+/// it reclaims the ns-side veth peer, the TAP device, and any in-netns
+/// nftables state, and the kernel removes the host-side veth end along with
+/// its peer's netns. See `teardown_orphan`'s module doc for why the caller
+/// (`Hyper.Node.Reaper`) has no uid to give here.
+pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
+    vec![Command::ip(argv!["netns", "del", netns])]
+}
+
 /// One-time host setup: a `hyper` nftables table that masquerades the clone
 /// pool out `uplink`, and a forward-chain default-drop policy that only admits
 /// the pool's own traffic — explicitly dropping anything addressed to the

@@ -14,6 +14,7 @@ mod exec;
 pub mod host_init;
 pub mod prepare;
 pub mod teardown;
+pub mod teardown_orphan;
 
 use crate::config::Network;
 use clap::Subcommand;
@@ -23,6 +24,7 @@ use thiserror::Error as ThisError;
 pub use host_init::HostInitArgs;
 pub use prepare::PrepareArgs;
 pub use teardown::TeardownArgs;
+pub use teardown_orphan::TeardownOrphanArgs;
 
 /// `[network]` is absent from config, i.e. VM networking is disabled.
 #[derive(Debug, ThisError, PartialEq, Eq)]
@@ -54,6 +56,8 @@ pub enum NetworkOp {
     Prepare(PrepareArgs),
     /// Remove a VM's netns and any lingering host-side veth end.
     Teardown(TeardownArgs),
+    /// Idempotently remove an orphan VM's netns by vm_id alone (no uid).
+    TeardownOrphan(TeardownOrphanArgs),
     /// One-time host setup: the `hyper` nftables table and forward policy.
     HostInit(HostInitArgs),
 }
@@ -65,6 +69,7 @@ impl NetworkOp {
         match self {
             NetworkOp::Prepare(args) => prepare::run(args),
             NetworkOp::Teardown(args) => teardown::run(args),
+            NetworkOp::TeardownOrphan(args) => teardown_orphan::run(args),
             NetworkOp::HostInit(args) => host_init::run(args),
         }
     }
