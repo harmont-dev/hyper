@@ -1,5 +1,6 @@
 defmodule Unit.InformationTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
   use Unit.Operators
 
   alias Unit.Information
@@ -23,5 +24,15 @@ defmodule Unit.InformationTest do
 
   test "zero is the additive identity" do
     assert Information.zero() + Information.gib(1) == Information.gib(1)
+  end
+
+  test "sectors are 512 bytes, the kernel's block-device unit" do
+    assert Information.sectors(8) == Information.bytes(4096)
+  end
+
+  property "as_sectors/sectors round-trips" do
+    check all(n <- integer(-1_000_000..1_000_000)) do
+      assert Information.as_sectors(Information.sectors(n)) == n
+    end
   end
 end

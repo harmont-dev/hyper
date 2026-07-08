@@ -52,6 +52,11 @@ enum DmOp {
         #[arg(long)]
         message: ThinMessage,
     },
+    /// Suspend a dm device (flushes queued I/O; required before `create_snap`
+    /// of the device's thin id).
+    Suspend { name: DmName },
+    /// Resume a suspended dm device.
+    Resume { name: DmName },
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
@@ -65,6 +70,8 @@ pub enum DmsetupOut {
     Created { device: PathBuf },
     Removed,
     Messaged,
+    Suspended,
+    Resumed,
     Targets { output: String },
     Listed { output: String },
 }
@@ -112,6 +119,12 @@ impl IsTool for Dmsetup {
                     .arg("0")
                     .arg(message.to_string());
             }
+            DmOp::Suspend { name } => {
+                cmd.arg("suspend").arg(name.to_string());
+            }
+            DmOp::Resume { name } => {
+                cmd.arg("resume").arg(name.to_string());
+            }
             DmOp::Targets => {
                 cmd.arg("targets");
             }
@@ -137,6 +150,8 @@ impl IsTool for Dmsetup {
             },
             DmOp::Remove { .. } => DmsetupOut::Removed,
             DmOp::Message { .. } => DmsetupOut::Messaged,
+            DmOp::Suspend { .. } => DmsetupOut::Suspended,
+            DmOp::Resume { .. } => DmsetupOut::Resumed,
             DmOp::Targets => DmsetupOut::Targets {
                 output: String::from_utf8_lossy(&out.stdout).into_owned(),
             },

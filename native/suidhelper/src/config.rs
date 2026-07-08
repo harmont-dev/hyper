@@ -129,12 +129,13 @@ impl Default for Jails {
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
 ///
-/// The device tools (`dmsetup`, `losetup`, `blockdev`) carry built-in defaults;
-/// `firecracker` and `jailer` have none and must be configured before any VM can
-/// launch — their absence surfaces as [`BinError::Unconfigured`] at use time, not
-/// at load. Every path is validated as a root-owned, correctly-named [`SafeBin`]
-/// when accessed, never at parse time (the file is read unprivileged). A missing
-/// `[tools]` table, or any missing key within it, falls back to these defaults.
+/// The device tools (`dmsetup`, `losetup`, `blockdev`, `thin_dump`) carry
+/// built-in defaults; `firecracker` and `jailer` have none and must be
+/// configured before any VM can launch — their absence surfaces as
+/// [`BinError::Unconfigured`] at use time, not at load. Every path is
+/// validated as a root-owned, correctly-named [`SafeBin`] when accessed,
+/// never at parse time (the file is read unprivileged). A missing `[tools]`
+/// table, or any missing key within it, falls back to these defaults.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Tools {
@@ -143,6 +144,7 @@ pub struct Tools {
     blockdev: PathBuf,
     ip: PathBuf,
     nft: PathBuf,
+    thin_dump: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
 }
@@ -155,6 +157,7 @@ impl Default for Tools {
             blockdev: default_blockdev(),
             ip: default_ip(),
             nft: default_nft(),
+            thin_dump: default_thin_dump(),
             firecracker: None,
             jailer: None,
         }
@@ -186,6 +189,10 @@ fn default_ip() -> PathBuf {
 
 fn default_nft() -> PathBuf {
     PathBuf::from("/usr/sbin/nft")
+}
+
+fn default_thin_dump() -> PathBuf {
+    PathBuf::from("/usr/sbin/thin_dump")
 }
 
 fn default_parent_cgroup() -> String {
@@ -298,6 +305,12 @@ impl Config {
         self.network
             .as_ref()
             .filter(|network| network.uplink.is_some())
+    }
+
+    /// The validated `thin_dump` binary (thin-provisioning-tools) the helper
+    /// will run.
+    pub fn thin_dump(&self) -> Result<SafeBin<"thin_dump">, safe_bin::Error> {
+        SafeBin::from_path(&self.tools.thin_dump)
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.

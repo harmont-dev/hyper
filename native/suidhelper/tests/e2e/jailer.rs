@@ -8,14 +8,11 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-const HELPER: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
+mod support;
+use support::{is_root, run};
+
 const RECORDER_EXIT: i32 = 7;
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
 
 fn cat_bin() -> &'static str {
     ["/bin/cat", "/usr/bin/cat"]

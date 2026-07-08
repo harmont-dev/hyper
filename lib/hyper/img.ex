@@ -22,7 +22,7 @@ defmodule Hyper.Img do
   # `Ecto.Multi` is an opaque struct; building it through the pipe trips
   # dialyzer's opacity check (a known Ecto false positive), so silence it for the
   # one function that assembles a Multi.
-  @dialyzer {:no_opaque, record: 3}
+  @dialyzer {:no_opaque, record: 3, record_derived: 4}
 
   @doc """
   Ingest the image file at `path` into the cluster and return its
@@ -52,6 +52,130 @@ defmodule Hyper.Img do
       {:error, _} = err ->
         _ = File.rm(path)
         err
+    end
+  end
+
+  @doc """
+  The id of the image derived from `parent_img_id` by applying delta blob
+  `delta_blob_id`: a digest of the *pair*, so re-publishing the same fork is
+  idempotent while identical delta bytes over different parents still get
+  distinct image rows.
+  """
+  @spec derived_image_id(id(), String.t()) :: id()
+  def derived_image_id(parent_img_id, delta_blob_id) do
+    :sha256
+    |> :crypto.hash("#{parent_img_id}:#{delta_blob_id}")
+    |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  The `image_layers` rows of a derived image: the parent's blob chain in order
+  at positions `0..n-1`, the delta blob at position `n`.
+  """
+  @spec derived_layer_rows(id(), [String.t()], String.t()) :: [
+          %{image_id: id(), position: non_neg_integer(), blob_id: String.t()}
+        ]
+  def derived_layer_rows(image_id, parent_blob_ids, delta_blob_id) do
+    (parent_blob_ids ++ [delta_blob_id])
+    |> Enum.with_index()
+    |> Enum.map(fn {blob_id, position} ->
+      %{image_id: image_id, position: position, blob_id: blob_id}
+    end)
+  end
+
+  @doc """
+  Ingest the dm-snapshot COW file at `delta_path` as a new delta layer over
+  `parent_img_id`, returning the derived image's id. The file is consumed, like
+  `create/2`. Idempotent for identical bytes over the same parent.
+
+  `opts[:label]` sets the derived image's label (defaults to the file basename).
+  """
+  @spec create_derived(id(), Path.t(), keyword()) :: {:ok, id()} | {:error, term()}
+  @decorate with_span("Hyper.Img.create_derived", include: [:parent_img_id, :delta_path])
+  def create_derived(parent_img_id, delta_path, opts \\ []) do
+    label = Keyword.get(opts, :label, Path.basename(delta_path))
+
+    with {:ok, parent_blob_ids} <- parent_chain(parent_img_id),
+         {:ok, %File.Stat{size: size}} <- File.stat(delta_path),
+         {:ok, blob_id} <- content_id(delta_path),
+         {:ok, final, origin} <- publish(delta_path, blob_id),
+         img_id = derived_image_id(parent_img_id, blob_id),
+         :ok <-
+           record_derived_or_rollback(
+             {img_id, label},
+             {blob_id, size},
+             parent_blob_ids,
+             {final, origin}
+           ) do
+      {:ok, img_id}
+    else
+      {:error, _} = err ->
+        _ = File.rm(delta_path)
+        err
+    end
+  end
+
+  @spec parent_chain(id()) :: {:ok, [String.t()]} | {:error, {:unknown_parent_image, id()}}
+  defp parent_chain(parent_img_id) do
+    case Image.resolve_chain(parent_img_id) do
+      [] -> {:error, {:unknown_parent_image, parent_img_id}}
+      blobs -> {:ok, Enum.map(blobs, & &1.id)}
+    end
+  end
+
+  @spec record_derived_or_rollback(
+          {id(), String.t()},
+          {String.t(), non_neg_integer()},
+          [String.t()],
+          {Path.t(), :created | :reused}
+        ) :: :ok | {:error, term()}
+  defp record_derived_or_rollback({img_id, label}, {blob_id, size}, parents, {final, origin}) do
+    case record_derived(img_id, label, {blob_id, size}, parents) do
+      :ok ->
+        :ok
+
+      {:error, _} = err ->
+        _ = if origin == :created, do: File.rm(final), else: :ok
+        err
+    end
+  end
+
+  # One transaction: delta blob, derived image, and the full chain rows. All
+  # idempotent upserts, mirroring record/3.
+  @spec record_derived(id(), String.t(), {String.t(), non_neg_integer()}, [String.t()]) ::
+          :ok | {:error, term()}
+  defp record_derived(img_id, label, {blob_id, size}, parent_blob_ids) do
+    rows = derived_layer_rows(img_id, parent_blob_ids, blob_id)
+
+    multi =
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(
+        :blob,
+        Blob.changeset(%Blob{}, %{id: blob_id, kind: :delta, size: size}),
+        on_conflict: :nothing,
+        conflict_target: :id
+      )
+      |> Ecto.Multi.insert(
+        :image,
+        Image.changeset(%Image{}, %{id: img_id, label: label}),
+        on_conflict: :nothing,
+        conflict_target: :id
+      )
+
+    rows
+    |> Enum.reduce(multi, fn row, acc ->
+      Ecto.Multi.insert(
+        acc,
+        {:layer, row.position},
+        ImageLayer.changeset(%ImageLayer{}, row),
+        on_conflict: :nothing,
+        conflict_target: [:image_id, :position]
+      )
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, step, reason, _changes} -> {:error, {:record_failed, step, reason}}
     end
   end
 

@@ -57,6 +57,11 @@ fn thinmessage_accepts_whitelisted_and_normalizes() {
         ("create_thin 7", "create_thin 7"),
         ("create_thin   7", "create_thin 7"),
         ("delete 3", "delete 3"),
+        ("create_snap 4 2", "create_snap 4 2"),
+        ("create_snap   4   2", "create_snap 4 2"),
+        ("reserve_metadata_snap", "reserve_metadata_snap"),
+        ("  reserve_metadata_snap  ", "reserve_metadata_snap"),
+        ("release_metadata_snap", "release_metadata_snap"),
     ] {
         let m = s
             .parse::<ThinMessage>()
@@ -75,6 +80,15 @@ fn thinmessage_rejects_non_whitelisted() {
         "create_thin 1 2",
         "",
         "create_thin -1",
+        "create_snap",
+        "create_snap 1",
+        "create_snap 1 2 3",
+        "create_snap x 2",
+        "create_snap 1 y",
+        "create_snap -1 2",
+        "reserve_metadata_snap 1",
+        "release_metadata_snap 1 2",
+        "reserve_metadata",
     ] {
         assert!(
             bad.parse::<ThinMessage>().is_err(),

@@ -13,13 +13,10 @@
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
-const BIN: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
+mod support;
+use support::{is_root, run};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
 /// `work_dir`, 0644 so the OnlyRootWritable axis passes.
