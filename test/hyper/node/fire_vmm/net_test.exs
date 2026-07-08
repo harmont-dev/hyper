@@ -20,6 +20,11 @@ defmodule Hyper.Node.FireVMM.NetTest do
     assert Net.ip_cmdline() == "ip=172.30.0.2::172.30.0.1:255.255.255.252::eth0:off"
   end
 
+  test "resolver_cmdline formats the hyper.resolver= fragment for the given resolver" do
+    assert Net.resolver_cmdline("1.1.1.1") == "hyper.resolver=1.1.1.1"
+    assert Net.resolver_cmdline("10.0.0.53") == "hyper.resolver=10.0.0.53"
+  end
+
   test "interface targets tap0/eth0 with the derived MAC" do
     nic = Net.interface("vabcdef")
     assert nic.iface_id == "eth0"

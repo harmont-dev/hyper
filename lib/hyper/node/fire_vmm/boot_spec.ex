@@ -39,7 +39,10 @@ defmodule Hyper.Node.FireVMM.BootSpec do
         vm_id = Map.fetch!(source, :vm_id)
 
         {[Hyper.Node.FireVMM.Net.interface(vm_id)],
-         base_args <> " " <> Hyper.Node.FireVMM.Net.ip_cmdline()}
+         base_args <>
+           " " <>
+           Hyper.Node.FireVMM.Net.ip_cmdline() <>
+           " " <> Hyper.Node.FireVMM.Net.resolver_cmdline(Hyper.Cfg.Network.resolver())}
       else
         {[], base_args}
       end

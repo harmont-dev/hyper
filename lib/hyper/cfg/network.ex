@@ -9,6 +9,7 @@ defmodule Hyper.Cfg.Network do
   import Hyper.Cfg, only: [get_cfg: 1]
 
   @default_clone_pool "172.31.0.0/16"
+  @default_resolver "1.1.1.1"
 
   @doc "Whether VM egress networking is turned on (`[network] uplink` present)."
   @spec enabled?() :: boolean()
@@ -27,4 +28,13 @@ defmodule Hyper.Cfg.Network do
   @doc "IPv4 CIDR the per-VM clone /30s are carved from. `[network] clone_pool`."
   @spec clone_pool() :: String.t()
   def clone_pool, do: get_cfg(toml: "network.clone_pool", default: @default_clone_pool)
+
+  @doc """
+  DNS resolver IP handed to the guest via the `hyper.resolver=` kernel cmdline
+  param, since the kernel's `ip=` autoconfig sets the guest's address/route but
+  never DNS. The PID-1 guest agent reads this back out of `/proc/cmdline` and
+  writes it to `/etc/resolv.conf`. `[network] resolver`.
+  """
+  @spec resolver() :: String.t()
+  def resolver, do: get_cfg(toml: "network.resolver", default: @default_resolver)
 end

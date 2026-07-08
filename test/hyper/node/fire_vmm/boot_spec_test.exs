@@ -3,11 +3,12 @@ defmodule Hyper.Node.FireVMM.BootSpecTest do
 
   alias Hyper.Node.FireVMM.BootSpec
 
-  # The enabled path (NIC populated + `ip=` appended) needs a `[network]` config
-  # override, which the unit config harness doesn't provide; it's asserted in
-  # the e2e/integration suite instead. This module only pins the disabled path
-  # (the base test config has no `[network]` table), which must hold for every
-  # existing VM.
+  # The enabled path (NIC populated + `ip=`/`hyper.resolver=` appended) needs a
+  # `[network]` config override, which the unit config harness doesn't provide;
+  # it's asserted in the e2e/integration suite instead. The pure formatting of
+  # the resolver fragment is pinned in net_test.exs. This module only pins the
+  # disabled path (the base test config has no `[network]` table), which must
+  # hold for every existing VM.
 
   test "default cmdline boots our agent as init with no serial console" do
     source = %{kernel_image_path: "/vmlinux", root_drive_path: "/rootfs"}
@@ -18,10 +19,11 @@ defmodule Hyper.Node.FireVMM.BootSpecTest do
     refute cold.boot_source.boot_args =~ "console="
   end
 
-  test "no NIC and no ip= when networking disabled" do
+  test "no NIC and no ip=/hyper.resolver= when networking disabled" do
     source = %{vm_id: "vabc", kernel_image_path: "/vmlinux", root_drive_path: "/rootfs"}
     cold = BootSpec.resolve(source, :micro)
     assert cold.network_interfaces == []
     refute cold.boot_source.boot_args =~ "ip="
+    refute cold.boot_source.boot_args =~ "hyper.resolver="
   end
 end

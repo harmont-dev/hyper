@@ -20,6 +20,15 @@ defmodule Hyper.Node.FireVMM.Net do
   def ip_cmdline, do: "ip=#{@guest_ip}::#{@tap_ip}:#{@netmask}::#{@iface}:off"
 
   @doc """
+  Kernel `hyper.resolver=` cmdline fragment carrying the DNS resolver IP the
+  PID-1 guest agent writes to `/etc/resolv.conf` — kernel `ip=` autoconfig sets
+  the guest's address/route but never DNS, so this closes that gap. Pure:
+  callers (`BootSpec.resolve/2`) read the configured resolver themselves.
+  """
+  @spec resolver_cmdline(String.t()) :: String.t()
+  def resolver_cmdline(resolver), do: "hyper.resolver=#{resolver}"
+
+  @doc """
   Stable locally-administered unicast MAC for `vm_id`. Derived from a SHA-256 of
   the id so it is deterministic on any node (aids debugging); duplicate MACs are
   harmless since no two guests ever share an L2 segment (each is alone in its netns).
