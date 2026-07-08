@@ -265,6 +265,24 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
             "add", "chain", "ip", "hyper", "forward", "{", "type", "filter", "hook", "forward",
             "priority", "0", ";", "policy", "drop", ";", "}"
         ]),
+        // Must precede the broad egress accept below: `accept` is a
+        // terminating verdict in nftables, so a rule reachable before this
+        // one would let a guest packet to the metadata IP exit via the
+        // uplink before this drop is ever evaluated.
+        Command::nft(argv![
+            "add",
+            "rule",
+            "ip",
+            "hyper",
+            "forward",
+            "ip",
+            "saddr",
+            clone_pool,
+            "ip",
+            "daddr",
+            "169.254.169.254",
+            "drop"
+        ]),
         Command::nft(argv![
             "add", "rule", "ip", "hyper", "forward", "ip", "saddr", clone_pool, "oifname", uplink,
             "accept"
@@ -282,20 +300,6 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
             "state",
             "established,related",
             "accept"
-        ]),
-        Command::nft(argv![
-            "add",
-            "rule",
-            "ip",
-            "hyper",
-            "forward",
-            "ip",
-            "saddr",
-            clone_pool,
-            "ip",
-            "daddr",
-            "169.254.169.254",
-            "drop"
         ]),
     ]
 }
