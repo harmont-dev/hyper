@@ -34,53 +34,33 @@ defmodule Hyper.E2e.NetworkTest do
     assert {:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
 
-    # Hyper.exec runs argv directly with no PATH (see its @doc): a bare command
-    # name returns exit 127. Route through an absolute `/bin/sh -c` so busybox's
-    # own default PATH resolves the `ip`/`wget` applets inside the guest.
-    assert {:ok, %{stdout: ip_out, exit_code: 0}} =
-             await_exec(vm, ["/bin/sh", "-c", "ip addr show eth0"])
+    # One exec gambles on guest-agent readiness once (not per-check), with a
+    # generous deadline for a cold boot on a shared runner. Hyper.exec runs argv
+    # directly with no PATH (see its @doc) — a bare name returns exit 127 — so
+    # route through an absolute `/bin/sh -c` and let busybox's own default PATH
+    # resolve the `ip`/`wget`/`nslookup` applets inside the guest.
+    #
+    # `wget -S` writes response headers to stderr; `2>&1` merges them into stdout
+    # so we can assert the `... 200 ...` status line. Alpine ships busybox wget
+    # (not curl); `-O /dev/null` discards the body but still drives the full
+    # netns → SNAT → veth → MASQUERADE → uplink path and DNS resolution.
+    script =
+      "echo '--ip--'; ip addr show eth0 2>&1; " <>
+        "echo '--resolv--'; cat /etc/resolv.conf 2>&1; " <>
+        "echo '--route--'; ip route 2>&1; " <>
+        "echo '--egress-by-ip--'; wget -T 10 -S -O /dev/null http://1.1.1.1/ 2>&1 | head -4; " <>
+        "echo '--dns--'; nslookup example.com 1.1.1.1 2>&1 | head -8; " <>
+        "echo '--http--'; wget -S -O /dev/null http://example.com 2>&1"
 
-    assert ip_out =~ "172.30.0.2"
-
-    # TEMP DIAGNOSTIC: capture the guest's runtime network state so a failing
-    # egress run tells us which layer is broken (resolv.conf write? raw L3
-    # egress? DNS specifically?). Logged via Logger (ExUnit drops the custom
-    # message on a pattern-match assert). Removed once egress is green.
-    diag =
-      case await_exec(
-             vm,
-             [
-               "/bin/sh",
-               "-c",
-               "echo '--resolv--'; cat /etc/resolv.conf 2>&1; " <>
-                 "echo '--route--'; ip route 2>&1; " <>
-                 "echo '--egress-by-ip--'; wget -T 10 -S -O /dev/null http://1.1.1.1/ 2>&1 | head -4; " <>
-                 "echo '--dns--'; nslookup example.com 1.1.1.1 2>&1 | head -8"
-             ],
-             :timer.seconds(90)
-           ) do
-        {:ok, r} -> r.stdout
-        other -> inspect(other)
-      end
+    assert {:ok, %{stdout: out, exit_code: _}} =
+             await_exec(vm, ["/bin/sh", "-c", script], :timer.seconds(120))
 
     require Logger
-    Logger.warning("=== GUEST NET DIAG ===\n#{diag}=== END GUEST NET DIAG ===")
+    Logger.warning("=== GUEST NET DIAG ===\n#{out}\n=== END GUEST NET DIAG ===")
 
-    # Prove real egress AND an explicit HTTP 200 — not just a non-zero-free
-    # exit. `wget -S` writes the server's response headers to stderr; we merge
-    # them into stdout (`2>&1`) and assert the status line is `... 200 ...`.
-    # (Alpine ships busybox wget, not curl — installing curl would need egress
-    # to the apk mirror first, adding a flaky dependency to prove the same
-    # thing.) `-O /dev/null` discards the body; the fetch still exercises the
-    # full netns → SNAT → veth → MASQUERADE → uplink path and DNS resolution.
-    assert {:ok, %{stdout: http_out, exit_code: 0}} =
-             await_exec(
-               vm,
-               ["/bin/sh", "-c", "wget -S -O /dev/null http://example.com 2>&1"],
-               :timer.seconds(90)
-             )
+    assert out =~ "172.30.0.2", "guest eth0 lacks the inner-world address:\n#{out}"
 
-    assert http_out =~ ~r"HTTP/[\d.]+ 200\b",
-           "expected an HTTP 200 status line from the guest's egress fetch, got:\n#{http_out}\n\nguest net diagnostics:\n#{diag}"
+    assert out =~ ~r"HTTP/[\d.]+ 200\b",
+           "expected an HTTP 200 status line from the guest's egress fetch:\n#{out}"
   end
 end
