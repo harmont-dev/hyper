@@ -101,6 +101,8 @@ pub struct Config {
     tools: Tools,
     #[serde(default)]
     jails: Jails,
+    #[serde(default)]
+    network: Option<Network>,
 }
 
 /// The `[jails]` table: how the helper places and confines each VM jail.
@@ -139,6 +141,8 @@ pub struct Tools {
     dmsetup: PathBuf,
     losetup: PathBuf,
     blockdev: PathBuf,
+    ip: PathBuf,
+    nft: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
 }
@@ -149,6 +153,8 @@ impl Default for Tools {
             dmsetup: default_dmsetup(),
             losetup: default_losetup(),
             blockdev: default_blockdev(),
+            ip: default_ip(),
+            nft: default_nft(),
             firecracker: None,
             jailer: None,
         }
@@ -174,6 +180,14 @@ fn default_blockdev() -> PathBuf {
     PathBuf::from("/usr/sbin/blockdev")
 }
 
+fn default_ip() -> PathBuf {
+    PathBuf::from("/usr/sbin/ip")
+}
+
+fn default_nft() -> PathBuf {
+    PathBuf::from("/usr/sbin/nft")
+}
+
 fn default_parent_cgroup() -> String {
     // Must match Elixir node's `@parent_cgroup`; operators need to keep them in sync.
     "hyper".into()
@@ -185,8 +199,25 @@ impl Default for Config {
             work_dir: default_work_dir(),
             tools: Tools::default(),
             jails: Jails::default(),
+            network: None,
         }
     }
+}
+
+/// The `[network]` table: VM egress networking. Absent ⇒ networking disabled.
+/// `uplink` is the physical interface guest traffic is masqueraded out of;
+/// `clone_pool` is the IPv4 CIDR per-VM /30 clone addresses are carved from
+/// (default `172.31.0.0/16`). Both are read identically by the Elixir node
+/// (`Hyper.Cfg.Network`) — keep the defaults in sync.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Network {
+    pub uplink: String,
+    #[serde(default = "default_clone_pool")]
+    pub clone_pool: String,
+}
+
+fn default_clone_pool() -> String {
+    "172.31.0.0/16".into()
 }
 
 impl Config {
@@ -230,6 +261,21 @@ impl Config {
     /// The validated `blockdev` binary the helper will run.
     pub fn blockdev(&self) -> Result<SafeBin<"blockdev">, safe_bin::Error> {
         SafeBin::from_path(&self.tools.blockdev)
+    }
+
+    /// The validated `ip` (iproute2) binary the network tool runs.
+    pub fn ip(&self) -> Result<SafeBin<"ip">, safe_bin::Error> {
+        SafeBin::from_path(&self.tools.ip)
+    }
+
+    /// The validated `nft` (nftables) binary the network tool runs.
+    pub fn nft(&self) -> Result<SafeBin<"nft">, safe_bin::Error> {
+        SafeBin::from_path(&self.tools.nft)
+    }
+
+    /// The `[network]` table, or `None` when VM networking is disabled.
+    pub fn network(&self) -> Option<&Network> {
+        self.network.as_ref()
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.

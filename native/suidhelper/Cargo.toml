@@ -92,6 +92,10 @@ path = "tests/e2e/chroot_jail.rs"
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
+[[test]]
+name = "config_network"
+path = "tests/config_network.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
