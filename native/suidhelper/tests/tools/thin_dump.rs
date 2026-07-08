@@ -108,23 +108,21 @@ proptest! {
     }
 
     #[test]
-    fn truncated_target_device_is_an_error(
+    fn short_mappings_against_the_claimed_count_are_an_error(
         block_sectors in 1u64..4096,
-        target_maps in proptest::collection::vec(mapping(), 1..64),
+        target_maps in proptest::collection::vec(mapping(), 0..64),
+        inflate in 1u64..64,
     ) {
-        let xml = render(block_sectors, &[(3, target_maps)]);
-        // Cut inside the target device: drop the final mapping line together
-        // with </device> and </superblock>.
-        let cut: String = xml
-            .lines()
-            .rev()
-            .skip(3)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .map(|l| format!("{l}\n"))
-            .collect();
-        let is_truncated = matches!(parse_mappings(&cut, 3), Err(Error::Truncated { .. }));
+        // Well-formed XML whose device CLAIMS more mapped blocks than its
+        // mapping children carry — the truncation cross-check must refuse.
+        let mut xml = render(block_sectors, &[(3, target_maps.clone())]);
+        let claimed: u64 =
+            expected_ranges(&target_maps).iter().map(|&(_, len)| len).sum::<u64>() + inflate;
+        xml = xml.replace(
+            &format!("mapped_blocks=\"{}\"", claimed - inflate),
+            &format!("mapped_blocks=\"{claimed}\""),
+        );
+        let is_truncated = matches!(parse_mappings(&xml, 3), Err(Error::Truncated { .. }));
         prop_assert!(is_truncated);
     }
 }
@@ -178,4 +176,11 @@ fn malformed_xml_is_an_error_not_a_guess() {
         3
     )
     .is_err());
+}
+
+#[test]
+fn a_mid_document_cut_is_an_error() {
+    let xml = render(128, &[(3, vec![M::Range { begin: 0, len: 8 }])]);
+    let cut: String = xml.lines().take(3).map(|l| format!("{l}\n")).collect();
+    assert!(parse_mappings(&cut, 3).is_err());
 }
