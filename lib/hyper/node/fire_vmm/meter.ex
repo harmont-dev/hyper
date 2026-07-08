@@ -197,7 +197,14 @@ defmodule Hyper.Node.FireVMM.Meter do
     end
   end
 
+  # Baseline-retry ticks (no successful sample yet) arrive every ~100ms; if
+  # they counted toward the flush cadence, the nominal 60s window would
+  # degenerate to ~6s of wall time while the cgroup leaf is still appearing.
+  # Nothing can have accrued without a baseline, so skipping the flush loses
+  # no usage.
   @spec tick_flush(%__MODULE__{}) :: %__MODULE__{}
+  defp tick_flush(%__MODULE__{samples_ok: 0} = state), do: state
+
   defp tick_flush(%__MODULE__{ticks: ticks} = state) do
     if ticks + 1 >= flush_every() do
       %{flush(state) | ticks: 0}
@@ -233,9 +240,15 @@ defmodule Hyper.Node.FireVMM.Meter do
 
   # An idle VM legitimately accrues nothing between flushes, but a meter that
   # drops a window having never recorded one means the VM has produced no
-  # usage row at all — that is operator-visible, not routine.
+  # usage row at all — that is operator-visible, not routine. Warn only on
+  # the FIRST such drop: the fingerprint's value is in the first occurrence,
+  # and a long-lived never-active VM (or a wedged jailer) would otherwise
+  # repeat the warning every window for its whole life.
   @spec log_dropped_window(%__MODULE__{}, DateTime.t()) :: :ok
-  defp log_dropped_window(%__MODULE__{windows_recorded: 0} = state, window_end) do
+  defp log_dropped_window(
+         %__MODULE__{windows_recorded: 0, windows_dropped: 0} = state,
+         window_end
+       ) do
     Logger.warning(
       "vm #{state.opts.vm_id}: dropping empty usage window with no usage " <>
         "ever recorded (#{dropped_window_detail(state, window_end)})"

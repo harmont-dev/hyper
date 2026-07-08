@@ -146,6 +146,15 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     assert log =~ "vm vmeterwarn: dropping empty usage window with no usage ever recorded"
     assert log =~ "1 ok/0 failed cgroup samples"
     assert log =~ "0 recorded/0 dropped windows"
+
+    # Only the FIRST never-recorded drop warns: a long-lived never-active VM
+    # would otherwise repeat the warning every window for its whole life.
+    warnings = capture_log([level: :warning], fn -> :ok = Meter.flush_now(meter) end)
+    refute warnings =~ "vm vmeterwarn"
+
+    debug = capture_log(fn -> :ok = Meter.flush_now(meter) end)
+    assert debug =~ "vm vmeterwarn: dropping empty usage window"
+    assert debug =~ "0 recorded/2 dropped windows"
   end
 
   test "the empty-window warning carries the failed-sample count and last error",

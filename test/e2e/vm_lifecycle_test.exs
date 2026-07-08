@@ -63,8 +63,10 @@ defmodule Hyper.E2e.VmLifecycleTest do
     # first and flushes a final usage window while the cgroup still exists.
     # Because the meter baselines its accumulator at init (meter start), the
     # CPU the guest burned booting and answering exec is billed even when the
-    # VM's whole life fits inside one sample interval — a positive usage row
-    # at stop is a guarantee of the meter contract, not a timing bet.
+    # VM's whole life fits inside one sample interval — for a VM whose cgroup
+    # is readable at meter start (this one booted and answered exec, so it
+    # was), a positive usage row at stop is a meter guarantee, not a timing
+    # bet.
     # stop_image_vm/1 has returned, so the row should already be committed;
     # the poll only absorbs distributed-registry teardown stragglers.
     assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
