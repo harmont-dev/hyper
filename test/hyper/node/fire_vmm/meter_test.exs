@@ -91,8 +91,48 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     :ok = Meter.sample_now(meter)
     :ok = Meter.flush_now(meter)
 
+    # The leaf did not exist at meter birth, so it was baselined at zero: the
+    # first successful read (2_000) is real boot burn, not a discarded
+    # baseline, and accrues alongside the later 500 delta.
     assert_receive {:usage, %{cpu_time: cpu}}
-    assert Time.as_us(cpu) == 500
+    assert Time.as_us(cpu) == 2_500
+  end
+
+  test "a VM stopped before its first tick still records its boot burn", %{tmp_dir: dir} do
+    # No cpu.stat yet at meter birth: the leaf is created only once the
+    # jailer finishes setting up the chroot, after the Meter child starts.
+    meter = start_meter(dir)
+    write_cpu_stat(dir, 200_000)
+
+    # stop_image_vm arrives before the first 1s tick ever fires: terminate/2's
+    # sample() |> flush() is the only observation this meter ever makes.
+    :ok = stop_supervised(Meter)
+    refute Process.alive?(meter)
+
+    assert_receive {:usage, %{cpu_time: cpu}},
+                   500,
+                   "no usage row: the terminate-time baseline was zero-skipped"
+
+    assert Time.as_us(cpu) == 200_000
+  end
+
+  test "a meter (re)started over a live counter never re-bills", %{tmp_dir: dir} do
+    # The leaf already holds usage a previous meter incarnation already
+    # flushed (Core restart, or this Meter itself restarting): the new meter
+    # must baseline on it, not treat it as fresh consumption.
+    write_cpu_stat(dir, 500_000)
+    meter = start_meter(dir)
+    # Establish the baseline through an ordinary tick as well, so this test
+    # holds under both the old and the new baselining: it pins the
+    # never-re-bill guarantee rather than the birth-baseline fix itself.
+    :ok = Meter.sample_now(meter)
+
+    write_cpu_stat(dir, 500_400)
+    :ok = stop_supervised(Meter)
+    refute Process.alive?(meter)
+
+    assert_receive {:usage, %{cpu_time: cpu}}
+    assert Time.as_us(cpu) == 400
   end
 
   test "a failed flush keeps the accrued time and the next flush retries",
@@ -118,6 +158,8 @@ defmodule Hyper.Node.FireVMM.MeterTest do
 
     meter = start_supervised!({Meter, opts})
 
+    # No cpu.stat yet at meter birth: baselined at zero, so the first read
+    # (100) is real boot burn, not a discarded baseline.
     write_cpu_stat(dir, 100)
     :ok = Meter.sample_now(meter)
     write_cpu_stat(dir, 700)
@@ -128,7 +170,7 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     Agent.update(agent, fn _state -> :ok end)
     :ok = Meter.flush_now(meter)
     assert_receive {:usage, %{cpu_time: cpu}}
-    assert Time.as_us(cpu) == 600
+    assert Time.as_us(cpu) == 700
   end
 
   test "dropping an empty window before any usage was recorded warns with the sample counters",
@@ -161,14 +203,13 @@ defmodule Hyper.Node.FireVMM.MeterTest do
        %{tmp_dir: dir} do
     meter = start_meter(dir, "vmetererr")
 
-    # No cpu.stat at all: every read fails (init's baseline attempt included),
-    # nothing ever accrues. The baseline retry keeps sampling concurrently, so
-    # assert the counter's shape rather than an exact count.
+    # No cpu.stat at all: every read fails — init's birth read and the forced
+    # sample — so nothing ever accrues and both failures are counted.
     :ok = Meter.sample_now(meter)
     log = capture_log(fn -> :ok = Meter.flush_now(meter) end)
 
     assert log =~ "vm vmetererr: dropping empty usage window with no usage ever recorded"
-    assert log =~ ~r"0 ok/\d+ failed cgroup samples"
+    assert log =~ "0 ok/2 failed cgroup samples"
     assert log =~ "last sample error: :enoent"
   end
 
@@ -205,41 +246,6 @@ defmodule Hyper.Node.FireVMM.MeterTest do
 
     assert_receive {:usage, %{cpu_time: cpu}}
     assert Time.as_us(cpu) == 42_210
-  end
-
-  test "a leaf that appears after meter start is baselined well within one sample interval",
-       %{tmp_dir: dir} do
-    meter = start_meter(dir)
-
-    # The jailer creates the cgroup leaf asynchronously after the meter
-    # starts. The baseline retry must observe it much faster than the 1s
-    # sample interval — the bound fails if the meter waits a full interval.
-    write_cpu_stat(dir, 2_000)
-    assert poll_until(fn -> :sys.get_state(meter).samples_ok >= 1 end, 900)
-
-    write_cpu_stat(dir, 2_750)
-    :ok = stop_supervised(Meter)
-
-    assert_receive {:usage, %{cpu_time: cpu}}
-    assert Time.as_us(cpu) == 750
-  end
-
-  defp poll_until(fun, timeout_ms) do
-    poll_until_deadline(fun, System.monotonic_time(:millisecond) + timeout_ms)
-  end
-
-  defp poll_until_deadline(fun, deadline) do
-    cond do
-      fun.() ->
-        true
-
-      System.monotonic_time(:millisecond) > deadline ->
-        false
-
-      true ->
-        Process.sleep(10)
-        poll_until_deadline(fun, deadline)
-    end
   end
 
   test "terminate takes a final sample and flushes the tail", %{tmp_dir: dir} do

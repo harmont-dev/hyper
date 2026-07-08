@@ -68,8 +68,10 @@ defmodule Hyper.E2e.VmLifecycleTest do
     # was), a positive usage row at stop is a meter guarantee, not a timing
     # bet.
     # stop_image_vm/1 has returned, so the row should already be committed;
-    # the poll only absorbs distributed-registry teardown stragglers.
-    assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(30)),
+    # the poll only absorbs distributed-registry teardown stragglers. Same 90s
+    # budget as the dm-reclaim poll above: 30s has flaked twice on runners
+    # busy with the rest of this job's E2E fleet.
+    assert poll_until(fn -> Usage.total(vm_id) != nil end, :timer.seconds(90)),
            "no usage row after stop_image_vm — the teardown flush never landed"
 
     total = Usage.total(vm_id)

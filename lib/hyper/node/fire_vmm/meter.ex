@@ -13,8 +13,10 @@ defmodule Hyper.Node.FireVMM.Meter do
       a cgroup recreated by a Core restart re-baselines instead of going
       negative;
     * the accumulator is baselined at meter **start**, not at the first
-      periodic tick: `init/1` samples immediately (retrying fast until the
-      jailer has created the cgroup leaf), so a VM that lives and dies inside
+      periodic tick: a leaf that already exists is baselined on its current
+      reading (a restarted meter never re-bills usage a previous incarnation
+      flushed), and a leaf the jailer has not yet created is baselined at
+      zero (its counter is born at zero), so a VM that lives and dies inside
       one sample interval still has its whole life covered by the final
       reading in `terminate/2`;
     * a failed flush keeps the accrued time and retries with the window
@@ -48,11 +50,6 @@ defmodule Hyper.Node.FireVMM.Meter do
 
   @sample_interval Time.s(1)
   @flush_interval Time.s(60)
-  # Cadence while the accumulator has no baseline (no successful read yet):
-  # the jailer creates the cgroup leaf asynchronously after the meter starts,
-  # and nothing can be billed until the first read lands, so retry well within
-  # one sample interval instead of losing up to a second of the VM's life.
-  @baseline_retry_interval Time.ms(100)
 
   defmodule Opts do
     @moduledoc "Meter wiring: the VM, its cgroup leaf, and the usage sink."
@@ -130,22 +127,15 @@ defmodule Hyper.Node.FireVMM.Meter do
 
     case register(opts) do
       :ok ->
-        # Baseline the accumulator now, not at the first periodic tick: a VM
-        # that lives and dies inside one sample interval would otherwise reach
-        # terminate/2 with a never-observed accumulator, making the final
-        # reading a pure baseline that accrues nothing and silently dropping
-        # the VM's entire life. The first observed reading is still never
-        # billed, so this only converts CPU the guest actually burned after
-        # meter start from dropped to recorded — it can never over-count.
         state =
-          sample(%__MODULE__{
+          initial_state(%__MODULE__{
             opts: opts,
             acc: Accumulator.new(Time.zero()),
             window_start: DateTime.utc_now(),
             ticks: 0
           })
 
-        _ = schedule_tick(state)
+        _ = schedule_tick()
         {:ok, state}
 
       {:error, reason} ->
@@ -158,7 +148,7 @@ defmodule Hyper.Node.FireVMM.Meter do
   @impl true
   def handle_info(:tick, state) do
     state = state |> sample() |> tick_flush()
-    _ = schedule_tick(state)
+    _ = schedule_tick()
     {:noreply, state}
   end
 
@@ -182,6 +172,31 @@ defmodule Hyper.Node.FireVMM.Meter do
   defp register(%Opts{register?: false}), do: :ok
   defp register(%Opts{vm_id: vm_id}), do: Routing.register_self({vm_id, :meter})
 
+  # Baseline the counter at the meter's birth, not at the first tick. A leaf
+  # that already exists may hold usage a previous meter incarnation flushed —
+  # baseline on its current reading, so a restarted meter never re-bills. A
+  # leaf that does not exist yet can only be created after us, so its counter
+  # is born at zero: baseline zero, and the first successful read accrues the
+  # boot burn — a VM stopped before its first tick still records a real window.
+  # The birth read participates in the observability counters like any sample.
+  @spec initial_state(%__MODULE__{}) :: %__MODULE__{}
+  defp initial_state(%__MODULE__{opts: opts} = state) do
+    case CpuStat.read(opts.cgroup_dir) do
+      {:ok, %CpuStat{usage: usage}} ->
+        %{state | acc: Accumulator.observe(state.acc, usage), samples_ok: 1}
+
+      {:error, reason} ->
+        Logger.debug("vm #{opts.vm_id}: cpu.stat sample failed: #{inspect(reason)}")
+
+        %{
+          state
+          | acc: Accumulator.observe(state.acc, Time.zero()),
+            samples_failed: 1,
+            last_sample_error: reason
+        }
+    end
+  end
+
   @spec sample(%__MODULE__{}) :: %__MODULE__{}
   defp sample(%__MODULE__{opts: opts} = state) do
     case CpuStat.read(opts.cgroup_dir) do
@@ -197,14 +212,7 @@ defmodule Hyper.Node.FireVMM.Meter do
     end
   end
 
-  # Baseline-retry ticks (no successful sample yet) arrive every ~100ms; if
-  # they counted toward the flush cadence, the nominal 60s window would
-  # degenerate to ~6s of wall time while the cgroup leaf is still appearing.
-  # Nothing can have accrued without a baseline, so skipping the flush loses
-  # no usage.
   @spec tick_flush(%__MODULE__{}) :: %__MODULE__{}
-  defp tick_flush(%__MODULE__{samples_ok: 0} = state), do: state
-
   defp tick_flush(%__MODULE__{ticks: ticks} = state) do
     if ticks + 1 >= flush_every() do
       %{flush(state) | ticks: 0}
@@ -297,12 +305,8 @@ defmodule Hyper.Node.FireVMM.Meter do
     end
   end
 
-  @spec schedule_tick(%__MODULE__{}) :: reference()
-  defp schedule_tick(%__MODULE__{samples_ok: 0}) do
-    Process.send_after(self(), :tick, Time.as_ms(@baseline_retry_interval))
-  end
-
-  defp schedule_tick(%__MODULE__{}) do
+  @spec schedule_tick() :: reference()
+  defp schedule_tick do
     Process.send_after(self(), :tick, Time.as_ms(@sample_interval))
   end
 

@@ -84,15 +84,69 @@ defmodule Hyper.Node do
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
-         {:ok, mutable} <- start_mutable_or_release(spec.img_id, vm_id, uid),
-         kernel = Vmlinux.path(spec.arch),
-         opts = build_opts(vm_id, spec, uid, mutable, kernel),
-         {:ok, pid} <- start_vm_or_release(opts, uid, mutable) do
-      # Bind the uid and the mutable layer to the VM supervisor's lifetime.
-      :ok = Users.bind(uid, pid)
-      :ok = Img.Mutable.acquire(mutable, pid)
-      :ok = Img.Mutable.release(mutable)
-      {:ok, pid}
+         {:ok, mutable} <-
+           acquire_or_release(uid, fn -> Img.create_mutable(spec.img_id, vm_id) end) do
+      boot_with_mutable(vm_id, spec, uid, mutable)
+    end
+  end
+
+  @doc """
+  Boot a fork of the running `parent` VM (described by its start `Opts`) on this
+  node: same image lineage, rootfs snapshotted COW-style from the parent's
+  mutable layer.
+  """
+  @spec start_forked_vm(Hyper.Vm.Id.t(), FireVMM.Opts.t()) :: {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.start_forked_vm", include: [:child_vm_id])
+  def start_forked_vm(child_vm_id, %FireVMM.Opts{} = parent) do
+    spec = %Hyper.Vm.Spec{
+      img_id: parent.img_id,
+      type: parent.type,
+      arch: parent.arch,
+      boot_args: parent.boot_args
+    }
+
+    with {:ok, uid} <- Users.claim(),
+         {:ok, mutable} <-
+           acquire_or_release(uid, fn ->
+             Img.create_fork(parent.img_id, parent.vm_id, child_vm_id)
+           end) do
+      boot_with_mutable(child_vm_id, spec, uid, mutable)
+    end
+  end
+
+  # The shared boot tail: kernel + opts + VM supervisor, binding uid and mutable
+  # to the supervisor's lifetime (previously inline in start_image_vm/2).
+  @spec boot_with_mutable(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid()) ::
+          {:ok, pid()} | {:error, term()}
+  defp boot_with_mutable(vm_id, spec, uid, mutable) do
+    kernel = Vmlinux.path(spec.arch)
+    opts = build_opts(vm_id, spec, uid, mutable, kernel)
+
+    case start_vm_or_release(opts, uid, mutable) do
+      {:ok, pid} ->
+        :ok = Users.bind(uid, pid)
+        :ok = Img.Mutable.acquire(mutable, pid)
+        :ok = Img.Mutable.release(mutable)
+        {:ok, pid}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Start a mutable layer (plain or fork) holding it against idle-reap during
+  # boot; on failure free the uid (generalizes start_mutable_or_release/3).
+  @spec acquire_or_release(Users.id(), (-> {:ok, pid()} | {:error, term()})) ::
+          {:ok, pid()} | {:error, term()}
+  defp acquire_or_release(uid, start_fun) do
+    case start_fun.() do
+      {:ok, mutable} ->
+        :ok = Img.Mutable.acquire(mutable)
+        {:ok, mutable}
+
+      {:error, reason} ->
+        Users.release(uid)
+        {:error, reason}
     end
   end
 
@@ -118,6 +172,71 @@ defmodule Hyper.Node do
   end
 
   @doc """
+  Fork the running VM `parent_vm_id` **onto this node**: budget-admitted like any
+  placement (`try_run/3`), erroring with the node's admission verdict
+  (`:mem_exhausted`, `:cpu_saturated`, ...) instead of falling back elsewhere.
+  The guest is asked to `sync` first (best-effort); the snapshot is otherwise
+  crash-consistent, like a power cut.
+  """
+  @spec fork_vm_local(Hyper.Vm.Id.t()) :: {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.fork_vm_local", include: [:parent_vm_id])
+  def fork_vm_local(parent_vm_id) do
+    with {:ok, parent} <- describe_vm(parent_vm_id) do
+      _ = quiesce(parent_vm_id)
+      child_vm_id = Hyper.Vm.Id.generate()
+      spec = Hyper.Vm.Instance.spec(parent.type)
+
+      try_run(spec, fn -> start_forked_vm(child_vm_id, parent) end, &stop_image_vm/1)
+    end
+  end
+
+  @doc false
+  # The start Opts of a VM running on this node; :not_found if it is gone
+  # (describe/1 exits when the routing entry is dead).
+  @spec describe_vm(Hyper.Vm.Id.t()) :: {:ok, FireVMM.Opts.t()} | {:error, :not_found}
+  def describe_vm(vm_id) do
+    {:ok, FireVMM.State.describe(vm_id)}
+  catch
+    :exit, _ -> {:error, :not_found}
+  end
+
+  # Best-effort guest page-cache flush before snapshotting; the fork is
+  # crash-consistent regardless, so any failure (agent not up yet, timeout)
+  # is deliberately ignored.
+  @spec quiesce(Hyper.Vm.Id.t()) :: :ok
+  defp quiesce(vm_id) do
+    _ = exec(vm_id, ["/bin/sync"], timeout: 2_000)
+    :ok
+  end
+
+  @doc """
+  Publish the running VM `vm_id`'s disk state as a new derived image and return
+  what a remote node needs to boot a fork of it: the new `img_id` plus the
+  parent's instance `type`, `arch`, and `boot_args`. The slow-fork half of
+  `Hyper.Vm.fork/1`; the parent keeps running throughout.
+  """
+  @spec publish_fork_image(Hyper.Vm.Id.t()) ::
+          {:ok,
+           %{
+             img_id: Hyper.Img.id(),
+             type: Hyper.Vm.Instance.t(),
+             arch: Hyper.Vm.Instance.arch(),
+             boot_args: String.t() | nil
+           }}
+          | {:error, term()}
+  @decorate with_span("Hyper.Node.publish_fork_image", include: [:vm_id])
+  def publish_fork_image(vm_id) do
+    with {:ok, parent} <- describe_vm(vm_id) do
+      _ = quiesce(vm_id)
+
+      with {:ok, img_id} <- Img.Publish.fork_image(vm_id, parent.img_id) do
+        {:ok,
+         %{img_id: img_id, type: parent.type, arch: parent.arch, boot_args: parent.boot_args}}
+      end
+    end
+  end
+
+  @doc """
   CPU time accrued by `vm_id`'s meter **on this node** but not yet flushed to
   the usage table. The node-local half of `Hyper.usage/1`, which resolves the
   owning node and `:erpc`-calls this function there.
@@ -135,6 +254,7 @@ defmodule Hyper.Node do
       gid: uid,
       type: spec.type,
       arch: spec.arch,
+      img_id: spec.img_id,
       mutable: mutable,
       kernel: kernel,
       boot_args: spec.boot_args
@@ -220,20 +340,6 @@ defmodule Hyper.Node do
       :ok
     else
       {:error, {:suid_helper_base_mismatch, base, Hyper.Cfg.Dirs.work_dir()}}
-    end
-  end
-
-  # Acquire the mutable layer on our own pid initially so it does not idle-reap
-  # during boot; release on failure so it tears down.
-  defp start_mutable_or_release(img_id, vm_id, uid) do
-    case Img.create_mutable(img_id, vm_id) do
-      {:ok, mutable} ->
-        :ok = Img.Mutable.acquire(mutable)
-        {:ok, mutable}
-
-      {:error, reason} ->
-        Users.release(uid)
-        {:error, reason}
     end
   end
 

@@ -16,6 +16,11 @@ defmodule Unit.Information do
   @gib 1024 * @mib
   @tib 1024 * @gib
 
+  # A disk sector is 512 bytes by kernel convention (dm tables, `blockdev
+  # --getsz`, /proc/diskstats), independent of the device's physical sector
+  # size.
+  @sector 512
+
   @spec bytes(integer()) :: t()
   def bytes(v), do: %__MODULE__{bytes: v}
 
@@ -31,6 +36,10 @@ defmodule Unit.Information do
   @spec tib(integer()) :: t()
   def tib(v), do: %__MODULE__{bytes: v * @tib}
 
+  @doc "`v` 512-byte disk sectors — the kernel's universal block-device unit."
+  @spec sectors(integer()) :: t()
+  def sectors(v), do: %__MODULE__{bytes: v * @sector}
+
   @spec as_bytes(t()) :: integer()
   def as_bytes(%__MODULE__{bytes: b}), do: b
 
@@ -39,6 +48,10 @@ defmodule Unit.Information do
 
   @spec as_gib(t()) :: integer()
   def as_gib(%__MODULE__{bytes: b}), do: div(b, @gib)
+
+  @doc "The quantity in whole 512-byte sectors."
+  @spec as_sectors(t()) :: integer()
+  def as_sectors(%__MODULE__{bytes: b}), do: div(b, @sector)
 
   @doc "The zero quantity (additive identity)."
   @spec zero() :: t()

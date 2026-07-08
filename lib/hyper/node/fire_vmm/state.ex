@@ -67,6 +67,16 @@ defmodule Hyper.Node.FireVMM.State do
     :gen_statem.call(via(id), :stop)
   end
 
+  @doc """
+  The start `Opts` of the running VM `id` — how a fork recovers the parent's
+  `img_id`/`type`/`arch`/`boot_args` from just a vm_id. Exits if the VM is gone;
+  callers translate that to `{:error, :not_found}`.
+  """
+  @spec describe(Hyper.Vm.Id.t()) :: Opts.t()
+  def describe(id) do
+    :gen_statem.call(via(id), :describe)
+  end
+
   @impl :gen_statem
   def callback_mode do
     :handle_event_function
@@ -103,6 +113,12 @@ defmodule Hyper.Node.FireVMM.State do
     do: %{kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
 
   @impl :gen_statem
+  # Answered in every lifecycle state: the opts are static data, and a fork must
+  # be able to describe a parent that is still configuring.
+  def handle_event({:call, from}, :describe, _state, data) do
+    {:keep_state_and_data, [{:reply, from, data.opts}]}
+  end
+
   def handle_event(type, content, state, data) do
     module =
       case state do

@@ -49,6 +49,10 @@ name = "tools_dmsetup_parsers"
 path = "tests/tools/dmsetup_parsers.rs"
 
 [[test]]
+name = "tools_blockcopy"
+path = "tests/tools/blockcopy.rs"
+
+[[test]]
 name = "tools_jailer"
 path = "tests/tools/jailer.rs"
 
@@ -96,10 +100,15 @@ path = "tests/e2e/version.rs"
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
+[[test]]
+name = "util_linux_thin_dump"
+path = "tests/util/linux/thin_dump.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"

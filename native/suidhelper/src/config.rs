@@ -127,18 +127,20 @@ impl Default for Jails {
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
 ///
-/// The device tools (`dmsetup`, `losetup`, `blockdev`) carry built-in defaults;
-/// `firecracker` and `jailer` have none and must be configured before any VM can
-/// launch — their absence surfaces as [`BinError::Unconfigured`] at use time, not
-/// at load. Every path is validated as a root-owned, correctly-named [`SafeBin`]
-/// when accessed, never at parse time (the file is read unprivileged). A missing
-/// `[tools]` table, or any missing key within it, falls back to these defaults.
+/// The device tools (`dmsetup`, `losetup`, `blockdev`, `thin_dump`) carry
+/// built-in defaults; `firecracker` and `jailer` have none and must be
+/// configured before any VM can launch — their absence surfaces as
+/// [`BinError::Unconfigured`] at use time, not at load. Every path is
+/// validated as a root-owned, correctly-named [`SafeBin`] when accessed,
+/// never at parse time (the file is read unprivileged). A missing `[tools]`
+/// table, or any missing key within it, falls back to these defaults.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Tools {
     dmsetup: PathBuf,
     losetup: PathBuf,
     blockdev: PathBuf,
+    thin_dump: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
 }
@@ -149,6 +151,7 @@ impl Default for Tools {
             dmsetup: default_dmsetup(),
             losetup: default_losetup(),
             blockdev: default_blockdev(),
+            thin_dump: default_thin_dump(),
             firecracker: None,
             jailer: None,
         }
@@ -172,6 +175,10 @@ fn default_losetup() -> PathBuf {
 
 fn default_blockdev() -> PathBuf {
     PathBuf::from("/usr/sbin/blockdev")
+}
+
+fn default_thin_dump() -> PathBuf {
+    PathBuf::from("/usr/sbin/thin_dump")
 }
 
 fn default_parent_cgroup() -> String {
@@ -230,6 +237,12 @@ impl Config {
     /// The validated `blockdev` binary the helper will run.
     pub fn blockdev(&self) -> Result<SafeBin<"blockdev">, safe_bin::Error> {
         SafeBin::from_path(&self.tools.blockdev)
+    }
+
+    /// The validated `thin_dump` binary (thin-provisioning-tools) the helper
+    /// will run.
+    pub fn thin_dump(&self) -> Result<SafeBin<"thin_dump">, safe_bin::Error> {
+        SafeBin::from_path(&self.tools.thin_dump)
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.
