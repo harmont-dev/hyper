@@ -101,8 +101,8 @@ name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
 [[test]]
-name = "tools_thin_dump"
-path = "tests/tools/thin_dump.rs"
+name = "util_linux_thin_dump"
+path = "tests/util/linux/thin_dump.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

@@ -18,7 +18,7 @@
 //!     never change the result, and malformed XML is a parse error rather
 //!     than a silently wrong guess.
 
-use hyper_suidhelper::tools::thin_dump::{parse_mappings, Error, ThinMappings};
+use hyper_suidhelper::util::linux::thin_dump::{parse_mappings, Error, ThinMappings};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]

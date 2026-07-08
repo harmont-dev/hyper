@@ -1,7 +1,7 @@
-//! The `thin_dump` XML document model, deserialized whole via serde —
-//! sibling-device isolation and child ordering are structural properties of
-//! the model rather than hand-maintained scan state. Validation (the
-//! refusals) sits on top of the typed document.
+//! The Linux thin-provisioning-tools `thin_dump` XML document model,
+//! deserialized whole via serde — sibling-device isolation and child ordering
+//! are structural properties of the model rather than hand-maintained scan
+//! state. Validation (the refusals) sits on top of the typed document.
 
 use serde::Deserialize;
 use thiserror::Error as ThisError;
