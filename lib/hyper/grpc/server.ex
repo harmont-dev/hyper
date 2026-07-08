@@ -53,10 +53,10 @@ defmodule Hyper.Grpc.Server do
   @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: Empty.t()
   @decorate with_span("Hyper.Grpc.Server.stop_vm", include: [:vm_id])
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
-    Hyper.Node.FireVMM.State.stop(vm_id)
-    Codec.to_grpc(:stopped)
-  catch
-    :exit, reason -> raise Codec.to_grpc({:exit, reason})
+    case Hyper.stop_vm(vm_id) do
+      :ok -> Codec.to_grpc(:stopped)
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
   end
 
   @spec get_vm(GetVmRequest.t(), GRPC.Server.Stream.t()) :: GetVmResponse.t()

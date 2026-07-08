@@ -52,8 +52,18 @@ defmodule Hyper.Cluster.Routing do
   @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   @decorate with_span("Hyper.Cluster.Routing.whereis", include: [:vm_id])
   def whereis(vm_id) do
+    case supervisor_of(vm_id) do
+      nil -> nil
+      pid -> node(pid)
+    end
+  end
+
+  @doc "The pid of `vm_id`'s VM supervisor process, or `nil` if unknown."
+  @spec supervisor_of(Hyper.Vm.Id.t()) :: pid() | nil
+  @decorate with_span("Hyper.Cluster.Routing.supervisor_of", include: [:vm_id])
+  def supervisor_of(vm_id) do
     case Horde.Registry.lookup(@name, {vm_id, :supervisor}) do
-      [{pid, _}] -> node(pid)
+      [{pid, _}] -> pid
       [] -> nil
     end
   end

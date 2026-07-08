@@ -259,11 +259,13 @@ jobs:
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
     # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
     runs-on: ubuntu-latest
-    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery) plus
-    # ~4 minutes of provisioning/compile/setup. 25 could cancel the job right
-    # as it finishes, and `!cancelled()` steps then skip result uploads —
-    # exactly when flake history matters most.
-    timeout-minutes: 35
+    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery), plus the
+    # gRPC contract wrapper's own 25-minute cap (20-min lifecycle vitest test +
+    # errors suite + npm ci/gen), plus ~5 minutes of provisioning/compile/npm
+    # setup. Budget with headroom above that sum: a tight budget could cancel
+    # the job right as it finishes, and `!cancelled()` steps then skip result
+    # uploads — exactly when flake history matters most.
+    timeout-minutes: 60
     env:
       MIX_ENV: test
     services:
@@ -286,6 +288,24 @@ jobs:
       # than timing out inside a VM boot.
       - name: Assert KVM is available
         run: '[ -e /dev/kvm ]'
+
+      # Node for the TypeScript gRPC contract suite (test/grpc), which the
+      # :integration wrapper test shells out to.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: test/grpc/package-lock.json
+
+      - name: Install gRPC contract suite deps
+        run: npm ci
+        working-directory: test/grpc
+
+      # tsc catches proto/type drift in seconds, before ~10 minutes of KVM
+      # provisioning; vitest alone strips types without checking them.
+      - name: Typecheck gRPC contract suite
+        run: npm run typecheck
+        working-directory: test/grpc
 
       - uses: erlef/setup-beam@v1
         id: beam
@@ -366,6 +386,24 @@ jobs:
         with:
           name: integration-test-results
           path: _build/test/junit.xml
+
+      - name: Upload TS contract test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: test/grpc/junit.xml
+          flags: grpc-ts
+          report_type: test_results
+
+      # test-results.yml globs artifacts/**/*.xml, so the vitest report joins
+      # the unified Test Results check automatically.
+      - name: Upload TS contract test results artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: grpc-ts-test-results
+          path: test/grpc/junit.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
