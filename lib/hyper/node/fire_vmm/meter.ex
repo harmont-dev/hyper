@@ -12,6 +12,11 @@ defmodule Hyper.Node.FireVMM.Meter do
     * consumption is accrued from counter deltas (`Controls.Accumulator`), so
       a cgroup recreated by a Core restart re-baselines instead of going
       negative;
+    * the accumulator is baselined at meter **start**, not at the first
+      periodic tick: `init/1` samples immediately (retrying fast until the
+      jailer has created the cgroup leaf), so a VM that lives and dies inside
+      one sample interval still has its whole life covered by the final
+      reading in `terminate/2`;
     * a failed flush keeps the accrued time and retries with the window
       extended; the retry is idempotent on `(vm_id, window_start)`, so an
       insert that committed but errored client-side is dropped, not
@@ -25,10 +30,10 @@ defmodule Hyper.Node.FireVMM.Meter do
   drop on a VM that has already recorded usage is a normal idle window and
   logs at `debug`; a drop on a VM that has **never** recorded a window means
   the VM's entire life produced no usage row — every cgroup read failed, or
-  the VM lived and died inside one sample interval (a single successful
-  sample is only the accumulator's baseline and accrues nothing) — and logs
-  at `warning`. Per-sample `cpu.stat` read failures log at `debug` (they are
-  expected while the jailer is still creating the leaf) and are counted.
+  the guest genuinely burned no measurable CPU after the start-of-life
+  baseline — and logs at `warning`. Per-sample `cpu.stat` read failures log
+  at `debug` (they are expected while the jailer is still creating the leaf)
+  and are counted.
   """
 
   use GenServer
@@ -43,6 +48,11 @@ defmodule Hyper.Node.FireVMM.Meter do
 
   @sample_interval Time.s(1)
   @flush_interval Time.s(60)
+  # Cadence while the accumulator has no baseline (no successful read yet):
+  # the jailer creates the cgroup leaf asynchronously after the meter starts,
+  # and nothing can be billed until the first read lands, so retry well within
+  # one sample interval instead of losing up to a second of the VM's life.
+  @baseline_retry_interval Time.ms(100)
 
   defmodule Opts do
     @moduledoc "Meter wiring: the VM, its cgroup leaf, and the usage sink."
@@ -77,7 +87,15 @@ defmodule Hyper.Node.FireVMM.Meter do
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
   def child_spec(%Opts{} = opts) do
-    %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, restart: :permanent}
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :permanent,
+      # Must outlast DBConnection's 15s query timeout: terminate/2 flushes the
+      # final usage window to Postgres, and the OTP default 5s would
+      # brutal-kill a slow teardown INSERT mid-write, losing the window.
+      shutdown: Time.as_ms(Time.s(20))
+    }
   end
 
   @spec start_link(Opts.t()) :: GenServer.on_start()
@@ -112,15 +130,23 @@ defmodule Hyper.Node.FireVMM.Meter do
 
     case register(opts) do
       :ok ->
-        _ = schedule_tick()
+        # Baseline the accumulator now, not at the first periodic tick: a VM
+        # that lives and dies inside one sample interval would otherwise reach
+        # terminate/2 with a never-observed accumulator, making the final
+        # reading a pure baseline that accrues nothing and silently dropping
+        # the VM's entire life. The first observed reading is still never
+        # billed, so this only converts CPU the guest actually burned after
+        # meter start from dropped to recorded — it can never over-count.
+        state =
+          sample(%__MODULE__{
+            opts: opts,
+            acc: Accumulator.new(Time.zero()),
+            window_start: DateTime.utc_now(),
+            ticks: 0
+          })
 
-        {:ok,
-         %__MODULE__{
-           opts: opts,
-           acc: Accumulator.new(Time.zero()),
-           window_start: DateTime.utc_now(),
-           ticks: 0
-         }}
+        _ = schedule_tick(state)
+        {:ok, state}
 
       {:error, reason} ->
         # A stale dead incarnation still holds the routing name; decline and
@@ -132,7 +158,7 @@ defmodule Hyper.Node.FireVMM.Meter do
   @impl true
   def handle_info(:tick, state) do
     state = state |> sample() |> tick_flush()
-    _ = schedule_tick()
+    _ = schedule_tick(state)
     {:noreply, state}
   end
 
@@ -258,8 +284,12 @@ defmodule Hyper.Node.FireVMM.Meter do
     end
   end
 
-  @spec schedule_tick() :: reference()
-  defp schedule_tick do
+  @spec schedule_tick(%__MODULE__{}) :: reference()
+  defp schedule_tick(%__MODULE__{samples_ok: 0}) do
+    Process.send_after(self(), :tick, Time.as_ms(@baseline_retry_interval))
+  end
+
+  defp schedule_tick(%__MODULE__{}) do
     Process.send_after(self(), :tick, Time.as_ms(@sample_interval))
   end
 

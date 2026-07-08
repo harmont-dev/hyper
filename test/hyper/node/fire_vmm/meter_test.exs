@@ -1,4 +1,11 @@
 defmodule Hyper.Node.FireVMM.MeterTest do
+  @moduledoc """
+  Example tests for the meter's billing contract: the reading at meter start
+  is the baseline (never billed); every counter advance observed after it —
+  including one that fits entirely inside a single sample interval — is
+  flushed exactly once; empty windows are dropped without a write and logged.
+  """
+
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
@@ -129,9 +136,9 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     write_cpu_stat(dir, 1_000)
     meter = start_meter(dir, "vmeterwarn")
 
-    # A single successful sample is only the accumulator's baseline: the CI
-    # zero-row scenario, where the VM died within the first sample interval.
-    :ok = Meter.sample_now(meter)
+    # The counter never advances after init's start-of-life baseline sample,
+    # so the window is legitimately empty — but a VM that has never recorded
+    # any usage is operator-visible, hence the warning.
     log = capture_log(fn -> :ok = Meter.flush_now(meter) end)
 
     refute_receive {:usage, _attrs}, 100
@@ -145,13 +152,14 @@ defmodule Hyper.Node.FireVMM.MeterTest do
        %{tmp_dir: dir} do
     meter = start_meter(dir, "vmetererr")
 
-    # No cpu.stat at all: every read fails, nothing ever accrues.
-    :ok = Meter.sample_now(meter)
+    # No cpu.stat at all: every read fails (init's baseline attempt included),
+    # nothing ever accrues. The baseline retry keeps sampling concurrently, so
+    # assert the counter's shape rather than an exact count.
     :ok = Meter.sample_now(meter)
     log = capture_log(fn -> :ok = Meter.flush_now(meter) end)
 
     assert log =~ "vm vmetererr: dropping empty usage window with no usage ever recorded"
-    assert log =~ "0 ok/2 failed cgroup samples"
+    assert log =~ ~r"0 ok/\d+ failed cgroup samples"
     assert log =~ "last sample error: :enoent"
   end
 
@@ -172,6 +180,57 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     debug = capture_log(fn -> :ok = Meter.flush_now(meter) end)
     assert debug =~ "vm vmeteridle: dropping empty usage window"
     assert debug =~ "1 recorded/1 dropped windows"
+  end
+
+  test "a life shorter than one sample interval still bills the burn since meter start",
+       %{tmp_dir: dir} do
+    write_cpu_stat(dir, 1_000)
+    meter = start_meter(dir)
+
+    # No sample_now and no time for a periodic tick: the meter's whole life
+    # fits inside one sample interval — the CI zero-row flake. init's baseline
+    # plus terminate's final sample must bill the advance anyway.
+    write_cpu_stat(dir, 43_210)
+    :ok = stop_supervised(Meter)
+    refute Process.alive?(meter)
+
+    assert_receive {:usage, %{cpu_time: cpu}}
+    assert Time.as_us(cpu) == 42_210
+  end
+
+  test "a leaf that appears after meter start is baselined well within one sample interval",
+       %{tmp_dir: dir} do
+    meter = start_meter(dir)
+
+    # The jailer creates the cgroup leaf asynchronously after the meter
+    # starts. The baseline retry must observe it much faster than the 1s
+    # sample interval — the bound fails if the meter waits a full interval.
+    write_cpu_stat(dir, 2_000)
+    assert poll_until(fn -> :sys.get_state(meter).samples_ok >= 1 end, 900)
+
+    write_cpu_stat(dir, 2_750)
+    :ok = stop_supervised(Meter)
+
+    assert_receive {:usage, %{cpu_time: cpu}}
+    assert Time.as_us(cpu) == 750
+  end
+
+  defp poll_until(fun, timeout_ms) do
+    poll_until_deadline(fun, System.monotonic_time(:millisecond) + timeout_ms)
+  end
+
+  defp poll_until_deadline(fun, deadline) do
+    cond do
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) > deadline ->
+        false
+
+      true ->
+        Process.sleep(10)
+        poll_until_deadline(fun, deadline)
+    end
   end
 
   test "terminate takes a final sample and flushes the tail", %{tmp_dir: dir} do
