@@ -15,6 +15,7 @@ pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
 pub use losetup::{Losetup, LosetupArgs};
+pub use network::NetworkOp;
 
 use crate::config::Config;
 use crate::util::setuid_privileged::{self, Privileged};
@@ -93,6 +94,11 @@ pub enum Tool {
         #[command(subcommand)]
         op: ChrootJailOp,
     },
+    /// Per-VM egress networking (netns + veth + TAP + NAT).
+    Network {
+        #[command(subcommand)]
+        op: NetworkOp,
+    },
 }
 
 impl Tool {
@@ -116,6 +122,7 @@ impl Tool {
                 Blockdev::new(bin.into(), args).run()
             }
             Tool::ChrootJail { op } => op.run(),
+            Tool::Network { op } => op.run(),
         }
     }
 }

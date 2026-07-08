@@ -57,6 +57,10 @@ name = "tools_network_addr"
 path = "tests/tools/network_addr.rs"
 
 [[test]]
+name = "tools_network_args"
+path = "tests/tools/network_args.rs"
+
+[[test]]
 name = "util_confinement"
 path = "tests/util/confinement.rs"
 
