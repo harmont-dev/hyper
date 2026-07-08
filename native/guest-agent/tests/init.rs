@@ -39,3 +39,27 @@ fn first_of_multiple_tokens_wins() {
         Some(Ipv4Addr::new(1, 1, 1, 1))
     );
 }
+
+#[test]
+fn first_of_multiple_tokens_wins_among_other_params() {
+    let cmdline = "a hyper.resolver=1.1.1.1 b hyper.resolver=8.8.8.8 c";
+    assert_eq!(
+        resolver_from_cmdline(cmdline),
+        Some(Ipv4Addr::new(1, 1, 1, 1))
+    );
+}
+
+// Regression: split_whitespace() + strip_prefix() requires the param to be its
+// own whitespace-delimited token, not merely a substring anywhere on the
+// cmdline. A future refactor to `cmdline.contains("hyper.resolver=")` would
+// match this look-alike token and could point the guest at an attacker
+// resolver embedded in an unrelated kernel param — that must never happen.
+#[test]
+fn prefixed_look_alike_token_is_not_matched() {
+    assert_eq!(resolver_from_cmdline("xhyper.resolver=9.9.9.9"), None);
+}
+
+#[test]
+fn suffixed_look_alike_key_is_not_matched() {
+    assert_eq!(resolver_from_cmdline("hyper.resolverX=1.1.1.1"), None);
+}
