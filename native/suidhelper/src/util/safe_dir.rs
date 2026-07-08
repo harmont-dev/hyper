@@ -201,6 +201,10 @@ impl SafeDir {
     /// Create a character device node `name` in this directory (mode `0666`,
     /// matching `/dev/net/tun`'s conventional permissions) with the given
     /// `rdev`, then chown it to `uid:gid`.
+    ///
+    /// `mknodat` masks its mode argument with the process umask (typically 022,
+    /// which would yield `0644`), so the exact `0666` is set with an explicit
+    /// `chmod` afterwards — `fchmodat` ignores the umask.
     pub fn mknod_char(&self, name: &Path, rdev: dev_t, uid: u32, gid: u32) -> Result<(), Error> {
         mknodat(
             Some(self.0.as_raw_fd()),
@@ -213,7 +217,8 @@ impl SafeDir {
             name: name.to_path_buf(),
             source,
         })?;
-        self.chown(name, uid, gid)
+        self.chown(name, uid, gid)?;
+        self.chmod(name, 0o666)
     }
 
     /// Create directory `name` in this directory with `mode`, tolerating
