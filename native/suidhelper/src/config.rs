@@ -152,12 +152,12 @@ pub struct Tools {
 impl Default for Tools {
     fn default() -> Self {
         Self {
-            dmsetup: default_dmsetup(),
-            losetup: default_losetup(),
-            blockdev: default_blockdev(),
-            ip: default_ip(),
-            nft: default_nft(),
-            thin_dump: default_thin_dump(),
+            dmsetup: "/usr/sbin/dmsetup".into(),
+            losetup: "/usr/sbin/losetup".into(),
+            blockdev: "/usr/sbin/blockdev".into(),
+            ip: "/usr/sbin/ip".into(),
+            nft: "/usr/sbin/nft".into(),
+            thin_dump: "/usr/sbin/thin_dump".into(),
             firecracker: None,
             jailer: None,
         }
@@ -169,30 +169,6 @@ impl Default for Tools {
 // `Hyper.Node.check_helper_base`).
 fn default_work_dir() -> PathBuf {
     PathBuf::from("/srv/hyper")
-}
-
-fn default_dmsetup() -> PathBuf {
-    PathBuf::from("/usr/sbin/dmsetup")
-}
-
-fn default_losetup() -> PathBuf {
-    PathBuf::from("/usr/sbin/losetup")
-}
-
-fn default_blockdev() -> PathBuf {
-    PathBuf::from("/usr/sbin/blockdev")
-}
-
-fn default_ip() -> PathBuf {
-    PathBuf::from("/usr/sbin/ip")
-}
-
-fn default_nft() -> PathBuf {
-    PathBuf::from("/usr/sbin/nft")
-}
-
-fn default_thin_dump() -> PathBuf {
-    PathBuf::from("/usr/sbin/thin_dump")
 }
 
 fn default_parent_cgroup() -> String {
