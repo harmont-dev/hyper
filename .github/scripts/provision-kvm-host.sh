@@ -30,7 +30,7 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo util-linux \
+  coreutils e2fsprogs libc-bin lvm2 skopeo thin-provisioning-tools util-linux \
   "linux-modules-extra-$(uname -r)"
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
@@ -39,6 +39,13 @@ sudo modprobe -av dm_snapshot dm_thin_pool loop
 targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
+command -v thin_dump >/dev/null || { echo "ERROR: thin_dump missing (thin-provisioning-tools)" >&2; exit 1; }
+
+# Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
+# rejects symlinks, so install a dereferenced hard copy under the name the
+# multi-call binary dispatches on.
+sudo install -o root -g root -m 0755 "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
+[ ! -L /usr/local/sbin/thin_dump ] || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'
@@ -47,6 +54,7 @@ work_dir = "/srv/hyper"
 [tools]
 firecracker = "/opt/firecracker/firecracker"
 jailer = "/opt/firecracker/jailer"
+thin_dump = "/usr/local/sbin/thin_dump"
 
 [jails]
 uid_gid_range = [900000, 999999]

@@ -4,16 +4,20 @@
 //! boundary. The binary each tool runs is resolved from the trusted config here,
 //! never passed by the caller.
 
+pub mod blockcopy;
 mod blockdev;
 pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
 mod losetup;
+pub mod thin_dump;
 
+pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
 pub use losetup::{Losetup, LosetupArgs};
+pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
 use crate::util::setuid_privileged::{self, Privileged};
@@ -87,10 +91,20 @@ pub enum Tool {
         #[command(flatten)]
         args: BlockdevArgs,
     },
+    /// Diff-copy between hyper block devices (fork delta materialization).
+    Blockcopy {
+        #[command(flatten)]
+        args: BlockcopyArgs,
+    },
     /// chroot/jail lifecycle operations (scoped subcommands).
     ChrootJail {
         #[command(subcommand)]
         op: ChrootJailOp,
+    },
+    /// Dump a thin device's provisioned ranges from the pool metadata.
+    ThinDump {
+        #[command(flatten)]
+        args: ThinDumpArgs,
     },
 }
 
@@ -114,7 +128,12 @@ impl Tool {
                 let bin = config.blockdev().map_err(|e| Error::Tool(Box::new(e)))?;
                 Blockdev::new(bin.into(), args).run()
             }
+            Tool::Blockcopy { args } => Blockcopy::new(args).run(),
             Tool::ChrootJail { op } => op.run(),
+            Tool::ThinDump { args } => {
+                let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
+                ThinDump::new(bin.into(), args).run()
+            }
         }
     }
 }

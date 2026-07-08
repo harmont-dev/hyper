@@ -17,6 +17,12 @@ defmodule Sys.MonTest do
   """
   use ExUnit.Case, async: false
 
+  # Needs the app's real supervision tree (the monitors are name-registered
+  # children of Hyper.Node.Budget.Supervisor), which the default `--no-start`
+  # unit run never boots — this is KVM-job territory, like the other live
+  # contracts.
+  @moduletag :integration
+
   alias Sys.Mon
   alias Sys.Mon.{Cpu, DiskBw, Mem, NetBw, Server}
   alias Sys.Mon.Server.Reading

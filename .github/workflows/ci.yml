@@ -273,13 +273,14 @@ jobs:
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
     # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
     runs-on: ubuntu-latest
-    # Worst case: two 10-minute tests (vm_lifecycle + crash_recovery), plus the
-    # gRPC contract wrapper's own 25-minute cap (20-min lifecycle vitest test +
-    # errors suite + npm ci/gen), plus ~5 minutes of provisioning/compile/npm
-    # setup. Budget with headroom above that sum: a tight budget could cancel
-    # the job right as it finishes, and `!cancelled()` steps then skip result
-    # uploads — exactly when flake history matters most.
-    timeout-minutes: 60
+    # Worst case: three 10-minute tests (vm_lifecycle + crash_recovery + fork),
+    # plus the gRPC contract wrapper's own 25-minute cap (20-min lifecycle
+    # vitest test + errors suite + npm ci/gen), plus ~5 minutes of
+    # provisioning/compile/npm setup. Budget with headroom above that sum: a
+    # tight budget could cancel the job right as it finishes, and
+    # `!cancelled()` steps then skip result uploads — exactly when flake
+    # history matters most.
+    timeout-minutes: 75
     env:
       MIX_ENV: test
     services:
