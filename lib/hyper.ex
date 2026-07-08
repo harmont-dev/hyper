@@ -142,6 +142,28 @@ defmodule Hyper do
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)
 
   @doc """
+  Stop and tear down `vm_id`, wherever it runs in the cluster.
+
+  Resolves the VM's supervisor through the routing registry and terminates it
+  on its owning node (`Hyper.Node.stop_image_vm/1`), which unwinds the whole
+  per-VM tree: guest killed, writable volume reclaimed, routing entry removed.
+  Registry removal propagates via CRDT, so `whereis/1` may briefly still
+  resolve a just-stopped VM on other nodes.
+
+  Returns `{:error, :not_found}` when no such VM is registered anywhere, and
+  `{:error, :machine_unreachable}` when the owning node cannot be reached.
+  """
+  @spec stop_vm(Hyper.Vm.Id.t()) :: :ok | {:error, :not_found | :machine_unreachable}
+  def stop_vm(vm_id) when is_binary(vm_id) do
+    case Hyper.Cluster.Routing.supervisor_of(vm_id) do
+      nil -> {:error, :not_found}
+      pid -> :erpc.call(node(pid), Hyper.Node, :stop_image_vm, [pid])
+    end
+  catch
+    :error, {:erpc, _} -> {:error, :machine_unreachable}
+  end
+
+  @doc """
   The vm id for a VM handle -- the pid returned by `create_vm/1`. Resolves on the
   pid's owning node, so a VM just placed on a remote node is found immediately
   rather than waiting for the routing CRDT to propagate. `nil` if unknown.

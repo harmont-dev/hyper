@@ -7,13 +7,9 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-const HELPER: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
+mod support;
+use support::{is_root, run};
 
 /// Install a root-owned fake tool named `basename` that records its argv (minus
 /// argv[0]) into `record` as a JSON array, then exits 0 with valid stdout for
@@ -44,16 +40,6 @@ fn write_root_config(dir: &Path, bins: &[(&str, &Path)]) -> PathBuf {
     fs::write(&p, body).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
     p
-}
-
-fn run(config: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(HELPER)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config)
-        .output()
-        .expect("spawn helper")
 }
 
 fn recorded_argv(record: &Path) -> Vec<String> {

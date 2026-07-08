@@ -8,13 +8,10 @@
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
-const BIN: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
+mod support;
+use support::{is_root, run};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
 /// `work_dir`, 0644 so the OnlyRootWritable axis passes.
@@ -23,16 +20,6 @@ fn write_config(dir: &Path, work_dir: &Path) -> PathBuf {
     fs::write(&p, format!("work_dir = \"{}\"\n", work_dir.display())).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
     p
-}
-
-fn run(config: &Path, args: &[&str]) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config)
-        .output()
-        .expect("spawn helper")
 }
 
 fn setup_loop(tmp: &Path) -> Option<PathBuf> {
