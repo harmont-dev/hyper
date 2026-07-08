@@ -82,7 +82,8 @@ defmodule Hyper.Node.FireVMM.State do
       ) do
     case Hyper.Cluster.Routing.register_self({id, :state}) do
       :ok ->
-        spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
+        source = Map.put(boot_source(kernel, Mutable.blk_path(mutable), boot_args), :vm_id, id)
+        spec = BootSpec.resolve(source, type)
         deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
         data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 

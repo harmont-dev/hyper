@@ -32,11 +32,23 @@ defmodule Hyper.Node.FireVMM.BootSpec do
 
   @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
+    base_args = Map.get(source, :boot_args, @default_boot_args)
+
+    {nics, boot_args} =
+      if Hyper.Cfg.Network.enabled?() do
+        vm_id = Map.fetch!(source, :vm_id)
+
+        {[Hyper.Node.FireVMM.Net.interface(vm_id)],
+         base_args <> " " <> Hyper.Node.FireVMM.Net.ip_cmdline()}
+      else
+        {[], base_args}
+      end
+
     %Cold{
       machine_config: Instance.Spec.machine_config(Instance.spec(type)),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
-        boot_args: Map.get(source, :boot_args, @default_boot_args)
+        boot_args: boot_args
       },
       drives: [
         %Drive{
@@ -45,7 +57,8 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           is_read_only: false,
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
-      ]
+      ],
+      network_interfaces: nics
     }
   end
 end
