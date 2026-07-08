@@ -28,6 +28,6 @@ defmodule Hyper.Node.FireVMM.VmLinux.ManifestTest do
 
     assert Manifest.asset_url(build) ==
              "https://github.com/harmont-dev/hyper-vmlinux/releases/download/" <>
-               "release-54d6c3f843c01fb55107a024cca5bf60af235c42/vmlinux-x86_64-6.1"
+               "release-bab2b3a92382df318e60b6b52376d2a9f5b5456c/vmlinux-x86_64-6.1"
   end
 end

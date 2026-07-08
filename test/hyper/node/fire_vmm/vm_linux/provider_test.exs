@@ -18,8 +18,11 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
     assert Provider.install_state(dir, builds) == {:error, :not_installed}
   end
 
-  test "install_state/2 is :ok when every asset file is present", %{dir: dir, builds: builds} do
-    for b <- builds, do: File.write!(Path.join(dir, b.asset), "kernel")
+  test "install_state/2 is :ok when every asset file is present with its manifest hash", %{
+    dir: dir,
+    builds: builds
+  } do
+    builds = Enum.map(builds, &write_asset(dir, &1))
     assert Provider.install_state(dir, builds) == :ok
   end
 
@@ -28,8 +31,30 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
     builds: builds
   } do
     assert length(builds) > 1
-    [first | _] = builds
-    File.write!(Path.join(dir, first.asset), "kernel")
+    [first | rest] = builds
+
+    assert Provider.install_state(dir, [write_asset(dir, first) | rest]) ==
+             {:error, :bad_install}
+  end
+
+  test "install_state/2 is :not_installed when every present file has a stale hash", %{
+    dir: dir,
+    builds: builds
+  } do
+    # A manifest bump leaves the previous release's kernels at the same asset
+    # paths; they must not count as installed or nodes would boot old kernels.
+    for b <- builds, do: File.write!(Path.join(dir, b.asset), "stale #{b.asset}")
+    assert Provider.install_state(dir, builds) == {:error, :not_installed}
+  end
+
+  test "install_state/2 is :bad_install when some present files have a stale hash", %{
+    dir: dir,
+    builds: builds
+  } do
+    assert length(builds) > 1
+    [first | rest] = builds
+    builds = [write_asset(dir, first) | rest]
+    for b <- rest, do: File.write!(Path.join(dir, b.asset), "stale #{b.asset}")
     assert Provider.install_state(dir, builds) == {:error, :bad_install}
   end
 
@@ -45,5 +70,14 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
 
   test "path/1 rejects an unknown build name" do
     assert Provider.path("nope") == {:error, {:unknown_build, "nope"}}
+  end
+
+  # Writes fabricated content for `build` under `dir` and returns the build
+  # with its sha256 matching that content, so install_state/2 sees it as a
+  # faithful install.
+  defp write_asset(dir, build) do
+    content = "kernel #{build.asset}"
+    File.write!(Path.join(dir, build.asset), content)
+    %{build | sha256: Base.encode16(:crypto.hash(:sha256, content), case: :lower)}
   end
 end

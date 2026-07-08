@@ -50,21 +50,30 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   end
 
   @doc """
-  Install state of `builds` under `dir`: `:ok` if every asset file is present;
-  `{:error, :not_installed}` if none are; `{:error, :bad_install}` if only some
-  are (a partial/corrupt install - `Redist.File` keeps existing files, so
-  the remedy is to wipe and reinstall).
+  Install state of `builds` under `dir`: `:ok` if every asset file is present
+  with the manifest's SHA-256; `{:error, :not_installed}` if none are;
+  `{:error, :bad_install}` if only some are (a partial/corrupt install -
+  `Redist.File` keeps existing files, so the remedy is to wipe and reinstall).
+
+  Presence alone is not enough: after a manifest bump the old release's kernels
+  sit at the same asset paths, and skipping the hash check would keep booting
+  guests on the previous release forever.
   """
   @spec install_state(Path.t(), [Manifest.Build.t()]) ::
           :ok | {:error, :not_installed | :bad_install}
   def install_state(dir, builds) do
-    present = Enum.count(builds, &File.regular?(build_path(dir, &1)))
+    installed = Enum.count(builds, &installed?(dir, &1))
 
     cond do
-      present == length(builds) -> :ok
-      present == 0 -> {:error, :not_installed}
+      installed == length(builds) -> :ok
+      installed == 0 -> {:error, :not_installed}
       true -> {:error, :bad_install}
     end
+  end
+
+  defp installed?(dir, build) do
+    path = build_path(dir, build)
+    File.regular?(path) and Redist.Sha256.file(path) == build.sha256
   end
 
   defp install_all(builds) do
