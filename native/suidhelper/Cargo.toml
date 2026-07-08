@@ -101,6 +101,10 @@ name = "e2e_losetup"
 path = "tests/e2e/losetup.rs"
 
 [[test]]
+name = "e2e_thin_dump"
+path = "tests/e2e/thin_dump.rs"
+
+[[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
