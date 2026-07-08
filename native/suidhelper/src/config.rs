@@ -155,7 +155,10 @@ impl Default for Tools {
             dmsetup: "/usr/sbin/dmsetup".into(),
             losetup: "/usr/sbin/losetup".into(),
             blockdev: "/usr/sbin/blockdev".into(),
-            ip: "/usr/sbin/ip".into(),
+            // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
+            // is a symlink to the former, and SafeBin rejects symlinked tool
+            // paths. iproute2's real binary lives at /usr/bin/ip.
+            ip: "/usr/bin/ip".into(),
             nft: "/usr/sbin/nft".into(),
             thin_dump: "/usr/sbin/thin_dump".into(),
             firecracker: None,
