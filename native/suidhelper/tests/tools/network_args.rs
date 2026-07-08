@@ -1,6 +1,7 @@
 use hyper_suidhelper::tools::jailer::VmId;
 use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
+use hyper_suidhelper::tools::network::prepare;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -296,4 +297,29 @@ fn host_init_commands_golden_sequence() {
         ),
     ];
     assert_eq!(cmds, expected);
+}
+
+#[test]
+fn prepare_refuses_uid_outside_range() {
+    // Derivation from an out-of-range uid must error before any command runs.
+    let err = prepare::plan_from(
+        42,
+        (900_000, 999_999),
+        "172.31.0.0/16",
+        &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
+    );
+    assert!(err.is_err());
+}
+
+#[test]
+fn prepare_refuses_malformed_clone_pool_cidr() {
+    // A malformed CIDR must error before any command runs, distinctly from a
+    // uid-range refusal.
+    let err = prepare::plan_from(
+        900_000,
+        (900_000, 999_999),
+        "not-a-cidr",
+        &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
+    );
+    assert!(err.is_err());
 }

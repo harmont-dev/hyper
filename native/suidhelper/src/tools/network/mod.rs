@@ -1,38 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `network`: per-VM egress networking (netns + veth + TAP + NAT).
 //!
-//! This module currently wires the CLI skeleton (`NetworkOp` and its arg
-//! structs) and the pure argv builders in [`args`]. The `run` bodies are typed
-//! no-ops; the real privileged execution (invoking `ip`/`nft` with the argv
-//! [`args`] builds) lands with the rest of the prepare/teardown/host-init logic.
+//! Each op ([`prepare`], [`teardown`], [`host_init`]) derives its `ip`/`nft`
+//! argv (built in [`args`]) from the validated uid and [`crate::config::Config::network`],
+//! then runs it through [`exec::run_all`], which stops at the first non-zero
+//! exit. Every refusal — `uid` outside the configured range, a malformed
+//! `clone_pool` CIDR, or `[network]` absent from config — happens while
+//! resolving the op (see `prepare::resolve`), strictly before `run_privileged`
+//! is ever reached, so no privileged command runs on invalid input.
 pub mod addr;
 pub mod args;
+mod exec;
+pub mod host_init;
+pub mod prepare;
+pub mod teardown;
 
-use crate::tools::jailer::VmId;
-use clap::{Args, Subcommand};
+use clap::Subcommand;
+use serde::Serialize;
 
-#[derive(Args)]
-pub struct PrepareArgs {
-    /// Microvm id; becomes the netns name.
-    #[arg(long)]
-    vm_id: VmId,
-    /// Unprivileged uid the VM runs as; derives its clone-pool `/30` slot.
-    #[arg(long)]
-    uid: u32,
+pub use host_init::HostInitArgs;
+pub use prepare::PrepareArgs;
+pub use teardown::TeardownArgs;
+
+/// The result shape shared by all three networking ops, tagged by which ran.
+#[derive(Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum NetworkOut {
+    Prepared,
+    ToreDown,
+    HostReady,
 }
-
-#[derive(Args)]
-pub struct TeardownArgs {
-    /// Microvm id; names the netns to remove.
-    #[arg(long)]
-    vm_id: VmId,
-    /// Unprivileged uid the VM ran as; derives its clone-pool `/30` slot.
-    #[arg(long)]
-    uid: u32,
-}
-
-#[derive(Args)]
-pub struct HostInitArgs {}
 
 #[derive(Subcommand)]
 pub enum NetworkOp {
@@ -45,13 +42,13 @@ pub enum NetworkOp {
 }
 
 impl NetworkOp {
-    /// Route to the selected op. Bodies are stubs for now (Task 4 fills the
-    /// privileged execution); each already returns its own serialized `Value`.
+    /// Route to the selected op; each runs in its own privileged scope and
+    /// returns its own serialized `Value`.
     pub fn run(self) -> Result<serde_json::Value, crate::tools::Error> {
         match self {
-            NetworkOp::Prepare(_) => Ok(serde_json::json!({"result": "noop"})),
-            NetworkOp::Teardown(_) => Ok(serde_json::json!({"result": "noop"})),
-            NetworkOp::HostInit(_) => Ok(serde_json::json!({"result": "noop"})),
+            NetworkOp::Prepare(args) => prepare::run(args),
+            NetworkOp::Teardown(args) => teardown::run(args),
+            NetworkOp::HostInit(args) => host_init::run(args),
         }
     }
 }
