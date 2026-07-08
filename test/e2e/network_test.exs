@@ -41,12 +41,22 @@ defmodule Hyper.E2e.NetworkTest do
 
       assert ip_out =~ "172.30.0.2"
 
-      assert {:ok, %{exit_code: 0}} =
+      # Prove real egress AND an explicit HTTP 200 — not just a non-zero-free
+      # exit. `wget -S` writes the server's response headers to stderr; we merge
+      # them into stdout (`2>&1`) and assert the status line is `... 200 ...`.
+      # (Alpine ships busybox wget, not curl — installing curl would need egress
+      # to the apk mirror first, adding a flaky dependency to prove the same
+      # thing.) `-O /dev/null` discards the body; the fetch still exercises the
+      # full netns → SNAT → veth → MASQUERADE → uplink path and DNS resolution.
+      assert {:ok, %{stdout: http_out, exit_code: 0}} =
                await_exec(
                  vm,
-                 ["sh", "-c", "wget -qO- http://example.com >/dev/null"],
+                 ["sh", "-c", "wget -S -O /dev/null http://example.com 2>&1"],
                  :timer.seconds(90)
                )
+
+      assert http_out =~ ~r"HTTP/[\d.]+ 200\b",
+             "expected an HTTP 200 status line from the guest's egress fetch, got:\n#{http_out}"
     else
       IO.puts("SKIP: [network] not enabled on this host — see Hyper.Cfg.Network.enabled?/0")
     end
