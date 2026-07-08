@@ -67,6 +67,20 @@ fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     p
 }
 
+/// Same as [`write_root_config`] but with a `[network]` table present, so
+/// `Config::network()` is `Some` and `run()` derives a `--netns` flag.
+fn write_root_config_with_network(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
+    let p = dir.join("config.toml");
+    let body = format!(
+        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n[network]\nuplink = \"eth0\"\n",
+        jailer.display(),
+        firecracker.display(),
+    );
+    fs::write(&p, body).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+    p
+}
+
 fn run(config: &Path, args: &[&str]) -> std::process::Output {
     Command::new(HELPER)
         .args(args)
@@ -169,6 +183,59 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     assert!(
         leaked.is_empty(),
         "caller environment leaked to the jailer (only shell-set PWD/_/SHLVL allowed): {leaked:?}",
+    );
+}
+
+#[test]
+fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
+    if !is_root() {
+        eprintln!("SKIP jailer netns: needs root to become_root_permanently + own the fakes");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let argv_rec = tmp.path().join("argv.json");
+    let env_rec = tmp.path().join("environ.bin");
+    let jailer = install_recorder(tmp.path(), &argv_rec, &env_rec);
+    let firecracker = install_firecracker(tmp.path());
+    let cfg = write_root_config_with_network(tmp.path(), &jailer, &firecracker);
+
+    let out = run(
+        &cfg,
+        &[
+            "jailer",
+            "--id",
+            "vnet1",
+            "--uid",
+            "900001",
+            "--gid",
+            "900002",
+            "--api-sock",
+            "/api.sock",
+        ],
+    );
+
+    assert_eq!(
+        out.status.code(),
+        Some(RECORDER_EXIT),
+        "exit status did not propagate; stderr: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    let argv: Vec<String> =
+        serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
+    let i = argv
+        .iter()
+        .position(|a| a == "--netns")
+        .expect("--netns present when [network] is configured");
+    assert_eq!(
+        argv[i + 1],
+        "/var/run/netns/vnet1",
+        "netns path must be derived from --id, not caller-supplied"
+    );
+    let sep = argv.iter().position(|a| a == "--").unwrap();
+    assert!(
+        i < sep,
+        "--netns must precede the `--` firecracker separator"
     );
 }
 

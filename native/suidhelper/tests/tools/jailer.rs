@@ -4,8 +4,11 @@
 //! a compromised BEAM from naming uid 0, a privileged path, a traversal, or a
 //! flag through the jailer subcommand.
 
-use hyper_suidhelper::tools::jailer::{validate_id_number, CgroupSetting, JailSock, VmId};
+use hyper_suidhelper::tools::jailer::{
+    build_argv, validate_id_number, CgroupSetting, JailSock, VmId,
+};
 use proptest::prelude::*;
+use std::path::Path;
 use std::str::FromStr;
 
 proptest! {
@@ -159,4 +162,51 @@ fn jailsock_rejects_known_bad_shapes() {
             "JailSock accepted {bad:?}"
         );
     }
+}
+
+/// `build_argv` is a pure function of its parameters — no process-wide config is
+/// read here, so the `netns` presence/absence is exercised directly rather than
+/// through the `[network]` config table (see `src/tools/jailer.rs::run`, which is
+/// the thin wrapper that derives the `Option<PathBuf>` from `Config::network()`).
+fn sample_argv(netns: Option<&Path>) -> Vec<String> {
+    let id = VmId::from_str("vabc").unwrap();
+    let api_sock = JailSock::from_str("/api.sock").unwrap();
+    let argv = build_argv(
+        Path::new("/usr/bin/jailer"),
+        &id,
+        Path::new("/usr/bin/firecracker"),
+        900_001,
+        900_002,
+        Path::new("/srv/hyper/jails"),
+        "hyper",
+        &[],
+        &api_sock,
+        netns,
+    )
+    .unwrap();
+    argv.into_iter()
+        .map(|c| c.to_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn netns_flag_derived_from_id_when_networking_enabled() {
+    let netns = std::path::PathBuf::from("/var/run/netns/vabc");
+    let joined = sample_argv(Some(&netns));
+    let i = joined
+        .iter()
+        .position(|a| a == "--netns")
+        .expect("--netns present");
+    assert_eq!(joined[i + 1], "/var/run/netns/vabc");
+    let sep = joined.iter().position(|a| a == "--").unwrap();
+    assert!(
+        i < sep,
+        "--netns must precede the `--` firecracker separator"
+    );
+}
+
+#[test]
+fn netns_flag_absent_when_networking_disabled() {
+    let joined = sample_argv(None);
+    assert!(!joined.contains(&"--netns".to_string()));
 }

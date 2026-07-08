@@ -241,8 +241,14 @@ fn cstr_path(p: &Path) -> Result<CString, Error> {
 /// Build the exact argv handed to the jailer. argv[0] is the jailer path. The
 /// caller never names the jailer, the `--exec-file`, the chroot base, the cgroup
 /// version, or the parent cgroup — those are derived from trusted config here.
+///
+/// `netns` is `Some(path)` when VM networking is enabled (see [`Config::network`]);
+/// the path itself is computed by the caller from the validated `id`, never taken
+/// from caller input. Kept as a plain parameter (rather than reading config here)
+/// so this function stays pure and directly testable without the process-wide
+/// config singleton.
 #[allow(clippy::too_many_arguments)]
-fn build_argv(
+pub fn build_argv(
     jailer: &Path,
     id: &VmId,
     firecracker: &Path,
@@ -252,6 +258,7 @@ fn build_argv(
     parent_cgroup: &str,
     cgroups: &[CgroupSetting],
     api_sock: &JailSock,
+    netns: Option<&Path>,
 ) -> Result<Vec<CString>, Error> {
     let mut argv = vec![
         cstr_path(jailer)?,
@@ -274,6 +281,11 @@ fn build_argv(
     for cg in cgroups {
         argv.push(cstr_str("--cgroup")?);
         argv.push(cstr_str(&cg.to_string())?);
+    }
+
+    if let Some(netns) = netns {
+        argv.push(cstr_str("--netns")?);
+        argv.push(cstr_path(netns)?);
     }
 
     argv.push(cstr_str("--")?);
@@ -329,6 +341,13 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         return Err(Error::TooManyCgroups(args.cgroup.len()));
     }
 
+    // The netns path is derived entirely from trusted config (whether networking
+    // is enabled) and the already-validated `--id` — the caller cannot name it.
+    // This must match the `ip netns add <id>` path the network tool creates.
+    let netns: Option<PathBuf> = config
+        .network()
+        .map(|_| PathBuf::from(format!("/var/run/netns/{}", args.id)));
+
     let argv = build_argv(
         &jailer,
         &args.id,
@@ -339,6 +358,7 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         parent_cgroup,
         &args.cgroup,
         &args.api_sock,
+        netns.as_deref(),
     )?;
     let jailer_cstr = cstr_path(&jailer)?;
 
