@@ -1,0 +1,29 @@
+defmodule Hyper.Node.FireVMM.NetTest do
+  use ExUnit.Case, async: true
+  alias Hyper.Node.FireVMM.Net
+
+  test "guest_mac is a stable locally-administered unicast MAC" do
+    mac = Net.guest_mac("vabcdef")
+    assert mac == Net.guest_mac("vabcdef"), "must be deterministic in vm_id"
+    [first | _] = String.split(mac, ":")
+    <<byte>> = Base.decode16!(first, case: :mixed)
+    # locally administered (bit 1 set), unicast (bit 0 clear)
+    assert Bitwise.band(byte, 0x02) == 0x02
+    assert Bitwise.band(byte, 0x01) == 0x00
+  end
+
+  test "distinct vm_ids get distinct MACs" do
+    refute Net.guest_mac("vaaa") == Net.guest_mac("vbbb")
+  end
+
+  test "ip_cmdline pins the inner-world contract" do
+    assert Net.ip_cmdline() == "ip=172.30.0.2::172.30.0.1:255.255.255.252::eth0:off"
+  end
+
+  test "interface targets tap0/eth0 with the derived MAC" do
+    nic = Net.interface("vabcdef")
+    assert nic.iface_id == "eth0"
+    assert nic.host_dev_name == "tap0"
+    assert nic.guest_mac == Net.guest_mac("vabcdef")
+  end
+end
