@@ -35,9 +35,12 @@ defmodule Hyper.Node.FireVMM.Net do
   """
   @spec guest_mac(Hyper.Vm.Id.t()) :: String.t()
   def guest_mac(vm_id) do
-    <<_::8, b1, b2, b3, b4, _::binary>> = :crypto.hash(:sha256, vm_id)
+    # Six octets: the fixed locally-administered-unicast leading byte plus five
+    # from the id hash. Firecracker rejects anything but a full XX:XX:XX:XX:XX:XX
+    # MAC (a five-octet address 400s the NIC config and the VM never boots).
+    <<_::8, b1, b2, b3, b4, b5, _::binary>> = :crypto.hash(:sha256, vm_id)
 
-    [0x02, b1, b2, b3, b4]
+    [0x02, b1, b2, b3, b4, b5]
     |> Enum.map_join(":", &(&1 |> Integer.to_string(16) |> String.pad_leading(2, "0")))
     |> String.downcase()
   end

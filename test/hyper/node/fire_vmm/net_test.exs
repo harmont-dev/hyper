@@ -5,8 +5,14 @@ defmodule Hyper.Node.FireVMM.NetTest do
   test "guest_mac is a stable locally-administered unicast MAC" do
     mac = Net.guest_mac("vabcdef")
     assert mac == Net.guest_mac("vabcdef"), "must be deterministic in vm_id"
-    [first | _] = String.split(mac, ":")
-    <<byte>> = Base.decode16!(first, case: :mixed)
+
+    octets = String.split(mac, ":")
+    # Firecracker rejects anything but a full six-octet MAC — a short address
+    # 400s the NIC config and the VM never boots.
+    assert length(octets) == 6, "MAC must have six octets, got #{mac}"
+    assert Enum.all?(octets, &(byte_size(&1) == 2 and match?({_, ""}, Integer.parse(&1, 16))))
+
+    <<byte>> = Base.decode16!(hd(octets), case: :mixed)
     # locally administered (bit 1 set), unicast (bit 0 clear)
     assert Bitwise.band(byte, 0x02) == 0x02
     assert Bitwise.band(byte, 0x01) == 0x00
