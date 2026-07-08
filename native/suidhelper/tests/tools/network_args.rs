@@ -1,7 +1,8 @@
+use hyper_suidhelper::config::Network;
 use hyper_suidhelper::tools::jailer::VmId;
 use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
-use hyper_suidhelper::tools::network::prepare;
+use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -60,6 +61,14 @@ fn cmd(bin: Which, argv: &[&str]) -> args::Command {
     args::Command {
         bin,
         argv: argv.iter().map(|s| s.to_string()).collect(),
+        allow_failure: false,
+    }
+}
+
+fn cmd_allow_failure(bin: Which, argv: &[&str]) -> args::Command {
+    args::Command {
+        allow_failure: true,
+        ..cmd(bin, argv)
     }
 }
 
@@ -195,13 +204,17 @@ fn prepare_commands_golden_sequence() {
 }
 
 /// Full-sequence golden test for the host-init nftables program: pins the
-/// metadata-IP drop rule immediately after the forward chain is created and
-/// before the broad egress accept, since `accept` is a terminating verdict in
-/// nftables and a drop reachable only after it would never fire.
+/// leading, failure-tolerant `delete table` (the reconcile-to-desired-state
+/// step — see `host_init.rs`'s module doc), the metadata-IP drop rule
+/// immediately after the forward chain is created and before the broad
+/// egress accept (since `accept` is a terminating verdict in nftables and a
+/// drop reachable only after it would never fire), and that every command
+/// after the delete is *not* failure-tolerant.
 #[test]
 fn host_init_commands_golden_sequence() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
     let expected = vec![
+        cmd_allow_failure(Which::Nft, &["delete", "table", "ip", "hyper"]),
         cmd(Which::Nft, &["add", "table", "ip", "hyper"]),
         cmd(
             Which::Nft,
@@ -302,6 +315,11 @@ fn host_init_commands_golden_sequence() {
 #[test]
 fn prepare_refuses_uid_outside_range() {
     // Derivation from an out-of-range uid must error before any command runs.
+    // Proving `Err` here is sufficient, not just necessary, to prove no
+    // privileged command spawns: `plan_from` only ever returns a `Plan`, and
+    // every op derives its commands from that returned `Plan` in a separate
+    // step downstream, one that is structurally unreachable when derivation
+    // itself fails.
     let err = prepare::plan_from(
         42,
         (900_000, 999_999),
@@ -322,4 +340,26 @@ fn prepare_refuses_malformed_clone_pool_cidr() {
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );
     assert!(err.is_err());
+}
+
+#[test]
+fn resolve_network_refuses_when_networking_disabled() {
+    // `[network]` absent from config is the security-critical refusal: every
+    // op (`prepare`, `teardown`, `host_init`) resolves through this same pure
+    // function before spawning anything privileged, so this exercises the
+    // real refusal path, not a copy of it — no root and no config file
+    // needed, since it takes the already-resolved `Option<&Network>` rather
+    // than reaching into `Config` itself.
+    assert!(matches!(resolve_network(None), Err(NetworkingDisabled)));
+}
+
+#[test]
+fn resolve_network_returns_the_configured_network_when_present() {
+    let network = Network {
+        uplink: "eth0".to_string(),
+        clone_pool: "172.31.0.0/16".to_string(),
+    };
+    let resolved = resolve_network(Some(&network)).unwrap();
+    assert_eq!(resolved.uplink, "eth0");
+    assert_eq!(resolved.clone_pool, "172.31.0.0/16");
 }

@@ -29,11 +29,15 @@ pub enum Which {
 
 /// One step of a prepare/teardown/host-init sequence: the binary to run and its
 /// exact argv (argv[0] is the binary itself, named by [`Which`], not repeated
-/// here).
+/// here). `allow_failure` marks a step whose non-zero exit must not stop the
+/// sequence — used only by the leading `nft delete table ip hyper` in
+/// [`host_init_commands`], since that command's whole purpose is to clear
+/// state that may not exist yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     pub bin: Which,
     pub argv: Vec<String>,
+    pub allow_failure: bool,
 }
 
 macro_rules! argv {
@@ -47,6 +51,7 @@ impl Command {
         Self {
             bin: Which::Ip,
             argv,
+            allow_failure: false,
         }
     }
 
@@ -61,6 +66,16 @@ impl Command {
         Self {
             bin: Which::Nft,
             argv,
+            allow_failure: false,
+        }
+    }
+
+    /// An `nft` step whose non-zero exit is tolerated — see the `allow_failure`
+    /// doc on [`Command`].
+    fn nft_allow_failure(argv: Vec<String>) -> Self {
+        Self {
+            allow_failure: true,
+            ..Self::nft(argv)
         }
     }
 
@@ -229,8 +244,17 @@ pub fn teardown_commands(plan: &Plan) -> Vec<Command> {
 /// pool out `uplink`, and a forward-chain default-drop policy that only admits
 /// the pool's own traffic — explicitly dropping anything addressed to the
 /// cloud metadata IP (`169.254.169.254`), so no VM can ever reach it.
+///
+/// Reconciles to desired state rather than diffing: the first command
+/// unconditionally deletes the `hyper` table (tolerating "no such file" when
+/// it doesn't exist yet), and every command after it rebuilds the table from
+/// scratch. This makes host-init idempotent by construction — the table is
+/// always either absent or complete, never partially applied — so a
+/// crash/interruption mid-sequence on one run can never strand a later run
+/// with, say, NAT but no forward-chain drop policy.
 pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
     vec![
+        Command::nft_allow_failure(argv!["delete", "table", "ip", "hyper"]),
         Command::nft(argv!["add", "table", "ip", "hyper"]),
         Command::nft(argv![
             "add",

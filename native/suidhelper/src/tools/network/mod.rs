@@ -15,12 +15,29 @@ pub mod host_init;
 pub mod prepare;
 pub mod teardown;
 
+use crate::config::Network;
 use clap::Subcommand;
 use serde::Serialize;
+use thiserror::Error as ThisError;
 
 pub use host_init::HostInitArgs;
 pub use prepare::PrepareArgs;
 pub use teardown::TeardownArgs;
+
+/// `[network]` is absent from config, i.e. VM networking is disabled.
+#[derive(Debug, ThisError, PartialEq, Eq)]
+#[error("VM networking is not configured ([network] absent from config)")]
+pub struct NetworkingDisabled;
+
+/// Refuse before any privileged command is ever spawned when `[network]` is
+/// absent from config. Pure — takes the already-loaded `Option<&Network>`
+/// rather than reaching into [`crate::config::Config`] itself — so this exact
+/// refusal path is exercisable from tests without root or a live config file,
+/// and `prepare`/`teardown`/`host_init` all resolve through this one function
+/// rather than duplicating the check.
+pub fn resolve_network(network: Option<&Network>) -> Result<&Network, NetworkingDisabled> {
+    network.ok_or(NetworkingDisabled)
+}
 
 /// The result shape shared by all three networking ops, tagged by which ran.
 #[derive(Serialize)]

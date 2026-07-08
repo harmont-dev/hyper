@@ -1,13 +1,16 @@
 //! `network host-init`: one-time host setup of the `hyper` nftables table,
 //! its masquerade rule, and the forward-chain default-drop policy.
 //!
-//! Idempotency: before building the program, list the `hyper` table (`nft
-//! list table ip hyper`). If it already exists and its listing contains the
-//! masquerade rule, host-init has already run and nothing more is added. This
-//! is coarser than a per-rule list-then-add guard, but the whole program is
-//! only ever created here as one atomic unit (never hand-edited), so "the
-//! masquerade rule is present" is equivalent to "the whole program already
-//! ran" — a single check covers every rule below it.
+//! Idempotency: host-init reconciles to desired state rather than diffing.
+//! [`args::host_init_commands`] always leads with a (failure-tolerant) delete
+//! of the `hyper` table, then rebuilds it from scratch. A presence check
+//! (e.g. "does `nft list table ip hyper` already mention masquerade?") looks
+//! idempotent but isn't: masquerade is added partway through the sequence, so
+//! a crash between that step and the later forward-chain drop policy would
+//! leave the table permanently short a security rule — every subsequent
+//! host-init would see masquerade present and skip, never adding the missing
+//! policy. Delete-then-recreate has no such window: the table is always
+//! either fully absent or fully complete.
 use super::args;
 use super::exec;
 use super::NetworkOut;
@@ -16,7 +19,6 @@ use crate::tools::IsTool;
 use crate::util::safe_bin;
 use clap::Args;
 use std::path::PathBuf;
-use std::process::Command;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -24,14 +26,12 @@ pub struct HostInitArgs {}
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("VM networking is not configured ([network] absent from config)")]
-    NetworkingDisabled,
+    #[error(transparent)]
+    NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
     Bin(#[from] safe_bin::Error),
     #[error(transparent)]
     Exec(#[from] exec::Error),
-    #[error("listing the existing hyper nft table: {0}")]
-    List(#[source] std::io::Error),
 }
 
 pub fn run(args: HostInitArgs) -> Result<serde_json::Value, crate::tools::Error> {
@@ -49,24 +49,12 @@ struct HostInit {
 impl HostInit {
     fn new(_args: HostInitArgs) -> Result<Self, Error> {
         let config = Config::get();
-        let network = config.network().ok_or(Error::NetworkingDisabled)?;
+        let network = super::resolve_network(config.network())?;
         Ok(Self {
             uplink: network.uplink.clone(),
             clone_pool: network.clone_pool.clone(),
             nft: config.nft()?.into(),
         })
-    }
-
-    /// `true` iff the `hyper` table already carries the masquerade rule, i.e.
-    /// host-init has already run.
-    fn already_done(&self) -> Result<bool, Error> {
-        let output = Command::new(&self.nft)
-            .args(["list", "table", "ip", "hyper"])
-            .env_clear()
-            .output()
-            .map_err(Error::List)?;
-        Ok(output.status.success()
-            && String::from_utf8_lossy(&output.stdout).contains("masquerade"))
     }
 }
 
@@ -76,9 +64,6 @@ impl IsTool for HostInit {
     type RunT = Result<(), Error>;
 
     fn run_privileged(&self) -> Self::RunT {
-        if self.already_done()? {
-            return Ok(());
-        }
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
         // host_init_commands only ever issues `nft` commands (see args.rs).
         exec::run_all(&commands, |_which| self.nft.as_path())?;

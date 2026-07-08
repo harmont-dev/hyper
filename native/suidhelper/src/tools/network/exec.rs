@@ -1,8 +1,9 @@
 //! Shared execution of an [`args::Command`] sequence: resolve each command's
 //! binary via `resolve`, spawn it with a cleared environment, and stop at the
-//! first non-zero exit. This is the whole privileged window for every network
-//! op — `prepare`, `teardown`, and `host_init` differ only in which commands
-//! they hand to [`run_all`].
+//! first non-zero exit — unless the command is marked `allow_failure`, in
+//! which case its exit status is ignored and the sequence continues. This is
+//! the whole privileged window for every network op — `prepare`, `teardown`,
+//! and `host_init` differ only in which commands they hand to [`run_all`].
 use super::args::{Command, Which};
 use std::path::Path;
 use std::process::Command as Proc;
@@ -40,7 +41,7 @@ pub(super) fn run_all<'a>(
                 source,
             })?;
 
-        if !output.status.success() {
+        if !output.status.success() && !command.allow_failure {
             return Err(Error::Failed {
                 bin: command.bin,
                 argv: command.argv.clone(),

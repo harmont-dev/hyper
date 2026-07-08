@@ -25,8 +25,8 @@ pub struct PrepareArgs {
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("VM networking is not configured ([network] absent from config)")]
-    NetworkingDisabled,
+    #[error(transparent)]
+    NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error("clone_pool {0:?} is not a valid IPv4 CIDR")]
     InvalidClonePool(String),
     #[error(transparent)]
@@ -84,7 +84,7 @@ fn parse_cidr_base(s: &str) -> Result<Ipv4Addr, Error> {
 /// misconfigured binary) happens before any privileged command is spawned.
 pub(super) fn resolve(uid: u32, vm_id: &VmId) -> Result<(Plan, PathBuf, PathBuf), Error> {
     let config = Config::get();
-    let network = config.network().ok_or(Error::NetworkingDisabled)?;
+    let network = super::resolve_network(config.network())?;
     let plan = plan_from(uid, config.uid_gid_range(), &network.clone_pool, vm_id)?;
     Ok((plan, config.ip()?.into(), config.nft()?.into()))
 }
