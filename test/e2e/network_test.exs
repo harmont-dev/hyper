@@ -34,8 +34,11 @@ defmodule Hyper.E2e.NetworkTest do
     assert {:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
 
+    # Hyper.exec runs argv directly with no PATH (see its @doc): a bare command
+    # name returns exit 127. Route through an absolute `/bin/sh -c` so busybox's
+    # own default PATH resolves the `ip`/`wget` applets inside the guest.
     assert {:ok, %{stdout: ip_out, exit_code: 0}} =
-             await_exec(vm, ["ip", "-4", "addr", "show", "eth0"])
+             await_exec(vm, ["/bin/sh", "-c", "ip addr show eth0"])
 
     assert ip_out =~ "172.30.0.2"
 
@@ -49,7 +52,7 @@ defmodule Hyper.E2e.NetworkTest do
     assert {:ok, %{stdout: http_out, exit_code: 0}} =
              await_exec(
                vm,
-               ["sh", "-c", "wget -S -O /dev/null http://example.com 2>&1"],
+               ["/bin/sh", "-c", "wget -S -O /dev/null http://example.com 2>&1"],
                :timer.seconds(90)
              )
 
