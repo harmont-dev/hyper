@@ -19,18 +19,23 @@ defmodule Sys.Linux.Subid do
   @spec subuid_ranges ::
           {:ok, [Spec.t()]}
           | {:error, File.posix() | :badarg | :terminated | :system_limit | :invalid_format}
-  def subuid_ranges, do: subid_ranges(@subuid_path)
+  def subuid_ranges, do: ranges(@subuid_path)
 
   @doc "Return the list of all subgid ranges"
   @spec subgid_ranges ::
           {:ok, [Spec.t()]}
           | {:error, File.posix() | :badarg | :terminated | :system_limit | :invalid_format}
-  def subgid_ranges, do: subid_ranges(@subgid_path)
+  def subgid_ranges, do: ranges(@subgid_path)
 
-  @spec subid_ranges(Path.t()) ::
+  @doc """
+  Parse the subid file at `path`. Any malformed line refuses the whole file
+  with `{:error, :invalid_format}` — these files gate privilege delegation, so
+  a partial read must never masquerade as the complete ruleset.
+  """
+  @spec ranges(Path.t()) ::
           {:ok, [Spec.t()]}
           | {:error, File.posix() | :badarg | :terminated | :system_limit | :invalid_format}
-  defp subid_ranges(path) do
+  def ranges(path) do
     with {:ok, content} <- File.read(path) do
       content
       |> String.split("\n", trim: true)

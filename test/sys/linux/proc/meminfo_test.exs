@@ -106,6 +106,20 @@ defmodule Sys.Linux.Proc.MeminfoTest do
       assert snap.cached == Information.kib(2_048)
     end
 
+    test "ignores lines with fewer than two tokens" do
+      payload = """
+      MemTotal:       16384 kB
+
+      bogus
+      MemFree:         1024 kB
+      MemAvailable:    8192 kB
+      Buffers:          256 kB
+      Cached:          2048 kB
+      """
+
+      assert Meminfo.parse(payload).total == Information.kib(16_384)
+    end
+
     test "raises when a required field is absent" do
       # MemAvailable removed - parse must fail loudly rather than fabricate a value.
       payload = """
