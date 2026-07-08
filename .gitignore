@@ -50,3 +50,8 @@ docs/superpowers/
 # the stamped binary's `version` output -- see the :suidhelper_stamp Mix compiler.
 /lib/hyper/suid_helper/expected.ex
 /priv/guest-agent/
+
+# TypeScript gRPC contract suite (test/grpc): deps, generated proto types, junit
+/test/grpc/node_modules/
+/test/grpc/generated/
+/test/grpc/junit.xml
