@@ -20,6 +20,7 @@ defmodule Hyper.Cfg.Network do
     case get_cfg(toml: "network.uplink", default: nil) do
       nil -> raise Hyper.Cfg.MissingError, "network.uplink is required when networking is enabled"
       v when is_binary(v) -> v
+      other -> raise ArgumentError, "network.uplink must be a string, got: #{inspect(other)}"
     end
   end
 
