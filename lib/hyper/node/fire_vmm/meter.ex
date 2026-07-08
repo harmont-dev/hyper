@@ -97,7 +97,7 @@ defmodule Hyper.Node.FireVMM.Meter do
         {:ok,
          %__MODULE__{
            opts: opts,
-           acc: Accumulator.new(Time.zero()),
+           acc: initial_acc(opts.cgroup_dir),
            window_start: DateTime.utc_now(),
            ticks: 0
          }}
@@ -135,6 +135,23 @@ defmodule Hyper.Node.FireVMM.Meter do
   @spec register(Opts.t()) :: :ok | {:error, term()}
   defp register(%Opts{register?: false}), do: :ok
   defp register(%Opts{vm_id: vm_id}), do: Routing.register_self({vm_id, :meter})
+
+  # Baseline the counter at the meter's birth, not at the first tick. A leaf
+  # that already exists may hold usage a previous meter incarnation flushed —
+  # baseline on its current reading, so a restarted meter never re-bills. A
+  # leaf that does not exist yet can only be created after us, so its counter
+  # is born at zero: baseline zero, and the first successful read accrues the
+  # boot burn — a VM stopped before its first tick still records a real window.
+  @spec initial_acc(Path.t()) :: Accumulator.t()
+  defp initial_acc(cgroup_dir) do
+    baseline =
+      case CpuStat.read(cgroup_dir) do
+        {:ok, %CpuStat{usage: usage}} -> usage
+        {:error, _reason} -> Time.zero()
+      end
+
+    Accumulator.observe(Accumulator.new(Time.zero()), baseline)
+  end
 
   @spec sample(%__MODULE__{}) :: %__MODULE__{}
   defp sample(%__MODULE__{opts: opts} = state) do
