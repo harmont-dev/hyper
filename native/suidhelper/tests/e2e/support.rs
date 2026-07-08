@@ -29,7 +29,7 @@ pub fn run(config: &Path, args: &[&str]) -> Output {
         .env_clear()
         .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
         .env("HYPER_SETUIDHELPER_CONFIG_PATH", config);
-    if let Ok(profile) = std::env::var("LLVM_PROFILE_FILE") {
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", profile);
     }
     cmd.output().expect("spawn helper")

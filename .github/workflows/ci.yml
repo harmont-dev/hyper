@@ -245,14 +245,14 @@ jobs:
       # `_as_root` and self-skips when run unprivileged. We select them by that
       # suffix (via sudo -E so the runner's cargo/rustup home and PATH are kept)
       # so the root-only paths -- sys-test ok, fake-bin argv capture, mknod/chown
-      # jail build -- actually run. A new root test is picked up automatically by
-      # following the naming convention; no test-binary enumeration to maintain.
-      # The rest of the suite (owner-axis tests assume a non-root uid) stays in
+      # jail build -- actually run, and collect coverage while doing so: this
+      # job is the only place those paths execute, since the non-root `rust`
+      # job's e2e tests self-skip them (the env passthrough in
+      # tests/e2e/support.rs lets the spawned helper's profile reach the
+      # collector). A new root test is picked up automatically by following
+      # the naming convention; no test-binary enumeration to maintain. The
+      # rest of the suite (owner-axis tests assume a non-root uid) stays in
       # the non-root `rust` job above.
-      # Coverage here is the only place the root-gated paths (tool dispatch,
-      # sys-test, jail build) execute -- the non-root rust job's e2e tests
-      # self-skip them. Task 1's LLVM_PROFILE_FILE passthrough makes the
-      # spawned helper's profile reach the collector.
       - name: Gated tests as root + coverage
         run: |
           sudo -E env "PATH=$PATH" \

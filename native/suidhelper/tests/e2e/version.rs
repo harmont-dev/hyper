@@ -4,8 +4,8 @@
 //! breaks helper verification at install time.
 //!
 //! Contract under test: exit 0 with a single JSON object on stdout where
-//! `version` == the crate version and `checksum_blake3` is 32 bytes of
-//! lowercase hex (all-zero on an unstamped dev build -- shape, not value).
+//! `version` == the crate version and `checksum_blake3` is 32 bytes rendered
+//! as 64 lowercase hex chars (all-zero on an unstamped dev build -- shape, not value).
 #![cfg(feature = "insecure_test_seams")]
 
 use std::path::Path;
