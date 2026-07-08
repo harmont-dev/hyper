@@ -38,7 +38,15 @@ sudo apt-get install -y \
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
 # PARAMETERS of the first, and the load fails.
-sudo modprobe -av dm_snapshot dm_thin_pool loop
+#
+# nf_tables + nf_nat back host-init's `hyper` nftables table and its
+# masquerade/SNAT/DNAT rules. A fresh GitHub-hosted runner does not have them
+# loaded, and the netfilter family does not always autoload on first `nft` use,
+# so `nft add table ip hyper` fails (empty stderr, non-zero exit) and the node
+# refuses to start. Load the base explicitly, as we do for the dm modules; the
+# nat expression sub-modules (nft_chain_nat, nft_masq) autoload once the base is
+# present and a rule is issued.
+sudo modprobe -av dm_snapshot dm_thin_pool loop nf_tables nf_nat
 targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
