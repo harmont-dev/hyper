@@ -12,6 +12,7 @@
 use hyper_suidhelper::security_gate;
 use hyper_suidhelper::tools::losetup::{ok_backing_file, Error};
 use proptest::prelude::*;
+use std::os::unix::fs::PermissionsExt;
 
 // An absolute, lexically-strict path that never exists: `safe_load` sees
 // ENOENT and falls back to the built-in defaults (hyper_base = /srv/hyper),
@@ -74,4 +75,87 @@ fn refusal_is_decided_on_the_resolved_path() {
             "{spelling}: got {err:?}",
         );
     }
+}
+
+fn is_root() -> bool {
+    nix::unistd::geteuid().is_root()
+}
+
+fn init_config_with_base(tmp: &std::path::Path) -> std::path::PathBuf {
+    let base = std::fs::canonicalize(tmp).unwrap();
+    let cfg = tmp.join("config.toml");
+    std::fs::write(&cfg, format!("work_dir = \"{}\"\n", base.display())).unwrap();
+    std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::env::set_var("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1");
+    std::env::set_var("HYPER_SETUIDHELPER_CONFIG_PATH", &cfg);
+    security_gate::init();
+    base
+}
+
+#[test]
+fn in_base_file_yields_inheritable_fd_to_same_inode_as_root() {
+    if !is_root() {
+        eprintln!("SKIP in_base_file accept: needs root to own the config file");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let base = init_config_with_base(tmp.path());
+    let backing = base.join("disk.img");
+    std::fs::write(&backing, b"data").unwrap();
+
+    let got =
+        ok_backing_file(backing.to_str().unwrap()).expect("in-base regular file must be accepted");
+
+    let fd: i32 = got
+        .to_str()
+        .unwrap()
+        .strip_prefix("/proc/self/fd/")
+        .expect("must return a /proc/self/fd/N handle")
+        .parse()
+        .unwrap();
+    assert_eq!(std::fs::read_link(&got).unwrap(), backing);
+
+    let flags = unsafe { nix::libc::fcntl(fd, nix::libc::F_GETFD) };
+    assert!(flags >= 0, "F_GETFD failed on the returned fd");
+    assert_eq!(
+        flags & nix::libc::FD_CLOEXEC,
+        0,
+        "backing fd must be inheritable across exec",
+    );
+}
+
+#[test]
+fn directory_under_base_is_refused_as_root() {
+    if !is_root() {
+        eprintln!("SKIP directory refusal: needs root to own the config file");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let base = init_config_with_base(tmp.path());
+    let dir = base.join("subdir");
+    std::fs::create_dir(&dir).unwrap();
+
+    let err = ok_backing_file(dir.to_str().unwrap())
+        .expect_err("a directory must never be a backing file");
+    assert!(matches!(err, Error::Backing(_)), "got {err:?}");
+}
+
+#[test]
+fn in_base_symlink_to_outside_is_refused_as_root() {
+    if !is_root() {
+        eprintln!("SKIP symlink-escape refusal: needs root to own the config file");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let base = init_config_with_base(tmp.path());
+
+    let target = outside.path().join("escape.img");
+    std::fs::write(&target, b"x").unwrap();
+    let link = base.join("innocent.img");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    let err = ok_backing_file(link.to_str().unwrap())
+        .expect_err("in-base symlink to an out-of-base target accepted");
+    assert!(matches!(err, Error::OutsideBase { .. }), "got {err:?}");
 }
