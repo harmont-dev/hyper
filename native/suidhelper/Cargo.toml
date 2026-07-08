@@ -53,6 +53,10 @@ name = "tools_jailer"
 path = "tests/tools/jailer.rs"
 
 [[test]]
+name = "tools_network_addr"
+path = "tests/tools/network_addr.rs"
+
+[[test]]
 name = "util_confinement"
 path = "tests/util/confinement.rs"
 

@@ -9,6 +9,7 @@ pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
 mod losetup;
+pub mod network;
 
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
