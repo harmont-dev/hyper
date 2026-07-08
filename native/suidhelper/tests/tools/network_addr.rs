@@ -52,4 +52,28 @@ proptest! {
         let is_slot_out_of_pool = matches!(result, Err(AddrError::SlotOutOfPool { .. }));
         prop_assert!(is_slot_out_of_pool);
     }
+
+    // Two distinct uids always derive non-overlapping /30 blocks: the gap
+    // between their veth_host_ip addresses is exactly 4x the slot distance,
+    // never wrapping one VM's address into another's.
+    #[test]
+    fn distinct_slots_never_share_a_block(
+        offset_a in 0u32..16_384,
+        offset_b in 0u32..16_384,
+    ) {
+        let uid_a = RANGE.0 + offset_a;
+        let uid_b = RANGE.0 + offset_b;
+        let plan_a = Plan::derive(uid_a, RANGE, POOL, &vm_id()).unwrap();
+        let plan_b = Plan::derive(uid_b, RANGE, POOL, &vm_id()).unwrap();
+
+        let ip_a = u32::from(plan_a.veth_host_ip);
+        let ip_b = u32::from(plan_b.veth_host_ip);
+        let slot_gap = i64::from(plan_b.slot) - i64::from(plan_a.slot);
+        let ip_gap = i64::from(ip_b) - i64::from(ip_a);
+
+        prop_assert_eq!(ip_gap, slot_gap * 4);
+        if plan_a.slot != plan_b.slot {
+            prop_assert_ne!(ip_a, ip_b);
+        }
+    }
 }

@@ -59,13 +59,19 @@ impl Plan {
         if slot >= (1u32 << 16) / 4 {
             return Err(AddrError::SlotOutOfPool { slot });
         }
+        let veth_host_ip = block
+            .checked_add(1)
+            .ok_or(AddrError::SlotOutOfPool { slot })?;
+        let veth_ns_ip = block
+            .checked_add(2)
+            .ok_or(AddrError::SlotOutOfPool { slot })?;
         Ok(Self {
             slot,
             netns: vm_id.to_string(),
             veth_host: format!("hv{slot}"),
             veth_ns: format!("hp{slot}"),
-            veth_host_ip: Ipv4Addr::from(block + 1),
-            veth_ns_ip: Ipv4Addr::from(block + 2),
+            veth_host_ip: Ipv4Addr::from(veth_host_ip),
+            veth_ns_ip: Ipv4Addr::from(veth_ns_ip),
         })
     }
 }
