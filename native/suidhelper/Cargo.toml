@@ -97,6 +97,10 @@ name = "e2e_version"
 path = "tests/e2e/version.rs"
 
 [[test]]
+name = "e2e_losetup"
+path = "tests/e2e/losetup.rs"
+
+[[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
