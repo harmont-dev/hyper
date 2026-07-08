@@ -43,16 +43,6 @@ fn write_config_with_network(dir: &Path, work_dir: &Path) -> PathBuf {
     p
 }
 
-fn run(config: &Path, args: &[&str]) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config)
-        .output()
-        .expect("spawn helper")
-}
-
 fn setup_loop(tmp: &Path) -> Option<PathBuf> {
     let backing = tmp.join("backing.img");
     let f = fs::File::create(&backing).ok()?;

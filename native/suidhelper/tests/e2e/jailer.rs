@@ -78,16 +78,6 @@ fn write_root_config_with_network(dir: &Path, jailer: &Path, firecracker: &Path)
     p
 }
 
-fn run(config: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(HELPER)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config)
-        .output()
-        .expect("spawn helper")
-}
-
 #[test]
 fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     if !is_root() {
