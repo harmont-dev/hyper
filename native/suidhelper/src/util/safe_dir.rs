@@ -15,9 +15,12 @@
 use super::safe_file::{Any, SafeFile};
 use super::safe_path::SafePath;
 use nix::dir::{Dir, Type};
+use nix::errno::Errno;
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::libc::dev_t;
-use nix::sys::stat::{fchmod, fchmodat, fstatat, mknodat, FchmodatFlags, FileStat, Mode, SFlag};
+use nix::sys::stat::{
+    fchmod, fchmodat, fstatat, mkdirat, mknodat, FchmodatFlags, FileStat, Mode, SFlag,
+};
 use nix::unistd::{dup, fchown, fchownat, linkat, unlinkat, write, Gid, Uid, UnlinkatFlags};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
@@ -35,6 +38,8 @@ pub enum Error {
     Unlink { name: PathBuf, source: nix::Error },
     #[error("write {name:?}: {source}")]
     Write { name: PathBuf, source: nix::Error },
+    #[error("mkdirat {name:?}: {source}")]
+    Mkdir { name: PathBuf, source: nix::Error },
     #[error("mknodat {name:?}: {source}")]
     Mknod { name: PathBuf, source: nix::Error },
     #[error("fchownat {name:?}: {source}")]
@@ -57,6 +62,7 @@ impl Error {
             Error::Open { source, .. }
             | Error::Unlink { source, .. }
             | Error::Write { source, .. }
+            | Error::Mkdir { source, .. }
             | Error::Mknod { source, .. }
             | Error::Chown { source, .. }
             | Error::Chmod { source, .. }
@@ -190,6 +196,42 @@ impl SafeDir {
             source,
         })?;
         self.chown(name, uid, gid)
+    }
+
+    /// Create a character device node `name` in this directory (mode `0666`,
+    /// matching `/dev/net/tun`'s conventional permissions) with the given
+    /// `rdev`, then chown it to `uid:gid`.
+    pub fn mknod_char(&self, name: &Path, rdev: dev_t, uid: u32, gid: u32) -> Result<(), Error> {
+        mknodat(
+            Some(self.0.as_raw_fd()),
+            name,
+            SFlag::S_IFCHR,
+            Mode::from_bits_truncate(0o666),
+            rdev,
+        )
+        .map_err(|source| Error::Mknod {
+            name: name.to_path_buf(),
+            source,
+        })?;
+        self.chown(name, uid, gid)
+    }
+
+    /// Create directory `name` in this directory with `mode`, tolerating
+    /// `EEXIST` (`mkdir -p` semantics): the jailer may have already created
+    /// intermediate directories (e.g. `dev`, to bind-mount `/dev/kvm`) before
+    /// this helper runs.
+    pub fn mkdir(&self, name: &Path, mode: u32) -> Result<(), Error> {
+        match mkdirat(
+            Some(self.0.as_raw_fd()),
+            name,
+            Mode::from_bits_truncate(mode),
+        ) {
+            Ok(()) | Err(Errno::EEXIST) => Ok(()),
+            Err(source) => Err(Error::Mkdir {
+                name: name.to_path_buf(),
+                source,
+            }),
+        }
     }
 
     /// Hard-link the file at host path `src` into this directory as `name`.
