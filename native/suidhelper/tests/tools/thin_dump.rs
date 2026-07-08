@@ -10,9 +10,13 @@
 //!   * integrity: the parsed ranges' total length must equal the target
 //!     device's own `mapped_blocks` attribute, so a dump truncated mid-device
 //!     is an error, never a silently short success;
-//!   * anchoring: every attribute lookup is anchored on a leading space, so a
-//!     key can never match as the suffix of another attribute's name (e.g.
-//!     `dev_id` inside `snap_dev_id`).
+//!   * anchoring: attribute lookup is by exact XML attribute name, so a key
+//!     can never match as the suffix of another attribute's name (e.g.
+//!     `dev_id` inside `snap_dev_id`);
+//!   * grammar-level: parsing is via a real XML reader (quick-xml), not a
+//!     fixed line layout, so attribute order, whitespace, and entity escaping
+//!     never change the result, and malformed XML is a parse error rather
+//!     than a silently wrong guess.
 
 use hyper_suidhelper::tools::thin_dump::{parse_mappings, Error, ThinMappings};
 use proptest::prelude::*;
@@ -151,4 +155,27 @@ fn attribute_lookup_is_anchored_not_suffix_matched() {
     // inside it, read 9, and report the real device 3 as missing.
     let xml = "<superblock uuid=\"\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\" data_block_size=\"128\" nr_data_blocks=\"1\">\n  <device snap_dev_id=\"9\" dev_id=\"3\" mapped_blocks=\"1\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n    <range_mapping origin_begin=\"0\" data_begin=\"0\" length=\"1\" time=\"0\"/>\n  </device>\n</superblock>\n";
     assert_eq!(parse_mappings(xml, 3).unwrap().ranges, vec![(0, 1)]);
+}
+
+#[test]
+fn layout_variance_is_irrelevant() {
+    // Same document as a single line with shuffled attribute order and an
+    // escaped uuid — a layout the old line-scanner could not survive.
+    let xml = "<superblock nr_data_blocks=\"16384\" data_block_size=\"128\" uuid=\"a&quot;b\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\"><device snap_time=\"1\" dev_id=\"3\" mapped_blocks=\"9\" transaction=\"0\" creation_time=\"0\"><range_mapping length=\"8\" origin_begin=\"0\" data_begin=\"100\" time=\"0\"/><single_mapping data_block=\"200\" origin_block=\"42\" time=\"0\"/></device></superblock>";
+    assert_eq!(
+        parse_mappings(xml, 3).unwrap(),
+        ThinMappings {
+            block_sectors: 128,
+            ranges: vec![(0, 8), (42, 1)]
+        }
+    );
+}
+
+#[test]
+fn malformed_xml_is_an_error_not_a_guess() {
+    assert!(parse_mappings(
+        "<superblock data_block_size=\"128\"><device dev_id=\"3\"",
+        3
+    )
+    .is_err());
 }

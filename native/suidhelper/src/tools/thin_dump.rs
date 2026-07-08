@@ -2,15 +2,19 @@
 //!
 //! With an external-origin thin device, provisioned blocks are exactly the
 //! blocks ever written — the divergence a fork publish must copy. The parser
-//! is line-oriented over thin_dump's machine-generated output and keys every
-//! attribute lookup on ` key="` (leading space), so `snap_time` can never
-//! satisfy a lookup for `time`.
+//! reads thin_dump's output at the XML grammar level via `quick_xml`, not as
+//! a fixed layout — thin-provisioning-tools has two implementations (the
+//! original C++ and the `pdata_tools` Rust rewrite) whose formatting can
+//! drift (attribute order, whitespace, escaping) without changing meaning, and
+//! a grammar-level parser is immune to that drift.
 //!
 //! The device's own `mapped_blocks` attribute is cross-checked against the
 //! number of ranges actually parsed, so a dump truncated mid-device (a
 //! killed/crashed `thin_dump`) is an error rather than a silently short
 //! result.
 
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::Reader;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -39,6 +43,8 @@ pub enum Error {
     Spawn(#[source] io::Error),
     #[error("thin_dump failed: {0}")]
     Failed(String),
+    #[error("thin_dump output is not well-formed XML: {0}")]
+    Xml(String),
 }
 
 /// A thin device's provisioned map: pool block size (512-byte sectors) and
@@ -53,30 +59,61 @@ pub struct ThinMappings {
 /// device is an error — an empty result must always mean "device exists, has
 /// no provisioned blocks", never "we looked at the wrong dump".
 pub fn parse_mappings(xml: &str, dev_id: u64) -> Result<ThinMappings, Error> {
+    let mut reader = Reader::from_str(xml);
+
     let mut block_sectors: Option<u64> = None;
     let mut expected_blocks: Option<u64> = None;
     let mut in_target = false;
     let mut found = false;
     let mut ranges = Vec::new();
 
-    for raw in xml.lines() {
-        let line = raw.trim_start();
-
-        if line.starts_with("<superblock") {
-            block_sectors = Some(attr_u64(line, "data_block_size")?);
-        } else if line.starts_with("<device") {
-            if attr_u64(line, "dev_id")? == dev_id {
-                found = true;
-                expected_blocks = Some(attr_u64(line, "mapped_blocks")?);
-                // An empty device self-closes; no </device> follows.
-                in_target = !line.ends_with("/>");
+    loop {
+        match reader
+            .read_event()
+            .map_err(|err| Error::Xml(err.to_string()))?
+        {
+            Event::Eof => break,
+            // A `<device>` that opens (Start) enters the ranges that follow;
+            // a self-closing `<device/>` (Empty) has no ranges at all — it
+            // never sets `in_target`, so the empty-device case falls out of
+            // the loop with zero ranges collected.
+            Event::Start(e) => match e.name().as_ref() {
+                b"superblock" => block_sectors = Some(attr_u64(&e, "data_block_size")?),
+                b"device" => {
+                    if attr_u64(&e, "dev_id")? == dev_id {
+                        found = true;
+                        expected_blocks = Some(attr_u64(&e, "mapped_blocks")?);
+                        in_target = true;
+                    }
+                }
+                b"range_mapping" if in_target => {
+                    ranges.push((attr_u64(&e, "origin_begin")?, attr_u64(&e, "length")?));
+                }
+                b"single_mapping" if in_target => {
+                    ranges.push((attr_u64(&e, "origin_block")?, 1));
+                }
+                _ => {}
+            },
+            Event::Empty(e) => match e.name().as_ref() {
+                b"superblock" => block_sectors = Some(attr_u64(&e, "data_block_size")?),
+                b"device" => {
+                    if attr_u64(&e, "dev_id")? == dev_id {
+                        found = true;
+                        expected_blocks = Some(attr_u64(&e, "mapped_blocks")?);
+                    }
+                }
+                b"range_mapping" if in_target => {
+                    ranges.push((attr_u64(&e, "origin_begin")?, attr_u64(&e, "length")?));
+                }
+                b"single_mapping" if in_target => {
+                    ranges.push((attr_u64(&e, "origin_block")?, 1));
+                }
+                _ => {}
+            },
+            Event::End(e) if e.name().as_ref() == b"device" => {
+                in_target = false;
             }
-        } else if line.starts_with("</device") {
-            in_target = false;
-        } else if in_target && line.starts_with("<range_mapping") {
-            ranges.push((attr_u64(line, "origin_begin")?, attr_u64(line, "length")?));
-        } else if in_target && line.starts_with("<single_mapping") {
-            ranges.push((attr_u64(line, "origin_block")?, 1));
+            _ => {}
         }
     }
 
@@ -97,14 +134,17 @@ pub fn parse_mappings(xml: &str, dev_id: u64) -> Result<ThinMappings, Error> {
     }
 }
 
-// ` key="` with the leading space, so a key can never match another key's
-// suffix (e.g. `time` vs `snap_time`), independent of attribute order.
-fn attr_u64(line: &str, key: &'static str) -> Result<u64, Error> {
-    let needle = format!(" {key}=\"");
-    let start = line.find(&needle).ok_or(Error::MissingAttr(key))? + needle.len();
-    let rest = &line[start..];
-    let end = rest.find('"').ok_or(Error::MissingAttr(key))?;
-    rest[..end].parse().map_err(|_| Error::BadAttr(key))
+/// Look up an attribute on a start/empty tag by name, unescaping XML entities
+/// in its value (so e.g. a `uuid="a&quot;b"` decodes to `a"b`).
+fn attr_u64(tag: &BytesStart, key: &'static str) -> Result<u64, Error> {
+    let attr = tag
+        .try_get_attribute(key)
+        .map_err(|err| Error::Xml(err.to_string()))?
+        .ok_or(Error::MissingAttr(key))?;
+    let value = attr
+        .unescape_value()
+        .map_err(|err| Error::Xml(err.to_string()))?;
+    value.parse().map_err(|_| Error::BadAttr(key))
 }
 
 #[derive(Args)]
