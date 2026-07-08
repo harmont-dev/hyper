@@ -8,24 +8,9 @@ use hyper_suidhelper::util::safe_bin;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Command, Output};
 
-const BIN: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
-
-/// Run the helper with the gate open and the config path redirected.
-fn run_with_config(config_path: &Path, args: &[&str]) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config_path)
-        .output()
-        .expect("spawn helper")
-}
+mod support;
+use support::{is_root, run};
 
 /// Write a config file owned root:root, 0644. Requires the test run as root.
 fn write_root_config(dir: &Path, body: &str) -> std::path::PathBuf {
@@ -48,7 +33,7 @@ fn missing_config_falls_back_to_defaults_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let missing = tmp.path().join("nope.toml");
-    let out = run_with_config(&missing, &["sys-test"]);
+    let out = run(&missing, &["sys-test"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -74,7 +59,7 @@ fn non_root_owned_config_is_rejected() {
         let nogrp = nix::unistd::Gid::from_raw(65534);
         nix::unistd::chown(&p, Some(nobody), Some(nogrp)).unwrap();
     }
-    let out = run_with_config(&p, &["sys-test"]);
+    let out = run(&p, &["sys-test"]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -91,7 +76,7 @@ fn malformed_config_exits_2_malformed_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "this is not = valid = toml ===");
-    let out = run_with_config(&p, &["sys-test"]);
+    let out = run(&p, &["sys-test"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not valid TOML"));
 }
@@ -104,7 +89,7 @@ fn relative_work_dir_exits_2_relative_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "work_dir = \"relative/path\"\n");
-    let out = run_with_config(&p, &["sys-test"]);
+    let out = run(&p, &["sys-test"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("must be an absolute path"));
 }
@@ -117,7 +102,7 @@ fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
-    let out = run_with_config(&p, &["sys-test"]);
+    let out = run(&p, &["sys-test"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -212,7 +197,7 @@ fn bad_uid_gid_range_exits_2_as_root() {
         tmp.path(),
         "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [0, 100]\n",
     );
-    let out = run_with_config(&p, &["sys-test"]);
+    let out = run(&p, &["sys-test"]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
