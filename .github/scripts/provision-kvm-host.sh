@@ -17,6 +17,9 @@
 #     the node)
 #   - DEBIAN_FRONTEND=noninteractive (install.md is written for an interactive
 #     operator session; CI has no tty to prompt on)
+#   - [network] is always written here (install.md presents it as an optional
+#     section) since the runner's default route interface is detected fresh
+#     each run and integration coverage wants egress networking exercised
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -30,7 +33,7 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo util-linux \
+  coreutils e2fsprogs iproute2 libc-bin lvm2 nftables skopeo util-linux \
   "linux-modules-extra-$(uname -r)"
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
@@ -40,8 +43,19 @@ targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
 
+# host-init (run by the node at start) asserts ip_forward=1 rather than
+# setting it, so provisioning must turn it on and persist it across reboots.
+sudo sysctl -w net.ipv4.ip_forward=1
+echo 'net.ipv4.ip_forward=1' \
+  | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf >/dev/null
+
+# The default-route interface is the uplink guests NAT egress through.
+uplink="$(ip route show default | awk '{print $5; exit}')"
+[ -n "${uplink}" ] || { echo "ERROR: could not detect default-route uplink interface" >&2; exit 1; }
+echo "detected uplink: ${uplink}"
+
 sudo mkdir -p /etc/hyper
-sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'
+sudo tee /etc/hyper/config.toml >/dev/null <<EOF
 work_dir = "/srv/hyper"
 
 [tools]
@@ -57,6 +71,11 @@ cgroup = "hyper"
 # load is still decaying, and nothing else runs here worth protecting.
 [budget]
 cpu_max_load = 4.0
+
+# Enables per-VM egress NAT. The nft table itself is owned by host-init
+# (created idempotently at node start), not by this script.
+[network]
+uplink = "${uplink}"
 EOF
 sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml

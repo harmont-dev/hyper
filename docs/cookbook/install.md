@@ -181,6 +181,53 @@ cgroup = "hyper"
 For more details on configuring and tuning Hyper, we suggest you see the
 [configuration guide](config.md).
 
+### VM Networking (optional)
+
+Adding a `[network]` table to `/etc/hyper/config.toml` turns on real network
+egress for VMs: each guest gets NAT'd out through a physical interface on the
+host. The `hyper` nft table itself is created (and owned) by `host-init`,
+which runs automatically at node start — you never create nft rules by hand.
+You do need to prepare the host first:
+
+Install `iproute2` and `nftables`:
+
+```sh
+sudo apt install -y iproute2 nftables   # dnf install -y iproute nftables
+```
+
+Enable IPv4 forwarding. `host-init` only *asserts* this is on — it refuses to
+proceed rather than setting it for you:
+
+```sh
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+> #### Persistent Config {: .warning}
+>
+> Loading this via `sysctl -w` is ephemeral and resets on reboot. Persist it:
+>
+> ```sh
+> echo 'net.ipv4.ip_forward=1' \
+>     | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf
+> ```
+
+Then set `uplink` to the physical NIC guests should NAT out through — the
+default-route interface is a reasonable choice on a single-uplink host:
+
+```sh
+ip route show default | awk '{print $5; exit}'
+```
+
+```toml
+[network]
+# **required**. The physical uplink interface guests NAT egress through.
+uplink = "eth0"
+
+# optional, defaults shown
+clone_pool = "172.31.0.0/16"
+resolver = "1.1.1.1"
+```
+
 ### Cgroups
 
 Hyper uses cgroups to impose limits on each VM. Each VM has its own cgroup,
