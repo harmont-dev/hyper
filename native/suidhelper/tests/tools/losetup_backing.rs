@@ -81,6 +81,9 @@ fn is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
+/// Point the config seam at a root-owned config whose work_dir is the (real,
+/// canonicalized) tempdir, so in-base acceptance is testable. Root-only: the
+/// config file must be root-owned to pass `SafeFile`'s owner check.
 fn init_config_with_base(tmp: &std::path::Path) -> std::path::PathBuf {
     let base = std::fs::canonicalize(tmp).unwrap();
     let cfg = tmp.join("config.toml");
@@ -106,6 +109,7 @@ fn in_base_file_yields_inheritable_fd_to_same_inode_as_root() {
     let got =
         ok_backing_file(backing.to_str().unwrap()).expect("in-base regular file must be accepted");
 
+    // Round-trip: the returned handle names exactly the validated inode.
     let fd: i32 = got
         .to_str()
         .unwrap()
@@ -115,6 +119,9 @@ fn in_base_file_yields_inheritable_fd_to_same_inode_as_root() {
         .unwrap();
     assert_eq!(std::fs::read_link(&got).unwrap(), backing);
 
+    // The whole point of the dup: the fd must survive exec into the losetup
+    // child, i.e. CLOEXEC must be OFF. (raw libc keeps this independent of
+    // nix's fcntl fd-type churn across versions)
     let flags = unsafe { nix::libc::fcntl(fd, nix::libc::F_GETFD) };
     assert!(flags >= 0, "F_GETFD failed on the returned fd");
     assert_eq!(
@@ -150,6 +157,8 @@ fn in_base_symlink_to_outside_is_refused_as_root() {
     let outside = tempfile::tempdir().unwrap();
     let base = init_config_with_base(tmp.path());
 
+    // The link LIVES under base but its target does not — the resolved real
+    // path must decide, so this in-base-looking name is refused.
     let target = outside.path().join("escape.img");
     std::fs::write(&target, b"x").unwrap();
     let link = base.join("innocent.img");
