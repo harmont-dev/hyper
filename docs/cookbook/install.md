@@ -191,13 +191,15 @@ cgroup = "hyper"
 For more details on configuring and tuning Hyper, we suggest you see the
 [configuration guide](config.md).
 
-### VM Networking (optional)
+### VM Networking (required)
 
-Adding a `[network]` table to `/etc/hyper/config.toml` turns on real network
-egress for VMs: each guest gets NAT'd out through a physical interface on the
-host. The `hyper` nft table itself is created (and owned) by `host-init`,
-which runs automatically at node start — you never create nft rules by hand.
-You do need to prepare the host first:
+VM networking is **mandatory**: a node refuses to start without a `[network]`
+table in `/etc/hyper/config.toml`, and every VM gets NAT'd egress out through a
+physical interface on the host. There is no opt-out — a node that fails this
+preflight will not boot (`{:error, :network_not_configured}`, a missing uplink,
+or IPv4 forwarding off). The `hyper` nft table itself is created (and owned) by
+`host-init`, which runs automatically at node start — you never create nft rules
+by hand. You must prepare the host first:
 
 Install `iproute2` and `nftables`:
 

@@ -166,25 +166,20 @@ defmodule Hyper.Node.Reaper do
     end
   end
 
-  # `/var/run/netns` only exists (and only matters) when VM egress networking is
-  # turned on; skip the listing entirely when it is off rather than logging
-  # spurious enoent warnings on every tick.
+  # Networking is mandatory, so `/var/run/netns` is expected present; an :enoent
+  # (nothing booted yet) is still normal and yields no orphans.
   @spec list_netns() :: [String.t()]
   defp list_netns do
-    if Hyper.Cfg.Network.enabled?() do
-      case File.ls("/var/run/netns") do
-        {:ok, names} ->
-          names
+    case File.ls("/var/run/netns") do
+      {:ok, names} ->
+        names
 
-        {:error, :enoent} ->
-          []
+      {:error, :enoent} ->
+        []
 
-        {:error, reason} ->
-          Logger.warning("reaper: could not list netns: #{inspect(reason)}")
-          []
-      end
-    else
-      []
+      {:error, reason} ->
+        Logger.warning("reaper: could not list netns: #{inspect(reason)}")
+        []
     end
   end
 
@@ -200,10 +195,7 @@ defmodule Hyper.Node.Reaper do
     )
 
     log_result("dm volume", id, Dmsetup.remove(Img.Mutable.dm_name(id)))
-
-    if Hyper.Cfg.Network.enabled?() do
-      log_result("netns", id, Hyper.SuidHelper.Network.teardown_orphan(id))
-    end
+    log_result("netns", id, Hyper.SuidHelper.Network.teardown_orphan(id))
 
     :ok
   end

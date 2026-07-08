@@ -64,20 +64,21 @@ defmodule Hyper.Node.FireVMM.Jailer do
     end
 
     @doc """
-    Host preflight for VM egress networking: a no-op when `[network]` is
-    absent from config (`Network.enabled?/0` false). When enabled, confirms
-    the uplink interface exists and the kernel is forwarding IPv4 — both
-    prerequisites `Hyper.SuidHelper.Network.host_init/0` and per-VM
-    `prepare/2` depend on but cannot themselves provision.
+    Host preflight for VM egress networking, which is mandatory: refuses to
+    start unless `[network]` is configured, the uplink interface exists, and
+    the kernel is forwarding IPv4 — all prerequisites
+    `Hyper.SuidHelper.Network.host_init/0` and per-VM `prepare/2` depend on but
+    cannot themselves provision. This is the gate that makes networking
+    non-optional: a node missing any of these will not boot.
     """
     @spec network_ready() :: :ok | {:error, term()}
     def network_ready do
-      if Network.enabled?() do
+      if Network.configured?() do
         with :ok <- uplink_present(Network.uplink()) do
           ip_forward_enabled()
         end
       else
-        :ok
+        {:error, :network_not_configured}
       end
     end
 

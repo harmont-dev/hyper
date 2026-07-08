@@ -87,11 +87,13 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   end
 
   describe "Checks.network_ready/0" do
-    test "ok when networking is disabled (no [network] table)" do
+    test "refuses to start when no [network] table is configured" do
+      # Networking is mandatory: absence is a hard startup failure, not a
+      # silent opt-out.
       Hyper.Cfg.Toml.put_cache(%{})
       on_exit(fn -> Hyper.Cfg.Toml.reload() end)
 
-      assert Jailer.Checks.network_ready() == :ok
+      assert Jailer.Checks.network_ready() == {:error, :network_not_configured}
     end
 
     test "fails when uplink iface is absent" do

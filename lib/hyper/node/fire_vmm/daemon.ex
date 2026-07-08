@@ -92,13 +92,13 @@ defmodule Hyper.Node.FireVMM.Daemon do
   end
 
   # The testable seam: reset any stale jail from a prior incarnation, then —
-  # gated on networking being enabled — prepare the netns the jailer's
-  # `--netns` will enter. Must run before `launch/1`: the jailer refuses to
-  # start if the netns it is told to enter does not already exist.
+  # Prepare the netns the jailer's `--netns` will enter. Must run before
+  # `launch/1`: the jailer refuses to start if the netns it is told to enter
+  # does not already exist. Networking is mandatory, so this is unconditional.
   @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
   defp prelaunch(%Opts{vm_id: id, uid: uid} = opts) do
     with :ok <- reset_stale_jail(opts) do
-      if Hyper.Cfg.Network.enabled?(), do: Hyper.SuidHelper.Network.prepare(id, uid), else: :ok
+      Hyper.SuidHelper.Network.prepare(id, uid)
     end
   end
 
@@ -110,11 +110,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # failure); the first error is surfaced to the caller.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id, uid: uid}) do
-    net =
-      if Hyper.Cfg.Network.enabled?(),
-        do: Hyper.SuidHelper.Network.teardown(id, uid),
-        else: :ok
-
+    net = Hyper.SuidHelper.Network.teardown(id, uid)
     jail = SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
     with :ok <- net, do: jail
   end

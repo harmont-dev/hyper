@@ -7,14 +7,13 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
   for `tools.firecracker`/`tools.jailer` — so they can observe real call
   order and gating without root, a real netns, or a real firecracker process.
 
-  Invariants under test:
+  Invariants under test (networking is mandatory — these fire unconditionally,
+  even with no `[network]` table in config):
 
     * the jailer enters the netns via `--netns` (Task 8), so it must already
       exist: `network prepare` must run before the `jailer` launch.
     * jail clearing (`chroot-jail remove`) and network teardown both fire
-      wherever the jail is cleared (stale-reset on relaunch, and terminate),
-      gated on `Hyper.Cfg.Network.enabled?/0`. Disabled is behavior-identical
-      to before this feature: no network call at all.
+      wherever the jail is cleared (stale-reset on relaunch, and terminate).
   """
 
   use ExUnit.Case, async: false
@@ -79,35 +78,16 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
   # (see `JailerTest`), so every scenario stubs it alongside `tools.suidhelper`
   # to keep it off the real filesystem.
-  defp put_toml(fake, network \\ nil) do
+  defp put_toml(fake) do
     tools = %{"suidhelper" => fake, "firecracker" => "/usr/local/bin/firecracker"}
-    base = %{"tools" => tools}
-    Hyper.Cfg.Toml.put_cache(if network, do: Map.put(base, "network", network), else: base)
+    Hyper.Cfg.Toml.put_cache(%{"tools" => tools})
   end
 
-  describe "networking disabled (default)" do
-    test "start_link never calls network, and jail clearing still runs", %{log: log, fake: fake} do
-      refute Hyper.Cfg.Network.enabled?()
-      put_toml(fake)
-
-      Process.flag(:trap_exit, true)
-      {:ok, pid} = Daemon.start_link(opts())
-      assert_receive {:EXIT, ^pid, _reason}, 2_000
-
-      ops = calls(log)
-      refute "network" in ops
-      assert "chroot-jail" in ops
-      assert "jailer" in ops
-      # the netns-prepare (or its absence) always precedes the launch attempt
-      assert Enum.find_index(ops, &(&1 == "chroot-jail")) <
-               Enum.find_index(ops, &(&1 == "jailer"))
-    end
-  end
-
-  describe "networking enabled" do
+  describe "netns lifecycle (mandatory)" do
     test "start_link prepares the netns before launching the jailer", %{log: log, fake: fake} do
-      put_toml(fake, %{"uplink" => "eth0"})
-      assert Hyper.Cfg.Network.enabled?()
+      # No [network] table on purpose: the netns prepare must fire regardless,
+      # since networking is mandatory rather than config-gated.
+      put_toml(fake)
 
       Process.flag(:trap_exit, true)
       {:ok, pid} = Daemon.start_link(opts())
@@ -123,7 +103,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     end
 
     test "terminate/2 tears down both the network and the chroot jail", %{log: log, fake: fake} do
-      put_toml(fake, %{"uplink" => "eth0"})
+      put_toml(fake)
 
       assert :ok =
                Daemon.terminate(:shutdown, %Daemon{

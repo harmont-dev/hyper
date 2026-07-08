@@ -32,20 +32,16 @@ defmodule Hyper.Node.FireVMM.BootSpec do
 
   @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
-    base_args = Map.get(source, :boot_args, @default_boot_args)
+    # Networking is mandatory: every VM gets a NIC on the uniform inner-world
+    # address plus the kernel `ip=`/`hyper.resolver=` cmdline. A node that
+    # reached here has already passed the startup network preflight.
+    vm_id = Map.fetch!(source, :vm_id)
 
-    {nics, boot_args} =
-      if Hyper.Cfg.Network.enabled?() do
-        vm_id = Map.fetch!(source, :vm_id)
-
-        {[Hyper.Node.FireVMM.Net.interface(vm_id)],
-         base_args <>
-           " " <>
-           Hyper.Node.FireVMM.Net.ip_cmdline() <>
-           " " <> Hyper.Node.FireVMM.Net.resolver_cmdline(Hyper.Cfg.Network.resolver())}
-      else
-        {[], base_args}
-      end
+    boot_args =
+      Map.get(source, :boot_args, @default_boot_args) <>
+        " " <>
+        Hyper.Node.FireVMM.Net.ip_cmdline() <>
+        " " <> Hyper.Node.FireVMM.Net.resolver_cmdline(Hyper.Cfg.Network.resolver())
 
     %Cold{
       machine_config: Instance.Spec.machine_config(Instance.spec(type)),
@@ -61,7 +57,7 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
       ],
-      network_interfaces: nics
+      network_interfaces: [Hyper.Node.FireVMM.Net.interface(vm_id)]
     }
   end
 end

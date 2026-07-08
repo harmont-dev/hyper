@@ -17,10 +17,11 @@ defmodule Hyper.Cfg.NetworkTest do
     end
   end
 
-  describe "enabled?/0" do
+  describe "configured?/0" do
     test "false when no uplink configured" do
-      # Base test config sets no [network] table.
-      refute Network.enabled?()
+      # Base test config sets no [network] table. This is the predicate the
+      # startup preflight uses to refuse booting a node without networking.
+      refute Network.configured?()
     end
   end
 
