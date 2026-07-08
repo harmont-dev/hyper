@@ -44,20 +44,27 @@ defmodule Hyper.E2e.NetworkTest do
 
     # TEMP DIAGNOSTIC: capture the guest's runtime network state so a failing
     # egress run tells us which layer is broken (resolv.conf write? raw L3
-    # egress? DNS specifically?). Removed once egress is green.
-    {:ok, %{stdout: diag}} =
-      await_exec(
-        vm,
-        [
-          "/bin/sh",
-          "-c",
-          "echo '--resolv--'; cat /etc/resolv.conf 2>&1; " <>
-            "echo '--route--'; ip route 2>&1; " <>
-            "echo '--egress-by-ip--'; wget -T 10 -S -O /dev/null http://1.1.1.1/ 2>&1 | head -4; " <>
-            "echo '--dns--'; nslookup example.com 1.1.1.1 2>&1 | head -6"
-        ],
-        :timer.seconds(90)
-      )
+    # egress? DNS specifically?). Logged via Logger (ExUnit drops the custom
+    # message on a pattern-match assert). Removed once egress is green.
+    diag =
+      case await_exec(
+             vm,
+             [
+               "/bin/sh",
+               "-c",
+               "echo '--resolv--'; cat /etc/resolv.conf 2>&1; " <>
+                 "echo '--route--'; ip route 2>&1; " <>
+                 "echo '--egress-by-ip--'; wget -T 10 -S -O /dev/null http://1.1.1.1/ 2>&1 | head -4; " <>
+                 "echo '--dns--'; nslookup example.com 1.1.1.1 2>&1 | head -8"
+             ],
+             :timer.seconds(90)
+           ) do
+        {:ok, r} -> r.stdout
+        other -> inspect(other)
+      end
+
+    require Logger
+    Logger.warning("=== GUEST NET DIAG ===\n#{diag}=== END GUEST NET DIAG ===")
 
     # Prove real egress AND an explicit HTTP 200 — not just a non-zero-free
     # exit. `wget -S` writes the server's response headers to stderr; we merge
