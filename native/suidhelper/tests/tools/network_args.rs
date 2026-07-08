@@ -18,7 +18,7 @@ fn plan0() -> Plan {
 
 #[test]
 fn prepare_creates_netns_first_and_default_route_last() {
-    let cmds = args::prepare_commands(&plan0(), "/usr/sbin/nft");
+    let cmds = args::prepare_commands(&plan0(), "/usr/sbin/nft", "/usr/sbin/sysctl");
     let first = &cmds[0];
     assert!(matches!(first.bin, Which::Ip));
     assert_eq!(
@@ -113,7 +113,8 @@ fn prepare_commands_golden_sequence() {
     // In-netns nft runs via `ip netns exec <ns> <abs nft path>` — the absolute
     // path, since the helper clears PATH before spawning (see nft_ns).
     let nft = "/usr/sbin/nft";
-    let cmds = args::prepare_commands(&plan0(), nft);
+    let sysctl = "/usr/sbin/sysctl";
+    let cmds = args::prepare_commands(&plan0(), nft, sysctl);
     let expected = vec![
         cmd(Which::Ip, &["netns", "add", netns]),
         cmd(
@@ -141,6 +142,17 @@ fn prepare_commands_golden_sequence() {
         cmd(
             Which::Ip,
             &["-n", netns, "route", "add", "default", "via", "172.31.0.1"],
+        ),
+        cmd(
+            Which::Ip,
+            &[
+                "netns",
+                "exec",
+                netns,
+                sysctl,
+                "-w",
+                "net.ipv4.ip_forward=1",
+            ],
         ),
         cmd(
             Which::Ip,

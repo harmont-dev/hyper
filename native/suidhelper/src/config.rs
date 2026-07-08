@@ -144,6 +144,7 @@ pub struct Tools {
     blockdev: PathBuf,
     ip: PathBuf,
     nft: PathBuf,
+    sysctl: PathBuf,
     thin_dump: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
@@ -160,6 +161,7 @@ impl Default for Tools {
             // paths. iproute2's real binary lives at /usr/bin/ip.
             ip: "/usr/bin/ip".into(),
             nft: "/usr/sbin/nft".into(),
+            sysctl: "/usr/sbin/sysctl".into(),
             thin_dump: "/usr/sbin/thin_dump".into(),
             firecracker: None,
             jailer: None,
@@ -264,6 +266,13 @@ impl Config {
     /// The validated `nft` (nftables) binary the network tool runs.
     pub fn nft(&self) -> Result<SafeBin<"nft">, safe_bin::Error> {
         SafeBin::from_path(&self.tools.nft)
+    }
+
+    /// The `sysctl` binary, used to enable IPv4 forwarding inside a VM's netns
+    /// (a fresh netns defaults `net.ipv4.ip_forward` to 0, independent of the
+    /// host, so the netns would not route the guest's egress without it).
+    pub fn sysctl(&self) -> Result<SafeBin<"sysctl">, safe_bin::Error> {
+        SafeBin::from_path(&self.tools.sysctl)
     }
 
     /// The `[network]` table, or `None` when VM networking is disabled — either

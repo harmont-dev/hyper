@@ -102,13 +102,23 @@ impl Command {
         full.extend(argv);
         Self::ip(full)
     }
+
+    /// `ip netns exec <netns> <sysctl> ...` — runs a `sysctl` write inside the
+    /// VM's netns. Like [`nft_ns`], it stays a [`Which::Ip`] command (only `ip`
+    /// and `nft` are ever the directly-named privileged binary) and takes the
+    /// *absolute* sysctl path, since the helper clears `PATH` before spawning.
+    fn sysctl_ns(netns: &str, sysctl: &str, argv: Vec<String>) -> Self {
+        let mut full = argv!["netns", "exec", netns, sysctl];
+        full.extend(argv);
+        Self::ip(full)
+    }
 }
 
 /// Bring up the VM's netns, host/ns veth pair, TAP device, and in-netns NAT so
 /// the guest's inner address (`addr::INNER_GUEST_IP`) can reach the host's
 /// uplink. The default route is requested last, after the host veth end
 /// (`hv<slot>`) is up, so the route's target is already reachable.
-pub fn prepare_commands(plan: &Plan, nft: &str) -> Vec<Command> {
+pub fn prepare_commands(plan: &Plan, nft: &str, sysctl: &str) -> Vec<Command> {
     let netns = plan.netns.as_str();
     let veth_host = plan.veth_host.as_str();
     let veth_ns = plan.veth_ns.as_str();
@@ -154,6 +164,11 @@ pub fn prepare_commands(plan: &Plan, nft: &str) -> Vec<Command> {
         Command::ip_ns(netns, argv!["link", "set", addr::TAP_NAME, "up"]),
         Command::ip_ns(netns, argv!["link", "set", "lo", "up"]),
         Command::ip_ns(netns, argv!["route", "add", "default", "via", veth_host_ip]),
+        // A fresh netns defaults net.ipv4.ip_forward to 0 (independent of the
+        // host's setting), so without this the netns silently drops every
+        // packet it would route between the guest's tap and the veth uplink —
+        // i.e. all guest egress. Enable it once the netns exists.
+        Command::sysctl_ns(netns, sysctl, argv!["-w", "net.ipv4.ip_forward=1"]),
     ];
     commands.extend(nft_prepare_commands(netns, veth_ns, veth_ns_ip, nft));
     commands

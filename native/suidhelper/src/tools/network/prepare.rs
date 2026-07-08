@@ -82,11 +82,16 @@ fn parse_cidr_base(s: &str) -> Result<Ipv4Addr, Error> {
 /// the same `uid` + config; only the argv sequence they run differs. Every
 /// refusal here (`[network]` absent, uid out of range, malformed CIDR, a
 /// misconfigured binary) happens before any privileged command is spawned.
-pub(super) fn resolve(uid: u32, vm_id: &VmId) -> Result<(Plan, PathBuf, PathBuf), Error> {
+pub(super) fn resolve(uid: u32, vm_id: &VmId) -> Result<(Plan, PathBuf, PathBuf, PathBuf), Error> {
     let config = Config::get();
     let network = super::resolve_network(config.network())?;
     let plan = plan_from(uid, config.uid_gid_range(), &network.clone_pool, vm_id)?;
-    Ok((plan, config.ip()?.into(), config.nft()?.into()))
+    Ok((
+        plan,
+        config.ip()?.into(),
+        config.nft()?.into(),
+        config.sysctl()?.into(),
+    ))
 }
 
 pub fn run(args: PrepareArgs) -> Result<serde_json::Value, crate::tools::Error> {
@@ -99,12 +104,18 @@ struct Prepare {
     plan: Plan,
     ip: PathBuf,
     nft: PathBuf,
+    sysctl: PathBuf,
 }
 
 impl Prepare {
     fn new(args: PrepareArgs) -> Result<Self, Error> {
-        let (plan, ip, nft) = resolve(args.uid, &args.vm_id)?;
-        Ok(Self { plan, ip, nft })
+        let (plan, ip, nft, sysctl) = resolve(args.uid, &args.vm_id)?;
+        Ok(Self {
+            plan,
+            ip,
+            nft,
+            sysctl,
+        })
     }
 }
 
@@ -114,7 +125,11 @@ impl IsTool for Prepare {
     type RunT = Result<(), Error>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let commands = args::prepare_commands(&self.plan, &self.nft.to_string_lossy());
+        let commands = args::prepare_commands(
+            &self.plan,
+            &self.nft.to_string_lossy(),
+            &self.sysctl.to_string_lossy(),
+        );
         exec::run_all(&commands, |which| match which {
             args::Which::Ip => self.ip.as_path(),
             args::Which::Nft => self.nft.as_path(),

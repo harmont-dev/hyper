@@ -42,7 +42,9 @@ struct Teardown {
 
 impl Teardown {
     fn new(args: TeardownArgs) -> Result<Self, Error> {
-        let (plan, ip, nft) = prepare::resolve(args.uid, &args.vm_id)?;
+        // Teardown only deletes the netns/veth (no in-netns sysctl), so the
+        // resolved sysctl path is unused here.
+        let (plan, ip, nft, _sysctl) = prepare::resolve(args.uid, &args.vm_id)?;
         Ok(Self { plan, ip, nft })
     }
 }
