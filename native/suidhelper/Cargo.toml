@@ -104,6 +104,10 @@ path = "tests/config_uid_gid_range.rs"
 name = "util_linux_thin_dump"
 path = "tests/util/linux/thin_dump.rs"
 
+[[test]]
+name = "tools_losetup_backing"
+path = "tests/tools/losetup_backing.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
