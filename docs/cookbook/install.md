@@ -223,6 +223,23 @@ sudo sysctl -w net.ipv4.ip_forward=1
 >     | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf
 > ```
 
+> #### Conflicting FORWARD firewall {: .warning}
+>
+> Guest egress is *forwarded* (per-VM netns veth → uplink). If the host already
+> runs a firewall that defaults the `filter` FORWARD chain to DROP — Docker does
+> this, and so do some hardened base images — those drops silently eat every
+> guest packet: the guest configures its NIC correctly but nothing ever returns.
+> Admit the clone pool through the firewall's user hook (Docker evaluates
+> `DOCKER-USER` before its own drops); the `hyper` nft forward chain still
+> enforces guest isolation:
+>
+> ```sh
+> sudo iptables -I DOCKER-USER -s 172.31.0.0/16 -j ACCEPT
+> sudo iptables -I DOCKER-USER -d 172.31.0.0/16 -j ACCEPT
+> ```
+>
+> On a host without Docker, ensure nothing else sets the FORWARD policy to DROP.
+
 Then set `uplink` to the physical NIC guests should NAT out through — the
 default-route interface is a reasonable choice on a single-uplink host:
 

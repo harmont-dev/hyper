@@ -38,25 +38,20 @@ defmodule Hyper.E2e.NetworkTest do
     # generous deadline for a cold boot on a shared runner. Hyper.exec runs argv
     # directly with no PATH (see its @doc) — a bare name returns exit 127 — so
     # route through an absolute `/bin/sh -c` and let busybox's own default PATH
-    # resolve the `ip`/`wget`/`nslookup` applets inside the guest.
+    # resolve the `ip`/`wget` applets inside the guest.
     #
-    # `wget -S` writes response headers to stderr; `2>&1` merges them into stdout
-    # so we can assert the `... 200 ...` status line. Alpine ships busybox wget
-    # (not curl); `-O /dev/null` discards the body but still drives the full
+    # `ip addr show eth0` proves the uniform inner-world address is configured;
+    # the `wget` then proves real egress with an explicit HTTP 200 (not just a
+    # zero exit): `-S` writes response headers to stderr, merged via `2>&1` so we
+    # can match the `... 200 ...` status line. Alpine ships busybox wget, not
+    # curl; `-O /dev/null` discards the body but still drives the full
     # netns → SNAT → veth → MASQUERADE → uplink path and DNS resolution.
     script =
-      "echo '--ip--'; ip addr show eth0 2>&1; " <>
-        "echo '--resolv--'; cat /etc/resolv.conf 2>&1; " <>
-        "echo '--route--'; ip route 2>&1; " <>
-        "echo '--egress-by-ip--'; wget -T 10 -S -O /dev/null http://1.1.1.1/ 2>&1 | head -4; " <>
-        "echo '--dns--'; nslookup example.com 1.1.1.1 2>&1 | head -8; " <>
+      "echo '--ip--'; ip addr show eth0; " <>
         "echo '--http--'; wget -S -O /dev/null http://example.com 2>&1"
 
-    assert {:ok, %{stdout: out, exit_code: _}} =
+    assert {:ok, %{stdout: out, exit_code: 0}} =
              await_exec(vm, ["/bin/sh", "-c", script], :timer.seconds(120))
-
-    require Logger
-    Logger.warning("=== GUEST NET DIAG ===\n#{out}\n=== END GUEST NET DIAG ===")
 
     assert out =~ "172.30.0.2", "guest eth0 lacks the inner-world address:\n#{out}"
 
