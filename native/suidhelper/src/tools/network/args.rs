@@ -81,6 +81,16 @@ impl Command {
         }
     }
 
+    /// An `ip` step whose non-zero exit is tolerated — for idempotent deletes
+    /// (`ip netns del`, `ip link del`) issued speculatively where the target may
+    /// not exist. See the `allow_failure` doc on [`Command`].
+    fn ip_allow_failure(argv: Vec<String>) -> Self {
+        Self {
+            allow_failure: true,
+            ..Self::ip(argv)
+        }
+    }
+
     /// `ip netns exec <netns> <nft> ...` — runs an `nft` operation inside the
     /// VM's netns, kept as a [`Which::Ip`] command so only `ip` and `nft` are
     /// ever the privileged binary named directly. `nft` is the *absolute* path
@@ -243,10 +253,17 @@ fn nft_prepare_commands(
 /// the TAP device, and any in-netns nftables state with it; the host-side veth
 /// end usually goes with it too, but `ip link del` is issued explicitly in
 /// case it lingers (a no-op if already gone).
+///
+/// Both deletes tolerate a missing target: `Daemon` runs teardown speculatively
+/// in `clear_jail` *before* launching a fresh VM (to clear any stale prior
+/// incarnation), so on a first boot the netns and veth do not exist yet —
+/// `ip netns del` on a missing namespace exits non-zero, which must not fail
+/// the launch. Like the chroot removal it sits beside, teardown is idempotent
+/// cleanup; a genuine leak is backstopped by `Hyper.Node.Reaper`.
 pub fn teardown_commands(plan: &Plan) -> Vec<Command> {
     vec![
-        Command::ip(argv!["netns", "del", plan.netns.as_str()]),
-        Command::ip(argv!["link", "del", plan.veth_host.as_str()]),
+        Command::ip_allow_failure(argv!["netns", "del", plan.netns.as_str()]),
+        Command::ip_allow_failure(argv!["link", "del", plan.veth_host.as_str()]),
     ]
 }
 
