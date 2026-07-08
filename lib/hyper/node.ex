@@ -190,8 +190,21 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
          {:ok, base} <- Hyper.SuidHelper.sys_test(),
-         :ok <- check_helper_base(base) do
+         :ok <- check_helper_base(base),
+         :ok <- maybe_host_init() do
       Hyper.Node.FireVMM.test_system()
+    end
+  end
+
+  # Idempotent: reconciles the host-wide `hyper` nftables table on every start.
+  # No-op when `[network]` is absent from config. Runs after
+  # `Hyper.SuidHelper.test_system/0` so the helper is confirmed present first.
+  @spec maybe_host_init :: :ok | {:error, term()}
+  defp maybe_host_init do
+    if Hyper.Cfg.Network.enabled?() do
+      Hyper.SuidHelper.Network.host_init()
+    else
+      :ok
     end
   end
 

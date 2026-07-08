@@ -38,7 +38,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
     first failure.
     """
 
-    alias Hyper.Cfg.{Dirs, Jails}
+    alias Hyper.Cfg.{Dirs, Jails, Network}
+
+    @ip_forward_path "/proc/sys/net/ipv4/ip_forward"
 
     @doc "Run every pre-requisite check, halting at the first failure."
     @spec run() :: :ok | {:error, term()}
@@ -56,8 +58,43 @@ defmodule Hyper.Node.FireVMM.Jailer do
         &kvm_present/0,
         &cgroup_v2_available/0,
         &parent_cgroup_present/0,
-        &chroot_writable/0
+        &chroot_writable/0,
+        &network_ready/0
       ]
+    end
+
+    @doc """
+    Host preflight for VM egress networking: a no-op when `[network]` is
+    absent from config (`Network.enabled?/0` false). When enabled, confirms
+    the uplink interface exists and the kernel is forwarding IPv4 — both
+    prerequisites `Hyper.SuidHelper.Network.host_init/0` and per-VM
+    `prepare/2` depend on but cannot themselves provision.
+    """
+    @spec network_ready() :: :ok | {:error, term()}
+    def network_ready do
+      if Network.enabled?() do
+        with :ok <- uplink_present(Network.uplink()) do
+          ip_forward_enabled()
+        end
+      else
+        :ok
+      end
+    end
+
+    defp uplink_present(uplink) do
+      if File.dir?("/sys/class/net/#{uplink}"),
+        do: :ok,
+        else: {:error, {:missing_uplink, uplink}}
+    end
+
+    defp ip_forward_enabled do
+      case File.read(@ip_forward_path) do
+        {:ok, contents} ->
+          if String.trim(contents) == "1", do: :ok, else: {:error, :ip_forward_disabled}
+
+        {:error, reason} ->
+          {:error, {:ip_forward_unreadable, reason}}
+      end
     end
 
     defp kvm_present do

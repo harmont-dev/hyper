@@ -85,4 +85,20 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert Jailer.host_vsock(@vm_id) ==
              "/srv/hyper/jails/firecracker/#{@vm_id}/root/vsock.sock"
   end
+
+  describe "Checks.network_ready/0" do
+    test "ok when networking is disabled (no [network] table)" do
+      Hyper.Cfg.Toml.put_cache(%{})
+      on_exit(fn -> Hyper.Cfg.Toml.reload() end)
+
+      assert Jailer.Checks.network_ready() == :ok
+    end
+
+    test "fails when uplink iface is absent" do
+      Hyper.Cfg.Toml.put_cache(%{"network" => %{"uplink" => "hyper-nonexistent-nic"}})
+      on_exit(fn -> Hyper.Cfg.Toml.reload() end)
+
+      assert {:error, {:missing_uplink, "hyper-nonexistent-nic"}} = Jailer.Checks.network_ready()
+    end
+  end
 end
