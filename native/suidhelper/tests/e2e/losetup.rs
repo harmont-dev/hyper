@@ -42,12 +42,13 @@ fn install_failing_losetup(dir: &Path) -> PathBuf {
     path
 }
 
-/// Root-owned config: work_dir is /srv/hyper so backing files pass
-/// confinement, and losetup points at the fake.
-fn write_root_config(dir: &Path, losetup_bin: &Path) -> PathBuf {
+/// Root-owned config: work_dir is the REAL (canonicalized) tempdir so a
+/// backing file inside it passes confinement, and losetup points at the fake.
+fn write_root_config(dir: &Path, work_dir: &Path, losetup_bin: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\nlosetup = \"{}\"\n",
+        "work_dir = \"{}\"\n[tools]\nlosetup = \"{}\"\n",
+        work_dir.display(),
         losetup_bin.display(),
     );
     fs::write(&p, body).unwrap();
@@ -71,9 +72,9 @@ fn losetup_attach_passes_validated_fd_readonly_as_root() {
     let rec = base.join("argv.json");
     let resolved = base.join("resolved.txt");
     let bin = install_fake_losetup(&base, &rec, &resolved, "/dev/loop9");
-    let backing = PathBuf::from("/srv/hyper/test_losetup_ro.img");
+    let backing = base.join("disk.img");
     fs::write(&backing, b"data").unwrap();
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     let out = run(&cfg, &["losetup", "attach", backing.to_str().unwrap()]);
     assert_eq!(
@@ -100,9 +101,6 @@ fn losetup_attach_passes_validated_fd_readonly_as_root() {
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["result"], "attached");
     assert_eq!(json["device"], "/dev/loop9");
-
-    // Cleanup
-    let _ = fs::remove_file(&backing);
 }
 
 #[test]
@@ -116,9 +114,9 @@ fn losetup_attach_rw_omits_read_only_as_root() {
     let rec = base.join("argv.json");
     let resolved = base.join("resolved.txt");
     let bin = install_fake_losetup(&base, &rec, &resolved, "/dev/loop9");
-    let backing = PathBuf::from("/srv/hyper/test_losetup_rw.img");
+    let backing = base.join("disk.img");
     fs::write(&backing, b"data").unwrap();
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     let out = run(
         &cfg,
@@ -139,9 +137,6 @@ fn losetup_attach_rw_omits_read_only_as_root() {
     );
     assert_eq!(&argv[..2], ["--find", "--show"]);
     assert!(argv[2].starts_with("/proc/self/fd/"));
-
-    // Cleanup
-    let _ = fs::remove_file(&backing);
 }
 
 #[test]
@@ -156,7 +151,7 @@ fn losetup_attach_refuses_out_of_base_before_running_tool_as_root() {
     let rec = base.join("argv.json");
     let resolved = base.join("resolved.txt");
     let bin = install_fake_losetup(&base, &rec, &resolved, "/dev/loop9");
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     let escapee = outside.path().join("escape.img");
     fs::write(&escapee, b"x").unwrap();
@@ -184,7 +179,7 @@ fn losetup_detach_argv_and_parse_as_root() {
     let rec = base.join("argv.json");
     let resolved = base.join("resolved.txt");
     let bin = install_fake_losetup(&base, &rec, &resolved, "");
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     let out = run(&cfg, &["losetup", "detach", "/dev/loop7"]);
     assert_eq!(
@@ -209,7 +204,7 @@ fn losetup_detach_refuses_non_loop_operands_as_root() {
     let rec = base.join("argv.json");
     let resolved = base.join("resolved.txt");
     let bin = install_fake_losetup(&base, &rec, &resolved, "");
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     // System storage and a path trick through a loop-looking prefix: both
     // must be refused at parse time, before the tool binary runs.
@@ -229,9 +224,9 @@ fn losetup_child_failure_surfaces_its_stderr_as_root() {
     let tmp = tempfile::tempdir().unwrap();
     let base = fs::canonicalize(tmp.path()).unwrap();
     let bin = install_failing_losetup(&base);
-    let backing = PathBuf::from("/srv/hyper/test_losetup_fail.img");
+    let backing = base.join("disk.img");
     fs::write(&backing, b"data").unwrap();
-    let cfg = write_root_config(&base, &bin);
+    let cfg = write_root_config(&base, &base, &bin);
 
     let out = run(&cfg, &["losetup", "attach", backing.to_str().unwrap()]);
     assert_ne!(out.status.code(), Some(0));
@@ -240,7 +235,4 @@ fn losetup_child_failure_surfaces_its_stderr_as_root() {
         err.contains("losetup failed: boom: no free loop device"),
         "stderr: {err}",
     );
-
-    // Cleanup
-    let _ = fs::remove_file(&backing);
 }
