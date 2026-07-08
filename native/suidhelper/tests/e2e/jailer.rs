@@ -8,14 +8,11 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-const HELPER: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
+mod support;
+use support::{is_root, run};
+
 const RECORDER_EXIT: i32 = 7;
-
-fn is_root() -> bool {
-    nix::unistd::geteuid().is_root()
-}
 
 fn cat_bin() -> &'static str {
     ["/bin/cat", "/usr/bin/cat"]
@@ -65,16 +62,6 @@ fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     fs::write(&p, body).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
     p
-}
-
-fn run(config: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(HELPER)
-        .args(args)
-        .env_clear()
-        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
-        .env("HYPER_SETUIDHELPER_CONFIG_PATH", config)
-        .output()
-        .expect("spawn helper")
 }
 
 #[test]
