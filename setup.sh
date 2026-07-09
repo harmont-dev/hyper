@@ -106,7 +106,10 @@ mix compile
 
 info "firecracker + jailer"
 sudo mkdir -p /opt/firecracker
-sudo chown "$(id -u)" /opt/firecracker
+# -R so a re-run can overwrite binaries the previous run left root-owned (the
+# chmod below hands them to root); without it mix firecracker.install's cp
+# hits permission denied on the second pass.
+sudo chown -R "$(id -u):$(id -g)" /opt/firecracker
 mix firecracker.install
 sudo chown root:root /opt/firecracker/firecracker /opt/firecracker/jailer
 sudo chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
