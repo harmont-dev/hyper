@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Provision a GitHub-hosted ubuntu runner as a single-node Firecracker host
 # for the `:integration` E2E suite. Mirrors docs/cookbook/install.md; keep
-# the two in sync. Assumes: passwordless sudo, repo compiled (the firecracker
+# the two (and setup.sh, the dev-host equivalent) in sync. Assumes:
+# passwordless sudo, repo compiled (the firecracker
 # and suidhelper install tasks are mix tasks), MIX_ENV matching the test run.
 #
 # Deliberate CI-only deltas from install.md — do NOT remove these in a future
