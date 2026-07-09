@@ -7,12 +7,12 @@ bar and a few non-obvious requirements.
 ## Before you start
 
 By submitting a contribution (a pull request, patch, or commit) you agree to
-the [Contributor License Agreement](CLA.md). In short: **you assign copyright
-in your contribution to the project owner**, who keeps the copyright
-consolidated so Hyper can be relicensed or dual-licensed in the future. You
-retain a perpetual license to your own work. If you are contributing on company
-time, make sure you have permission to do so. If you do not agree with the CLA,
-please do not submit a contribution.
+the [Contributor License Agreement](CLA.md). In short: **you keep the copyright
+to your contribution** and grant the project owner a broad, non-exclusive
+license — including the right to relicense and dual-license Hyper in the
+future. You are not asked to give up ownership of your work. If you are
+contributing on company time, make sure you have permission to do so. If you do
+not agree with the CLA, please do not submit a contribution.
 
 For anything beyond a small fix, **open an issue first** and describe what you
 intend to do. Hyper is opinionated and moves fast; a quick discussion avoids
@@ -27,22 +27,24 @@ compatible.
 Under the AGPL, every contributor owns the copyright to their own patches. That
 sounds nice, but it means the license can never be changed without tracking down
 and getting agreement from every person who ever contributed -- the same reason
-Linux can never move off GPLv2. Consolidating copyright under a single owner
-avoids that trap and lets Hyper:
+Linux can never move off GPLv2. The CLA sidesteps that trap **without taking
+your copyright**: you keep ownership, and you grant the owner a broad,
+non-exclusive, sublicensable license. That single grant is enough to let Hyper:
 
 - **Relicense in the future** if the AGPL stops serving the project.
 - **Offer commercial licenses** to organizations that cannot use AGPL code,
-  which is how development gets funded. You can only sell what you wholly own.
-- **Enforce the license** against infringers without coordinating dozens of
-  copyright holders.
+  which is how development gets funded. A sublicensable license lets the owner
+  do this without owning your copyright outright.
+- **Enforce the license** against infringers from a single party, without
+  coordinating dozens of copyright holders.
 
 Yes, this is asymmetric: the owner reserves the right to license Hyper
 proprietarily, which the AGPL denies everyone else. That is the deal open-core
-projects make, and we would rather state it plainly than bury it. In exchange,
-the CLA grants you a perpetual license to keep using your own contributions for
-any purpose (CLA §3) -- you never lose the right to the work you authored.
+projects make, and we would rather state it plainly than bury it. But you are
+not signing your work away -- you keep the copyright to everything you author
+(CLA §3) and stay free to use it however you like.
 
-If assigning copyright is not something you are willing to do, that is a
+If granting that license is not something you are willing to do, that is a
 completely reasonable position -- but please do not submit a contribution.
 
 ## What we are looking for
