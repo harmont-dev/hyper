@@ -36,6 +36,18 @@ service Hyper {
   //                       before its id could be confirmed.
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
 
+  // Fork a running microVM: snapshot its disk and boot a colocated child from
+  // the copy-on-write clone, falling back to a cluster-wide placement (via a
+  // published delta layer) when the parent's node is full. The parent keeps
+  // running. The fork is crash-consistent (like a power cut) after a best-effort
+  // guest sync. Returns the new child's `vm_id` and the node it booted on.
+  //
+  // Errors:
+  //   NOT_FOUND          -- no VM with this `vm_id` is running in the cluster.
+  //   RESOURCE_EXHAUSTED -- no node in the cluster can admit the child.
+  //   UNAVAILABLE        -- the parent's host node became unreachable.
+  rpc ForkVm(ForkVmRequest) returns (ForkVmResponse);
+
   // Stop and tear down a running microVM. Idempotent in effect: tearing down a
   // VM that is already stopping is not an error.
   //
@@ -127,6 +139,21 @@ message CreateVmResponse {
   string vm_id = 1;
 
   // The cluster node (Erlang node name) the guest booted on.
+  string node = 2;
+}
+
+// Request to fork a running VM.
+message ForkVmRequest {
+  // The id of the parent VM to fork.
+  string vm_id = 1;
+}
+
+// Result of a successful ForkVm.
+message ForkVmResponse {
+  // The server-minted id for the new child VM; use it in all later RPCs.
+  string vm_id = 1;
+
+  // The cluster node (Erlang node name) the child booted on.
   string node = 2;
 }
 
