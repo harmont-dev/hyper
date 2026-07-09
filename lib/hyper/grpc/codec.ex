@@ -13,6 +13,7 @@ defmodule Hyper.Grpc.Codec do
   alias Hyper.Grpc.V0.{
     CreateVmRequest,
     CreateVmResponse,
+    ForkVmResponse,
     GetVmResponse,
     GetVmUsageResponse,
     ListVmsResponse,
@@ -75,6 +76,10 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
     do: %CreateVmResponse{vm_id: vm_id, node: to_string(node)}
 
+  @spec to_grpc({:forked, Hyper.Vm.Id.t(), node()}) :: ForkVmResponse.t()
+  def to_grpc({:forked, vm_id, node}) when is_binary(vm_id),
+    do: %ForkVmResponse{vm_id: vm_id, node: to_string(node)}
+
   @spec to_grpc({:located, Hyper.Vm.Id.t(), node()}) :: GetVmResponse.t()
   def to_grpc({:located, vm_id, node}),
     do: %GetVmResponse{vm_id: vm_id, node: to_string(node)}
@@ -125,6 +130,9 @@ defmodule Hyper.Grpc.Codec do
 
   defp rpc_error(:machine_unreachable),
     do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
+
+  defp rpc_error(:node_unreachable),
+    do: GRPC.RPCError.exception(:unavailable, "the VM's host node is unreachable")
 
   defp rpc_error(reason) when reason in [:no_capacity, :exhausted],
     do: GRPC.RPCError.exception(:resource_exhausted, "no capacity")

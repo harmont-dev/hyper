@@ -15,6 +15,8 @@ defmodule Hyper.Grpc.Server do
   alias Hyper.Grpc.V0.{
     CreateVmRequest,
     CreateVmResponse,
+    ForkVmRequest,
+    ForkVmResponse,
     GetVmRequest,
     GetVmResponse,
     GetVmUsageRequest,
@@ -45,6 +47,20 @@ defmodule Hyper.Grpc.Server do
     else
       # Hyper.id/1 could not resolve the id: the VM was placed but its host
       # became unreachable. Surface that rather than returning an empty vm_id.
+      nil -> raise Codec.to_grpc({:error, :machine_unreachable})
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
+  end
+
+  @spec fork_vm(ForkVmRequest.t(), GRPC.Server.Stream.t()) :: ForkVmResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.fork_vm", include: [:vm_id])
+  def fork_vm(%ForkVmRequest{vm_id: vm_id}, _stream) do
+    with {:ok, child} <- Hyper.fork_vm(vm_id),
+         child_id when is_binary(child_id) <- Hyper.id(child) do
+      Codec.to_grpc({:forked, child_id, node(child)})
+    else
+      # The child was placed but its host became unreachable before its id
+      # could be confirmed — same shape as create_vm/2.
       nil -> raise Codec.to_grpc({:error, :machine_unreachable})
       {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
