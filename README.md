@@ -84,6 +84,7 @@ integrating Hyper.
   BEAM-native interfaces, we recognize this may not be ideal for all languages
   and existing stacks. For that reason, Hyper has a GRPC interface, so you can
   call it from any language you already use.
+  ⚠️ The gRPC API is unauthenticated and off by default — bind it to a trusted network or front it with an authenticating proxy. See [the gRPC guide](docs/grpc.md).
 
 ## Docs
 
