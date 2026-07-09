@@ -298,8 +298,19 @@ impl Jailer<'_> {
 /// closing each fd individually — fail closed before handing root to the jailer.
 fn close_inherited_fds() {
     const FIRST: u32 = 3;
+    // Invoke `close_range(2)` as a raw syscall rather than through the
+    // `libc::close_range` wrapper: the `libc` crate does not define that wrapper
+    // for every target (it is absent on aarch64-musl), but `SYS_close_range` is
+    // defined on all Linux arches. `syscall` returns 0 on success, -1 on error.
     // SAFETY: raw syscall with no memory operands; closing fds has no UB.
-    let rc = unsafe { nix::libc::close_range(FIRST, u32::MAX, 0) };
+    let rc = unsafe {
+        nix::libc::syscall(
+            nix::libc::SYS_close_range,
+            FIRST as nix::libc::c_uint,
+            u32::MAX as nix::libc::c_uint,
+            0 as nix::libc::c_uint,
+        )
+    };
     if rc == 0 {
         return;
     }
