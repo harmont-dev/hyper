@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 

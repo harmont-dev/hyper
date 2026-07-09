@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `chroot-jail grant-api`: hand the firecracker API socket to the node user so
 //! the unprivileged controller can `connect()` to it.
 //!

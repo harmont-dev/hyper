@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Central security gate: the single place that decides whether this process is
 //! running in INSECURE TEST MODE, resolved once at startup.
 //!

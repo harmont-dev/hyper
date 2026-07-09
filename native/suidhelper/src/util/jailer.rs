@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Typed invocation of the firecracker jailer: the validated argument newtypes
 //! and the `execve` mechanics behind the `jailer` subcommand.
 //!

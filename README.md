@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://hex.pm/packages/hypervm"><img src="https://img.shields.io/hexpm/v/hypervm.svg" alt="Hex.pm version" /></a>
   <a href="https://hexdocs.pm/hypervm/"><img src="https://img.shields.io/badge/docs-hexdocs-purple.svg" alt="Hexdocs" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hypervm.svg" alt="License: AGPL-3.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/hexpm/l/hypervm.svg" alt="License: MIT" /></a>
   <a href="https://github.com/harmont-dev/hyper/commits/main"><img src="https://img.shields.io/github/last-commit/harmont-dev/hyper.svg" alt="Last commit" /></a>
   <a href="https://codecov.io/gh/harmont-dev/hyper"><img src="https://codecov.io/gh/harmont-dev/hyper/branch/main/graph/badge.svg" alt="Coverage" /></a>
   <a href="https://discord.gg/hm-dev"><img src="https://img.shields.io/discord/1503184719578136576?logo=discord&label=discord" alt="Discord" /></a>
@@ -126,34 +126,12 @@ Contributions are welcome. Hyper is a technical-first project with a strict
 quality gate (`mix check` must pass) and a few Linux/Firecracker prerequisites.
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-Note that all contributions are governed by the
-[Contributor License Agreement](CLA.md): by submitting a PR you assign
-copyright in your contribution to the project owner, which keeps Hyper's
-copyright consolidated. If that is a dealbreaker for you, it is better to know
-up front.
+Contributions are accepted under the project's license (MIT): by opening a
+pull request you agree that your contribution is licensed under the same terms,
+and you retain the copyright to your own work. No separate contributor
+agreement is required.
 
 ## License
 
-Hyper is licensed under the GNU Affero General Public License v3.0 or later
-(AGPL-3.0-or-later). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions
-are governed by the [Contributor License Agreement](CLA.md).
-
-### Why AGPL?
-
-Hyper is infrastructure meant to be run as a service. If you modify Hyper and
-offer it to others over a network, we expect you to share your changes
-publicly. The product is built by humans for humans and we want to keep it that
-way -- we don't want anyone taking Hyper closed-source and reselling it. Hyper
-is free of charge, and we expect you to play nicely with that philosophy. In
-practical terms, for most users:
-
-- **Running Hyper as-is internally** imposes no copyleft obligations. You do
-  not need to share your source.
-- **The VMs and workloads Hyper runs are yours.** Copyleft covers Hyper itself,
-  not the things you orchestrate with it. Your code stays your code.
-- **Modifying Hyper** and offering any form of product built with it as a
-  service, however, **requires** that you make your modifications open-source.
-  We wish to make Hyper better, and that means you need to be a part of it.
-
-This section is a plain-language summary, not legally binding. For the
-authoritative terms, see [LICENSE](LICENSE).
+Hyper is licensed under the MIT License. See [LICENSE](LICENSE). Contributions
+are accepted under the same license.

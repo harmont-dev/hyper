@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `chroot-jail remove`: delete a VM's stale chroot and cgroup leaf before
 //! relaunching the jailer.
 //!

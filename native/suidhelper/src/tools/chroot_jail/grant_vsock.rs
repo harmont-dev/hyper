@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `chroot-jail grant-vsock`: hand the firecracker vsock Unix-domain socket to
 //! the node user so the unprivileged controller can connect the guest via AF_VSOCK.
 //!
