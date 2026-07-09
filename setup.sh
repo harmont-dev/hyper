@@ -41,8 +41,8 @@ sudo -v
 info "OS packages"
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo thin-provisioning-tools \
-  util-linux "linux-modules-extra-$(uname -r)"
+  coreutils e2fsprogs libc-bin lvm2 nftables iproute2 skopeo \
+  thin-provisioning-tools util-linux "linux-modules-extra-$(uname -r)"
 
 info "device-mapper modules"
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
@@ -52,6 +52,11 @@ printf 'dm_snapshot\ndm_thin_pool\nloop\n' \
   | sudo tee /etc/modules-load.d/hyper.conf >/dev/null
 sudo dmsetup targets | grep -q thin-pool \
   || fail "thin-pool dm target missing after modprobe"
+
+info "IPv4 forwarding (required — host-init only asserts it, never sets it)"
+sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
+echo 'net.ipv4.ip_forward=1' \
+  | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf >/dev/null
 
 # Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
 # rejects symlinks, so install a dereferenced hard copy under the name the
@@ -72,8 +77,12 @@ if [ -f /etc/hyper/config.toml ]; then
   info "/etc/hyper/config.toml exists -- leaving it alone"
 else
   info "writing /etc/hyper/config.toml"
+  # A single-uplink host NATs guest egress out of its default-route NIC.
+  uplink="$(ip route show default | awk '{print $5; exit}')"
+  [ -n "$uplink" ] \
+    || fail "could not detect a default-route interface -- set [network] uplink in /etc/hyper/config.toml by hand (see docs/cookbook/install.md)"
   sudo mkdir -p /etc/hyper
-  sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'
+  sudo tee /etc/hyper/config.toml >/dev/null <<EOF
 work_dir = "/srv/hyper"
 
 [tools]
@@ -84,6 +93,11 @@ thin_dump = "/usr/local/sbin/thin_dump"
 [jails]
 uid_gid_range = [900000, 999999]
 cgroup = "hyper"
+
+[network]
+uplink = "${uplink}"
+clone_pool = "172.31.0.0/16"
+resolver = "1.1.1.1"
 EOF
   sudo chown root:root /etc/hyper/config.toml
   sudo chmod 0644 /etc/hyper/config.toml

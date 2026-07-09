@@ -8,6 +8,15 @@ create, stop, locate, and list microVMs.
 > **v0 -- unstable.** The contract may change without notice during early
 > development. Pin to a commit if you depend on it.
 
+> #### No authentication {: .warning}
+>
+> The gRPC API has **no authentication**. Any client that can reach the port can
+> create and stop VMs and load images. It is **off by default** (`grpc.enabled =
+> false`). When you enable it, bind it to loopback or a trusted network, or put
+> it behind a proxy that terminates TLS and authenticates callers. TLS (`cred`)
+> encrypts the channel but does not authenticate the client. Authentication is
+> planned for a later release; the `v0` contract is UNSTABLE.
+
 ## Configuration
 
 By default, the gRPC interface is **disabled**. The simplest way to enable it

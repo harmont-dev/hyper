@@ -167,6 +167,19 @@ defmodule Hyper do
   end
 
   @doc """
+  Fork the running VM `vm_id`: boot a child from a copy-on-write clone of its
+  disk, colocated when the parent's node has room and re-placed cluster-wide
+  otherwise. Returns the child VM. See `Hyper.Vm.fork/1` for the semantics.
+  """
+  @spec fork_vm(Hyper.Vm.Id.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
+  def fork_vm(vm_id) when is_binary(vm_id) do
+    case Hyper.Cluster.Routing.supervisor_of(vm_id) do
+      nil -> {:error, :not_found}
+      pid -> Hyper.Vm.fork(pid)
+    end
+  end
+
+  @doc """
   The vm id for a VM handle -- the pid returned by `create_vm/1`. Resolves on the
   pid's owning node, so a VM just placed on a remote node is found immediately
   rather than waiting for the routing CRDT to propagate. `nil` if unknown.

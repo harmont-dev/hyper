@@ -2,6 +2,9 @@
 name = "hyper-guest-agent"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "PID-1 guest agent for Hyper microVMs: mounts, resolv.conf, and a vsock exec server."
+repository = "https://github.com/harmont-dev/hyper"
 
 [lib]
 name = "hyper_guest_agent"

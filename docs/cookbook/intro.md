@@ -65,7 +65,7 @@ interface, or through [gRPC](../grpc.md):
 With the image loaded, and an `img_id` in hand, you can boot it:
 
 ```elixir
-{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
 ```
 
 The VM is scheduled onto the most available node in the cluster, preferring

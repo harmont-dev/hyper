@@ -108,6 +108,32 @@ uid_gid_range = [900000, 999999]
 ```
 <!-- tabs close -->
 
+## VM Networking Configuration
+
+**Required.** Every VM gets NAT'd egress out through a physical host interface,
+and a node refuses to start without a `[network]` table (see the
+[install guide](install.md#vm-networking-required) for the host prerequisites:
+`iproute2`/`nftables` and `net.ipv4.ip_forward=1`). `config.toml`-only — the
+setuid helper reads the same `uplink` and `clone_pool` to build each VM's netns,
+veth pair, and NAT rules, so it cannot live in `config.exs`.
+
+### `config.toml`
+
+```toml
+[network]
+# **required**. The physical uplink interface guest egress is NAT'd out through.
+# On a single-uplink host, the default-route NIC is the usual choice:
+#   ip route show default | awk '{print $5; exit}'
+uplink = "eth0"
+
+# optional -- defaults shown. The IPv4 CIDR the per-VM /30s are carved from.
+clone_pool = "172.31.0.0/16"
+
+# optional -- defaults shown. DNS resolver handed to guests via the kernel
+# cmdline (the guest agent writes it to /etc/resolv.conf).
+resolver = "1.1.1.1"
+```
+
 ## gRPC Configuration
 
 Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface
