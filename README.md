@@ -134,5 +134,4 @@ agreement is required.
 ## License
 
 Hyper is licensed under the MIT License. See [LICENSE](LICENSE). Contributions
-are accepted under the same license (inbound=outbound); contributors retain
-copyright to their work.
+are accepted under the same license.
