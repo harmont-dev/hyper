@@ -45,9 +45,13 @@ In the `iex` shell:
 
 ```elixir
 {:ok, img_id} = Hyper.Img.OciLoader.load("docker.io/library/alpine:3.19")
-{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
 {:ok, %{stdout: "hello\n"}} = Hyper.exec(vm, ["/bin/echo", "hello"])
 ```
+
+`type: :micro` is the smallest instance size (0.25 vCPU, 128 MiB) — the
+lightest footprint for a first boot on a modest machine. Omit it to get the
+`:base` default (4 vCPU, 2 GiB); `Hyper.Vm.Instance` lists the full range.
 
 That is a real Firecracker microVM with a copy-on-write rootfs. The
 [intro](intro.md#usage) walks through loading images, booting VMs, and
