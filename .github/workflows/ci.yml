@@ -152,6 +152,18 @@ jobs:
       - name: Dialyzer
         run: mix dialyzer
 
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # shellcheck ships preinstalled on GitHub-hosted ubuntu runners. Lint
+      # every tracked shell script; `git ls-files` keeps new scripts covered
+      # without a hand-maintained list and skips untracked _build/deps.
+      - name: ShellCheck
+        run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
   rust:
     name: Rust (suidhelper)
     runs-on: ubuntu-latest
