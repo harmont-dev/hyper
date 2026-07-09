@@ -35,8 +35,8 @@ non-exclusive, sublicensable license. That single grant is enough to let Hyper:
 - **Offer commercial licenses** to organizations that cannot use AGPL code,
   which is how development gets funded. A sublicensable license lets the owner
   do this without owning your copyright outright.
-- **Enforce the license** against infringers from a single party, without
-  coordinating dozens of copyright holders.
+- **Keep licensing decisions consolidated** in a single party, so the
+  project's terms can evolve without coordinating dozens of copyright holders.
 
 Yes, this is asymmetric: the owner reserves the right to license Hyper
 proprietarily, which the AGPL denies everyone else. That is the deal open-core
