@@ -11,22 +11,6 @@ defmodule Hyper.Grpc do
 
   alias Hyper.Cfg.Grpc, as: Config
 
-  require Logger
-
-  @doc """
-  The startup warning for a gRPC server that has no application-level
-  authentication (Hyper ships none in v0.1 — TLS, when configured, encrypts but
-  does not authenticate). `nil` when the server is disabled.
-  """
-  @spec auth_warning(Config.t()) :: String.t() | nil
-  def auth_warning(%Config{enabled: false}), do: nil
-
-  def auth_warning(%Config{}) do
-    "gRPC server is enabled with no authentication: any client that can reach " <>
-      "the port can create and stop VMs. Bind it to a trusted network or " <>
-      "loopback, or front it with an authenticating proxy."
-  end
-
   @doc """
   The gRPC server's supervisor child, or `[]` when the server is disabled (the
   default). Spliced into the app supervision tree by `Hyper.Application`.
@@ -36,7 +20,6 @@ defmodule Hyper.Grpc do
     config = Config.load()
 
     if config.enabled do
-      Logger.warning(auth_warning(config))
       [{GRPC.Server.Supervisor, Config.server_options(config)}]
     else
       []
