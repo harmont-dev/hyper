@@ -49,7 +49,7 @@ defmodule Hyper.Img.Db.Gc.PruneTest do
     })
   end
 
-  defp blob!(opts \\ []) do
+  defp blob!(opts) do
     id = unique_id()
     insert_blob!(id, opts)
     on_exit(fn -> Repo.delete_all(from b in Blob, where: b.id == ^id) end)
@@ -57,7 +57,7 @@ defmodule Hyper.Img.Db.Gc.PruneTest do
   end
 
   # A blob referenced by an image_layer row (ON DELETE RESTRICT on blob_id).
-  defp referenced_blob!(opts \\ []) do
+  defp referenced_blob!(opts) do
     blob_id = unique_id()
     img_id = unique_id()
     insert_blob!(blob_id, opts)
