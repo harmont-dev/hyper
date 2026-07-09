@@ -55,9 +55,12 @@ sudo dmsetup targets | grep -q thin-pool \
 
 # Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
 # rejects symlinks, so install a dereferenced hard copy under the name the
-# multi-call binary dispatches on.
-sudo install -o root -g root -m 0755 \
-  "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
+# multi-call binary dispatches on. Skip when a prior run already placed it —
+# it then wins on PATH, and install refuses to copy a file onto itself.
+thin_dump_src="$(readlink -f "$(command -v thin_dump)")"
+if [ "$thin_dump_src" != /usr/local/sbin/thin_dump ]; then
+  sudo install -o root -g root -m 0755 "$thin_dump_src" /usr/local/sbin/thin_dump
+fi
 
 info "build toolchain extras"
 rustup target add "$(uname -m)-unknown-linux-musl"
