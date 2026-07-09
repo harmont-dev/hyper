@@ -132,7 +132,7 @@ defmodule Hyper.Grpc.Codec do
     do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
 
   defp rpc_error(:node_unreachable),
-    do: GRPC.RPCError.exception(:unavailable, "the VM's host node is unreachable")
+    do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
 
   defp rpc_error(reason) when reason in [:no_capacity, :exhausted],
     do: GRPC.RPCError.exception(:resource_exhausted, "no capacity")

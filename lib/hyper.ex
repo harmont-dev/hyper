@@ -173,7 +173,7 @@ defmodule Hyper do
   """
   @spec fork_vm(Hyper.Vm.Id.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def fork_vm(vm_id) when is_binary(vm_id) do
-    case GenServer.whereis(Hyper.Cluster.Routing.via(vm_id)) do
+    case Hyper.Cluster.Routing.supervisor_of(vm_id) do
       nil -> {:error, :not_found}
       pid -> Hyper.Vm.fork(pid)
     end
