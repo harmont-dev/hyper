@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Directory handles with fd-relative operations.
 //!
 //! A [`SafeDir`] owns a directory fd (closed on drop). It is two things at once:

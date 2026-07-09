@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Shared grant-socket logic reused by `grant-api` and `grant-vsock`.
 //!
 //! Both ops chown a jail-confined Unix-domain socket to the helper's caller and

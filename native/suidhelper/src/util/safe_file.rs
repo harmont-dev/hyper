@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Typestate-validated file descriptors.
 //!
 //! Each type parameter is an independent axis (file type, ownership, mode); the

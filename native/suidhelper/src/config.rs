@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Runtime host configuration, read from a single root-owned TOML file.
 //!
 //! ## UID/GID range divergence

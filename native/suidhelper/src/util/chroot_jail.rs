@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Declarative builder for a VM's chroot jail contents.
 
 use crate::config::Config;

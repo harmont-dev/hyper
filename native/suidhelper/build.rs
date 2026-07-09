@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Build guard: keep the `insecure_test_seams` feature out of any release
 //! artifact. Tests build in the `debug` profile, so they are unaffected.
 

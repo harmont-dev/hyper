@@ -187,7 +187,7 @@ defmodule Hyper.MixProject do
       # The OTP app is `:hyper`, but `hyper` is already taken on Hex, so the
       # package publishes as `hypervm`. Package name and app name are independent.
       name: "hypervm",
-      licenses: ["AGPL-3.0-or-later"],
+      licenses: ["MIT"],
       # priv/firecracker ships the OpenAPI spec so the `:firecracker_gen` compiler
       # can regenerate the bindings in a consumer's build (they are gitignored, so
       # not in `lib`).
@@ -204,7 +204,7 @@ defmodule Hyper.MixProject do
       # load even for plain `cargo build`.
       files: ~w(
         lib priv/firecracker priv/repo priv/vmlinux proto config mix.exs
-        README.md LICENSE NOTICE CLA.md
+        README.md LICENSE
         native/guest-agent/src native/guest-agent/tests native/guest-agent/build.rs
         native/guest-agent/Cargo.toml native/guest-agent/Cargo.lock
         native/guest-agent/.cargo

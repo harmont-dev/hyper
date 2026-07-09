@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `network`: per-VM egress networking (netns + veth + TAP + NAT).
 //!
 //! Each op ([`prepare`], [`teardown`], [`host_init`]) derives its `ip`/`nft`

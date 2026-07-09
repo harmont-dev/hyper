@@ -17,7 +17,7 @@
       "author": "Marko Vejnovic"
     },
     {
-      "content": "Canonical operator documentation lives in docs/cookbook/ (especially install.md for host provisioning: KVM, device-mapper thin pools, the setuid helper) and is published to https://hexdocs.pm/hypervm/. Prefer citing those guides for installation and configuration rather than inferring procedures from code. The package is published on Hex as `hypervm`. License is AGPL-3.0-or-later.",
+      "content": "Canonical operator documentation lives in docs/cookbook/ (especially install.md for host provisioning: KVM, device-mapper thin pools, the setuid helper) and is published to https://hexdocs.pm/hypervm/. Prefer citing those guides for installation and configuration rather than inferring procedures from code. The package is published on Hex as `hypervm`. License is MIT.",
       "author": "Marko Vejnovic"
     }
   ]

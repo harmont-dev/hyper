@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Fallible conversion of paths and strings to NUL-terminated C strings, for
 //! handing to `execve`-family syscalls.
 //!

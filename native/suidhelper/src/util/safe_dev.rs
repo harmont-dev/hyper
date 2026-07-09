@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! Validated device-name operands.
 //!
 //! The privileged tools must only ever touch Hyper's own devices, never

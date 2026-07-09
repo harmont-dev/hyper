@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: MIT
 //! `chroot-jail`: per-VM chroot/jail lifecycle.
 
 mod grant;
