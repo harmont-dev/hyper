@@ -39,7 +39,7 @@ Then load an OCI image and boot it:
 
 ```elixir
 {:ok, img_id} = Hyper.Img.OciLoader.load("docker.io/library/alpine:3.19")
-{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id})
+{:ok, vm} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
 {:ok, %{stdout: "hello\n"}} = Hyper.exec(vm, ["/bin/echo", "hello"])
 ```
 

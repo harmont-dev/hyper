@@ -45,7 +45,7 @@ You can install the required packages by running:
 sudo dnf install -y \
   coreutils \
   device-mapper-persistent-data \
-  e2fsprogs \ 
+  e2fsprogs \
   glibc-common \
   kernel-modules-extra-$(uname -r) \
   lvm2 \
