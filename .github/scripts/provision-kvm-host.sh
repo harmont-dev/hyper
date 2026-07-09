@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Provision a GitHub-hosted ubuntu runner as a single-node Firecracker host
 # for the `:integration` E2E suite. Mirrors docs/cookbook/install.md; keep
-# the two in sync. Assumes: passwordless sudo, repo compiled (the firecracker
+# the two (and setup.sh, the dev-host equivalent) in sync. Assumes:
+# passwordless sudo, repo compiled (the firecracker
 # and suidhelper install tasks are mix tasks), MIX_ENV matching the test run.
 #
-# Deliberate CI-only deltas from install.md — do NOT remove these in a future
+# Deliberate CI-only deltas from install.md -- do NOT remove these in a future
 # sync pass:
 #   - the 0666 udev kvm rule (install.md assumes a real host with a `kvm`
 #     group an operator is added to; the ephemeral runner has neither)
@@ -115,7 +116,7 @@ sudo chmod 0644 /etc/hyper/config.toml
 sudo mkdir -p /sys/fs/cgroup/hyper
 echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control >/dev/null
 
-# The BEAM (the `runner` user — Hyper refuses to run as root) owns work_dir.
+# The BEAM (the `runner` user -- Hyper refuses to run as root) owns work_dir.
 # layers/ must pre-exist: boot validation (Layer.Repo.test_system) checks it,
 # and the node only creates it lazily on first image load.
 sudo mkdir -p /srv/hyper

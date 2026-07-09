@@ -152,6 +152,18 @@ jobs:
       - name: Dialyzer
         run: mix dialyzer
 
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # shellcheck ships preinstalled on GitHub-hosted ubuntu runners. Lint
+      # every tracked shell script; `git ls-files` keeps new scripts covered
+      # without a hand-maintained list and skips untracked _build/deps.
+      - name: ShellCheck
+        run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
   rust:
     name: Rust (suidhelper)
     runs-on: ubuntu-latest
@@ -271,14 +283,14 @@ jobs:
   integration:
     name: Integration (KVM E2E)
     # ubuntu-latest x64 exposes /dev/kvm (all Linux runners with 2+ vCPUs,
-    # per GitHub's Apr 2024 changelog); arm64 runners do NOT — keep this x64.
+    # per GitHub's Apr 2024 changelog); arm64 runners do NOT -- keep this x64.
     runs-on: ubuntu-latest
     # Worst case: three 10-minute tests (vm_lifecycle + crash_recovery + fork),
     # plus the gRPC contract wrapper's own 25-minute cap (20-min lifecycle
     # vitest test + errors suite + npm ci/gen), plus ~5 minutes of
     # provisioning/compile/npm setup. Budget with headroom above that sum: a
     # tight budget could cancel the job right as it finishes, and
-    # `!cancelled()` steps then skip result uploads — exactly when flake
+    # `!cancelled()` steps then skip result uploads -- exactly when flake
     # history matters most.
     timeout-minutes: 75
     env:
@@ -383,7 +395,7 @@ jobs:
       # Multiple --only flags OR together: this runs ONLY the gated tags.
       # coveralls.json wraps `mix test`, so the tag filters and
       # --warnings-as-errors pass through; it writes cover/excoveralls.json,
-      # which is this job's Codecov upload — without it the integration-only
+      # which is this job's Codecov upload -- without it the integration-only
       # modules (e.g. Hyper.Metering.Usage) report zero coverage.
       # LLVM_PROFILE_FILE reaches the helper through the BEAM's System.cmd
       # (inherited env). %p keeps concurrent helper invocations' profiles

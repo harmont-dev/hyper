@@ -118,6 +118,7 @@ defmodule Hyper.MixProject do
       # Narrative/guide pages rendered alongside the API reference.
       extras: [
         "README.md",
+        "docs/cookbook/quickstart.md",
         "docs/cookbook/intro.md",
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",
@@ -195,7 +196,7 @@ defmodule Hyper.MixProject do
       # the bindings in a consumer's build (they are gitignored, not in `lib`).
       # priv/repo ships the migrations so a consumer can `mix ecto.migrate`.
       # native/ ships the Rust crate *sources* because the `:suidhelper_stamp` and
-      # `:guest_agent_build` compilers build them wherever hyper compiles — the
+      # `:guest_agent_build` compilers build them wherever hyper compiles -- the
       # suidhelper must be built locally anyway (`Hyper.SuidHelper.verify_version/0`
       # checks the deployed helper's BLAKE3 against this build's stamp, so a
       # prebuilt binary can never match). Crate subpaths are listed explicitly to
@@ -216,7 +217,7 @@ defmodule Hyper.MixProject do
       ),
       # `lib` is included wholesale, so on a dev box the gitignored generated
       # outputs (bindings, expected.ex) exist on disk and would leak into the
-      # tarball — with a build identity from the packaging machine. Keep the
+      # tarball -- with a build identity from the packaging machine. Keep the
       # package deterministic: consumers regenerate all of these at compile.
       exclude_patterns: [
         ~r{^lib/hyper/firecracker/api/(operations|schemas)/},
@@ -239,7 +240,7 @@ defmodule Hyper.MixProject do
   #      zsh (it only de-selects the `$ ` prompt; everything else is plain text)
   #      from `ExDoc.Application.start`, which runs during the `docs` task.
   #
-  # So we start :ex_doc and :makeup_syntect here first (idempotent — the later
+  # So we start :ex_doc and :makeup_syntect here first (idempotent -- the later
   # `docs` task won't re-run their `start/2`), then register our shell aliases
   # LAST so they win. Dev-only; runs as the `docs` alias's first step.
   defp register_doc_lexers(_args) do
