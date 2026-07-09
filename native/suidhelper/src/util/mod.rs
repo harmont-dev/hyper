@@ -1,7 +1,9 @@
 //! Internal utilities shared across the helper.
 
 pub mod chroot_jail;
+pub mod jailer;
 pub mod linux;
+pub mod path;
 pub mod safe_bin;
 pub mod safe_dev;
 pub mod safe_dir;

@@ -30,7 +30,7 @@ pub enum Error {
     #[error("clone_pool {0:?} is not a valid IPv4 CIDR")]
     InvalidClonePool(String),
     #[error(transparent)]
-    Uid(#[from] jailer::Error),
+    Uid(#[from] crate::util::jailer::Error),
     #[error(transparent)]
     Addr(#[from] AddrError),
     #[error(transparent)]

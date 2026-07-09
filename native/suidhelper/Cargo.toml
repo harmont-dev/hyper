@@ -133,6 +133,7 @@ name = "tools_losetup_backing"
 path = "tests/tools/losetup_backing.rs"
 
 [dependencies]
+bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
