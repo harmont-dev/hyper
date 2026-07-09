@@ -233,7 +233,10 @@ jobs:
     steps:
       # Flip the draft (created earlier) to live only after both registries
       # have the new version. github.token has the contents:write granted above.
+      # This job does no checkout, so `gh` cannot infer the repo from a git
+      # remote -- pass it explicitly with --repo, or the edit dies with
+      # "fatal: not a git repository".
       - name: Mark release as published
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --draft=false
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
