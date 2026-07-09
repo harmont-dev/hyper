@@ -6,7 +6,8 @@
 Thank you for your interest in contributing to Hyper (the "Project"). This
 Contributor License Agreement ("Agreement") sets out the terms under which
 contributions are accepted. It protects both you ("Contributor") and the Owner,
-and it keeps the Project's copyright consolidated under a single holder.
+and it gives the Owner the licensing rights needed to sustain, relicense, and
+dual-license the Project — without asking you to give up ownership of your work.
 
 By submitting a Contribution to the Project (for example, by opening a pull
 request, sending a patch, or pushing a commit), you agree to the terms below.
@@ -22,27 +23,31 @@ If you do not agree, do not submit a Contribution.
   and electronic communication), excluding any communication conspicuously
   marked in writing as "Not a Contribution."
 
-## 2. Copyright Assignment
+## 2. License Grant
 
-You hereby assign, transfer, and convey to the Owner all right, title, and
-interest worldwide in all copyright in your Contribution, including the right
-to sue for and recover damages for past, present, and future infringement. To
-the extent any such assignment is unenforceable in a given jurisdiction, you
-instead grant the Owner an exclusive, perpetual, irrevocable, worldwide,
-royalty-free, transferable, and sublicensable license to use, reproduce,
-modify, distribute, publicly perform and display, sublicense, and create
-derivative works of your Contribution, and to relicense or dual-license it
-under any terms the Owner chooses.
+You retain all right, title, and interest in the copyright to your
+Contribution. You do **not** assign or transfer ownership of your Contribution
+to the Owner.
 
-As a result, the Owner remains the sole copyright holder of the Project and may
-license, relicense, or dual-license the Project — including the AGPL-3.0-or-later
-license under which it is currently distributed — at the Owner's sole discretion.
+You hereby grant to the Owner a perpetual, worldwide, non-exclusive,
+royalty-free, irrevocable, and transferable license — with the right to grant
+and authorize sublicenses through multiple tiers of sublicensees — to use,
+reproduce, modify, adapt, publicly perform and display, distribute, and create
+derivative works of your Contribution, and to relicense and dual-license your
+Contribution (alone or as part of the Project) under any terms the Owner
+chooses, including proprietary or commercial terms.
 
-## 3. License Back to Contributor
+Because this grant is non-exclusive, the Owner may license, relicense, or
+dual-license the Project — including the AGPL-3.0-or-later license under which
+it is currently distributed — at the Owner's sole discretion, while you keep
+every right you hold as the copyright owner of your own Contribution.
 
-The Owner grants back to you a non-exclusive, perpetual, irrevocable,
-worldwide, royalty-free license to use your own Contribution for any purpose.
-You are not restricted from using the work you authored.
+## 3. Your Retained Rights
+
+You retain ownership of the copyright in your Contribution. Nothing in this
+Agreement restricts you from using, licensing, relicensing, or otherwise
+exploiting the work you authored for any purpose. The license you grant in
+Section 2 is non-exclusive and coexists with every right you keep as the owner.
 
 ## 4. Patent License
 
