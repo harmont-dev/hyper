@@ -387,10 +387,13 @@ jobs:
       # modules (e.g. Hyper.Metering.Usage) report zero coverage.
       # LLVM_PROFILE_FILE reaches the helper through the BEAM's System.cmd
       # (inherited env). %p keeps concurrent helper invocations' profiles
-      # distinct; %m makes the runtime merge same-binary runs safely.
+      # distinct; %m makes the runtime merge same-binary runs safely; %c is
+      # continuous mode (counters mmap-written as they increment), pairing
+      # with the seam's runtime-counter-relocation so the jailer's
+      # execve/_exit paths — which never reach the atexit dump — still count.
       - name: Integration + external tests
         env:
-          LLVM_PROFILE_FILE: ${{ github.workspace }}/cover/suidhelper-%p-%m.profraw
+          LLVM_PROFILE_FILE: ${{ github.workspace }}/cover/suidhelper-%p-%m%c.profraw
         run: |
           mkdir -p cover
           mix coveralls.json --only integration --only external --warnings-as-errors

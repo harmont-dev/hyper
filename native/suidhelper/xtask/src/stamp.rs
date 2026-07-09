@@ -27,7 +27,11 @@ pub fn run() -> PathBuf {
         if !flags.is_empty() {
             flags.push(' ');
         }
-        flags.push_str("-C instrument-coverage");
+        // runtime-counter-relocation enables LLVM continuous mode (`%c` in
+        // LLVM_PROFILE_FILE): counters are mmap-written as they increment, so
+        // profiles survive the jailer's execve/_exit paths, which never reach
+        // the normal atexit dump.
+        flags.push_str("-C instrument-coverage -C llvm-args=-runtime-counter-relocation");
         build.env("RUSTFLAGS", flags);
     }
     let built = build.status().expect("failed to spawn cargo");
