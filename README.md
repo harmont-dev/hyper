@@ -127,10 +127,11 @@ quality gate (`mix check` must pass) and a few Linux/Firecracker prerequisites.
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 Note that all contributions are governed by the
-[Contributor License Agreement](CLA.md): by submitting a PR you assign
-copyright in your contribution to the project owner, which keeps Hyper's
-copyright consolidated. If that is a dealbreaker for you, it is better to know
-up front.
+[Contributor License Agreement](CLA.md): by submitting a PR you keep the
+copyright to your contribution and grant the project owner a broad,
+non-exclusive license (including the right to relicense and dual-license
+Hyper). You are not asked to give up ownership. If that is a dealbreaker for
+you, it is better to know up front.
 
 ## License
 
