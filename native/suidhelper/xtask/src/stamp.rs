@@ -16,10 +16,25 @@ use crate::{target_dir, BIN};
 /// the stamped ELF.
 pub fn run() -> PathBuf {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let built = std::process::Command::new(cargo)
-        .args(["build", "--release", "-p", BIN])
-        .status()
-        .expect("failed to spawn cargo");
+    let mut build = std::process::Command::new(cargo);
+    build.args(["build", "--release", "-p", BIN]);
+    // CI coverage seam: instrument ONLY the helper build. A job-wide RUSTFLAGS
+    // would also instrument the guest agent, which runs as PID 1 inside the
+    // guest where no profile can be collected. Appending (not replacing)
+    // preserves any caller-provided RUSTFLAGS.
+    if std::env::var("HYPER_SUIDHELPER_INSTRUMENT_COVERAGE").as_deref() == Ok("1") {
+        let mut flags = std::env::var("RUSTFLAGS").unwrap_or_default();
+        if !flags.is_empty() {
+            flags.push(' ');
+        }
+        // runtime-counter-relocation enables LLVM continuous mode (`%c` in
+        // LLVM_PROFILE_FILE): counters are mmap-written as they increment, so
+        // profiles survive the jailer's execve/_exit paths, which never reach
+        // the normal atexit dump.
+        flags.push_str("-C instrument-coverage -C llvm-args=-runtime-counter-relocation");
+        build.env("RUSTFLAGS", flags);
+    }
+    let built = build.status().expect("failed to spawn cargo");
     assert!(built.success(), "cargo build --release failed");
 
     let path = target_dir().join("release").join(BIN);

@@ -283,6 +283,10 @@ jobs:
     timeout-minutes: 75
     env:
       MIX_ENV: test
+      # Task 6's xtask seam: instrument ONLY the suidhelper build so the live
+      # E2E's helper executions produce coverage profiles. Job-level so the
+      # stamp compiler (mix compile) and suidhelper.install build identically.
+      HYPER_SUIDHELPER_INSTRUMENT_COVERAGE: "1"
     services:
       postgres:
         image: postgres:17-alpine
@@ -381,8 +385,18 @@ jobs:
       # --warnings-as-errors pass through; it writes cover/excoveralls.json,
       # which is this job's Codecov upload — without it the integration-only
       # modules (e.g. Hyper.Metering.Usage) report zero coverage.
+      # LLVM_PROFILE_FILE reaches the helper through the BEAM's System.cmd
+      # (inherited env). %p keeps concurrent helper invocations' profiles
+      # distinct; %m makes the runtime merge same-binary runs safely; %c is
+      # continuous mode (counters mmap-written as they increment), pairing
+      # with the seam's runtime-counter-relocation so the jailer's
+      # execve/_exit paths — which never reach the atexit dump — still count.
       - name: Integration + external tests
-        run: mix coveralls.json --only integration --only external --warnings-as-errors
+        env:
+          LLVM_PROFILE_FILE: ${{ github.workspace }}/cover/suidhelper-%p-%m%c.profraw
+        run: |
+          mkdir -p cover
+          mix coveralls.json --only integration --only external --warnings-as-errors
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
@@ -426,6 +440,37 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: cover/excoveralls.json
           flags: integration
+          fail_ci_if_error: true
+
+      # Merge the instrumented helper's profiles and export lcov, so the
+      # live-VM paths (losetup attach, dmsetup, thin_dump, jail build) count
+      # toward Rust coverage. llvm-tools must come from the same pinned
+      # nightly that built the helper: profraw formats are version-locked.
+      # The positional src/ filter keeps dependency crates out of the report;
+      # the sed rewrites absolute SF: paths to repo-relative for codecov.
+      - name: Export suidhelper E2E coverage
+        working-directory: native/suidhelper
+        run: |
+          ls "$GITHUB_WORKSPACE"/cover/suidhelper-*.profraw
+          rustup component add llvm-tools
+          TOOLS="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+          "$TOOLS/llvm-profdata" merge -sparse \
+            "$GITHUB_WORKSPACE"/cover/suidhelper-*.profraw \
+            -o suidhelper.profdata
+          "$TOOLS/llvm-cov" export --format=lcov \
+            --instr-profile=suidhelper.profdata \
+            target/release/hyper-suidhelper \
+            "$GITHUB_WORKSPACE/native/suidhelper/src" \
+            > lcov-e2e.info
+          sed -i "s|^SF:$GITHUB_WORKSPACE/|SF:|" lcov-e2e.info
+          grep -c '^SF:' lcov-e2e.info
+
+      - name: Upload suidhelper E2E coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: native/suidhelper/lcov-e2e.info
+          flags: rust
           fail_ci_if_error: true
 
   # Uploads the triggering event payload so the workflow_run publisher

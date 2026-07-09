@@ -9,7 +9,7 @@ mod blockdev;
 pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
-mod losetup;
+pub mod losetup;
 pub mod network;
 pub mod thin_dump;
 

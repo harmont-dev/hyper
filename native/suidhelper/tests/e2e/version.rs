@@ -14,7 +14,7 @@ mod support;
 
 #[test]
 fn version_reports_pkg_version_and_hex_checksum() {
-    // A nonexistent config path: `version` renders before config/gate setup,
+    // A nonexistent config path: `version` renders before config setup,
     // so it must succeed regardless. Needs no root.
     let out = support::run(Path::new("/nonexistent/hyper-config.toml"), &["version"]);
     assert_eq!(

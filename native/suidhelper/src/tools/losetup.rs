@@ -142,7 +142,8 @@ impl IsTool for Losetup {
 /// check the real path is in-bounds, then open *that* inode and return
 /// `/proc/self/fd/N`. Operating on the validated fd (not the path) closes the
 /// TOCTOU window: a swap after the check can't redirect losetup elsewhere.
-fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
+/// Public so the integration suite can prove the refusal/accept contract.
+pub fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
     let real = std::fs::canonicalize(p).map_err(|source| Error::Canonicalize {
         path: PathBuf::from(p),
         source,
