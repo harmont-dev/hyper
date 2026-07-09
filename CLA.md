@@ -63,7 +63,7 @@ Contribution with the Project.
 You represent that:
 
 1. Each Contribution is an original work that you created, and you have the
-   legal right to assign the rights set out above.
+   legal right to grant the license set out above.
 2. If your employer has rights to intellectual property you create, you have
    either received permission to make the Contribution on behalf of that
    employer, or your employer has waived such rights for the Contribution.
