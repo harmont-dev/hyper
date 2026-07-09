@@ -3,22 +3,22 @@
 Boot a real Firecracker microVM on your own Linux machine in about five
 minutes.
 
-This is the fastest path to a running Hyper node. It is a dev/eval setup — for
+This is the fastest path to a running Hyper node. It is a dev/eval setup -- for
 a production install (dedicated system user, managed PostgreSQL, systemd)
 follow the [installation guide](install.md).
 
 ## What you need
 
-- An Ubuntu/Debian host (x86_64 or aarch64) with KVM — `stat /dev/kvm` must
+- An Ubuntu/Debian host (x86_64 or aarch64) with KVM -- `stat /dev/kvm` must
   succeed. (Other distros work too, via the manual [installation
   guide](install.md).)
 - cgroups v2 (the default on any modern distro).
-- `sudo` — host provisioning (device-mapper, the setuid helper) needs root.
+- `sudo` -- host provisioning (device-mapper, the setuid helper) needs root.
   Hyper itself never runs as root.
-- [Docker](https://docs.docker.com/engine/install/) — for the side-car
+- [Docker](https://docs.docker.com/engine/install/) -- for the side-car
   Postgres.
 - Elixir `~> 1.20` OTP 28+ ([install](https://elixir-lang.org/install.html)).
-- Rust via [rustup](https://rustup.rs) — the build compiles the setuid helper
+- Rust via [rustup](https://rustup.rs) -- the build compiles the setuid helper
   and the in-guest agent.
 
 `setup.sh` checks every requirement up front and stops with an actionable
@@ -52,6 +52,6 @@ running commands; for other languages there is a
 
 ## Where next
 
-- [Intro](intro.md) — concepts and the usage walkthrough.
-- [Installation guide](install.md) — the manual, production-grade setup.
-- [Configuration guide](config.md) — every `/etc/hyper/config.toml` knob.
+- [Intro](intro.md) -- concepts and the usage walkthrough.
+- [Installation guide](install.md) -- the manual, production-grade setup.
+- [Configuration guide](config.md) -- every `/etc/hyper/config.toml` knob.

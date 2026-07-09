@@ -2,7 +2,7 @@
 # One-time host provisioning for a Hyper dev/eval node. After this succeeds,
 # `iex -S mix` boots a Hyper node.
 #
-# Provisioning mirrors docs/cookbook/install.md — keep the two in sync, the
+# Provisioning mirrors docs/cookbook/install.md -- keep the two in sync, the
 # same way .github/scripts/provision-kvm-host.sh is kept in lockstep with it.
 #
 # Deliberate deltas from install.md (this is a dev/eval path, not production):
@@ -21,11 +21,11 @@ fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 [ -e /dev/kvm ] \
-  || fail "no /dev/kvm — Hyper needs a Linux host with KVM (bare metal, or a cloud instance with nested virtualization)"
+  || fail "no /dev/kvm -- Hyper needs a Linux host with KVM (bare metal, or a cloud instance with nested virtualization)"
 [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] \
   || fail "cgroups v2 not mounted at /sys/fs/cgroup"
 have apt-get \
-  || fail "setup.sh automates Ubuntu/Debian only — follow docs/cookbook/install.md on other distros"
+  || fail "setup.sh automates Ubuntu/Debian only -- follow docs/cookbook/install.md on other distros"
 have sudo || fail "sudo is required for host provisioning"
 have elixir \
   || fail "install Elixir ~> 1.20 on OTP 28+ first: https://elixir-lang.org/install.html"
@@ -33,9 +33,9 @@ have rustup || fail "install Rust via rustup first: https://rustup.rs"
 have docker \
   || fail "install Docker first (used only for the dev postgres): https://docs.docker.com/engine/install/"
 docker info >/dev/null 2>&1 \
-  || fail "docker is installed but not usable — is the daemon running, and are you in the docker group?"
+  || fail "docker is installed but not usable -- is the daemon running, and are you in the docker group?"
 
-info "host provisioning needs root — asking sudo once up front"
+info "host provisioning needs root -- asking sudo once up front"
 sudo -v
 
 info "OS packages"
@@ -55,7 +55,7 @@ sudo dmsetup targets | grep -q thin-pool \
 
 # Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
 # rejects symlinks, so install a dereferenced hard copy under the name the
-# multi-call binary dispatches on. Skip when a prior run already placed it —
+# multi-call binary dispatches on. Skip when a prior run already placed it --
 # it then wins on PATH, and install refuses to copy a file onto itself.
 thin_dump_src="$(readlink -f "$(command -v thin_dump)")"
 if [ "$thin_dump_src" != /usr/local/sbin/thin_dump ]; then
@@ -69,7 +69,7 @@ have protoc || sudo apt-get install -y protobuf-compiler
   || mix escript.install --force hex protobuf 0.17.0
 
 if [ -f /etc/hyper/config.toml ]; then
-  info "/etc/hyper/config.toml exists — leaving it alone"
+  info "/etc/hyper/config.toml exists -- leaving it alone"
 else
   info "writing /etc/hyper/config.toml"
   sudo mkdir -p /etc/hyper
@@ -103,7 +103,7 @@ sudo chown "$(id -u):$(id -g)" "$WORK_DIR"
 # it, and the node only creates it lazily on first image load.
 mkdir -p "$WORK_DIR/layers"
 
-info "compiling hyper (first run builds two Rust crates — takes a while)"
+info "compiling hyper (first run builds two Rust crates -- takes a while)"
 mix deps.get
 mix compile
 
@@ -140,4 +140,4 @@ info "image database"
 mix ecto.create -r Hyper.Img.Db.Repo
 mix ecto.migrate -r Hyper.Img.Db.Repo
 
-info "setup complete — boot a node with: iex -S mix"
+info "setup complete -- boot a node with: iex -S mix"

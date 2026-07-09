@@ -43,7 +43,7 @@ Then load an OCI image and boot it:
 {:ok, %{stdout: "hello\n"}} = Hyper.exec(vm, ["/bin/echo", "hello"])
 ```
 
-That's a real Firecracker microVM with a copy-on-write rootfs — the
+That's a real Firecracker microVM with a copy-on-write rootfs -- the
 [quickstart guide](https://hexdocs.pm/hypervm/quickstart.html) has the
 details. To embed Hyper in your own application instead, add it to your Mix
 project:
