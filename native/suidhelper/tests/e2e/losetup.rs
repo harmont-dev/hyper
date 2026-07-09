@@ -20,7 +20,17 @@ use support::{is_root, run};
 fn install_fake_losetup(dir: &Path, record: &Path, resolved: &Path, stdout_line: &str) -> PathBuf {
     let path = dir.join("losetup");
     let script = format!(
-        "#!/bin/sh\nprintf '%s' \"$(\n  printf '['\n  sep=''\n  for a in \"$@\"; do printf '%s\"%s\"' \"$sep\" \"$a\"; sep=','; done\n  printf ']'\n)\" > '{record}'\nfor a in \"$@\"; do last=$a; done\n/usr/bin/readlink \"$last\" > '{resolved}' 2>/dev/null || true\nprintf '{stdout_line}\\n'\n",
+        r#"#!/bin/sh
+printf '%s' "$(
+  printf '['
+  sep=''
+  for a in "$@"; do printf '%s"%s"' "$sep" "$a"; sep=','; done
+  printf ']'
+)" > '{record}'
+for a in "$@"; do last=$a; done
+/usr/bin/readlink "$last" > '{resolved}' 2>/dev/null || true
+printf '{stdout_line}\n'
+"#,
         record = record.display(),
         resolved = resolved.display(),
     );
@@ -35,7 +45,10 @@ fn install_failing_losetup(dir: &Path) -> PathBuf {
     let path = dir.join("losetup");
     fs::write(
         &path,
-        "#!/bin/sh\necho 'boom: no free loop device' >&2\nexit 1\n",
+        r"#!/bin/sh
+echo 'boom: no free loop device' >&2
+exit 1
+",
     )
     .unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -47,9 +60,12 @@ fn install_failing_losetup(dir: &Path) -> PathBuf {
 fn write_root_config(dir: &Path, work_dir: &Path, losetup_bin: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     let body = format!(
-        "work_dir = \"{}\"\n[tools]\nlosetup = \"{}\"\n",
-        work_dir.display(),
-        losetup_bin.display(),
+        r#"work_dir = "{work_dir}"
+[tools]
+losetup = "{losetup}"
+"#,
+        work_dir = work_dir.display(),
+        losetup = losetup_bin.display(),
     );
     fs::write(&p, body).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();

@@ -87,7 +87,7 @@ fn is_root() -> bool {
 fn init_config_with_base(tmp: &std::path::Path) -> std::path::PathBuf {
     let base = std::fs::canonicalize(tmp).unwrap();
     let cfg = tmp.join("config.toml");
-    std::fs::write(&cfg, format!("work_dir = \"{}\"\n", base.display())).unwrap();
+    std::fs::write(&cfg, format!(r#"work_dir = "{}""#, base.display()) + "\n").unwrap();
     std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
     std::env::set_var("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1");
     std::env::set_var("HYPER_SETUIDHELPER_CONFIG_PATH", &cfg);
