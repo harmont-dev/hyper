@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time host provisioning for a Hyper dev/eval node. After this succeeds,
-# `iex -S mix` boots a Hyper node (or `foreman start` — see Procfile).
+# `iex -S mix` boots a Hyper node.
 #
 # Provisioning mirrors docs/cookbook/install.md — keep the two in sync, the
 # same way .github/scripts/provision-kvm-host.sh is kept in lockstep with it.

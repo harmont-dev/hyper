@@ -54,12 +54,6 @@ That is a real Firecracker microVM with a copy-on-write rootfs. The
 running commands; for other languages there is a
 [gRPC interface](../grpc.md).
 
-## Procfile
-
-Prefer everything in the foreground with multiplexed logs? A `Procfile` is
-included: `foreman start` (or hivemind, or overmind) tails PostgreSQL and
-boots the Hyper node side by side.
-
 ## Where next
 
 - [Intro](intro.md) — concepts and the usage walkthrough.
