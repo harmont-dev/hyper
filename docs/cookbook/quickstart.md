@@ -50,8 +50,9 @@ In the `iex` shell:
 ```
 
 That is a real Firecracker microVM with a copy-on-write rootfs. The
-[intro](intro.md#usage) walks through the rest — forking, stopping, and
-driving Hyper over gRPC.
+[intro](intro.md#usage) walks through loading images, booting VMs, and
+running commands; for other languages there is a
+[gRPC interface](../grpc.md).
 
 ## Procfile
 
