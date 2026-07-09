@@ -118,8 +118,6 @@ defmodule Hyper.Img.Db.Gc do
   # role, monitor noise, etc.) rather than crashing an in-flight sweep.
   def handle_info(_msg, state), do: {:noreply, state}
 
-  ## Internals
-
   @spec acquire(t()) :: t()
   defp acquire(state) do
     case Horde.Registry.register(Routing.name(), @singleton_key, nil) do

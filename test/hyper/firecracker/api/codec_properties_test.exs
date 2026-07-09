@@ -40,6 +40,9 @@ defmodule Hyper.Firecracker.Api.CodecPropertiesTest do
           is_read_only <- optional(boolean()),
           path_on_host <- optional(string(:alphanumeric, min_length: 1)),
           cache_type <- optional(member_of(["Unsafe", "Writeback"])),
+          io_engine <- optional(member_of(["Sync", "Async"])),
+          partuuid <- optional(string(:alphanumeric, min_length: 1)),
+          socket <- optional(string(:alphanumeric, min_length: 1)),
           rate_limiter <- optional(rate_limiter())
         ) do
       %Drive{
@@ -48,6 +51,9 @@ defmodule Hyper.Firecracker.Api.CodecPropertiesTest do
         is_read_only: is_read_only,
         path_on_host: path_on_host,
         cache_type: cache_type,
+        io_engine: io_engine,
+        partuuid: partuuid,
+        socket: socket,
         rate_limiter: rate_limiter
       }
     end
