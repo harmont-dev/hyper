@@ -91,19 +91,16 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  # The testable seam: reset any stale jail from a prior incarnation, then —
-  # Prepare the netns the jailer's `--netns` will enter. Must run before
-  # `launch/1`: the jailer refuses to start if the netns it is told to enter
-  # does not already exist. Networking is mandatory, so this is unconditional.
+  # Clear any stale jail + netns left by a prior incarnation, then prepare the
+  # fresh netns the jailer's `--netns` will enter. Must run before `launch/1`:
+  # the jailer refuses to start if the netns it is told to enter does not yet
+  # exist. Networking is mandatory, so this is unconditional.
   @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
   defp prelaunch(%Opts{vm_id: id, uid: uid} = opts) do
-    with :ok <- reset_stale_jail(opts) do
+    with :ok <- clear_jail(opts) do
       Hyper.SuidHelper.Network.prepare(id, uid)
     end
   end
-
-  @spec reset_stale_jail(Opts.t()) :: :ok | {:error, term()}
-  defp reset_stale_jail(opts), do: clear_jail(opts)
 
   # Best-effort: both the chroot/cgroup removal and the network teardown are
   # attempted regardless of the other's outcome (a `Reaper` backstops either

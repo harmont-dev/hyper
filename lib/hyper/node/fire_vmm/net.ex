@@ -50,8 +50,4 @@ defmodule Hyper.Node.FireVMM.Net do
   def interface(vm_id) do
     %NetworkInterface{iface_id: @iface, host_dev_name: @tap, guest_mac: guest_mac(vm_id)}
   end
-
-  @doc false
-  @spec guest_iface() :: String.t()
-  def guest_iface, do: @iface
 end

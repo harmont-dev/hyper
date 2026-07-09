@@ -11,12 +11,6 @@ defmodule Hyper.Cfg.NetworkTest do
     end
   end
 
-  describe "resolver/0" do
-    test "defaults when unset" do
-      assert Network.resolver() == "1.1.1.1"
-    end
-  end
-
   describe "configured?/0" do
     test "false when no uplink configured" do
       # Base test config sets no [network] table. This is the predicate the
