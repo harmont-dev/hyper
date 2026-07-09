@@ -38,16 +38,18 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
 
-          # The tag is the single source of truth: stamp it into both manifests.
-          # Cargo.toml's [package] version is the only line starting with
-          # `version = `; mix.exs has exactly one `version: "..."` (the project
-          # version). `0,/re/` rewrites just the first match.
-          sed -i -E "0,/^version = \"[^\"]*\"/s//version = \"${version}\"/" native/suidhelper/Cargo.toml
+          # The tag is the single source of truth: stamp it into every package
+          # manifest. `0,/re/` rewrites only the first match, which for each
+          # Cargo.toml is its own `[package] version` (xtask is intentionally
+          # left at 0.0.0 — it is publish = false).
+          for m in native/suidhelper/Cargo.toml native/suidhelper/meta/Cargo.toml native/guest-agent/Cargo.toml; do
+            sed -i -E "0,/^version = \"[^\"]*\"/s//version = \"${version}\"/" "$m"
+          done
           sed -i -E "0,/version: \"[^\"]*\"/s//version: \"${version}\"/" mix.exs
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add native/suidhelper/Cargo.toml mix.exs
+          git add native/suidhelper/Cargo.toml native/suidhelper/meta/Cargo.toml native/guest-agent/Cargo.toml mix.exs
 
           # Idempotent: a re-run after the bump already landed has nothing to commit.
           if git diff --cached --quiet; then
