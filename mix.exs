@@ -118,6 +118,7 @@ defmodule Hyper.MixProject do
       # Narrative/guide pages rendered alongside the API reference.
       extras: [
         "README.md",
+        "docs/cookbook/quickstart.md",
         "docs/cookbook/intro.md",
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",

@@ -1,6 +1,8 @@
-# Quick Start
+# Installation
 
-This document provides the quickest start available to get Hyper running.
+This document walks through a full installation of Hyper on a node. For the
+fastest dev/eval path, see the [quickstart](quickstart.md), which automates
+this guide via `setup.sh`.
 
 ## Configuration
 
