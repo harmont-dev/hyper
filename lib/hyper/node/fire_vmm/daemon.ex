@@ -57,11 +57,13 @@ defmodule Hyper.Node.FireVMM.Daemon do
     # link kill) and so `terminate/2` runs on supervisor shutdown.
     Process.flag(:trap_exit, true)
 
-    with :ok <- reset_stale_jail(id),
+    with :ok <- prelaunch(opts),
          {:ok, muontrap} <- launch(opts) do
       {:ok, %__MODULE__{opts: opts, muontrap: muontrap}}
     else
-      {:error, reason} -> {:stop, reason}
+      {:error, reason} ->
+        Logger.error("vm #{id}: init failed: #{inspect(reason)}")
+        {:stop, reason}
     end
   end
 
@@ -79,8 +81,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # here is logged, and the `Reaper` will retry, but it must not crash teardown.
   @impl true
   @decorate with_span("Hyper.Node.FireVMM.Daemon.terminate", include: [:id])
-  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id}}) do
-    case clear_jail(id) do
+  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id} = opts}) do
+    case clear_jail(opts) do
       :ok ->
         :ok
 
@@ -89,12 +91,25 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  @spec reset_stale_jail(Hyper.Vm.Id.t()) :: :ok | {:error, term()}
-  defp reset_stale_jail(id), do: clear_jail(id)
+  # Clear any stale jail + netns left by a prior incarnation, then prepare the
+  # fresh netns the jailer's `--netns` will enter. Must run before `launch/1`:
+  # the jailer refuses to start if the netns it is told to enter does not yet
+  # exist. Networking is mandatory, so this is unconditional.
+  @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
+  defp prelaunch(%Opts{vm_id: id, uid: uid} = opts) do
+    with :ok <- clear_jail(opts) do
+      Hyper.SuidHelper.Network.prepare(id, uid)
+    end
+  end
 
-  @spec clear_jail(Hyper.Vm.Id.t()) :: :ok | {:error, term()}
-  defp clear_jail(id) do
-    SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
+  # Best-effort: both the chroot/cgroup removal and the network teardown are
+  # attempted regardless of the other's outcome (a `Reaper` backstops either
+  # failure); the first error is surfaced to the caller.
+  @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
+  defp clear_jail(%Opts{vm_id: id, uid: uid}) do
+    net = Hyper.SuidHelper.Network.teardown(id, uid)
+    jail = SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
+    with :ok <- net, do: jail
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}

@@ -191,6 +191,72 @@ cgroup = "hyper"
 For more details on configuring and tuning Hyper, we suggest you see the
 [configuration guide](config.md).
 
+### VM Networking (required)
+
+VM networking is **mandatory**: a node refuses to start without a `[network]`
+table in `/etc/hyper/config.toml`, and every VM gets NAT'd egress out through a
+physical interface on the host. There is no opt-out — a node that fails this
+preflight will not boot (`{:error, :network_not_configured}`, a missing uplink,
+or IPv4 forwarding off). The `hyper` nft table itself is created (and owned) by
+`host-init`, which runs automatically at node start — you never create nft rules
+by hand. You must prepare the host first:
+
+Install `iproute2` and `nftables`:
+
+```sh
+sudo apt install -y iproute2 nftables   # dnf install -y iproute nftables
+```
+
+Enable IPv4 forwarding. `host-init` only *asserts* this is on — it refuses to
+proceed rather than setting it for you:
+
+```sh
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+> #### Persistent Config {: .warning}
+>
+> Loading this via `sysctl -w` is ephemeral and resets on reboot. Persist it:
+>
+> ```sh
+> echo 'net.ipv4.ip_forward=1' \
+>     | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf
+> ```
+
+> #### Conflicting FORWARD firewall {: .warning}
+>
+> Guest egress is *forwarded* (per-VM netns veth → uplink). If the host already
+> runs a firewall that defaults the `filter` FORWARD chain to DROP — Docker does
+> this, and so do some hardened base images — those drops silently eat every
+> guest packet: the guest configures its NIC correctly but nothing ever returns.
+> Admit the clone pool through the firewall's user hook (Docker evaluates
+> `DOCKER-USER` before its own drops); the `hyper` nft forward chain still
+> enforces guest isolation:
+>
+> ```sh
+> sudo iptables -I DOCKER-USER -s 172.31.0.0/16 -j ACCEPT
+> sudo iptables -I DOCKER-USER -d 172.31.0.0/16 -j ACCEPT
+> ```
+>
+> On a host without Docker, ensure nothing else sets the FORWARD policy to DROP.
+
+Then set `uplink` to the physical NIC guests should NAT out through — the
+default-route interface is a reasonable choice on a single-uplink host:
+
+```sh
+ip route show default | awk '{print $5; exit}'
+```
+
+```toml
+[network]
+# **required**. The physical uplink interface guests NAT egress through.
+uplink = "eth0"
+
+# optional, defaults shown
+clone_pool = "172.31.0.0/16"
+resolver = "1.1.1.1"
+```
+
 ### Cgroups
 
 Hyper uses cgroups to impose limits on each VM. Each VM has its own cgroup,

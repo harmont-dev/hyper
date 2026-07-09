@@ -8,7 +8,7 @@ use crate::util::safe_file::{self, Any, IsBlockDevice, SafeFile};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{open as nix_open, OFlag};
-use nix::sys::stat::Mode;
+use nix::sys::stat::{makedev, Mode};
 use std::io;
 use std::os::unix::io::FromRawFd;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,10 @@ use thiserror::Error as ThisError;
 /// mirrors.
 const KERNEL_NAME: &str = "vmlinux";
 const ROOTFS_NAME: &str = "rootfs";
+
+/// `/dev/net/tun`'s well-known major:minor, per Linux's `Documentation/admin-guide/devices.txt`.
+const TUN_MAJOR: u64 = 10;
+const TUN_MINOR: u64 = 200;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -122,6 +126,9 @@ impl ChrootJail<Kernel, Rootfs> {
         let chroot = open_chroot_under(jail_base, &self.chroot)?;
         stage_kernel_under(&chroot, &self.kernel.0, hyper_base, self.uid, self.gid)?;
         make_rootfs(&chroot, &self.rootfs.0, self.uid, self.gid)?;
+        if Config::get().network().is_some() {
+            make_tun_node(&chroot, self.uid, self.gid)?;
+        }
         Ok(())
     }
 }
@@ -211,5 +218,24 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
     let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
     chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;
+    Ok(())
+}
+
+/// Create `dev/net/tun` (char `10:200`, mode `0666`) inside the jail, owned
+/// `uid:gid`, so the chrooted firecracker can `open("/dev/net/tun")` and
+/// `TUNSETIFF` onto the tap device waiting in its netns. Only called when VM
+/// networking is enabled; a jail built without it has no `dev` tree at all
+/// today (see [`ChrootJail::build_under`]).
+fn make_tun_node(chroot: &SafeDir, uid: u32, gid: u32) -> Result<(), Error> {
+    let dev = Path::new("dev");
+    chroot.mkdir(dev, 0o755)?;
+    let dev_dir = chroot.openat_dir(dev)?;
+
+    let net = Path::new("net");
+    dev_dir.mkdir(net, 0o755)?;
+    let net_dir = dev_dir.openat_dir(net)?;
+
+    let rdev = makedev(TUN_MAJOR, TUN_MINOR);
+    net_dir.mknod_char(Path::new("tun"), rdev, uid, gid)?;
     Ok(())
 }

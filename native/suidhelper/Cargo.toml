@@ -57,6 +57,18 @@ name = "tools_jailer"
 path = "tests/tools/jailer.rs"
 
 [[test]]
+name = "tools_network_addr"
+path = "tests/tools/network_addr.rs"
+
+[[test]]
+name = "tools_network_args"
+path = "tests/tools/network_args.rs"
+
+[[test]]
+name = "tools_host_init"
+path = "tests/tools/host_init.rs"
+
+[[test]]
 name = "util_confinement"
 path = "tests/util/confinement.rs"
 
@@ -107,6 +119,10 @@ path = "tests/e2e/thin_dump.rs"
 [[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
+
+[[test]]
+name = "config_network"
+path = "tests/config_network.rs"
 
 [[test]]
 name = "util_linux_thin_dump"

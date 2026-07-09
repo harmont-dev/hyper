@@ -3,10 +3,15 @@
 //! never touch /etc/hyper or /srv. Root-gated: the helper acquires privileges for
 //! mknod/chown, so these self-skip without root. The cgroup half is exercised
 //! only with a MISSING leaf (idempotent, mutates nothing on the real host).
+//!
+//! The `dev/net/tun` node `prepare` creates when `[network]` is configured is
+//! likewise privileged `mknod` — no unit-level substitute exists; it is proven
+//! only here, root-gated, with the insecure config seam supplying a `[network]`
+//! table.
 #![cfg(feature = "insecure_test_seams")]
 
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,6 +23,22 @@ use support::{is_root, run};
 fn write_config(dir: &Path, work_dir: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     fs::write(&p, format!("work_dir = \"{}\"\n", work_dir.display())).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+    p
+}
+
+/// Same as [`write_config`], plus a `[network]` table — the gate that makes
+/// `chroot-jail prepare` also mknod `dev/net/tun` into the jail.
+fn write_config_with_network(dir: &Path, work_dir: &Path) -> PathBuf {
+    let p = dir.join("config.toml");
+    fs::write(
+        &p,
+        format!(
+            "work_dir = \"{}\"\n[network]\nuplink = \"eth0\"\n",
+            work_dir.display()
+        ),
+    )
+    .unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
     p
 }
@@ -100,6 +121,65 @@ fn prepare_succeeds_and_builds_jail_as_root() {
         fs::metadata(chroot.join("rootfs")).unwrap().rdev(),
         dev_rdev.unwrap(),
     );
+}
+
+// `chroot-jail prepare` against a config with `[network]` set also mknods
+// `dev/net/tun` into the jail: char device 10:200, mode 0666, owned uid:gid.
+#[test]
+fn prepare_creates_tun_node_when_networking_enabled_as_root() {
+    if !is_root() {
+        eprintln!("SKIP prepare_creates_tun_node_when_networking_enabled: needs root");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("srv");
+    let chroot = work.join("jails").join("exec").join("id");
+    fs::create_dir_all(&chroot).unwrap();
+    let kernel = work.join("vmlinux-src");
+    fs::write(&kernel, b"kernel image").unwrap();
+    let cfg = write_config_with_network(tmp.path(), &work);
+
+    let Some(dev) = setup_loop(tmp.path()) else {
+        eprintln!("SKIP prepare_creates_tun_node: losetup unavailable");
+        return;
+    };
+
+    let uid = 1234;
+    let gid = 5678;
+    let out = run(
+        &cfg,
+        &[
+            "chroot-jail",
+            "prepare",
+            "--chroot",
+            chroot.to_str().unwrap(),
+            "--kernel",
+            kernel.to_str().unwrap(),
+            "--device",
+            dev.to_str().unwrap(),
+            "--uid",
+            &uid.to_string(),
+            "--gid",
+            &gid.to_string(),
+        ],
+    );
+    teardown_loop(&dev);
+
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let tun = chroot.join("dev").join("net").join("tun");
+    let meta = fs::metadata(&tun).expect("dev/net/tun must exist");
+    assert!(meta.file_type().is_char_device(), "must be a char device");
+    assert_eq!(nix::sys::stat::major(meta.rdev()), 10);
+    assert_eq!(nix::sys::stat::minor(meta.rdev()), 200);
+    assert_eq!(meta.uid(), uid);
+    assert_eq!(meta.gid(), gid);
+    assert_eq!(meta.permissions().mode() & 0o777, 0o666);
 }
 
 // `chroot-jail prepare` with a system device (not a loop / hyper-* dm) is

@@ -64,6 +64,14 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
     let uid = validate_id_number(args.uid, range).map_err(Error::Jail)?;
     let gid = validate_id_number(args.gid, range).map_err(Error::Jail)?;
 
+    // The netns path is derived entirely from trusted config (whether VM
+    // networking is enabled) and the already-validated `--id` — the caller
+    // cannot name it. Must match the `ip netns add <id>` path the network tool
+    // creates. Networking is mandatory, so in practice this is always `Some`.
+    let netns: Option<PathBuf> = config
+        .network()
+        .map(|_| PathBuf::from(format!("/var/run/netns/{}", args.id)));
+
     Ok(Jailer::builder()
         .jailer(&jailer)
         .firecracker(&firecracker)
@@ -74,6 +82,7 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         .gid(gid)
         .cgroups(&args.cgroup)
         .api_sock(&args.api_sock)
+        .maybe_netns(netns.as_deref())
         .build()
         .invoke()?)
 }

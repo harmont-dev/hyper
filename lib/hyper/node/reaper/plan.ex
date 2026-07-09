@@ -16,12 +16,20 @@ defmodule Hyper.Node.Reaper.Plan do
         do: String.replace_prefix(name, @rw_prefix, "")
   end
 
-  @doc "Candidate orphans this tick: (cgroup leaves ∪ rw vm_ids) minus the live set."
-  @spec orphans(MapSet.t(String.t()), [String.t()], [String.t()]) :: MapSet.t(String.t())
-  def orphans(live, cgroup_leaves, rw_ids) do
+  @doc """
+  Candidate orphans this tick: (cgroup leaves ∪ rw vm_ids ∪ netns names) minus
+  the live set. `netns_names` are the leaf names of `/var/run/netns/*` — a VM's
+  netns is named exactly its vm_id (see `Hyper.SuidHelper.Network`), so it folds
+  into the same union/difference as the other two sources and is subject to the
+  same two-strike `confirm/2` grace before `Hyper.Node.Reaper` ever reaps it.
+  """
+  @spec orphans(MapSet.t(String.t()), [String.t()], [String.t()], [String.t()]) ::
+          MapSet.t(String.t())
+  def orphans(live, cgroup_leaves, rw_ids, netns_names) do
     cgroup_leaves
     |> MapSet.new()
     |> MapSet.union(MapSet.new(rw_ids))
+    |> MapSet.union(MapSet.new(netns_names))
     |> MapSet.difference(live)
   end
 

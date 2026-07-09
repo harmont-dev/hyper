@@ -92,7 +92,8 @@ defmodule Hyper.Node.FireVMM.State do
       ) do
     case Hyper.Cluster.Routing.register_self({id, :state}) do
       :ok ->
-        spec = BootSpec.resolve(boot_source(kernel, Mutable.blk_path(mutable), boot_args), type)
+        source = boot_source(id, kernel, Mutable.blk_path(mutable), boot_args)
+        spec = BootSpec.resolve(source, type)
         deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
         data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 
@@ -104,13 +105,15 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +
-  # device. `boot_args` is omitted when nil so BootSpec applies its default.
-  @spec boot_source(Path.t(), Path.t(), String.t() | nil) :: Hyper.Vm.source()
-  defp boot_source(kernel, dev, nil),
-    do: %{kernel_image_path: kernel, root_drive_path: dev}
+  # device. `boot_args` is omitted when nil so BootSpec applies its default;
+  # `vm_id` is always included (networking is mandatory — BootSpec derives the
+  # guest NIC from it).
+  @spec boot_source(Hyper.Vm.Id.t(), Path.t(), Path.t(), String.t() | nil) :: Hyper.Vm.source()
+  defp boot_source(vm_id, kernel, dev, nil),
+    do: %{vm_id: vm_id, kernel_image_path: kernel, root_drive_path: dev}
 
-  defp boot_source(kernel, dev, boot_args),
-    do: %{kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
+  defp boot_source(vm_id, kernel, dev, boot_args),
+    do: %{vm_id: vm_id, kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
 
   @impl :gen_statem
   # Answered in every lifecycle state: the opts are static data, and a fork must

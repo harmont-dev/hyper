@@ -186,6 +186,12 @@ defmodule Hyper.Node.Img.Server do
   # on top. Rolls back any devices it created if a later one fails.
   @spec build_chain(Hyper.Img.id(), [Path.t()]) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+  # An unknown image id resolves to no layers; return a clean domain error so
+  # `init/1` stops with `{:stop, :unknown_image}` (which the scheduler maps to
+  # `:no_capacity`) rather than crashing with a FunctionClauseError + SASL
+  # report. This is the placement-refusal path for a never-loaded image.
+  defp build_chain(_img_id, []), do: {:error, :unknown_image}
+
   defp build_chain(img_id, [base | deltas]) do
     with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(base) do
       deltas

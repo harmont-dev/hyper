@@ -8,11 +8,13 @@ defmodule Hyper.Vm do
   @typedoc """
   What a VM boots from: explicit, already-jail-visible artifact paths for a cold
   boot (kernel + root drive). `boot_args` defaults to a standard serial-console
-  cmdline when omitted.
+  cmdline when omitted. `vm_id` is required — networking is mandatory and
+  `BootSpec.resolve/2` derives the guest NIC (`ip=` cmdline + MAC) from it.
   """
   @type source :: %{
           required(:kernel_image_path) => Path.t(),
           required(:root_drive_path) => Path.t(),
+          required(:vm_id) => Hyper.Vm.Id.t(),
           optional(:boot_args) => String.t()
         }
 

@@ -17,6 +17,9 @@
 #     the node)
 #   - DEBIAN_FRONTEND=noninteractive (install.md is written for an interactive
 #     operator session; CI has no tty to prompt on)
+#   - [network] is always written here (install.md presents it as an optional
+#     section) since the runner's default route interface is detected fresh
+#     each run and integration coverage wants egress networking exercised
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -30,12 +33,20 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo thin-provisioning-tools util-linux \
+  coreutils e2fsprogs iproute2 libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux \
   "linux-modules-extra-$(uname -r)"
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
 # PARAMETERS of the first, and the load fails.
-sudo modprobe -av dm_snapshot dm_thin_pool loop
+#
+# nf_tables + nf_nat back host-init's `hyper` nftables table and its
+# masquerade/SNAT/DNAT rules. A fresh GitHub-hosted runner does not have them
+# loaded, and the netfilter family does not always autoload on first `nft` use,
+# so `nft add table ip hyper` fails (empty stderr, non-zero exit) and the node
+# refuses to start. Load the base explicitly, as we do for the dm modules; the
+# nat expression sub-modules (nft_chain_nat, nft_masq) autoload once the base is
+# present and a rule is issued.
+sudo modprobe -av dm_snapshot dm_thin_pool loop nf_tables nf_nat
 targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
@@ -47,8 +58,35 @@ command -v thin_dump >/dev/null || { echo "ERROR: thin_dump missing (thin-provis
 sudo install -o root -g root -m 0755 "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
 [ ! -L /usr/local/sbin/thin_dump ] || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
 
+# host-init (run by the node at start) asserts ip_forward=1 rather than
+# setting it, so provisioning must turn it on and persist it across reboots.
+sudo sysctl -w net.ipv4.ip_forward=1
+echo 'net.ipv4.ip_forward=1' \
+  | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf >/dev/null
+
+# GitHub-hosted runners ship Docker, which sets the iptables `filter` FORWARD
+# policy to DROP and only admits its own bridge traffic. Hyper's guest egress is
+# *forwarded* (per-VM netns veth -> uplink), so Docker's drop silently eats
+# every packet the guest sends — the guest configures its NIC fine but nothing
+# ever returns. Admit the clone pool (172.31.0.0/16, the helper's default) both
+# directions via DOCKER-USER, which Docker evaluates before its own drops; the
+# `hyper` nftables forward chain still enforces guest isolation. Fall back to an
+# accepting FORWARD policy on a host without Docker's chain.
+clone_pool="172.31.0.0/16"
+if sudo iptables -L DOCKER-USER >/dev/null 2>&1; then
+  sudo iptables -I DOCKER-USER -s "${clone_pool}" -j ACCEPT
+  sudo iptables -I DOCKER-USER -d "${clone_pool}" -j ACCEPT
+else
+  sudo iptables -P FORWARD ACCEPT
+fi
+
+# The default-route interface is the uplink guests NAT egress through.
+uplink="$(ip route show default | awk '{print $5; exit}')"
+[ -n "${uplink}" ] || { echo "ERROR: could not detect default-route uplink interface" >&2; exit 1; }
+echo "detected uplink: ${uplink}"
+
 sudo mkdir -p /etc/hyper
-sudo tee /etc/hyper/config.toml >/dev/null <<'EOF'
+sudo tee /etc/hyper/config.toml >/dev/null <<EOF
 work_dir = "/srv/hyper"
 
 [tools]
@@ -65,6 +103,11 @@ cgroup = "hyper"
 # load is still decaying, and nothing else runs here worth protecting.
 [budget]
 cpu_max_load = 4.0
+
+# Enables per-VM egress NAT. The nft table itself is owned by host-init
+# (created idempotently at node start), not by this script.
+[network]
+uplink = "${uplink}"
 EOF
 sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml

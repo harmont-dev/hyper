@@ -9,12 +9,16 @@ defmodule Hyper.Node.Reaper do
   Liveness is the whole point. The reaper consults three independent sources of
   truth for "this vm is alive" — the local VM supervisor's children, the cluster
   routing table, and the node's live mutable layers (`Img.Mutable.active_vm_ids/0`)
-  — (`Plan.orphans/3` removes their union from the candidate set) and only ever
-  touches `hyper-rw-*` dm names and per-VM cgroup leaves - never `hyper-thinpool`,
+  — (`Plan.orphans/4` removes their union from the candidate set) and only ever
+  touches `hyper-rw-*` dm names, per-VM cgroup leaves, and (when networking is
+  enabled) per-VM netns names under `/var/run/netns` - never `hyper-thinpool`,
   `hyper-img-*`, or a live VM's resources. A
   candidate must also survive two consecutive ticks (`Plan.confirm/2`) before it
   is reaped, so a VM caught mid-boot (resources present, not yet registered) is
-  given a grace tick rather than destroyed.
+  given a grace tick rather than destroyed — this is what protects a netns that
+  `Hyper.Node.FireVMM.Daemon.prelaunch/1` just created for a VM that has not yet
+  appeared in `gather_live/0`: it takes two orphan sightings to reap, and a
+  normally-booting VM never produces a second one.
 
   The decision logic lives in the pure `Hyper.Node.Reaper.Plan`; this module is a
   thin I/O adapter that gathers the inputs, calls the plan, and executes the
@@ -84,8 +88,9 @@ defmodule Hyper.Node.Reaper do
     live = gather_live()
     leaves = list_cgroup_leaves()
     rw = Plan.rw_ids(list_rw_dm())
+    netns = list_netns()
 
-    current = Plan.orphans(live, leaves, rw)
+    current = Plan.orphans(live, leaves, rw, netns)
     {to_reap, next} = Plan.confirm(current, state.last_orphans)
 
     Enum.each(to_reap, &reap_one/1)
@@ -161,6 +166,23 @@ defmodule Hyper.Node.Reaper do
     end
   end
 
+  # Networking is mandatory, so `/var/run/netns` is expected present; an :enoent
+  # (nothing booted yet) is still normal and yields no orphans.
+  @spec list_netns() :: [String.t()]
+  defp list_netns do
+    case File.ls("/var/run/netns") do
+      {:ok, names} ->
+        names
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.warning("reaper: could not list netns: #{inspect(reason)}")
+        []
+    end
+  end
+
   @spec reap_one(String.t()) :: :ok
   @decorate with_span("Hyper.Node.Reaper.reap_one", include: [:id])
   defp reap_one(id) do
@@ -173,6 +195,8 @@ defmodule Hyper.Node.Reaper do
     )
 
     log_result("dm volume", id, Dmsetup.remove(Img.Mutable.dm_name(id)))
+    log_result("netns", id, Hyper.SuidHelper.Network.teardown_orphan(id))
+
     :ok
   end
 
