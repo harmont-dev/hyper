@@ -4,6 +4,7 @@ defmodule Hyper.Grpc.CodecTest do
   alias Hyper.Grpc.Codec
   alias Hyper.Grpc.V0.CreateVmRequest
   alias Hyper.Grpc.V0.GetVmUsageResponse
+  alias Hyper.Grpc.V0.ListVmsResponse
   alias Hyper.Grpc.V0.StopVmResponse
 
   test "usage encodes as microseconds on the wire" do
@@ -63,5 +64,14 @@ defmodule Hyper.Grpc.CodecTest do
              })
 
     assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :missing_arch})
+  end
+
+  test "a vms page maps to ListVmsResponse carrying the next_page_token" do
+    assert %ListVmsResponse{vms: [%{vm_id: "a"}], next_page_token: "cursor"} =
+             Codec.to_grpc({:vms, [{"a", :node@host}], "cursor"})
+  end
+
+  test "a malformed page_token maps to INVALID_ARGUMENT" do
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :bad_page_token})
   end
 end

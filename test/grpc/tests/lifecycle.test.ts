@@ -57,8 +57,10 @@ test(
       expect(located.vmId).toBe(created.vmId);
       expect(located.node).toBe(created.node);
 
-      const listed = (await call(client, client.listVms, {})) as ListVmsResponse__Output;
+      const listed = (await call(client, client.listVms, { pageSize: 1000 })) as ListVmsResponse__Output;
       expect((listed.vms ?? []).map((vm) => vm.vmId)).toContain(created.vmId);
+      // next_page_token is a string field: absent-on-last-page decodes to "".
+      expect(typeof (listed.nextPageToken ?? "")).toBe("string");
 
       const usage = (await call(client, client.getVmUsage, { vmId: created.vmId })) as GetVmUsageResponse__Output;
       expect(usage.vmId).toBe(created.vmId);

@@ -197,13 +197,27 @@ message GetVmUsageResponse {
   uint64 cpu_usec = 2;
 }
 
-// Request to list VMs.
-message ListVmsRequest {}
+// Request to list VMs. All fields are optional; an empty request lists from the
+// beginning with a server-default page size.
+message ListVmsRequest {
+  // Optional. Maximum VMs to return in one page. 0 or unset selects a server
+  // default (100); values above the server maximum (1000) are capped down.
+  int32 page_size = 1;
+
+  // Optional. An opaque cursor taken verbatim from a previous response's
+  // `next_page_token`. Empty or unset starts from the beginning. Keep every
+  // other argument identical across a paged sequence.
+  string page_token = 2;
+}
 
 // Result of ListVms.
 message ListVmsResponse {
-  // Every VM known to the cluster, in no particular order.
+  // A page of VMs, ordered by `vm_id`.
   repeated Vm vms = 1;
+
+  // Opaque cursor for the next page. Empty exactly when this is the last page
+  // -- the only signal of end-of-collection.
+  string next_page_token = 2;
 }
 
 // A VM and where it runs. Returned by ListVms.

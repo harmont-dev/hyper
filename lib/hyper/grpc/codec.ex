@@ -87,9 +87,9 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:usage, vm_id, cpu_time}),
     do: %GetVmUsageResponse{vm_id: vm_id, cpu_usec: Unit.Time.as_us(cpu_time)}
 
-  @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}]}) :: ListVmsResponse.t()
-  def to_grpc({:vms, vms}),
-    do: %ListVmsResponse{vms: Enum.map(vms, &vm/1)}
+  @spec to_grpc({:vms, [Hyper.Grpc.Page.entry()], String.t()}) :: ListVmsResponse.t()
+  def to_grpc({:vms, vms, next_page_token}),
+    do: %ListVmsResponse{vms: Enum.map(vms, &vm/1), next_page_token: next_page_token}
 
   @spec to_grpc({:loaded, Hyper.Img.id()}) :: LoadImageResponse.t()
   def to_grpc({:loaded, img_id}) when is_binary(img_id),
@@ -127,6 +127,9 @@ defmodule Hyper.Grpc.Codec do
 
   defp rpc_error(:missing_arch),
     do: GRPC.RPCError.exception(:invalid_argument, "arch is required")
+
+  defp rpc_error(:bad_page_token),
+    do: GRPC.RPCError.exception(:invalid_argument, "page_token is malformed")
 
   defp rpc_error(:bad_instance_type),
     do: GRPC.RPCError.exception(:invalid_argument, "instance_type holds an unrecognised value")
