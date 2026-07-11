@@ -42,4 +42,26 @@ defmodule Hyper.Grpc.CodecTest do
   test "a stopped result maps to a StopVmResponse, not google.protobuf.Empty" do
     assert %StopVmResponse{} = Codec.to_grpc(:stopped)
   end
+
+  test "an unset instance_type (UNSPECIFIED) is rejected as required, not defaulted" do
+    assert {:error, :missing_instance_type} =
+             Codec.from_grpc(%CreateVmRequest{
+               img_id: "img",
+               instance_type: :INSTANCE_TYPE_UNSPECIFIED,
+               arch: :ARCHITECTURE_X86_64
+             })
+
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :missing_instance_type})
+  end
+
+  test "an unset arch (UNSPECIFIED) is rejected as required, not defaulted" do
+    assert {:error, :missing_arch} =
+             Codec.from_grpc(%CreateVmRequest{
+               img_id: "img",
+               instance_type: :INSTANCE_TYPE_MICRO,
+               arch: :ARCHITECTURE_UNSPECIFIED
+             })
+
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :missing_arch})
+  end
 end

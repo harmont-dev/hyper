@@ -104,19 +104,29 @@ defmodule Hyper.Grpc.Codec do
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
-  @spec instance_type(term()) :: {:ok, Hyper.Vm.Instance.t()} | {:error, :bad_instance_type}
+  @spec instance_type(term()) ::
+          {:ok, Hyper.Vm.Instance.t()} | {:error, :missing_instance_type | :bad_instance_type}
+  defp instance_type(:INSTANCE_TYPE_UNSPECIFIED), do: {:error, :missing_instance_type}
+
   defp instance_type(enum) when is_map_key(@instance_types, enum),
     do: {:ok, @instance_types[enum]}
 
   defp instance_type(_unrecognised), do: {:error, :bad_instance_type}
 
-  @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :bad_arch}
+  @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :missing_arch | :bad_arch}
+  defp arch(:ARCHITECTURE_UNSPECIFIED), do: {:error, :missing_arch}
   defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
   defp arch(_unrecognised), do: {:error, :bad_arch}
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
+
+  defp rpc_error(:missing_instance_type),
+    do: GRPC.RPCError.exception(:invalid_argument, "instance_type is required")
+
+  defp rpc_error(:missing_arch),
+    do: GRPC.RPCError.exception(:invalid_argument, "arch is required")
 
   defp rpc_error(:bad_instance_type),
     do: GRPC.RPCError.exception(:invalid_argument, "instance_type holds an unrecognised value")

@@ -91,31 +91,32 @@ service Hyper {
 // is roughly a doubling. The vCPU/memory annotations below are the headline
 // figures; disk and bandwidth scale alongside them.
 enum InstanceType {
-  INSTANCE_TYPE_MICRO = 0;  // 0.25 vCPU, 128 MiB  -- also the zero/default value
-  INSTANCE_TYPE_MILLI = 1;  // 0.5 vCPU,  256 MiB
-  INSTANCE_TYPE_CENTI = 2;  // 1 vCPU,    512 MiB
-  INSTANCE_TYPE_DECI = 3;   // 2 vCPU,    1 GiB
-  INSTANCE_TYPE_BASE = 4;   // 4 vCPU,    2 GiB
-  INSTANCE_TYPE_DECA = 5;   // 8 vCPU,    4 GiB
-  INSTANCE_TYPE_HECTO = 6;  // 16 vCPU,   8 GiB
-  INSTANCE_TYPE_KILO = 7;   // 32 vCPU,   16 GiB
-  INSTANCE_TYPE_MEGA = 8;   // 64 vCPU,   32 GiB
-  INSTANCE_TYPE_GIGA = 9;   // 128 vCPU,  64 GiB
-  INSTANCE_TYPE_TERA = 10;  // 256 vCPU,  128 GiB
+  INSTANCE_TYPE_UNSPECIFIED = 0;  // unset -- the server rejects it (INVALID_ARGUMENT)
+  INSTANCE_TYPE_MICRO = 1;   // 0.25 vCPU, 128 MiB
+  INSTANCE_TYPE_MILLI = 2;   // 0.5 vCPU,  256 MiB
+  INSTANCE_TYPE_CENTI = 3;   // 1 vCPU,    512 MiB
+  INSTANCE_TYPE_DECI = 4;    // 2 vCPU,    1 GiB
+  INSTANCE_TYPE_BASE = 5;    // 4 vCPU,    2 GiB
+  INSTANCE_TYPE_DECA = 6;    // 8 vCPU,    4 GiB
+  INSTANCE_TYPE_HECTO = 7;   // 16 vCPU,   8 GiB
+  INSTANCE_TYPE_KILO = 8;    // 32 vCPU,   16 GiB
+  INSTANCE_TYPE_MEGA = 9;    // 64 vCPU,   32 GiB
+  INSTANCE_TYPE_GIGA = 10;   // 128 vCPU,  64 GiB
+  INSTANCE_TYPE_TERA = 11;   // 256 vCPU,  128 GiB
 }
 
 // Guest CPU architecture. Must match the architecture the image was built for.
 enum Architecture {
-  ARCHITECTURE_X86_64 = 0;    // x86-64 / amd64 -- also the zero/default value
-  ARCHITECTURE_AARCH64 = 1;   // arm64
+  ARCHITECTURE_UNSPECIFIED = 0;  // unset -- the server rejects it (INVALID_ARGUMENT)
+  ARCHITECTURE_X86_64 = 1;       // x86-64 / amd64
+  ARCHITECTURE_AARCH64 = 2;      // arm64
 }
 
 // Request to create and boot a VM.
 //
-// `instance_type` and `arch` are required by the contract. Note that proto3
-// does not enforce field presence: an omitted field decodes to its enum's zero
-// value (INSTANCE_TYPE_MICRO / ARCHITECTURE_X86_64), so clients should always
-// set them explicitly.
+// `instance_type` and `arch` are required. Their proto3 zero value is the
+// `*_UNSPECIFIED` sentinel, which the server rejects with INVALID_ARGUMENT --
+// an omitted field is an error, never a silent default. Set them explicitly.
 message CreateVmRequest {
   // Required. The content-addressed id of the image to boot.
   string img_id = 1;
