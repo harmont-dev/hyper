@@ -4,6 +4,7 @@ defmodule Hyper.Grpc.CodecTest do
   alias Hyper.Grpc.Codec
   alias Hyper.Grpc.V0.CreateVmRequest
   alias Hyper.Grpc.V0.GetVmUsageResponse
+  alias Hyper.Grpc.V0.StopVmResponse
 
   test "usage encodes as microseconds on the wire" do
     assert %GetVmUsageResponse{vm_id: "v1", cpu_usec: 1_500_000} =
@@ -36,5 +37,9 @@ defmodule Hyper.Grpc.CodecTest do
              })
 
     assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :bad_arch})
+  end
+
+  test "a stopped result maps to a StopVmResponse, not google.protobuf.Empty" do
+    assert %StopVmResponse{} = Codec.to_grpc(:stopped)
   end
 end

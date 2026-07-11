@@ -8,8 +8,6 @@ defmodule Hyper.Grpc.Codec do
       or a `GRPC.RPCError` for the server to raise.
   """
 
-  alias Google.Protobuf.Empty
-
   alias Hyper.Grpc.V0.{
     CreateVmRequest,
     CreateVmResponse,
@@ -19,6 +17,7 @@ defmodule Hyper.Grpc.Codec do
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
+    StopVmResponse,
     Vm
   }
 
@@ -96,8 +95,8 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:loaded, img_id}) when is_binary(img_id),
     do: %LoadImageResponse{img_id: img_id}
 
-  @spec to_grpc(:stopped) :: Empty.t()
-  def to_grpc(:stopped), do: %Empty{}
+  @spec to_grpc(:stopped) :: StopVmResponse.t()
+  def to_grpc(:stopped), do: %StopVmResponse{}
 
   @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
   def to_grpc({:error, reason}), do: rpc_error(reason)

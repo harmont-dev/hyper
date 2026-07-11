@@ -9,7 +9,6 @@ defmodule Hyper.Grpc.Server do
   use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
   use OpenTelemetryDecorator
 
-  alias Google.Protobuf.Empty
   alias Hyper.Grpc.Codec
 
   alias Hyper.Grpc.V0.{
@@ -21,10 +20,12 @@ defmodule Hyper.Grpc.Server do
     GetVmResponse,
     GetVmUsageRequest,
     GetVmUsageResponse,
+    ListVmsRequest,
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
-    StopVmRequest
+    StopVmRequest,
+    StopVmResponse
   }
 
   @spec load_image(LoadImageRequest.t(), GRPC.Server.Stream.t()) :: LoadImageResponse.t()
@@ -66,7 +67,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: Empty.t()
+  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: StopVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.stop_vm", include: [:vm_id])
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.stop_vm(vm_id) do
@@ -93,9 +94,9 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec list_vms(Empty.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
   @decorate with_span("Hyper.Grpc.Server.list_vms")
-  def list_vms(%Empty{}, _stream) do
+  def list_vms(%ListVmsRequest{}, _stream) do
     Codec.to_grpc({:vms, Hyper.Cluster.Routing.all()})
   end
 end

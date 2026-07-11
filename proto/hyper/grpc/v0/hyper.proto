@@ -14,8 +14,6 @@ syntax = "proto3";
 
 package hyper.grpc.v0;
 
-import "google/protobuf/empty.proto";
-
 // The VM lifecycle service.
 //
 // Errors are returned as standard gRPC statuses (see each RPC). Beyond the ones
@@ -54,7 +52,7 @@ service Hyper {
   // Errors:
   //   NOT_FOUND   -- no VM with this `vm_id` is running in the cluster.
   //   UNAVAILABLE -- the VM's host node is unreachable.
-  rpc StopVm(StopVmRequest) returns (google.protobuf.Empty);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
 
   // Locate a microVM: report the cluster node it currently runs on.
   //
@@ -72,7 +70,7 @@ service Hyper {
   rpc GetVmUsage(GetVmUsageRequest) returns (GetVmUsageResponse);
 
   // List every microVM currently known to the cluster, across all nodes.
-  rpc ListVms(google.protobuf.Empty) returns (ListVmsResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
 
   // Load an OCI image into the cluster's shared media store and image database.
   //
@@ -163,6 +161,11 @@ message StopVmRequest {
   string vm_id = 1;
 }
 
+// Result of StopVm. Empty today; a dedicated message (never google.protobuf.Empty)
+// so a field -- e.g. the VM's final metered usage -- can be added later without a
+// breaking change.
+message StopVmResponse {}
+
 // Request to locate a VM.
 message GetVmRequest {
   // The id of the VM to look up.
@@ -192,6 +195,9 @@ message GetVmUsageResponse {
   // Cumulative CPU time the VM has actually executed, in microseconds.
   uint64 cpu_usec = 2;
 }
+
+// Request to list VMs.
+message ListVmsRequest {}
 
 // Result of ListVms.
 message ListVmsResponse {
