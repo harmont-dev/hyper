@@ -26,7 +26,7 @@ defmodule Redist.FileTest do
     on_exit(fn -> File.rm_rf!(tmp) end)
     # Install into a not-yet-existing nested path so we also prove parent dirs
     # are created on success and never created on failure.
-    {:ok, server: server, dest: Path.join([tmp, "nested", "asset.bin"])}
+    {:ok, server: server, dest: Path.join([tmp, "nested", "asset.bin"]), tmp: tmp}
   end
 
   @payloads [
@@ -68,6 +68,22 @@ defmodule Redist.FileTest do
 
     assert {:error, {:download_failed, 404}} = RedistFile.install(url, sha, dest)
     refute File.exists?(dest)
+  end
+
+  test "install/3 surfaces an unwritable destination as {:install_failed, _}", %{
+    server: server,
+    tmp: tmp
+  } do
+    # The download and checksum succeed; the failure is copying onto a path
+    # that is already a directory. The contract: a failed install classifies
+    # the POSIX reason rather than crashing or leaving a partial file.
+    bytes = "real-bytes"
+    url = HttpServer.put_file(server, "asset.bin", bytes)
+    dest = Path.join(tmp, "iamafile")
+    File.mkdir_p!(dest)
+
+    assert {:error, {:install_failed, reason}} = RedistFile.install(url, sha256(bytes), dest)
+    assert reason == :eisdir
   end
 
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)

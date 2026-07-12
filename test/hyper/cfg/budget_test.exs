@@ -58,4 +58,22 @@ defmodule Hyper.Cfg.BudgetTest do
     assert {:ok, config} = Budget.load()
     assert config.cpu_max_cap == nil
   end
+
+  # Refusal contracts on bad budget values: each must fail load with a specific
+  # error naming the offending key, never silently coerce or crash. Table-driven:
+  # one assertion shape, rows differ only in the bad env and expected error.
+  @bad_budgets [
+    {[mem_max: 123], {:error, {:bad_value, :mem_max, 123}}},
+    {[mem_max: "notabytes"], {:error, {:bad_value, :mem_max, "notabytes"}}},
+    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}}
+  ]
+
+  for {env, expected} <- @bad_budgets do
+    @env env
+    @expected expected
+    test "load/0 rejects #{inspect(@env)} with #{inspect(@expected)}" do
+      Application.put_env(:hyper, Budget, @env)
+      assert @expected = Budget.load()
+    end
+  end
 end
