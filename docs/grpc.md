@@ -5,8 +5,10 @@ The gRPC interface puts that same machine lifecycle behind a language-agnostic
 contract, so consumers in **any** language -- and off-BEAM services -- can
 create, stop, locate, and list microVMs.
 
-> **v1 -- stable.** Backward-compatible changes may land in place; a breaking
-> change ships as a side-by-side `hyper.grpc.v2` package.
+> **v1 -- stable.** This is the first stable contract. Backward-compatible
+> additions (new RPCs, new messages, appended fields, new enum values) may
+> land in place; a breaking change would ship as a side-by-side `hyper.grpc.v2`
+> package. Removed fields are retired with `reserved` and never reused.
 
 > #### No authentication {: .warning}
 >
@@ -61,7 +63,6 @@ language. We will be using _Python_ here:
 
 ```python
 import grpc
-from google.protobuf import empty_pb2
 from hyper.grpc.v1 import hyper_pb2, hyper_pb2_grpc
 
 # Plaintext. For TLS, pass grpc.ssl_channel_credentials(ca_pem) to
@@ -102,15 +103,24 @@ created = await client.CreateVm(
 print(created.vm_id, created.node)
 ```
 
+`instance_type` and `arch` are **required**. Their proto3 zero value is the
+`*_UNSPECIFIED` sentinel; sending it (or omitting the field) returns
+`INVALID_ARGUMENT`. Always set them explicitly, e.g.
+`InstanceType.INSTANCE_TYPE_CENTI`, `Architecture.ARCHITECTURE_X86_64`.
+
 ### Listing VMs
 
-You can list running virtual machines with `ListVms`, which takes a
-`google.protobuf.Empty`:
+You can list running virtual machines with `ListVms`, which is paginated via
+`page_size`/`page_token` in and `next_page_token` out:
 
 ```python
-listed = await client.ListVms(empty_pb2.Empty())
+from hyper.grpc.v1 import hyper_pb2
+
+# List a page of VMs. Follow next_page_token until it is empty for the full set.
+listed = await client.ListVms(hyper_pb2.ListVmsRequest(page_size=100))
 for vm in listed.vms:
     print(vm.vm_id, vm.node)
+next_token = listed.next_page_token  # "" means this was the last page
 ```
 
 ### Getting VM Info
@@ -143,11 +153,11 @@ the `vm_usage` Postgres table (`vm_id`, `window_start`, `window_end`,
 
 ### Stopping a VM
 
-You can stop a running VM with `StopVm`, which returns a
-`google.protobuf.Empty`:
+You can stop a running VM with `StopVm`, which takes a request and returns an
+(empty) `StopVmResponse`:
 
 ```python
-await client.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
+await client.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))  # -> StopVmResponse
 ```
 
 For full documentation, please read the documentation in the
