@@ -5,11 +5,6 @@ The gRPC interface puts that same machine lifecycle behind a language-agnostic
 contract, so consumers in **any** language -- and off-BEAM services -- can
 create, stop, locate, and list microVMs.
 
-> **v1 -- stable.** This is the first stable contract. Backward-compatible
-> additions (new RPCs, new messages, appended fields, new enum values) may
-> land in place; a breaking change would ship as a side-by-side `hyper.grpc.v2`
-> package. Removed fields are retired with `reserved` and never reused.
-
 > #### No authentication {: .warning}
 >
 > The gRPC API has **no authentication**. Any client that can reach the port can
@@ -102,11 +97,6 @@ created = await client.CreateVm(
 )
 print(created.vm_id, created.node)
 ```
-
-`instance_type` and `arch` are **required**. Their proto3 zero value is the
-`*_UNSPECIFIED` sentinel; sending it (or omitting the field) returns
-`INVALID_ARGUMENT`. Always set them explicitly, e.g.
-`hyper_pb2.INSTANCE_TYPE_CENTI`, `hyper_pb2.ARCHITECTURE_X86_64`.
 
 ### Listing VMs
 

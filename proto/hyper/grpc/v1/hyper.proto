@@ -7,12 +7,6 @@
 // A VM is addressed by its `vm_id` -- a URL-safe base64 string the server mints
 // at creation. Placement across the cluster is automatic; the server is
 // stateless and identical on every node, so any node can serve any request.
-//
-// Versioning: this is `v1`, the first stable contract. Backward-compatible
-// changes (new RPCs, new messages, appended fields, new enum values) may land
-// in place. A breaking change ships as a side-by-side `hyper.grpc.v2` package;
-// this one is never mutated incompatibly. Removed field numbers/names are
-// retired with `reserved`, never reused.
 syntax = "proto3";
 
 package hyper.grpc.v1;
@@ -165,9 +159,7 @@ message StopVmRequest {
   string vm_id = 1;
 }
 
-// Result of StopVm. Empty today; a dedicated message (never google.protobuf.Empty)
-// so a field -- e.g. the VM's final metered usage -- can be added later without a
-// breaking change.
+// Result of StopVm. Empty today.
 message StopVmResponse {}
 
 // Request to locate a VM.
@@ -208,8 +200,7 @@ message ListVmsRequest {
   int32 page_size = 1;
 
   // Optional. An opaque cursor taken verbatim from a previous response's
-  // `next_page_token`. Empty or unset starts from the beginning. Keep every
-  // other argument identical across a paged sequence.
+  // `next_page_token`. Empty or unset starts from the beginning.
   string page_token = 2;
 }
 
@@ -218,8 +209,7 @@ message ListVmsResponse {
   // A page of VMs, ordered by `vm_id`.
   repeated Vm vms = 1;
 
-  // Opaque cursor for the next page. Empty exactly when this is the last page
-  // -- the only signal of end-of-collection.
+  // Opaque cursor for the next page. `""` when this is the last page.
   string next_page_token = 2;
 }
 
