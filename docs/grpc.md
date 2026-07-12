@@ -11,8 +11,7 @@ create, stop, locate, and list microVMs.
 > create and stop VMs and load images. It is **off by default** (`grpc.enabled =
 > false`). When you enable it, bind it to loopback or a trusted network, or put
 > it behind a proxy that terminates TLS and authenticates callers. TLS (`cred`)
-> encrypts the channel but does not authenticate the client. Authentication is
-> planned for a later release.
+> encrypts the channel but does not authenticate the client.
 
 ## Configuration
 
