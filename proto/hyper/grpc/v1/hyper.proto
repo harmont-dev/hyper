@@ -8,11 +8,14 @@
 // at creation. Placement across the cluster is automatic; the server is
 // stateless and identical on every node, so any node can serve any request.
 //
-// Versioning: this is `v0` and UNSTABLE. The contract may change without notice
-// during early development. Pin to a specific commit if you depend on it.
+// Versioning: this is `v1`, the first stable contract. Backward-compatible
+// changes (new RPCs, new messages, appended fields, new enum values) may land
+// in place. A breaking change ships as a side-by-side `hyper.grpc.v2` package;
+// this one is never mutated incompatibly. Removed field numbers/names are
+// retired with `reserved`, never reused.
 syntax = "proto3";
 
-package hyper.grpc.v0;
+package hyper.grpc.v1;
 
 // The VM lifecycle service.
 //

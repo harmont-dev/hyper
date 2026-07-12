@@ -49,7 +49,7 @@ run in CI's `integration` job, which provisions the GitHub-hosted runner via
 - `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests in
   `tests/` (see Rust rules below).
 - Generated, do not hand-edit: `lib/hyper/firecracker/api/{operations,schemas}`
-  (regen `mix firecracker.gen`) and `lib/hyper/grpc/v0/hyper.pb.ex`
+  (regen `mix firecracker.gen`) and `lib/hyper/grpc/v1/hyper.pb.ex`
   (regen `mix grpc.gen`). Both are gitignored and rebuilt by a Mix compiler.
 
 ## Testing philosophy — read this before writing any test

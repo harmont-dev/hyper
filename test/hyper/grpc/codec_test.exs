@@ -2,10 +2,10 @@ defmodule Hyper.Grpc.CodecTest do
   use ExUnit.Case, async: true
 
   alias Hyper.Grpc.Codec
-  alias Hyper.Grpc.V0.CreateVmRequest
-  alias Hyper.Grpc.V0.GetVmUsageResponse
-  alias Hyper.Grpc.V0.ListVmsResponse
-  alias Hyper.Grpc.V0.StopVmResponse
+  alias Hyper.Grpc.V1.CreateVmRequest
+  alias Hyper.Grpc.V1.GetVmUsageResponse
+  alias Hyper.Grpc.V1.ListVmsResponse
+  alias Hyper.Grpc.V1.StopVmResponse
 
   test "usage encodes as microseconds on the wire" do
     assert %GetVmUsageResponse{vm_id: "v1", cpu_usec: 1_500_000} =

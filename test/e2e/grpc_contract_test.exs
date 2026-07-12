@@ -1,15 +1,15 @@
 defmodule Hyper.E2e.GrpcContractTest do
   @moduledoc """
-  Live contract test of the public gRPC surface (`hyper.grpc.v0.Hyper`),
+  Live contract test of the public gRPC surface (`hyper.grpc.v1.Hyper`),
   exercised from outside the BEAM: starts the gRPC server against the running
   app tree, then drives it with the TypeScript suite in `test/grpc/`, which
-  loads `proto/hyper/grpc/v0/hyper.proto` directly. Status codes and the full
+  loads `proto/hyper/grpc/v1/hyper.proto` directly. Status codes and the full
   VM lifecycle are asserted over the real wire, catching proto/codec/server
   drift a BEAM-side client cannot produce (e.g. unrecognised enum integers).
 
   Also carries one BEAM-side test of `ForkVm`: it needs a real booted parent
   VM (Firecracker + device-mapper), which the TypeScript suite cannot boot,
-  so it drives `Hyper.Grpc.V0.Hyper.Stub` directly over the same server
+  so it drives `Hyper.Grpc.V1.Hyper.Stub` directly over the same server
   instead.
 
   Runs only under `--only integration` on a provisioned host (CI: the
@@ -18,8 +18,8 @@ defmodule Hyper.E2e.GrpcContractTest do
   """
   use ExUnit.Case, async: false
 
-  alias Hyper.Grpc.V0.{ForkVmRequest, ForkVmResponse, StopVmRequest}
-  alias Hyper.Grpc.V0.Hyper.Stub
+  alias Hyper.Grpc.V1.{ForkVmRequest, ForkVmResponse, StopVmRequest}
+  alias Hyper.Grpc.V1.Hyper.Stub
 
   @moduletag :integration
   @moduletag timeout: :timer.minutes(25)

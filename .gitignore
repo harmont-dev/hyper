@@ -43,7 +43,7 @@ docs/superpowers/
 
 # gRPC bindings are generated from proto/**/*.proto before compile
 # -- see the :grpc_gen Mix compiler in mix.exs.
-/lib/hyper/grpc/v0/
+/lib/hyper/grpc/v1/
 /lib/hyper/agent/v1/
 
 # The expected suidhelper build identity (version + checksum) is captured from

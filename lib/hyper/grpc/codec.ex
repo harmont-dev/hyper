@@ -1,6 +1,6 @@
 defmodule Hyper.Grpc.Codec do
   @moduledoc """
-  Translation between the gRPC wire types (`Hyper.Grpc.V0.*`) and Hyper's domain
+  Translation between the gRPC wire types (`Hyper.Grpc.V1.*`) and Hyper's domain
   types. Two entry points, each dispatching by pattern match on the value's type:
 
     * `from_grpc/1` -- an inbound request message -> a domain value.
@@ -8,7 +8,7 @@ defmodule Hyper.Grpc.Codec do
       or a `GRPC.RPCError` for the server to raise.
   """
 
-  alias Hyper.Grpc.V0.{
+  alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
     ForkVmResponse,

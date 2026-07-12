@@ -3,14 +3,14 @@ import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import type { ProtoGrpcType } from "../generated/hyper";
-import type { HyperClient } from "../generated/hyper/grpc/v0/Hyper";
+import type { HyperClient } from "../generated/hyper/grpc/v1/Hyper";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROTO_ROOT = path.resolve(here, "../../../proto");
 
 // Options must mirror the `gen` script in package.json, or the generated
 // types describe a different runtime shape than proto-loader produces.
-const packageDefinition = protoLoader.loadSync("hyper/grpc/v0/hyper.proto", {
+const packageDefinition = protoLoader.loadSync("hyper/grpc/v1/hyper.proto", {
   longs: Number,
   enums: String,
   defaults: true,
@@ -25,7 +25,7 @@ export type { HyperClient };
 export const DEFAULT_ADDR = process.env.HYPER_GRPC_ADDR ?? "127.0.0.1:50061";
 
 export function connect(addr: string = DEFAULT_ADDR): HyperClient {
-  return new proto.hyper.grpc.v0.Hyper(addr, grpc.credentials.createInsecure());
+  return new proto.hyper.grpc.v1.Hyper(addr, grpc.credentials.createInsecure());
 }
 
 type Unary<Req, Res> = (

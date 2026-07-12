@@ -1,17 +1,17 @@
 defmodule Hyper.Grpc.Server do
   @moduledoc """
-  gRPC handler for `hyper.grpc.v0.Hyper`. A thin translation layer: each RPC
+  gRPC handler for `hyper.grpc.v1.Hyper`. A thin translation layer: each RPC
   maps its request to a domain value via `Hyper.Grpc.Codec.from_grpc/1`, calls
   the existing `Hyper` BEAM API, and maps the result back with
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
   """
 
-  use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
+  use GRPC.Server, service: Hyper.Grpc.V1.Hyper.Service
   use OpenTelemetryDecorator
 
   alias Hyper.Grpc.Codec
 
-  alias Hyper.Grpc.V0.{
+  alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
     ForkVmRequest,

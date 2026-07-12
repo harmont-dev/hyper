@@ -2,7 +2,7 @@ defmodule Hyper.Grpc.CodecForkTest do
   use ExUnit.Case, async: true
 
   alias Hyper.Grpc.Codec
-  alias Hyper.Grpc.V0.ForkVmResponse
+  alias Hyper.Grpc.V1.ForkVmResponse
 
   test "a forked result maps to a ForkVmResponse with the child id and node string" do
     assert %ForkVmResponse{vm_id: "child-abc", node: "hyper@host"} =

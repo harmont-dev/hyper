@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
 import { status } from "@grpc/grpc-js";
 import { call, connect, eventually, expectStatus, statusOf } from "../src/client";
-import type { CreateVmResponse__Output } from "../generated/hyper/grpc/v0/CreateVmResponse";
-import type { GetVmResponse__Output } from "../generated/hyper/grpc/v0/GetVmResponse";
-import type { GetVmUsageResponse__Output } from "../generated/hyper/grpc/v0/GetVmUsageResponse";
-import type { ListVmsResponse__Output } from "../generated/hyper/grpc/v0/ListVmsResponse";
-import type { LoadImageResponse__Output } from "../generated/hyper/grpc/v0/LoadImageResponse";
+import type { CreateVmResponse__Output } from "../generated/hyper/grpc/v1/CreateVmResponse";
+import type { GetVmResponse__Output } from "../generated/hyper/grpc/v1/GetVmResponse";
+import type { GetVmUsageResponse__Output } from "../generated/hyper/grpc/v1/GetVmUsageResponse";
+import type { ListVmsResponse__Output } from "../generated/hyper/grpc/v1/ListVmsResponse";
+import type { LoadImageResponse__Output } from "../generated/hyper/grpc/v1/LoadImageResponse";
 
 const MIN = 60_000;
 

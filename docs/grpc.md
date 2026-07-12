@@ -5,8 +5,8 @@ The gRPC interface puts that same machine lifecycle behind a language-agnostic
 contract, so consumers in **any** language -- and off-BEAM services -- can
 create, stop, locate, and list microVMs.
 
-> **v0 -- unstable.** The contract may change without notice during early
-> development. Pin to a commit if you depend on it.
+> **v1 -- stable.** Backward-compatible changes may land in place; a breaking
+> change ships as a side-by-side `hyper.grpc.v2` package.
 
 > #### No authentication {: .warning}
 >
@@ -15,7 +15,7 @@ create, stop, locate, and list microVMs.
 > false`). When you enable it, bind it to loopback or a trusted network, or put
 > it behind a proxy that terminates TLS and authenticates callers. TLS (`cred`)
 > encrypts the channel but does not authenticate the client. Authentication is
-> planned for a later release; the `v0` contract is UNSTABLE.
+> planned for a later release.
 
 ## Configuration
 
@@ -62,7 +62,7 @@ language. We will be using _Python_ here:
 ```python
 import grpc
 from google.protobuf import empty_pb2
-from hyper.grpc.v0 import hyper_pb2, hyper_pb2_grpc
+from hyper.grpc.v1 import hyper_pb2, hyper_pb2_grpc
 
 # Plaintext. For TLS, pass grpc.ssl_channel_credentials(ca_pem) to
 # grpc.aio.secure_channel(...) instead.
@@ -151,5 +151,5 @@ await client.StopVm(hyper_pb2.StopVmRequest(vm_id=created.vm_id))
 ```
 
 For full documentation, please read the documentation in the
-[`.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v0/hyper.proto)
+[`.proto`](https://github.com/harmont-dev/hyper/blob/main/proto/hyper/grpc/v1/hyper.proto)
 file.
