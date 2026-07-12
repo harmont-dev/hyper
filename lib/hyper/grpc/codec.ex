@@ -87,7 +87,7 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:usage, vm_id, cpu_time}),
     do: %GetVmUsageResponse{vm_id: vm_id, cpu_usec: Unit.Time.as_us(cpu_time)}
 
-  @spec to_grpc({:vms, [Hyper.Grpc.Page.entry()], String.t()}) :: ListVmsResponse.t()
+  @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}], String.t()}) :: ListVmsResponse.t()
   def to_grpc({:vms, vms, next_page_token}),
     do: %ListVmsResponse{vms: Enum.map(vms, &vm/1), next_page_token: next_page_token}
 
