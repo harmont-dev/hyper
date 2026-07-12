@@ -91,6 +91,19 @@ defmodule Redist.TargzTest do
     assert File.ls(dest) in [{:error, :enoent}, {:ok, []}]
   end
 
+  test "install/3 surfaces a corrupt archive as {:extract_failed, _}", %{
+    server: server,
+    dest: dest
+  } do
+    # Checksum passes (it is the hash of the bytes we serve); extraction fails
+    # because the payload is not a tarball. The contract: a corrupt archive
+    # classifies as extract_failed, distinct from the unsafe-path refusal.
+    bytes = :crypto.strong_rand_bytes(64)
+    url = HttpServer.put_file(server, "bogus.tar.gz", bytes)
+
+    assert {:error, {:extract_failed, _reason}} = Targz.install(url, sha256(bytes), dest)
+  end
+
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
   defp targz(files) do

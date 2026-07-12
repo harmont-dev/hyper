@@ -30,5 +30,16 @@ defmodule Hyper.Cfg.NetworkTest do
         Network.uplink()
       end
     end
+
+    test "raises ArgumentError when network.uplink is not a string" do
+      # A non-string uplink must raise ArgumentError, not be silently coerced
+      # or passed to the setuid helper which would then build a broken netns.
+      on_exit(fn -> Toml.reload() end)
+      Toml.put_cache(%{"network" => %{"uplink" => 123}})
+
+      assert_raise ArgumentError, ~r/network\.uplink/, fn ->
+        Network.uplink()
+      end
+    end
   end
 end

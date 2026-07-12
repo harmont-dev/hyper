@@ -50,6 +50,12 @@ defmodule Hyper.Cfg.GrpcTest do
     assert Grpc.load().cred == cred
   end
 
+  test "with no cred configured, load returns nil (plaintext)" do
+    # The plaintext default: an absent cred must yield nil, never a defaulted
+    # credential that would silently enable TLS.
+    assert Grpc.load().cred == nil
+  end
+
   test "server_options omits :cred and :adapter_opts at their plaintext defaults" do
     opts = Grpc.server_options(%Grpc{})
 
