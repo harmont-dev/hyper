@@ -115,7 +115,9 @@ defmodule Hyper.Grpc.Codec do
 
   @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :missing_arch | :bad_arch}
   defp arch(:ARCHITECTURE_UNSPECIFIED), do: {:error, :missing_arch}
+
   defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
+
   defp arch(_unrecognised), do: {:error, :bad_arch}
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()

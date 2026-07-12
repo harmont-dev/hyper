@@ -106,7 +106,7 @@ print(created.vm_id, created.node)
 `instance_type` and `arch` are **required**. Their proto3 zero value is the
 `*_UNSPECIFIED` sentinel; sending it (or omitting the field) returns
 `INVALID_ARGUMENT`. Always set them explicitly, e.g.
-`InstanceType.INSTANCE_TYPE_CENTI`, `Architecture.ARCHITECTURE_X86_64`.
+`hyper_pb2.INSTANCE_TYPE_CENTI`, `hyper_pb2.ARCHITECTURE_X86_64`.
 
 ### Listing VMs
 
