@@ -97,7 +97,12 @@ defmodule Hyper.Grpc.Server do
   @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
   @decorate with_span("Hyper.Grpc.Server.list_vms")
   def list_vms(%ListVmsRequest{page_size: page_size, page_token: page_token}, _stream) do
-    case Hyper.Grpc.Page.paginate(Hyper.Cluster.Routing.all(), page_size, page_token) do
+    case Hyper.Grpc.Page.paginate(
+           Hyper.Cluster.Routing.all(),
+           page_size,
+           page_token,
+           Hyper.Grpc.Pageable.Vm
+         ) do
       {:ok, {page, next}} -> Codec.to_grpc({:vms, page, next})
       {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
