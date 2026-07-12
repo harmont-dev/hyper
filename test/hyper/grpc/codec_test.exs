@@ -2,8 +2,10 @@ defmodule Hyper.Grpc.CodecTest do
   use ExUnit.Case, async: true
 
   alias Hyper.Grpc.Codec
-  alias Hyper.Grpc.V0.CreateVmRequest
-  alias Hyper.Grpc.V0.GetVmUsageResponse
+  alias Hyper.Grpc.V1.CreateVmRequest
+  alias Hyper.Grpc.V1.GetVmUsageResponse
+  alias Hyper.Grpc.V1.ListVmsResponse
+  alias Hyper.Grpc.V1.StopVmResponse
 
   test "usage encodes as microseconds on the wire" do
     assert %GetVmUsageResponse{vm_id: "v1", cpu_usec: 1_500_000} =
@@ -36,5 +38,40 @@ defmodule Hyper.Grpc.CodecTest do
              })
 
     assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :bad_arch})
+  end
+
+  test "a stopped result maps to a StopVmResponse, not google.protobuf.Empty" do
+    assert %StopVmResponse{} = Codec.to_grpc(:stopped)
+  end
+
+  test "an unset instance_type (UNSPECIFIED) is rejected as required, not defaulted" do
+    assert {:error, :missing_instance_type} =
+             Codec.from_grpc(%CreateVmRequest{
+               img_id: "img",
+               instance_type: :INSTANCE_TYPE_UNSPECIFIED,
+               arch: :ARCHITECTURE_X86_64
+             })
+
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :missing_instance_type})
+  end
+
+  test "an unset arch (UNSPECIFIED) is rejected as required, not defaulted" do
+    assert {:error, :missing_arch} =
+             Codec.from_grpc(%CreateVmRequest{
+               img_id: "img",
+               instance_type: :INSTANCE_TYPE_MICRO,
+               arch: :ARCHITECTURE_UNSPECIFIED
+             })
+
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :missing_arch})
+  end
+
+  test "a vms page maps to ListVmsResponse carrying the next_page_token" do
+    assert %ListVmsResponse{vms: [%{vm_id: "a"}], next_page_token: "cursor"} =
+             Codec.to_grpc({:vms, [{"a", :node@host}], "cursor"})
+  end
+
+  test "a malformed page_token maps to INVALID_ARGUMENT" do
+    assert %GRPC.RPCError{status: 3} = Codec.to_grpc({:error, :bad_page_token})
   end
 end

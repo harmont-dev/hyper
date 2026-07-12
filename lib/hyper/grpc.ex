@@ -2,11 +2,11 @@ defmodule Hyper.Grpc do
   @moduledoc """
   Public gRPC interface to a Hyper cluster.
 
-  The service contract is `hyper.grpc.v0.Hyper` (see
-  `proto/hyper/grpc/v0/hyper.proto`). Any gRPC client, in any language, can
+  The service contract is `hyper.grpc.v1.Hyper` (see
+  `proto/hyper/grpc/v1/hyper.proto`). Any gRPC client, in any language, can
   create, stop, locate, and list microVMs. Off-BEAM clients generate their own
   stubs from the `.proto`; BEAM clients can use the generated
-  `Hyper.Grpc.V0.Hyper.Stub` together with `connect/2`.
+  `Hyper.Grpc.V1.Hyper.Stub` together with `connect/2`.
   """
 
   alias Hyper.Cfg.Grpc, as: Config

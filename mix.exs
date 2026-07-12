@@ -221,7 +221,7 @@ defmodule Hyper.MixProject do
       # package deterministic: consumers regenerate all of these at compile.
       exclude_patterns: [
         ~r{^lib/hyper/firecracker/api/(operations|schemas)/},
-        ~r{^lib/hyper/grpc/v0/},
+        ~r{^lib/hyper/grpc/v1/},
         ~r{^lib/hyper/agent/v1/},
         ~r{^lib/hyper/suid_helper/expected\.ex$}
       ],

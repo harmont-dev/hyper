@@ -1,6 +1,6 @@
 defmodule Hyper.Grpc.Codec do
   @moduledoc """
-  Translation between the gRPC wire types (`Hyper.Grpc.V0.*`) and Hyper's domain
+  Translation between the gRPC wire types (`Hyper.Grpc.V1.*`) and Hyper's domain
   types. Two entry points, each dispatching by pattern match on the value's type:
 
     * `from_grpc/1` -- an inbound request message -> a domain value.
@@ -8,9 +8,7 @@ defmodule Hyper.Grpc.Codec do
       or a `GRPC.RPCError` for the server to raise.
   """
 
-  alias Google.Protobuf.Empty
-
-  alias Hyper.Grpc.V0.{
+  alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
     ForkVmResponse,
@@ -19,6 +17,7 @@ defmodule Hyper.Grpc.Codec do
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
+    StopVmResponse,
     Vm
   }
 
@@ -88,16 +87,16 @@ defmodule Hyper.Grpc.Codec do
   def to_grpc({:usage, vm_id, cpu_time}),
     do: %GetVmUsageResponse{vm_id: vm_id, cpu_usec: Unit.Time.as_us(cpu_time)}
 
-  @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}]}) :: ListVmsResponse.t()
-  def to_grpc({:vms, vms}),
-    do: %ListVmsResponse{vms: Enum.map(vms, &vm/1)}
+  @spec to_grpc({:vms, [{Hyper.Vm.Id.t(), node()}], String.t()}) :: ListVmsResponse.t()
+  def to_grpc({:vms, vms, next_page_token}),
+    do: %ListVmsResponse{vms: Enum.map(vms, &vm/1), next_page_token: next_page_token}
 
   @spec to_grpc({:loaded, Hyper.Img.id()}) :: LoadImageResponse.t()
   def to_grpc({:loaded, img_id}) when is_binary(img_id),
     do: %LoadImageResponse{img_id: img_id}
 
-  @spec to_grpc(:stopped) :: Empty.t()
-  def to_grpc(:stopped), do: %Empty{}
+  @spec to_grpc(:stopped) :: StopVmResponse.t()
+  def to_grpc(:stopped), do: %StopVmResponse{}
 
   @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
   def to_grpc({:error, reason}), do: rpc_error(reason)
@@ -105,19 +104,34 @@ defmodule Hyper.Grpc.Codec do
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
 
-  @spec instance_type(term()) :: {:ok, Hyper.Vm.Instance.t()} | {:error, :bad_instance_type}
+  @spec instance_type(term()) ::
+          {:ok, Hyper.Vm.Instance.t()} | {:error, :missing_instance_type | :bad_instance_type}
+  defp instance_type(:INSTANCE_TYPE_UNSPECIFIED), do: {:error, :missing_instance_type}
+
   defp instance_type(enum) when is_map_key(@instance_types, enum),
     do: {:ok, @instance_types[enum]}
 
   defp instance_type(_unrecognised), do: {:error, :bad_instance_type}
 
-  @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :bad_arch}
+  @spec arch(term()) :: {:ok, Hyper.Vm.Instance.arch()} | {:error, :missing_arch | :bad_arch}
+  defp arch(:ARCHITECTURE_UNSPECIFIED), do: {:error, :missing_arch}
+
   defp arch(enum) when is_map_key(@arches, enum), do: {:ok, @arches[enum]}
+
   defp arch(_unrecognised), do: {:error, :bad_arch}
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
+
+  defp rpc_error(:missing_instance_type),
+    do: GRPC.RPCError.exception(:invalid_argument, "instance_type is required")
+
+  defp rpc_error(:missing_arch),
+    do: GRPC.RPCError.exception(:invalid_argument, "arch is required")
+
+  defp rpc_error(:bad_page_token),
+    do: GRPC.RPCError.exception(:invalid_argument, "page_token is malformed")
 
   defp rpc_error(:bad_instance_type),
     do: GRPC.RPCError.exception(:invalid_argument, "instance_type holds an unrecognised value")

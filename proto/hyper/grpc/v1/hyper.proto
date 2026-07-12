@@ -7,14 +7,9 @@
 // A VM is addressed by its `vm_id` -- a URL-safe base64 string the server mints
 // at creation. Placement across the cluster is automatic; the server is
 // stateless and identical on every node, so any node can serve any request.
-//
-// Versioning: this is `v0` and UNSTABLE. The contract may change without notice
-// during early development. Pin to a specific commit if you depend on it.
 syntax = "proto3";
 
-package hyper.grpc.v0;
-
-import "google/protobuf/empty.proto";
+package hyper.grpc.v1;
 
 // The VM lifecycle service.
 //
@@ -54,7 +49,7 @@ service Hyper {
   // Errors:
   //   NOT_FOUND   -- no VM with this `vm_id` is running in the cluster.
   //   UNAVAILABLE -- the VM's host node is unreachable.
-  rpc StopVm(StopVmRequest) returns (google.protobuf.Empty);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
 
   // Locate a microVM: report the cluster node it currently runs on.
   //
@@ -72,7 +67,7 @@ service Hyper {
   rpc GetVmUsage(GetVmUsageRequest) returns (GetVmUsageResponse);
 
   // List every microVM currently known to the cluster, across all nodes.
-  rpc ListVms(google.protobuf.Empty) returns (ListVmsResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
 
   // Load an OCI image into the cluster's shared media store and image database.
   //
@@ -93,31 +88,32 @@ service Hyper {
 // is roughly a doubling. The vCPU/memory annotations below are the headline
 // figures; disk and bandwidth scale alongside them.
 enum InstanceType {
-  INSTANCE_TYPE_MICRO = 0;  // 0.25 vCPU, 128 MiB  -- also the zero/default value
-  INSTANCE_TYPE_MILLI = 1;  // 0.5 vCPU,  256 MiB
-  INSTANCE_TYPE_CENTI = 2;  // 1 vCPU,    512 MiB
-  INSTANCE_TYPE_DECI = 3;   // 2 vCPU,    1 GiB
-  INSTANCE_TYPE_BASE = 4;   // 4 vCPU,    2 GiB
-  INSTANCE_TYPE_DECA = 5;   // 8 vCPU,    4 GiB
-  INSTANCE_TYPE_HECTO = 6;  // 16 vCPU,   8 GiB
-  INSTANCE_TYPE_KILO = 7;   // 32 vCPU,   16 GiB
-  INSTANCE_TYPE_MEGA = 8;   // 64 vCPU,   32 GiB
-  INSTANCE_TYPE_GIGA = 9;   // 128 vCPU,  64 GiB
-  INSTANCE_TYPE_TERA = 10;  // 256 vCPU,  128 GiB
+  INSTANCE_TYPE_UNSPECIFIED = 0;  // unset -- the server rejects it (INVALID_ARGUMENT)
+  INSTANCE_TYPE_MICRO = 1;   // 0.25 vCPU, 128 MiB
+  INSTANCE_TYPE_MILLI = 2;   // 0.5 vCPU,  256 MiB
+  INSTANCE_TYPE_CENTI = 3;   // 1 vCPU,    512 MiB
+  INSTANCE_TYPE_DECI = 4;    // 2 vCPU,    1 GiB
+  INSTANCE_TYPE_BASE = 5;    // 4 vCPU,    2 GiB
+  INSTANCE_TYPE_DECA = 6;    // 8 vCPU,    4 GiB
+  INSTANCE_TYPE_HECTO = 7;   // 16 vCPU,   8 GiB
+  INSTANCE_TYPE_KILO = 8;    // 32 vCPU,   16 GiB
+  INSTANCE_TYPE_MEGA = 9;    // 64 vCPU,   32 GiB
+  INSTANCE_TYPE_GIGA = 10;   // 128 vCPU,  64 GiB
+  INSTANCE_TYPE_TERA = 11;   // 256 vCPU,  128 GiB
 }
 
 // Guest CPU architecture. Must match the architecture the image was built for.
 enum Architecture {
-  ARCHITECTURE_X86_64 = 0;    // x86-64 / amd64 -- also the zero/default value
-  ARCHITECTURE_AARCH64 = 1;   // arm64
+  ARCHITECTURE_UNSPECIFIED = 0;  // unset -- the server rejects it (INVALID_ARGUMENT)
+  ARCHITECTURE_X86_64 = 1;       // x86-64 / amd64
+  ARCHITECTURE_AARCH64 = 2;      // arm64
 }
 
 // Request to create and boot a VM.
 //
-// `instance_type` and `arch` are required by the contract. Note that proto3
-// does not enforce field presence: an omitted field decodes to its enum's zero
-// value (INSTANCE_TYPE_MICRO / ARCHITECTURE_X86_64), so clients should always
-// set them explicitly.
+// `instance_type` and `arch` are required. Their proto3 zero value is the
+// `*_UNSPECIFIED` sentinel, which the server rejects with INVALID_ARGUMENT --
+// an omitted field is an error, never a silent default. Set them explicitly.
 message CreateVmRequest {
   // Required. The content-addressed id of the image to boot.
   string img_id = 1;
@@ -163,6 +159,9 @@ message StopVmRequest {
   string vm_id = 1;
 }
 
+// Result of StopVm. Empty today.
+message StopVmResponse {}
+
 // Request to locate a VM.
 message GetVmRequest {
   // The id of the VM to look up.
@@ -193,10 +192,25 @@ message GetVmUsageResponse {
   uint64 cpu_usec = 2;
 }
 
+// Request to list VMs. All fields are optional; an empty request lists from the
+// beginning with a server-default page size.
+message ListVmsRequest {
+  // Optional. Maximum VMs to return in one page. 0 or unset selects a server
+  // default (100); values above the server maximum (1000) are capped down.
+  int32 page_size = 1;
+
+  // Optional. An opaque cursor taken verbatim from a previous response's
+  // `next_page_token`. Empty or unset starts from the beginning.
+  string page_token = 2;
+}
+
 // Result of ListVms.
 message ListVmsResponse {
-  // Every VM known to the cluster, in no particular order.
+  // A page of VMs, ordered by `vm_id`.
   repeated Vm vms = 1;
+
+  // Opaque cursor for the next page. `""` when this is the last page.
+  string next_page_token = 2;
 }
 
 // A VM and where it runs. Returned by ListVms.

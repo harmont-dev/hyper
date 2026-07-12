@@ -2,9 +2,9 @@
   "name": "hyper-grpc-contract-tests",
   "private": true,
   "type": "module",
-  "description": "Wire-level contract tests for hyper.grpc.v0.Hyper, driven from outside the BEAM",
+  "description": "Wire-level contract tests for hyper.grpc.v1.Hyper, driven from outside the BEAM",
   "scripts": {
-    "gen": "proto-loader-gen-types --longs=Number --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --includeDirs=../../proto --outDir=generated hyper/grpc/v0/hyper.proto",
+    "gen": "proto-loader-gen-types --longs=Number --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --includeDirs=../../proto --outDir=generated hyper/grpc/v1/hyper.proto",
     "pretest": "npm run gen",
     "test": "vitest run",
     "pretypecheck": "npm run gen",

@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** the gRPC package was promoted `hyper.grpc.v0` -> `hyper.grpc.v1`.
+  `google.protobuf.Empty` is replaced by dedicated `StopVmResponse` and
+  `ListVmsRequest` messages; the `InstanceType` and `Architecture` enums gained
+  `*_UNSPECIFIED = 0` sentinels (existing values renumbered), and an unset
+  value is now rejected with `INVALID_ARGUMENT`; `ListVms` is now paginated
+  (`page_size` / `page_token` / `next_page_token`).
+
 ## [0.1.0]
 
 First public release: a distributed orchestrator for Firecracker microVMs on the

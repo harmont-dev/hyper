@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
 import { status } from "@grpc/grpc-js";
 import { call, connect, eventually, expectStatus, statusOf } from "../src/client";
-import type { CreateVmResponse__Output } from "../generated/hyper/grpc/v0/CreateVmResponse";
-import type { GetVmResponse__Output } from "../generated/hyper/grpc/v0/GetVmResponse";
-import type { GetVmUsageResponse__Output } from "../generated/hyper/grpc/v0/GetVmUsageResponse";
-import type { ListVmsResponse__Output } from "../generated/hyper/grpc/v0/ListVmsResponse";
-import type { LoadImageResponse__Output } from "../generated/hyper/grpc/v0/LoadImageResponse";
+import type { CreateVmResponse__Output } from "../generated/hyper/grpc/v1/CreateVmResponse";
+import type { GetVmResponse__Output } from "../generated/hyper/grpc/v1/GetVmResponse";
+import type { GetVmUsageResponse__Output } from "../generated/hyper/grpc/v1/GetVmUsageResponse";
+import type { ListVmsResponse__Output } from "../generated/hyper/grpc/v1/ListVmsResponse";
+import type { LoadImageResponse__Output } from "../generated/hyper/grpc/v1/LoadImageResponse";
 
 const MIN = 60_000;
 
@@ -57,8 +57,10 @@ test(
       expect(located.vmId).toBe(created.vmId);
       expect(located.node).toBe(created.node);
 
-      const listed = (await call(client, client.listVms, {})) as ListVmsResponse__Output;
+      const listed = (await call(client, client.listVms, { pageSize: 1000 })) as ListVmsResponse__Output;
       expect((listed.vms ?? []).map((vm) => vm.vmId)).toContain(created.vmId);
+      // next_page_token is a string field: absent-on-last-page decodes to "".
+      expect(typeof (listed.nextPageToken ?? "")).toBe("string");
 
       const usage = (await call(client, client.getVmUsage, { vmId: created.vmId })) as GetVmUsageResponse__Output;
       expect(usage.vmId).toBe(created.vmId);

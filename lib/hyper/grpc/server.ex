@@ -1,18 +1,17 @@
 defmodule Hyper.Grpc.Server do
   @moduledoc """
-  gRPC handler for `hyper.grpc.v0.Hyper`. A thin translation layer: each RPC
+  gRPC handler for `hyper.grpc.v1.Hyper`. A thin translation layer: each RPC
   maps its request to a domain value via `Hyper.Grpc.Codec.from_grpc/1`, calls
   the existing `Hyper` BEAM API, and maps the result back with
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
   """
 
-  use GRPC.Server, service: Hyper.Grpc.V0.Hyper.Service
+  use GRPC.Server, service: Hyper.Grpc.V1.Hyper.Service
   use OpenTelemetryDecorator
 
-  alias Google.Protobuf.Empty
   alias Hyper.Grpc.Codec
 
-  alias Hyper.Grpc.V0.{
+  alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
     ForkVmRequest,
@@ -21,10 +20,12 @@ defmodule Hyper.Grpc.Server do
     GetVmResponse,
     GetVmUsageRequest,
     GetVmUsageResponse,
+    ListVmsRequest,
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
-    StopVmRequest
+    StopVmRequest,
+    StopVmResponse
   }
 
   @spec load_image(LoadImageRequest.t(), GRPC.Server.Stream.t()) :: LoadImageResponse.t()
@@ -66,7 +67,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: Empty.t()
+  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: StopVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.stop_vm", include: [:vm_id])
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.stop_vm(vm_id) do
@@ -93,9 +94,17 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec list_vms(Empty.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
   @decorate with_span("Hyper.Grpc.Server.list_vms")
-  def list_vms(%Empty{}, _stream) do
-    Codec.to_grpc({:vms, Hyper.Cluster.Routing.all()})
+  def list_vms(%ListVmsRequest{page_size: page_size, page_token: page_token}, _stream) do
+    case Hyper.Grpc.Page.paginate(
+           Hyper.Cluster.Routing.all(),
+           page_size,
+           page_token,
+           Hyper.Grpc.Pageable.Vm
+         ) do
+      {:ok, {page, next}} -> Codec.to_grpc({:vms, page, next})
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
   end
 end
