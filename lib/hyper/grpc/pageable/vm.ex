@@ -1,9 +1,5 @@
 defmodule Hyper.Grpc.Pageable.Vm do
-  @moduledoc """
-  `Hyper.Grpc.Pageable` for the cluster VM listing: `{vm_id, node}` pairs from
-  `Hyper.Cluster.Routing.all/0`. The cursor is the `vm_id` -- already a unique,
-  totally-ordered binary -- so no extra encoding is needed.
-  """
+  @moduledoc false
   @behaviour Hyper.Grpc.Pageable
 
   @impl true
