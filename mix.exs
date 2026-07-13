@@ -151,30 +151,57 @@ defmodule Hyper.MixProject do
     """
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
-    onload="renderMathInElement(document.body, {delimiters: [
-      {left: '$$', right: '$$', display: true},
-      {left: '$', right: '$', display: false},
-      {left: '\\\\[', right: '\\\\]', display: true},
-      {left: '\\\\(', right: '\\\\)', display: false}
-    ]});"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" integrity="sha384-rbtjAdnIQE/aQJGEgXrVUlMibdfTSa4PQju4HDhN3sR2PmaKFzhEafuePsl9H/9I" crossorigin="anonymous"></script>
     <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: document.body.className.includes("dark") ? "dark" : "default"
-        });
-        let id = 0;
-        for (const pre of document.querySelectorAll("pre.mermaid")) {
-          const code = pre.textContent;
-          const div = document.createElement("div");
-          div.className = "mermaid";
-          div.textContent = code;
-          pre.replaceWith(div);
+      // ExDoc moves between pages with swup (client-side transitions): a full
+      // load -- and therefore DOMContentLoaded and a script's onload -- fires
+      // only once, on first arrival. ExDoc re-emits `exdoc:loaded` on window
+      // after every swup content swap as well as on the initial load, so all
+      // rendering must hang off it; otherwise KaTeX and Mermaid go unrendered
+      // the moment a reader navigates within the docs.
+      (function () {
+        let mermaidReady = false;
+
+        function renderMath() {
+          if (typeof window.renderMathInElement !== "function") return;
+          renderMathInElement(document.body, {
+            delimiters: [
+              {left: "$$", right: "$$", display: true},
+              {left: "$", right: "$", display: false},
+              {left: "\\\\[", right: "\\\\]", display: true},
+              {left: "\\\\(", right: "\\\\)", display: false}
+            ]
+          });
         }
-        mermaid.run();
-      });
+
+        function renderMermaid() {
+          if (typeof window.mermaid === "undefined") return;
+          if (!mermaidReady) {
+            mermaid.initialize({
+              startOnLoad: false,
+              theme: document.body.className.includes("dark") ? "dark" : "default"
+            });
+            mermaidReady = true;
+          }
+          // ExDoc renders ```mermaid fences as <pre><code class="mermaid">; lift
+          // each into a bare <div class="mermaid"> for Mermaid to render into.
+          for (const code of document.querySelectorAll("pre > code.mermaid")) {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+          }
+          mermaid.run({nodes: document.querySelectorAll("div.mermaid:not([data-processed])")});
+        }
+
+        function render() {
+          renderMath();
+          renderMermaid();
+        }
+
+        window.addEventListener("exdoc:loaded", render);
+      })();
     </script>
     """
   end
