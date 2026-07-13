@@ -145,63 +145,50 @@ defmodule Hyper.MixProject do
     ]
   end
 
-  # Load Mermaid in the HTML docs and render any ```mermaid code fences as
-  # diagrams. ExDoc tags Mermaid blocks with the `mermaid` class.
+  # KaTeX (math) and Mermaid (diagrams) rendering for the HTML docs. This is the
+  # recipe ExDoc's own README prescribes: ExDoc navigates between pages with
+  # swup (client-side content swaps) and re-fires `exdoc:loaded` on window after
+  # every swap as well as on the initial load. Hanging rendering off that event
+  # -- rather than DOMContentLoaded / a script `onload`, which fire only once --
+  # is what keeps math and diagrams rendered as a reader navigates the docs.
   defp before_closing_body_tag(:html) do
     """
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" integrity="sha384-rbtjAdnIQE/aQJGEgXrVUlMibdfTSa4PQju4HDhN3sR2PmaKFzhEafuePsl9H/9I" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" integrity="sha384-rbtjAdnIQE/aQJGEgXrVUlMibdfTSa4PQju4HDhN3sR2PmaKFzhEafuePsl9H/9I" crossorigin="anonymous"></script>
     <script>
-      // ExDoc moves between pages with swup (client-side transitions): a full
-      // load -- and therefore DOMContentLoaded and a script's onload -- fires
-      // only once, on first arrival. ExDoc re-emits `exdoc:loaded` on window
-      // after every swup content swap as well as on the initial load, so all
-      // rendering must hang off it; otherwise KaTeX and Mermaid go unrendered
-      // the moment a reader navigates within the docs.
-      (function () {
-        let mermaidReady = false;
+      window.addEventListener("exdoc:loaded", () => {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: "$$", right: "$$", display: true},
+            {left: "$", right: "$", display: false}
+          ]
+        });
+      });
 
-        function renderMath() {
-          if (typeof window.renderMathInElement !== "function") return;
-          renderMathInElement(document.body, {
-            delimiters: [
-              {left: "$$", right: "$$", display: true},
-              {left: "$", right: "$", display: false},
-              {left: "\\\\[", right: "\\\\]", display: true},
-              {left: "\\\\(", right: "\\\\)", display: false}
-            ]
+      let mermaidInitialized = false;
+      window.addEventListener("exdoc:loaded", () => {
+        if (!mermaidInitialized) {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.className.includes("dark") ? "dark" : "default"
+          });
+          mermaidInitialized = true;
+        }
+
+        let id = 0;
+        for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
+          const preEl = codeEl.parentElement;
+          const graphEl = document.createElement("div");
+          mermaid.render("mermaid-graph-" + id++, codeEl.textContent).then(({svg, bindFunctions}) => {
+            graphEl.innerHTML = svg;
+            bindFunctions?.(graphEl);
+            preEl.insertAdjacentElement("afterend", graphEl);
+            preEl.remove();
           });
         }
-
-        function renderMermaid() {
-          if (typeof window.mermaid === "undefined") return;
-          if (!mermaidReady) {
-            mermaid.initialize({
-              startOnLoad: false,
-              theme: document.body.className.includes("dark") ? "dark" : "default"
-            });
-            mermaidReady = true;
-          }
-          // ExDoc renders ```mermaid fences as <pre><code class="mermaid">; lift
-          // each into a bare <div class="mermaid"> for Mermaid to render into.
-          for (const code of document.querySelectorAll("pre > code.mermaid")) {
-            const div = document.createElement("div");
-            div.className = "mermaid";
-            div.textContent = code.textContent;
-            code.parentElement.replaceWith(div);
-          }
-          mermaid.run({nodes: document.querySelectorAll("div.mermaid:not([data-processed])")});
-        }
-
-        function render() {
-          renderMath();
-          renderMermaid();
-        }
-
-        window.addEventListener("exdoc:loaded", render);
-      })();
+      });
     </script>
     """
   end
