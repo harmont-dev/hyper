@@ -109,8 +109,9 @@ defmodule Hyper.Metering.UsageTest do
       await_local(vm_id)
 
       # id/1 reverse-resolves self() -> vm_id; usage/1 then delegates to the
-      # vm_id clause. whereis/1 resolves this node, whose meter is absent, so the
-      # unflushed remainder is zero and the flushed total is returned.
+      # vm_id clause. whereis/1 resolves this node, so unflushed_on/2 does erpc
+      # into Meter.unflushed/1; no meter is registered, so it swallows the
+      # GenServer :noproc exit and returns zero. The flushed total is returned.
       assert {:ok, total} = Hyper.usage(self())
       assert Time.as_ms(total) == 750
     end
