@@ -84,4 +84,49 @@ defmodule Hyper.Metering.UsageTest do
                cpu_time: Time.zero()
              })
   end
+
+  describe "Hyper.usage/1 across a VM's lifetime" do
+    test "a stopped-but-metered VM reports its recorded lifetime total" do
+      vm_id = Hyper.Vm.Id.generate()
+      record!(vm_id, 0, 60, Time.ms(1_500))
+      record!(vm_id, 60, 120, Time.ms(500))
+
+      # Not registered anywhere: whereis/1 is nil, so the not-yet-flushed
+      # remainder is zero and usage/1 returns the flushed windows alone.
+      assert {:ok, total} = Hyper.usage(vm_id)
+      assert Time.as_ms(total) == 2_000
+    end
+
+    test "an entirely unknown VM is :not_found" do
+      # Never metered and not running anywhere: both halves of the lookup miss.
+      assert Hyper.usage(Hyper.Vm.Id.generate()) == {:error, :not_found}
+    end
+
+    test "usage/1 resolves a pid handle to its vm_id and delegates" do
+      vm_id = Hyper.Vm.Id.generate()
+      record!(vm_id, 0, 60, Time.ms(750))
+      :ok = Hyper.Cluster.Routing.register_self({vm_id, :supervisor})
+      await_local(vm_id)
+
+      # id/1 reverse-resolves self() -> vm_id; usage/1 then delegates to the
+      # vm_id clause. whereis/1 resolves this node, whose meter is absent, so the
+      # unflushed remainder is zero and the flushed total is returned.
+      assert {:ok, total} = Hyper.usage(self())
+      assert Time.as_ms(total) == 750
+    end
+  end
+
+  # Horde materialises a local registration into its replica asynchronously; poll
+  # until this node owns the routing entry before routing against it.
+  defp await_local(vm_id, tries \\ 200)
+  defp await_local(vm_id, 0), do: flunk("routing entry for #{vm_id} never materialised")
+
+  defp await_local(vm_id, tries) do
+    if Hyper.whereis(vm_id) == node() do
+      :ok
+    else
+      Process.sleep(5)
+      await_local(vm_id, tries - 1)
+    end
+  end
 end
