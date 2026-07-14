@@ -3,6 +3,7 @@
     "lib/hyper/firecracker/api/codec.ex",
     "lib/hyper/firecracker/api/operations/",
     "lib/hyper/firecracker/api/schemas/",
+    "lib/hyper/suid_helper/expected.ex",
     "lib/mix/"
   ]
 }
