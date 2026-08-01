@@ -255,7 +255,10 @@ fn prepare_commands_golden_sequence() {
 /// step — see `host_init.rs`'s module doc), the metadata-IP drop rule
 /// immediately after the forward chain is created and before the broad
 /// egress accept (since `accept` is a terminating verdict in nftables and a
-/// drop reachable only after it would never fire), the trailing input-chain
+/// drop reachable only after it would never fire), the catch-all pool drop
+/// rules after the egress and established/related accepts (so unrelated
+/// forwarded traffic — notably Docker bridge — falls through via `policy
+/// accept` while pool traffic is still isolated), the trailing input-chain
 /// isolation (drops all clone-pool-sourced traffic addressed to the host
 /// itself, on the INPUT hook FORWARD never sees — see `host_init_commands`'s
 /// doc), and that every command after the delete is *not* failure-tolerant.
@@ -304,7 +307,7 @@ fn host_init_commands_golden_sequence() {
             Which::Nft,
             &[
                 "add", "chain", "ip", "hyper", "forward", "{", "type", "filter", "hook", "forward",
-                "priority", "0", ";", "policy", "drop", ";", "}",
+                "priority", "0", ";", "policy", "accept", ";", "}",
             ],
         ),
         cmd(
@@ -355,6 +358,18 @@ fn host_init_commands_golden_sequence() {
                 "state",
                 "established,related",
                 "accept",
+            ],
+        ),
+        cmd(
+            Which::Nft,
+            &[
+                "add", "rule", "ip", "hyper", "forward", "ip", "saddr", "172.31.0.0/16", "drop",
+            ],
+        ),
+        cmd(
+            Which::Nft,
+            &[
+                "add", "rule", "ip", "hyper", "forward", "ip", "daddr", "172.31.0.0/16", "drop",
             ],
         ),
         cmd(
@@ -432,4 +447,31 @@ fn resolve_network_returns_the_configured_network_when_present() {
     let resolved = resolve_network(Some(&network)).unwrap();
     assert_eq!(resolved.uplink.as_deref(), Some("eth0"));
     assert_eq!(resolved.clone_pool, "172.31.0.0/16");
+}
+
+#[test]
+fn host_init_forward_chain_uses_policy_accept() {
+    // Regression: the forward chain must use `policy accept` so that traffic
+    // unrelated to the clone pool (e.g. Docker bridge traffic between
+    // containers) falls through to other chains on the forward hook. A
+    // `policy drop` would silently drop all forwarded traffic not explicitly
+    // accepted by *this* chain, breaking colocated Docker networking.
+    let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
+    let forward_chain = cmds
+        .iter()
+        .find(|c| {
+            c.bin == Which::Nft
+                && c.argv.contains(&"chain".to_string())
+                && c.argv.contains(&"forward".to_string())
+        })
+        .expect("forward chain command must exist");
+    let policy_idx = forward_chain
+        .argv
+        .iter()
+        .position(|a| a == "policy")
+        .expect("forward chain must have a policy");
+    assert_eq!(
+        forward_chain.argv[policy_idx + 1], "accept",
+        "forward chain policy must be accept, not drop"
+    );
 }

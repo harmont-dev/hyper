@@ -1,15 +1,15 @@
 //! `network host-init`: one-time host setup of the `hyper` nftables table,
-//! its masquerade rule, and the forward-chain default-drop policy.
+//! its masquerade rule, and the forward-chain isolation rules.
 //!
 //! Idempotency: host-init reconciles to desired state rather than diffing.
 //! [`args::host_init_commands`] always leads with a (failure-tolerant) delete
 //! of the `hyper` table, then rebuilds it from scratch. A presence check
 //! (e.g. "does `nft list table ip hyper` already mention masquerade?") looks
 //! idempotent but isn't: masquerade is added partway through the sequence, so
-//! a crash between that step and the later forward-chain drop policy would
+//! a crash between that step and the later forward-chain drop rules would
 //! leave the table permanently short a security rule — every subsequent
 //! host-init would see masquerade present and skip, never adding the missing
-//! policy. Delete-then-recreate has no such window: the table is always
+//! rules. Delete-then-recreate has no such window: the table is always
 //! either fully absent or fully complete.
 use super::args;
 use super::exec;
