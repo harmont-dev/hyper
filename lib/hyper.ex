@@ -195,4 +195,43 @@ defmodule Hyper do
   catch
     :error, {:erpc, _} -> nil
   end
+
+  @doc """
+  The host-routable veth namespace IP for `vm_id` — the address on the host's
+  network namespace side that DNATs into the guest's inner `172.30.0.2`.
+
+  Derived from the VM's allocated uid and the node's clone pool config, mirroring
+  the Rust suid helper's `Plan::derive`. Returns `{:error, :not_found}` when the
+  VM is not running anywhere.
+  """
+  @spec vm_address(Hyper.Vm.Id.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def vm_address(vm_id) when is_binary(vm_id) do
+    case whereis(vm_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        opts = :erpc.call(node, Hyper.Node.FireVMM.State, :describe, [vm_id])
+        {floor, _ceiling} = :erpc.call(node, Hyper.Cfg.Jails, :uid_gid_range, [])
+        clone_pool_cidr = :erpc.call(node, Hyper.Cfg.Network, :clone_pool, [])
+        [ip_str | _] = String.split(clone_pool_cidr, "/")
+        {:ok, {a, b, c, d}} = :inet.parse_ipv4_address(String.to_charlist(ip_str))
+        base = Bitwise.bsl(a, 24) + Bitwise.bsl(b, 16) + Bitwise.bsl(c, 8) + d
+        slot = opts.uid - floor
+        veth_ns_ip_int = base + slot * 4 + 2
+
+        {:ok,
+         Enum.join(
+           [
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 24), 0xFF),
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 16), 0xFF),
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 8), 0xFF),
+             Bitwise.band(veth_ns_ip_int, 0xFF)
+           ],
+           "."
+         )}
+    end
+  rescue
+    _ -> {:error, :not_found}
+  end
 end
