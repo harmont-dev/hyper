@@ -17,6 +17,12 @@ defmodule Hyper.Node.FireVMM.Agent do
 
   @default_timeout 30_000
 
+  # `retry: 0` disables gun's connect-retry backoff. Callers poll this function
+  # while a VM boots, so a socket that is not there yet is expected, not
+  # exceptional: retrying inside a single exec/3 only delays the caller's own
+  # retry loop by a full backoff cycle without improving the odds.
+  @connect_opts [adapter: GRPC.Client.Adapters.Gun, adapter_opts: [retry: 0]]
+
   @doc """
   Deterministic host-side path for the per-VM relay Unix socket.
 
@@ -59,7 +65,7 @@ defmodule Hyper.Node.FireVMM.Agent do
       cwd: opts[:cwd]
     }
 
-    case GRPC.Stub.connect("unix://" <> path, adapter: GRPC.Client.Adapters.Gun) do
+    case GRPC.Stub.connect("unix://" <> path, @connect_opts) do
       {:error, _} = err ->
         map_grpc_error(err)
 
