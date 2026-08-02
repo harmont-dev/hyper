@@ -1,6 +1,7 @@
 defmodule Hyper.Node.FireVMM.Agent.RelayTest do
   use ExUnit.Case, async: true
 
+  alias Hyper.Node.FireVMM.Agent
   alias Hyper.Node.FireVMM.Agent.Relay
 
   defp tmp_path(label) do
@@ -32,6 +33,97 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
     end)
 
     {:ok, %{fc_srv: fc_srv, relay: relay, vsock_path: vsock_path, listen_path: listen_path}}
+  end
+
+  describe "supervising several relays per VM" do
+    test "child_spec ids differ by port" do
+      # One VM runs a relay per in-guest service. Supervisor.init/2 rejects
+      # duplicate child ids outright, so a fixed id would make the second
+      # relay unstartable rather than merely awkward.
+      base = %{vm_id: "vm-1", vsock_uds: "/tmp/vsock.sock", listen_path: "/tmp/listen.sock"}
+
+      grpc = Relay.child_spec(base)
+      docker = Relay.child_spec(Map.put(base, :vsock_port, Relay.docker_vsock_port()))
+
+      refute grpc.id == docker.id
+    end
+
+    test "docker and gRPC relays bind distinct host sockets" do
+      # Both are per-VM sockets in the same directory; colliding names would
+      # have the second relay unlink and rebind the first one's path.
+      vm_id = "vm-1"
+
+      assert Relay.docker_socket_path(vm_id) != Agent.relay_socket_path(vm_id)
+      assert String.contains?(Relay.docker_socket_path(vm_id), vm_id)
+    end
+  end
+
+  describe "vsock_port" do
+    test "dials the configured guest port rather than a fixed one" do
+      # One vsock device multiplexes every in-guest service by port, so the
+      # relay has to carry the caller's choice through into the Firecracker
+      # CONNECT handshake. Reported back to the test process so the assertion
+      # is on the bytes the guest side actually saw.
+      vsock_path = tmp_path("vsock-port")
+      listen_path = tmp_path("listen-port")
+      test_pid = self()
+
+      {:ok, fc_srv} = :socket.open(:local, :stream)
+      :ok = :socket.bind(fc_srv, %{family: :local, path: vsock_path})
+      :ok = :socket.listen(fc_srv, 5)
+
+      spawn(fn ->
+        {:ok, conn} = :socket.accept(fc_srv)
+        {:ok, line} = :socket.recv(conn)
+        send(test_pid, {:connect_line, line})
+        :ok = :socket.send(conn, "OK 5\n")
+      end)
+
+      {:ok, relay} =
+        Relay.start_link(%{
+          vm_id: "test-vm",
+          vsock_uds: vsock_path,
+          listen_path: listen_path,
+          vsock_port: 2375
+        })
+
+      true = Process.unlink(relay)
+
+      on_exit(fn ->
+        if Process.alive?(relay), do: GenServer.stop(relay)
+        :socket.close(fc_srv)
+        File.rm(vsock_path)
+        File.rm(listen_path)
+      end)
+
+      {:ok, client} = :socket.open(:local, :stream)
+      :ok = :socket.connect(client, %{family: :local, path: listen_path})
+
+      assert_receive {:connect_line, line}, 2_000
+      assert line == "CONNECT 2375\n"
+
+      :socket.close(client)
+    end
+
+    test "defaults to the guest agent's gRPC port when unspecified",
+         %{fc_srv: fc_srv, listen_path: listen_path} do
+      test_pid = self()
+
+      spawn(fn ->
+        {:ok, conn} = :socket.accept(fc_srv)
+        {:ok, line} = :socket.recv(conn)
+        send(test_pid, {:connect_line, line})
+        :ok = :socket.send(conn, "OK 5\n")
+      end)
+
+      {:ok, client} = :socket.open(:local, :stream)
+      :ok = :socket.connect(client, %{family: :local, path: listen_path})
+
+      assert_receive {:connect_line, line}, 2_000
+      assert line == "CONNECT 1024\n"
+
+      :socket.close(client)
+    end
   end
 
   defp start_echo_server(fc_srv) do

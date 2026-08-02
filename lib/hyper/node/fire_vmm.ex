@@ -95,6 +95,17 @@ defmodule Hyper.Node.FireVMM do
              vsock_uds: Jailer.host_vsock(opts.vm_id),
              listen_path: Agent.relay_socket_path(opts.vm_id)
            }},
+          # Second relay over the same vsock device, carrying the guest's
+          # Docker socket. Keeps the daemon off the network: reaching it over
+          # IP would mean publishing an unauthenticated, root-equivalent API on
+          # the guest's address and opening the host firewall to match.
+          {Relay,
+           %{
+             vm_id: opts.vm_id,
+             vsock_uds: Jailer.host_vsock(opts.vm_id),
+             listen_path: Relay.docker_socket_path(opts.vm_id),
+             vsock_port: Relay.docker_vsock_port()
+           }},
           # Last on purpose: children stop in reverse start order, so the meter
           # stops first at teardown and flushes its final usage window while
           # Core's Daemon (and the cgroup it removes) is still alive.

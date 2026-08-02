@@ -234,4 +234,26 @@ defmodule Hyper do
   rescue
     _ -> {:error, :not_found}
   end
+
+  @doc """
+  Host-side Unix socket that speaks to `vm_id`'s Docker daemon.
+
+  Connections are relayed over the VM's vsock device to the guest agent, which
+  forwards them to the daemon's own socket. The daemon therefore never binds a
+  network address, and no host firewall exception is needed to drive it.
+
+  The path is deterministic, so this only fails when the VM is not running.
+  """
+  @spec docker_socket(Hyper.Vm.Id.t()) :: {:ok, Path.t()} | {:error, :not_found}
+  def docker_socket(vm_id) when is_binary(vm_id) do
+    case whereis(vm_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        {:ok, :erpc.call(node, Hyper.Node.FireVMM.Agent.Relay, :docker_socket_path, [vm_id])}
+    end
+  rescue
+    _ -> {:error, :not_found}
+  end
 end
