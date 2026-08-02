@@ -5,15 +5,24 @@ use nix::mount::{mount, MsFlags};
 
 const RESOLVER_PARAM: &str = "hyper.resolver=";
 
+/// Filesystems PID 1 mounts for the guest, in dependency order: a nested target
+/// is only reachable once the filesystem it sits inside is mounted.
+///
+/// `/sys/fs/cgroup` is here because container runtimes refuse to start without
+/// a cgroup hierarchy, and only PID 1 can mount it -- an exec'd program gets
+/// EPERM, which `mount(8)` reports as the rather misleading "must be superuser
+/// to use mount".
+pub const MOUNTS: [(&str, &str, &str); 4] = [
+    ("proc", "/proc", "proc"),
+    ("sysfs", "/sys", "sysfs"),
+    ("devtmpfs", "/dev", "devtmpfs"),
+    ("cgroup2", "/sys/fs/cgroup", "cgroup2"),
+];
+
 // As PID 1 nothing else mounts these; exec'd programs need /proc and /dev.
 pub fn setup() -> io::Result<()> {
     let none: Option<&str> = None;
-    let mounts = [
-        ("proc", "/proc", "proc"),
-        ("sysfs", "/sys", "sysfs"),
-        ("devtmpfs", "/dev", "devtmpfs"),
-    ];
-    for (src, target, fstype) in mounts {
+    for (src, target, fstype) in MOUNTS {
         std::fs::create_dir_all(target).ok();
         // Best-effort: a rootfs that already has one mounted (or lacks the dir)
         // must not abort the agent; a missing /proc only degrades exec'd tools.

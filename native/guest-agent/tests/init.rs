@@ -1,5 +1,34 @@
-use hyper_guest_agent::init::resolver_from_cmdline;
+use hyper_guest_agent::init::{resolver_from_cmdline, MOUNTS};
 use std::net::Ipv4Addr;
+use std::path::Path;
+
+// A filesystem mounted at a nested target is only reachable once its parent
+// filesystem is mounted -- /sys/fs/cgroup lives inside sysfs, so mounting it
+// before /sys silently leaves the guest with no cgroup hierarchy and dockerd
+// refuses to start. Ordering is load-bearing, not cosmetic.
+#[test]
+fn nested_targets_are_mounted_after_their_parent() {
+    for (i, (_, target, _)) in MOUNTS.iter().enumerate() {
+        for (j, (_, other, _)) in MOUNTS.iter().enumerate() {
+            if i != j && Path::new(target).starts_with(other) {
+                assert!(
+                    j < i,
+                    "{target} is nested under {other} but is mounted before it"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cgroup2_is_mounted_so_container_runtimes_can_start() {
+    assert!(
+        MOUNTS
+            .iter()
+            .any(|(_, target, fstype)| *target == "/sys/fs/cgroup" && *fstype == "cgroup2"),
+        "guests run container runtimes, which refuse to start without a cgroup hierarchy"
+    );
+}
 
 #[test]
 fn present_among_other_params() {
