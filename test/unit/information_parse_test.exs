@@ -29,4 +29,29 @@ defmodule Unit.InformationParseTest do
       assert Information.parse!("#{n}GiB") == Information.gib(n)
     end
   end
+
+  describe "coerce!/1" do
+    property "is idempotent: an already-typed quantity passes through unchanged" do
+      check all(n <- integer(0..4096)) do
+        size = Information.gib(n)
+        assert Information.coerce!(size) == size
+      end
+    end
+
+    property "agrees with parse! on every string it accepts" do
+      check all(n <- integer(0..4096)) do
+        assert Information.coerce!("#{n}GiB") == Information.parse!("#{n}GiB")
+      end
+    end
+
+    for input <- ["", "GiB", "4 Gigs", "nope"] do
+      test "rejects #{inspect(input)}" do
+        assert_raise ArgumentError, fn -> Information.coerce!(unquote(input)) end
+      end
+    end
+
+    test "rejects a value that is neither a quantity nor a string" do
+      assert_raise ArgumentError, fn -> Information.coerce!(42) end
+    end
+  end
 end
