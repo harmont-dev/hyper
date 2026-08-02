@@ -123,14 +123,19 @@ pub fn parse_mappings(xml: &str, dev_id: u64) -> Result<ThinMappings, Error> {
     })
 }
 
-fn expand_mappings(mappings: &[Mapping], definitions: &[Definition]) -> Result<Vec<(u64, u64)>, Error> {
+fn expand_mappings(
+    mappings: &[Mapping],
+    definitions: &[Definition],
+) -> Result<Vec<(u64, u64)>, Error> {
     mappings.iter().try_fold(Vec::new(), |mut ranges, mapping| {
         match mapping {
             Mapping::Ref { name } => {
                 let definition = definitions
                     .iter()
                     .find(|definition| definition.name == *name)
-                    .ok_or_else(|| Error::Xml(format!("mapping reference `{name}` has no definition")))?;
+                    .ok_or_else(|| {
+                        Error::Xml(format!("mapping reference `{name}` has no definition"))
+                    })?;
                 ranges.extend(expand_mappings(&definition.mappings, definitions)?);
             }
             _ => ranges.extend(mapping.range()),
