@@ -34,6 +34,16 @@ struct Superblock {
     data_block_size: u64,
     #[serde(rename = "device", default)]
     devices: Vec<Device>,
+    #[serde(rename = "def", default)]
+    definitions: Vec<Definition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Definition {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "$value", default)]
+    mappings: Vec<Mapping>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,16 +72,22 @@ enum Mapping {
         #[serde(rename = "@origin_block")]
         origin_block: u64,
     },
+    #[serde(rename = "ref")]
+    Ref {
+        #[serde(rename = "@name")]
+        name: String,
+    },
 }
 
 impl Mapping {
-    fn range(&self) -> (u64, u64) {
+    fn range(&self) -> Option<(u64, u64)> {
         match *self {
             Mapping::Range {
                 origin_begin,
                 length,
-            } => (origin_begin, length),
-            Mapping::Single { origin_block } => (origin_block, 1),
+            } => Some((origin_begin, length)),
+            Mapping::Single { origin_block } => Some((origin_block, 1)),
+            Mapping::Ref { .. } => None,
         }
     }
 }
@@ -91,7 +107,7 @@ pub fn parse_mappings(xml: &str, dev_id: u64) -> Result<ThinMappings, Error> {
         .find(|device| device.dev_id == dev_id)
         .ok_or(Error::DeviceNotFound(dev_id))?;
 
-    let ranges: Vec<(u64, u64)> = device.mappings.iter().map(Mapping::range).collect();
+    let ranges = expand_mappings(&device.mappings, &superblock.definitions)?;
 
     let got: u64 = ranges.iter().map(|&(_, len)| len).sum();
     if got != device.mapped_blocks {
@@ -104,6 +120,23 @@ pub fn parse_mappings(xml: &str, dev_id: u64) -> Result<ThinMappings, Error> {
     Ok(ThinMappings {
         block_sectors: superblock.data_block_size,
         ranges,
+    })
+}
+
+fn expand_mappings(mappings: &[Mapping], definitions: &[Definition]) -> Result<Vec<(u64, u64)>, Error> {
+    mappings.iter().try_fold(Vec::new(), |mut ranges, mapping| {
+        match mapping {
+            Mapping::Ref { name } => {
+                let definition = definitions
+                    .iter()
+                    .find(|definition| definition.name == *name)
+                    .ok_or_else(|| Error::Xml(format!("mapping reference `{name}` has no definition")))?;
+                ranges.extend(expand_mappings(&definition.mappings, definitions)?);
+            }
+            _ => ranges.extend(mapping.range()),
+        }
+
+        Ok(ranges)
     })
 }
 
