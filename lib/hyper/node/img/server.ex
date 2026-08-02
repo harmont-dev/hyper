@@ -22,6 +22,7 @@ defmodule Hyper.Node.Img.Server do
   alias Hyper.Img.Db
   alias Hyper.Node.Layer
   alias Hyper.SuidHelper
+  alias Unit.Information
 
   use OpenTelemetryDecorator
 
@@ -193,10 +194,12 @@ defmodule Hyper.Node.Img.Server do
   defp build_chain(_img_id, []), do: {:error, :unknown_image}
 
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(base) do
+    with {:ok, base_sectors} <- SuidHelper.Blockdev.device_sectors(base),
+         {:ok, sectors} <- chain_sectors(base_sectors, deltas),
+         {:ok, origin, names} <- pad_base(img_id, base, base_sectors, sectors) do
       deltas
       |> Enum.with_index(1)
-      |> Enum.reduce_while({:ok, base, []}, fn {cow_dev, idx}, {:ok, origin, names} ->
+      |> Enum.reduce_while({:ok, origin, names}, fn {cow_dev, idx}, {:ok, origin, names} ->
         name = dm_name(img_id, idx)
 
         case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_dev, sectors) do
@@ -214,6 +217,50 @@ defmodule Hyper.Node.Img.Server do
       end
     end
   end
+
+  defp pad_base(_img_id, base, base_sectors, sectors) when base_sectors >= sectors,
+    do: {:ok, base, []}
+
+  defp pad_base(img_id, base, base_sectors, sectors) do
+    name = "hyper-img-pad-#{sanitize(img_id)}"
+
+    with {:ok, padded} <- SuidHelper.Dmsetup.create_padded(name, base, base_sectors, sectors) do
+      {:ok, padded, [name]}
+    end
+  end
+
+  defp chain_sectors(base_sectors, deltas) do
+    deltas
+    |> Enum.reduce_while({:ok, base_sectors}, fn cow_dev, {:ok, largest} ->
+      with {:ok, cow_sectors} <- SuidHelper.Blockdev.device_sectors(cow_dev),
+           {:ok, sectors} <- delta_sectors(cow_sectors) do
+        {:cont, {:ok, max(largest, sectors)}}
+      else
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  # A published COW store is sparse but has a deterministic geometry: logical
+  # sectors, one 16-byte exception entry per 8-sector chunk, and 4 MiB slack.
+  # Recovering its logical size lets a derived image retain the VM disk size
+  # without widening the image database schema.
+  defp delta_sectors(cow_sectors) do
+    slack = Information.as_sectors(Information.mib(4))
+    upper = cow_sectors - slack
+
+    candidate = div(upper * 256, 257)
+
+    candidates = Enum.to_list(max(0, candidate - 2)..(candidate + 2))
+
+    case Enum.find(candidates, &(cow_sectors_for(&1, slack) == cow_sectors)) do
+      nil -> {:error, {:invalid_delta_geometry, cow_sectors}}
+      sectors -> {:ok, sectors}
+    end
+  end
+
+  defp cow_sectors_for(sectors, slack),
+    do: sectors + div(div(sectors, Hyper.Cfg.Img.chunk_sectors()) * 16, 512) + slack
 
   @spec dm_name(Hyper.Img.id(), pos_integer()) :: String.t()
   defp dm_name(img_id, idx), do: "hyper-img-#{sanitize(img_id)}-#{idx}"
