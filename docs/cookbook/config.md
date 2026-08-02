@@ -287,19 +287,27 @@ aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 ## Image Configuration
 
 Hyper's image provisioning layer stores read-only layers on a configurable
-medium. (The device-mapper geometry behind it is fixed at compile time and
-rarely needs tweaking.)
+medium, backed by a dm-thin pool sized at node setup. (The device-mapper
+*geometry* — chunk and block sizes — is fixed at compile time and rarely needs
+tweaking; the pool's sparse sizes are configurable below.)
 
-| Config Key | `config.exs` | `config.toml` | Default             | Notes |
-| ---------- | ------------ | ------------- | ------------------- | ----- |
-| `store`    | `.store`     | `.store`      | `<work_dir>/layers` | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
+| Config Key             | `config.exs`             | `config.toml`            | Default             | Notes |
+| ---------------------- | ------------------------ | ------------------------ | ------------------- | ----- |
+| `store`                | `.store`                 | `.store`                 | `<work_dir>/layers` | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
+| `thin_pool_data_size`  | `.thin_pool_data_size`   | `.thin_pool_data_size`   | `64 GiB`            | Sparse size ([unit](#unit)) of the thin pool's data device. Ceiling on the disk a node hands out across all its VMs, so it bounds what [`disk_max`](#budget-configuration) can honestly be set to. |
+| `thin_pool_meta_size`  | `.thin_pool_meta_size`   | `.thin_pool_meta_size`   | `1 GiB`             | Sparse size ([unit](#unit)) of the thin pool's metadata device. |
+
+> **Note:** Both sizes are only consulted when the pool is first created.
+> Growing them on a node that already has a pool means recreating the backing
+> device, not just editing config.
 
 <!-- tabs open -->
 ### `config.exs`
 
 ```elixir
 config :hyper, Hyper.Cfg.Img,
-  store: "/mnt/hyper/layers"
+  store: "/mnt/hyper/layers",
+  thin_pool_data_size: Unit.Information.gib(256)
 ```
 
 ### `config.toml`
@@ -307,6 +315,7 @@ config :hyper, Hyper.Cfg.Img,
 ```toml
 [img]
 store = "/mnt/hyper/layers"
+thin_pool_data_size = "256GiB"
 ```
 <!-- tabs close -->
 
@@ -531,6 +540,8 @@ aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 
 [img]
 store = "/mnt/hyper/layers"
+thin_pool_data_size = "256GiB"
+thin_pool_meta_size = "2GiB"
 
 [img.gc]
 batch_size = 200
