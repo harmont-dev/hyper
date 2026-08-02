@@ -85,12 +85,15 @@ defmodule Hyper.Node.Img.Publish do
   defp write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, parent_img_id) do
     cow_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-delta-#{tmp}.img")
 
-    with :ok <- create_sparse(cow_path, cow_size(sectors)),
-         {:ok, cow_loop} <- SuidHelper.Losetup.attach_rw(cow_path) do
+    with :ok <- tag(:create_sparse, create_sparse(cow_path, cow_size(sectors))),
+         {:ok, cow_loop} <- tag(:attach_cow_loop, SuidHelper.Losetup.attach_rw(cow_path)) do
       try do
         with {:ok, write_dev} <-
-               SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors),
-             {:ok, _stats} <- copy_divergence(snap_dev, snap_id, write_dev),
+               tag(
+                 :create_write_snapshot,
+                 SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors)
+               ),
+             {:ok, _stats} <- tag(:copy_divergence, copy_divergence(snap_dev, snap_id, write_dev)),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
              :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)),
@@ -146,6 +149,10 @@ defmodule Hyper.Node.Img.Publish do
       end
     end
   end
+
+  defp tag(_operation, :ok), do: :ok
+  defp tag(_operation, {:ok, _} = success), do: success
+  defp tag(operation, {:error, reason}), do: {:error, {operation, reason}}
 
   @spec snap_name(String.t()) :: String.t()
   defp snap_name(tmp), do: "hyper-fork-#{tmp}"
