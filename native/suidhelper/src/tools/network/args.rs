@@ -329,8 +329,8 @@ pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
 /// crash/interruption mid-sequence on one run can never strand a later run
 /// with, say, NAT but no forward-chain drop rules (or no input-chain
 /// isolation).
-pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
-    vec![
+pub fn host_init_commands(uplink: &str, clone_pool: &str, host_ports: &[u16]) -> Vec<Command> {
+    let mut commands = vec![
         Command::nft_allow_failure(argv!["delete", "table", "ip", "hyper"]),
         Command::nft(argv!["add", "table", "ip", "hyper"]),
         Command::nft(argv![
@@ -417,8 +417,31 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
             "add", "chain", "ip", "hyper", "input", "{", "type", "filter", "hook", "input",
             "priority", "0", ";", "policy", "accept", ";", "}"
         ]),
-        Command::nft(argv![
-            "add", "rule", "ip", "hyper", "input", "ip", "saddr", clone_pool, "drop"
-        ]),
-    ]
+    ];
+
+    // Opt-in exemptions, stated per port so the hole is auditable: a guest may
+    // reach these host-local services and nothing else. They precede the drop
+    // below because `drop` is a terminating verdict.
+    for port in host_ports {
+        commands.push(Command::nft(argv![
+            "add",
+            "rule",
+            "ip",
+            "hyper",
+            "input",
+            "ip",
+            "saddr",
+            clone_pool,
+            "tcp",
+            "dport",
+            port.to_string(),
+            "accept"
+        ]));
+    }
+
+    commands.push(Command::nft(argv![
+        "add", "rule", "ip", "hyper", "input", "ip", "saddr", clone_pool, "drop"
+    ]));
+
+    commands
 }

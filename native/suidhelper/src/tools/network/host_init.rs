@@ -61,6 +61,7 @@ pub fn run(args: HostInitArgs) -> Result<serde_json::Value, crate::tools::Error>
 struct HostInit {
     uplink: String,
     clone_pool: String,
+    host_ports: Vec<u16>,
     nft: PathBuf,
 }
 
@@ -77,6 +78,7 @@ impl HostInit {
                 .clone()
                 .expect("Config::network() guarantees uplink is set"),
             clone_pool: network.clone_pool.clone(),
+            host_ports: network.host_ports.clone(),
             nft: config.nft()?.into(),
         })
     }
@@ -93,7 +95,7 @@ impl IsTool for HostInit {
             return Err(Error::IpForwardDisabled);
         }
 
-        let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
+        let commands = args::host_init_commands(&self.uplink, &self.clone_pool, &self.host_ports);
         // host_init_commands only ever issues `nft` commands (see args.rs).
         exec::run_all(&commands, |_which| self.nft.as_path())?;
         Ok(())

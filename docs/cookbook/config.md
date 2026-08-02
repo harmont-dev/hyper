@@ -132,6 +132,14 @@ clone_pool = "172.31.0.0/16"
 # optional -- defaults shown. DNS resolver handed to guests via the kernel
 # cmdline (the guest agent writes it to /etc/resolv.conf).
 resolver = "1.1.1.1"
+
+# optional -- empty by default. Host TCP ports guests may reach. Guests are
+# otherwise cut off from the host entirely: the input chain drops everything
+# sourced from the clone pool, so a host-local service is unreachable even
+# though the guest can route to it. Each entry punches a single, auditable
+# hole -- name only what a guest genuinely needs, such as an image registry
+# mirror. Guests dial the host at the address `Hyper.host_address/1` returns.
+host_ports = [5001]
 ```
 
 ## gRPC Configuration

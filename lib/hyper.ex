@@ -236,6 +236,26 @@ defmodule Hyper do
   end
 
   @doc """
+  The host's own address on `vm_id`'s veth — what the guest dials to reach a
+  host-local service, and the peer of the address `vm_address/1` returns.
+
+  Only ports named in `[network] host_ports` are actually reachable there; the
+  rest are dropped on the input hook.
+  """
+  @spec host_address(Hyper.Vm.Id.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def host_address(vm_id) when is_binary(vm_id) do
+    # The /30's .1 to the guest side's .2 — derived by stepping back from
+    # vm_address/1 rather than recomputing, so the two can never disagree.
+    with {:ok, ns_ip} <- vm_address(vm_id),
+         [a, b, c, d] <- String.split(ns_ip, "."),
+         {last, ""} <- Integer.parse(d) do
+      {:ok, Enum.join([a, b, c, last - 1], ".")}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Host-side Unix socket that speaks to `vm_id`'s Docker daemon.
 
   Connections are relayed over the VM's vsock device to the guest agent, which

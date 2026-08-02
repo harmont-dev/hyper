@@ -209,6 +209,11 @@ pub struct Network {
     pub uplink: Option<String>,
     #[serde(default = "default_clone_pool")]
     pub clone_pool: String,
+    /// Host TCP ports guests may reach, punched through the input-chain
+    /// isolation one port at a time. Empty by default: guests reach nothing on
+    /// the host unless an operator names it.
+    #[serde(default)]
+    pub host_ports: Vec<u16>,
 }
 
 fn default_clone_pool() -> String {
