@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod docker_proxy;
 pub mod exec;
 pub mod init;
 

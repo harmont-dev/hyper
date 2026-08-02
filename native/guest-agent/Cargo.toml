@@ -38,6 +38,10 @@ path = "tests/exec.rs"
 name = "init"
 path = "tests/init.rs"
 
+[[test]]
+name = "docker_proxy"
+path = "tests/docker_proxy.rs"
+
 [profile.release]
 opt-level = "z"
 lto = true
