@@ -58,10 +58,17 @@ defmodule Hyper.Node.Img.Publish do
   end
 
   @spec materialize(map(), Hyper.Img.id()) :: {:ok, Hyper.Img.id()} | {:error, term()}
-  defp materialize(%{thin_name: origin_name, thin_id: origin_id, origin_dev: ro_dev}, img_id) do
+  defp materialize(
+         %{thin_name: origin_name, thin_id: origin_id, blk_path: mutable_dev, origin_dev: ro_dev},
+         img_id
+       ) do
     tmp = Hyper.Vm.Id.generate()
 
-    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+    # The VM's mutable thin volume can be larger than its immutable base image
+    # (instance types promise a disk size). Snapshotting at the base-image size
+    # drops the higher mapped blocks before blockcopy gets a chance to publish
+    # them.
+    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(mutable_dev),
          {:ok, %{dev: snap_dev, id: snap_id}} <-
            ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, sectors, ro_dev) do
       try do
