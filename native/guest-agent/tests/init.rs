@@ -21,6 +21,25 @@ fn nested_targets_are_mounted_after_their_parent() {
 }
 
 #[test]
+fn resize_command_targets_the_root_device_and_is_absolute() {
+    // The writable volume is created at the instance type's disk size, but a
+    // larger block device does not move the filesystem's superblock -- without
+    // growing it the guest still sees a filesystem the size of the image it
+    // booted from, and Docker cannot pull anything into it.
+    //
+    // PID 1 runs with a near-empty environment and no PATH, so a bare
+    // `resize2fs` would not resolve.
+    let (program, args) = hyper_guest_agent::init::resize_root_command();
+
+    assert!(
+        program.starts_with('/'),
+        "PID 1 has no PATH to resolve a bare command name against"
+    );
+    assert!(program.ends_with("resize2fs"));
+    assert_eq!(args, vec!["/dev/vda"]);
+}
+
+#[test]
 fn cgroup2_is_mounted_so_container_runtimes_can_start() {
     assert!(
         MOUNTS

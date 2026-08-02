@@ -28,12 +28,46 @@ pub fn setup() -> io::Result<()> {
         // must not abort the agent; a missing /proc only degrades exec'd tools.
         let _ = mount(Some(src), target, Some(fstype), MsFlags::empty(), none);
     }
+    // Best-effort, after the mounts: the writable volume is created at the
+    // instance type's disk size, but a larger block device does not move the
+    // filesystem's superblock. Without this the guest sees a filesystem the
+    // size of the image it booted from -- enough for the image and nothing
+    // else, so a container runtime cannot pull into it.
+    //
+    // A failure only costs the guest its extra room, never boot: an image
+    // already sized to its volume reports "nothing to do", and a guest without
+    // resize2fs installed simply keeps what it has.
+    let _ = grow_root();
+
     // Best-effort, run after /proc is mounted: the kernel's `ip=` autoconfig
     // sets the guest's address/route but never DNS, so BootSpec appends
     // `hyper.resolver=<ip>` to the cmdline for us to relay into resolv.conf. A
     // missing param or unwritable /etc only degrades DNS, never boot.
     let _ = write_resolv_conf();
     Ok(())
+}
+
+/// The command that grows the root filesystem to fill its block device.
+///
+/// Absolute because PID 1 runs with a near-empty environment and no `PATH`, so
+/// a bare command name would not resolve. `/dev/vda` is what Firecracker
+/// attaches the rootfs as (`root=/dev/vda`, appended to the boot args).
+///
+/// ext4 grows online, so this runs against the mounted root.
+pub fn resize_root_command() -> (&'static str, Vec<&'static str>) {
+    ("/usr/sbin/resize2fs", vec![ROOT_DEVICE])
+}
+
+const ROOT_DEVICE: &str = "/dev/vda";
+
+fn grow_root() -> io::Result<()> {
+    let (program, args) = resize_root_command();
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|_| ())
 }
 
 /// Extracts the value of the `hyper.resolver=` token from a `/proc/cmdline`-style
