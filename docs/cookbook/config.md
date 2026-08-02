@@ -263,8 +263,18 @@ Hyper requires Linux images for the architectures it runs on:
 
 | Config Key | `config.exs` | `config.toml` | Default                                                                                      | Notes |
 | ---------- | ------------ | ------------- | -------------------------------------------------------------------------------------------- | ----- |
-| `amd64`    | `.amd64`     | `.amd64`      | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
-| `aarch64`  | `.aarch64`   | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
+| `amd64`    | `.amd64`     | `.amd64`      | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path), on the same filesystem as [`work_dir`](#root-keys). |
+| `aarch64`  | `.aarch64`   | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path), on the same filesystem as [`work_dir`](#root-keys). |
+
+> #### Keep the kernel on the `work_dir` filesystem {: .warning}
+>
+> Booting a VM hard-links the kernel into that VM's jail at
+> `<work_dir>/jails/firecracker/<vm_id>/root/vmlinux` rather than copying it, so
+> the two paths must live on one filesystem — a hard link cannot cross a mount
+> point. Point these keys at a path under `work_dir` (or at least on the same
+> volume); an override on a separate disk fails at boot, not at config load.
+>
+> The default download already satisfies this: it lands under `work_dir`.
 
 <!-- tabs open -->
 ### `config.exs`
