@@ -99,6 +99,17 @@ defmodule Hyper.SuidHelper.Dmsetup do
     create(name, table, [])
   end
 
+  @doc "Create a virtual device that appends zero-filled sectors to `base_dev`."
+  @spec create_padded(String.t(), Path.t(), pos_integer(), pos_integer()) ::
+          {:ok, Path.t()} | {:error, err()}
+  def create_padded(name, base_dev, base_sectors, sectors)
+      when sectors > base_sectors do
+    table =
+      "0 #{base_sectors} linear #{base_dev} 0\n#{base_sectors} #{sectors - base_sectors} zero"
+
+    create(name, table, ["--readonly"])
+  end
+
   @doc "Send a thin-pool `message` to dm device `name`."
   @spec message(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])

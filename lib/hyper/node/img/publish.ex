@@ -72,7 +72,9 @@ defmodule Hyper.Node.Img.Publish do
          {:ok, %{dev: snap_dev, id: snap_id}} <-
            ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, sectors, ro_dev) do
       try do
-        write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, img_id)
+        with_padded_origin(tmp, ro_dev, sectors, fn origin_dev ->
+          write_delta(tmp, origin_dev, {snap_dev, snap_id}, sectors, img_id)
+        end)
       after
         :ok = ThinPool.destroy(snap_name(tmp), snap_id)
       end
@@ -153,6 +155,25 @@ defmodule Hyper.Node.Img.Publish do
         :ok
       after
         File.close(io)
+      end
+    end
+  end
+
+  defp with_padded_origin(tmp, origin_dev, sectors, fun) do
+    with {:ok, origin_sectors} <- SuidHelper.Blockdev.device_sectors(origin_dev) do
+      if origin_sectors >= sectors do
+        fun.(origin_dev)
+      else
+        name = "hyper-forkorigin-#{tmp}"
+
+        with {:ok, padded_dev} <-
+               SuidHelper.Dmsetup.create_padded(name, origin_dev, origin_sectors, sectors) do
+          try do
+            fun.(padded_dev)
+          after
+            :ok = SuidHelper.Dmsetup.remove(name)
+          end
+        end
       end
     end
   end
