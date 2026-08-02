@@ -8,8 +8,8 @@ use std::path::Path;
 // refuses to start. Ordering is load-bearing, not cosmetic.
 #[test]
 fn nested_targets_are_mounted_after_their_parent() {
-    for (i, (_, target, _)) in MOUNTS.iter().enumerate() {
-        for (j, (_, other, _)) in MOUNTS.iter().enumerate() {
+    for (i, (_, target, _, _)) in MOUNTS.iter().enumerate() {
+        for (j, (_, other, _, _)) in MOUNTS.iter().enumerate() {
             if i != j && Path::new(target).starts_with(other) {
                 assert!(
                     j < i,
@@ -44,8 +44,21 @@ fn cgroup2_is_mounted_so_container_runtimes_can_start() {
     assert!(
         MOUNTS
             .iter()
-            .any(|(_, target, fstype)| *target == "/sys/fs/cgroup" && *fstype == "cgroup2"),
+            .any(|(_, target, fstype, _)| *target == "/sys/fs/cgroup" && *fstype == "cgroup2"),
         "guests run container runtimes, which refuse to start without a cgroup hierarchy"
+    );
+}
+
+#[test]
+fn run_is_a_private_tmpfs_on_every_guest_boot() {
+    assert!(
+        MOUNTS.iter().any(|(src, target, fstype, options)| {
+            *src == "tmpfs"
+                && *target == "/run"
+                && *fstype == "tmpfs"
+                && *options == Some("mode=755")
+        }),
+        "forked disks retain durable Docker data, but runtime sockets and PID files must start fresh"
     );
 }
 

@@ -12,21 +12,30 @@ const RESOLVER_PARAM: &str = "hyper.resolver=";
 /// a cgroup hierarchy, and only PID 1 can mount it -- an exec'd program gets
 /// EPERM, which `mount(8)` reports as the rather misleading "must be superuser
 /// to use mount".
-pub const MOUNTS: [(&str, &str, &str); 4] = [
-    ("proc", "/proc", "proc"),
-    ("sysfs", "/sys", "sysfs"),
-    ("devtmpfs", "/dev", "devtmpfs"),
-    ("cgroup2", "/sys/fs/cgroup", "cgroup2"),
+pub const MOUNTS: [(&str, &str, &str, Option<&str>); 5] = [
+    ("proc", "/proc", "proc", None),
+    ("sysfs", "/sys", "sysfs", None),
+    ("devtmpfs", "/dev", "devtmpfs", None),
+    // Runtime state must not leak from a disk fork into a fresh guest boot:
+    // `/var/run` resolves here on Debian, covering dockerd and containerd
+    // sockets/PID files while preserving durable `/var/lib/docker` state.
+    ("tmpfs", "/run", "tmpfs", Some("mode=755")),
+    ("cgroup2", "/sys/fs/cgroup", "cgroup2", None),
 ];
 
 // As PID 1 nothing else mounts these; exec'd programs need /proc and /dev.
 pub fn setup() -> io::Result<()> {
     let none: Option<&str> = None;
-    for (src, target, fstype) in MOUNTS {
+    for (src, target, fstype, data) in MOUNTS {
         std::fs::create_dir_all(target).ok();
         // Best-effort: a rootfs that already has one mounted (or lacks the dir)
         // must not abort the agent; a missing /proc only degrades exec'd tools.
-        let _ = mount(Some(src), target, Some(fstype), MsFlags::empty(), none);
+        let flags = if target == "/run" {
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV
+        } else {
+            MsFlags::empty()
+        };
+        let _ = mount(Some(src), target, Some(fstype), flags, data.or(none));
     }
     // Best-effort, after the mounts: the writable volume is created at the
     // instance type's disk size, but a larger block device does not move the
