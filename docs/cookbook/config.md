@@ -416,6 +416,84 @@ config :hyper, Hyper.Cfg.Cluster,
 ```
 <!-- tabs close -->
 
+## Fleet Configuration
+
+Hyper can grow and shrink the set of *machines* it runs on — see
+`Hyper.Cluster.Fleet`. The configuration comes in two halves, deliberately from
+different layers.
+
+**Who supplies machines** is `config.exs`-only, exactly like the cluster
+topology: `provider` names a module, and `provider_opts` carries the vendor
+credentials **and the machine shape** (plan, region, image) — neither belongs in
+the TOML the setuid helper shares. Hyper never chooses a machine size at runtime,
+so the shape lives here; "the largest the provider offers" is the documented
+default.
+
+**How many to keep** is ordinary operational tuning and resolves through all
+three layers. Every knob has a built-in default; set only what you need.
+
+The default provider, `Hyper.Cluster.Fleet.Provider.Static`, declares no machines
+and implements no mutation, so an install that configures nothing regulates
+nothing. Autoscaling is opted into by naming a provider that can create.
+
+| Config Key           | `config.exs`          | `config.toml`         | Default   | Notes |
+| -------------------- | --------------------- | --------------------- | --------- | ----- |
+| `provider`           | `.provider`           | -                     | `Hyper.Cluster.Fleet.Provider.Static` | The `Hyper.Cluster.Fleet.Provider` implementation. Module reference, so `config.exs` only. |
+| `provider_opts`      | `.provider_opts`      | -                     | `[]`      | Passed verbatim to the provider's `init/1`: credentials, region, plan. Secrets, so `config.exs` only. |
+| `min_nodes`          | `.min_nodes`          | `.min_nodes`          | `0`       | Floor on the machines kept, and the cold-start target. |
+| `max_nodes`          | `.max_nodes`          | `.max_nodes`          | `nil`     | Ceiling on the machines kept. `nil` is unbounded — only sane behind a provider quota; set it. |
+| `target_headroom`    | `.target_headroom`    | `.target_headroom`    | `1`       | How many *more* `reference_type` VMs the cluster should still be able to place. A count of VMs, not a percentage, because that is the unit placement fails in. |
+| `reference_type`     | `.reference_type`     | `.reference_type`     | `base`    | The `Hyper.Vm.Instance` type headroom is counted in. Validated at load. |
+| `cooldown`           | `.cooldown`           | `.cooldown`           | `120s`    | [Unit](#unit) of time: minimum time between two size changes, so the fleet reacts to a machine having joined rather than to the same shortage twice. |
+| `provision_deadline` | `.provision_deadline` | `.provision_deadline` | `600s`    | [Unit](#unit) of time: how long a machine may take to be created *and* join the cluster before it is written off and replaced. |
+| `nodedown_grace`     | `.nodedown_grace`     | `.nodedown_grace`     | `300s`    | [Unit](#unit) of time: how long a joined machine may stay unreachable before the provider is asked whether it is still there. |
+| `drain_deadline`     | `.drain_deadline`     | `.drain_deadline`     | `1800s`   | [Unit](#unit) of time: how long to wait for a cordoned machine's VMs to end on their own. A machine still running VMs at this point is held cordoned, never destroyed. |
+
+To have machines Hyper provisions *join* the cluster, point the topology at the
+fleet as well — the provider's inventory then doubles as the membership source:
+
+```elixir
+config :hyper, Hyper.Cfg.Cluster,
+  topologies: [fleet: [strategy: Hyper.Cluster.Fleet.Strategy]]
+```
+
+Connecting only works against a machine that is already a speakable BEAM node, so
+it is the provider's user-data / cloud-init that must bake in the Erlang cookie
+and Hyper's configuration. A machine that boots without them is never connected,
+and is replaced at `provision_deadline`.
+
+<!-- tabs open -->
+### `config.exs`
+
+```elixir
+config :hyper, Hyper.Cfg.Fleet,
+  provider: Hyper.Cluster.Fleet.Provider.Static,
+  provider_opts: [
+    nodes: [:"hyper@10.0.0.1", :"hyper@10.0.0.2"],
+    tags: %{"role" => "hyper"}
+  ],
+  min_nodes: 2,
+  max_nodes: 10,
+  target_headroom: 2
+```
+
+### `config.toml`
+
+```toml
+# provider and provider_opts are config.exs only: they name modules and carry
+# credentials.
+[fleet]
+min_nodes = 2
+max_nodes = 10
+target_headroom = 2
+reference_type = "base"
+cooldown = "120s"
+provision_deadline = "10m"
+nodedown_grace = "5m"
+drain_deadline = "30m"
+```
+<!-- tabs close -->
+
 ## Key Types
 
 #### Absolute Path

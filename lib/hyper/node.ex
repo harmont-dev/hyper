@@ -21,6 +21,12 @@ defmodule Hyper.Node do
     * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
       and group id.
 
+    * `Hyper.Node.Cordon` - this node's drain flag ("no new work here"). The one
+      cluster-facing decision that is stored per-node, because it is a statement
+      about *this* machine that has to survive the death of whoever made it.
+      Started before the budget subsystem: `Hyper.Node.Budget.NodeState.build/0`
+      reads the flag, so its owner outlives every reader of it.
+
     * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
       memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
       real-time monitors backing the soft budget (`Hyper.Node.Budget.Soft`).
@@ -64,6 +70,9 @@ defmodule Hyper.Node do
       # (via Hyper.Node.Layer.active/0) as it advertises on init - so Layer must
       # be up first.
       Hyper.Node.Layer,
+      # Before Budget.Supervisor: NodeState.build/0 reads Cordon.drained?/0, and
+      # the Advertiser's first publish happens in its own init.
+      Hyper.Node.Cordon,
       Hyper.Node.Budget.Supervisor,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Img,

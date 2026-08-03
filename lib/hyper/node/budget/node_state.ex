@@ -8,6 +8,12 @@ defmodule Hyper.Node.Budget.NodeState do
   is always the owning node's `Hyper.Node.Budget.admit/2`. Each record carries the
   node's load *and* its ceilings, so a scheduler anywhere can evaluate fit without
   knowing the target's config or core count.
+
+  Separately from any resource number, `drain` carries the node's cordon
+  (`Hyper.Node.Cordon`): an operator or the fleet regulator has declared that no
+  *new* VM should be placed here, whatever the headroom says. It is a statement of
+  intent about the machine's future, not a measurement of its present, and it is
+  the only field of this record that is not derived from the hardware.
   """
 
   alias Hyper.Cfg.Budget, as: Config
@@ -29,7 +35,8 @@ defmodule Hyper.Node.Budget.NodeState do
           disk_bw_ceiling: Unit.Bandwidth.t(),
           net_bw_load: Unit.Bandwidth.t(),
           net_bw_ceiling: Unit.Bandwidth.t(),
-          layers: [Hyper.Layer.id()]
+          layers: [Hyper.Layer.id()],
+          drain: boolean()
         }
 
   @enforce_keys [
@@ -45,7 +52,13 @@ defmodule Hyper.Node.Budget.NodeState do
     :net_bw_ceiling,
     :layers
   ]
-  defstruct @enforce_keys
+  # `drain` is the one field left out of @enforce_keys, defaulting to false: it is
+  # also the one field a peer running an older release will not send at all. Both
+  # the absent and the defaulted flag must read as "not cordoned", because that is
+  # the only answer available for a node that predates cordoning - so `fits?/2`
+  # matches on it positionally rather than reading it, and an old record costs an
+  # extra scheduling round instead of crashing the scheduler.
+  defstruct @enforce_keys ++ [drain: false]
 
   @doc "Snapshot this node's current budget state."
   @spec build() :: t()
@@ -65,7 +78,8 @@ defmodule Hyper.Node.Budget.NodeState do
       disk_bw_ceiling: ceiling(config.disk_bw_cap, config.disk_bw_max_load),
       net_bw_load: smoothed_bandwidth(readings.net_bw),
       net_bw_ceiling: ceiling(config.net_bw_cap, config.net_bw_max_load),
-      layers: Hyper.Node.Layer.active()
+      layers: Hyper.Node.Layer.active(),
+      drain: Hyper.Node.Cordon.drained?()
     }
   end
 
@@ -74,8 +88,14 @@ defmodule Hyper.Node.Budget.NodeState do
   soft cpu/disk-bw/net-bw load ceilings. A pure predicate over the published
   snapshot; the authoritative check is still the owning node's
   `Hyper.Node.Budget.admit/2`.
+
+  A cordoned node holds nothing. `drain` is checked first and answers for the
+  whole predicate, so a machine being emptied contributes zero capacity to every
+  caller - placement and fleet headroom alike - without either having to know the
+  flag exists.
   """
   @spec fits?(t(), Spec.t()) :: boolean()
+  def fits?(%__MODULE__{drain: true}, _spec), do: false
   def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
 
   @spec hard_fits?(t(), Spec.t()) :: boolean()

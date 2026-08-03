@@ -78,4 +78,32 @@ defmodule Hyper.Node.Budget.NodeStateTest do
     state = roomy_state(%{net_bw_ceiling: Bandwidth.mibps(5)})
     refute NodeState.fits?(state, spec(%{net_bw: Bandwidth.mibps(6)}))
   end
+
+  test "a cordoned node is never a placement candidate, however roomy" do
+    # A spec demanding nothing at all fits the same node when it is uncordoned,
+    # so the cordon - and not a resource - is what does the rejecting.
+    nothing =
+      spec(%{
+        vcpus: 0,
+        mem: Information.zero(),
+        disk: Information.zero(),
+        disk_bw: Bandwidth.zero(),
+        net_bw: Bandwidth.zero()
+      })
+
+    assert NodeState.fits?(roomy_state(), nothing)
+
+    refute NodeState.fits?(roomy_state(%{drain: true}), nothing)
+    refute NodeState.fits?(roomy_state(%{drain: true}), spec())
+  end
+
+  test "a snapshot gossiped by a peer that predates cordoning reads as uncordoned" do
+    # Records arrive from other nodes as decoded maps, never rebuilt through the
+    # struct, so a peer on an older release sends one with no `:drain` key at
+    # all. `fits?/2` has to match its way past that rather than read the field,
+    # or a rolling upgrade takes the scheduler down with a KeyError.
+    legacy = Map.delete(roomy_state(), :drain)
+
+    assert NodeState.fits?(legacy, spec())
+  end
 end
