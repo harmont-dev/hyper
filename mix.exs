@@ -145,12 +145,6 @@ defmodule Hyper.MixProject do
     ]
   end
 
-  # KaTeX (math) and Mermaid (diagrams) rendering for the HTML docs. This is the
-  # recipe ExDoc's own README prescribes: ExDoc navigates between pages with
-  # swup (client-side content swaps) and re-fires `exdoc:loaded` on window after
-  # every swap as well as on the initial load. Hanging rendering off that event
-  # -- rather than DOMContentLoaded / a script `onload`, which fire only once --
-  # is what keeps math and diagrams rendered as a reader navigates the docs.
   defp before_closing_body_tag(:html) do
     """
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
