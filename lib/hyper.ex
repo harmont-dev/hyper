@@ -43,6 +43,45 @@ defmodule Hyper do
   defp resolve_arch(arch), do: {:ok, arch}
 
   @doc """
+  Load the OCI image `ref` into the image database, returning its `img_id`.
+
+  Runs on a host: `Hyper.Img.OciLoader` needs the umoci/OCI tooling and the
+  shared media store, which a `:control` node (`Hyper.Cfg.Node`) has no reason
+  to carry. A host loads locally; a control node forwards to any node currently
+  advertising itself in `Hyper.Cluster.Budget`, since publishing a `NodeState`
+  is exactly the claim to be a working host.
+
+  `{:error, :no_host}` when the cluster has no host to load on — the honest
+  answer for a control node that is alone, and distinct from a load that failed.
+  """
+  @spec load_image(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
+  def load_image(ref, opts \\ []) when is_binary(ref) do
+    if Hyper.Cfg.Node.host?() do
+      Hyper.Img.OciLoader.load(ref, opts)
+    else
+      forward_load(ref, opts)
+    end
+  end
+
+  @spec forward_load(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
+  defp forward_load(ref, opts) do
+    case Hyper.Cluster.Budget.all_states() do
+      [] -> {:error, :no_host}
+      states -> remote_load(Enum.random(states).node, ref, opts)
+    end
+  end
+
+  # Any advertising host will do — the image lands in the shared store and the
+  # shared database either way, so this picks at random rather than pretending
+  # one of them is the right one.
+  @spec remote_load(node(), String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
+  defp remote_load(node, ref, opts) do
+    :erpc.call(node, Hyper.Img.OciLoader, :load, [ref, opts])
+  catch
+    :error, {:erpc, _} -> {:error, :node_unreachable}
+  end
+
+  @doc """
   Run `argv` inside VM `vm` — a pid (from `create_vm/1`) or a `Hyper.Vm.Id.t()`
   binary — and return its captured output.
 

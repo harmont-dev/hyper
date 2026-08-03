@@ -1,7 +1,10 @@
 defmodule Hyper.Node do
   @moduledoc """
-  Per-machine supervisor. Exactly one `Hyper.Node` runs per BEAM node; it owns
-  every microVM scheduled onto this machine.
+  Per-machine supervisor. Exactly one `Hyper.Node` runs per *host* BEAM node; it
+  owns every microVM scheduled onto this machine. A `:control` node
+  (`Hyper.Cfg.Node`) does not start it at all, and so never becomes a placement
+  candidate: candidacy is earned by publishing a `Hyper.Node.Budget.NodeState`,
+  which only this tree does.
 
   Children:
 

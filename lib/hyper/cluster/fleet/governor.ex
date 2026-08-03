@@ -42,11 +42,22 @@ defmodule Hyper.Cluster.Fleet.Governor do
   has not published yet (`Hyper.Cluster` starts before `Hyper.Node`), and a
   registration is not visible to the process that made it until the diff loop
   has run. Regulating against that reads as "there is no capacity anywhere" and
-  buys a machine the cluster already has. So the Governor refuses to regulate
-  until it can see *its own node* in the replica — a node that cannot see itself
-  is not seeing the cluster either. Adoption is not gated: it is idempotent, it
-  is keyed on the provider's listing rather than on the replica, and rebuilding
-  the controllers as early as possible is the whole point of it.
+  buys a machine the cluster already has. Two checks stand in for "this replica
+  has converged", and a machine has to pass both:
+
+    * **It can see itself.** A host advertises, so its own absence means the
+      replica has not caught up. A `:control` node (`Hyper.Cfg.Node`) never
+      advertises at all, so this check does not apply to it — gating on it would
+      leave the very machine that provisions the fleet permanently unable to.
+    * **It can see what it knows joined.** Every machine whose controller reached
+      `:ready` watched that node join; if the replica no longer lists one, the
+      replica is stale. This is the only check a control node has, and an empty
+      fleet passes it trivially — which is what lets a cluster bootstrap from
+      nothing.
+
+  Adoption is not gated by either: it is idempotent, it is keyed on the
+  provider's listing rather than on the replica, and rebuilding the controllers
+  as early as possible is the whole point of it.
 
   ## One tick
 
@@ -392,27 +403,49 @@ defmodule Hyper.Cluster.Fleet.Governor do
   @spec regulate(t(), non_neg_integer()) :: t()
   defp regulate(state, adopting) do
     states = Budget.all_states()
+    machines = controllers()
 
-    if measurable?(states) do
-      decide(state, states, adopting)
+    if measurable?(states, machines) do
+      decide(state, states, machines, adopting)
     else
       warn_once(
         state,
         :blind,
-        "this node is not in the budget registry yet, so the cluster cannot be " <>
-          "measured; adopting machines but regulating nothing"
+        "the budget registry does not yet show what this node knows to be joined, " <>
+          "so the cluster cannot be measured; adopting machines but regulating nothing"
       )
     end
   end
 
-  # A healthy node advertises itself, so its own absence means the replica is not
-  # trustworthy rather than that the cluster is empty. See the moduledoc.
-  @spec measurable?([NodeState.t()]) :: boolean()
-  defp measurable?(states), do: Enum.any?(states, &(&1.node == node()))
+  # Is the replica worth deciding on? Two independent reasons it might not be,
+  # and a `:control` node has only the second (see `Hyper.Cfg.Node`): it never
+  # advertises, so its own absence says nothing at all and gating on it would
+  # leave the machine that provisions the fleet permanently unable to.
+  @spec measurable?([NodeState.t()], [Machine.summary()]) :: boolean()
+  defp measurable?(states, machines),
+    do: self_visible?(states) and joined_visible?(states, machines)
 
-  @spec decide(t(), [NodeState.t()], non_neg_integer()) :: t()
-  defp decide(state, states, adopting) do
-    machines = controllers()
+  # A host advertises itself, so its own absence means the replica has not
+  # converged rather than that the cluster is empty. See the moduledoc.
+  @spec self_visible?([NodeState.t()]) :: boolean()
+  defp self_visible?(states) do
+    Hyper.Cfg.Node.control?() or Enum.any?(states, &(&1.node == node()))
+  end
+
+  # The role-independent half, and the only check a control node has: a `:ready`
+  # controller watched its machine join, so that machine missing from the replica
+  # means the replica is stale. It is briefly true for real when a host dies —
+  # the controller has not processed `nodedown` yet — and refusing to regulate
+  # for those few seconds is the safe direction to be wrong in. An empty fleet
+  # trivially passes, which is what lets a cluster bootstrap from nothing.
+  @spec joined_visible?([NodeState.t()], [Machine.summary()]) :: boolean()
+  defp joined_visible?(states, machines) do
+    advertised = MapSet.new(states, & &1.node)
+    Enum.all?(nodes(machines, :ready), &MapSet.member?(advertised, &1))
+  end
+
+  @spec decide(t(), [NodeState.t()], [Machine.summary()], non_neg_integer()) :: t()
+  defp decide(state, states, machines, adopting) do
     in_flight = Enum.count(machines, &(&1.phase in @unjoined)) + adopting
 
     case Policy.decide(states, in_flight, state.cfg, control(machines)) do

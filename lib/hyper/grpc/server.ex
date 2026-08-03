@@ -31,7 +31,7 @@ defmodule Hyper.Grpc.Server do
   @spec load_image(LoadImageRequest.t(), GRPC.Server.Stream.t()) :: LoadImageResponse.t()
   def load_image(%LoadImageRequest{} = req, _stream) do
     with {:ok, {ref, opts}} <- Codec.from_grpc(req),
-         {:ok, img_id} <- Hyper.Img.OciLoader.load(ref, opts) do
+         {:ok, img_id} <- Hyper.load_image(ref, opts) do
       Codec.to_grpc({:loaded, img_id})
     else
       {:error, reason} -> raise Codec.to_grpc({:error, reason})

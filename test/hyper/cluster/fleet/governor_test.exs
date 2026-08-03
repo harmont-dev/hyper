@@ -18,10 +18,12 @@ defmodule Hyper.Cluster.Fleet.GovernorTest do
       is driven for every combination of "who owns the emptiest node";
     * a controller that cannot answer — crashed, or wedged on a partitioned node
       — is skipped rather than taking the regulation tick down with it;
-    * a Governor regulates only once it can see its own node in the budget
-      replica, and only once the registry has confirmed its claim on the
-      singleton key; a standby does nothing whatsoever, not even ask the
-      provider;
+    * a Governor regulates only once the budget replica is worth deciding on —
+      a host must see *itself* in it, a control node (which never advertises)
+      must not be held to that, and either must see every machine its own
+      `:ready` controllers watched join — and only once the registry has
+      confirmed its claim on the singleton key; a standby does nothing
+      whatsoever, not even ask the provider;
     * configuration that will not load leaves it inert, never dead: it is a
       child of `Hyper.Cluster`, and a typo in an autoscaling knob must not stop
       a Firecracker host from booting.
@@ -401,6 +403,79 @@ defmodule Hyper.Cluster.Fleet.GovernorTest do
       assert after_tick.role == :standby
       assert after_tick.provider_state == nil
       assert children(ctx) == []
+    end
+  end
+
+  describe "seeing the cluster" do
+    test "a control node regulates against a replica it is absent from", ctx do
+      as_control!()
+      unadvertise_self!()
+
+      after_tick = Governor.tick(active(ctx, list: [], capabilities: [:create]))
+
+      # The gate a host passes by advertising is one a control node can never
+      # pass: it runs no `Hyper.Node`, so it publishes no `NodeState` and its own
+      # absence carries no information. Gating on it would leave the machine that
+      # provisions the fleet unable to provision anything, forever.
+      assert_receive {:create, _tags}, 2_000
+      assert after_tick.last_change != nil
+    end
+
+    test "a host that cannot see itself adopts machines but buys none", ctx do
+      unadvertise_self!()
+
+      after_tick =
+        Governor.tick(active(ctx, list: [info(unique("adopted"))], capabilities: [:create]))
+
+      refute_receive {:create, _tags}, 200
+      assert after_tick.last_change == nil
+      # Adoption is deliberately not gated: it is keyed on the provider's
+      # listing, not on the replica, so a Governor rebuilds the world it is
+      # responsible for even while it declines to change its size.
+      assert length(children(ctx)) == 1
+    end
+
+    for {visibility, expect} <- [{:advertised, :creates}, {:vanished, :suppressed}] do
+      @visibility visibility
+      @expect expect
+
+      test "a machine known joined but #{visibility} in the replica: growth is #{expect}", ctx do
+        _id = own(:ready, joined_node(@visibility))
+
+        before = active(ctx, list: [], capabilities: [:create])
+        after_tick = Governor.tick(before)
+
+        assert_growth(@expect, after_tick, before)
+      end
+    end
+  end
+
+  # A node one of our `:ready` controllers watched join. When the replica no
+  # longer lists it, the replica is stale rather than the cluster empty — and a
+  # stale replica reads as "no capacity anywhere", which is how an autoscaler
+  # buys a machine it already owns.
+  defp joined_node(:advertised), do: fleet_node("joined", Information.gib(1))
+  defp joined_node(:vanished), do: :"vanished-#{System.unique_integer([:positive])}@nowhere"
+
+  defp as_control! do
+    Application.put_env(:hyper, Hyper.Cfg.Node, role: :control)
+    on_exit(fn -> Application.delete_env(:hyper, Hyper.Cfg.Node) end)
+  end
+
+  defp unadvertise_self! do
+    :ok = Horde.Registry.unregister(Budget.name(), Budget.key())
+    assert await_unadvertised(node())
+  end
+
+  defp await_unadvertised(node, tries \\ 200)
+  defp await_unadvertised(_node, 0), do: false
+
+  defp await_unadvertised(node, tries) do
+    if Enum.any?(Budget.all_states(), &(&1.node == node)) do
+      Process.sleep(5)
+      await_unadvertised(node, tries - 1)
+    else
+      true
     end
   end
 

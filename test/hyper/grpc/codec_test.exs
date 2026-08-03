@@ -158,7 +158,11 @@ defmodule Hyper.Grpc.CodecTest do
       {:invalid_ref, GRPC.Status.invalid_argument()},
       {:machine_unreachable, GRPC.Status.unavailable()},
       {:no_capacity, GRPC.Status.resource_exhausted()},
-      {:exhausted, GRPC.Status.resource_exhausted()}
+      {:exhausted, GRPC.Status.resource_exhausted()},
+      # A control-only cluster cannot load an image anywhere. That is a
+      # precondition the operator can fix, not the INTERNAL the fallback would
+      # otherwise report.
+      {:no_host, GRPC.Status.failed_precondition()}
     ]
 
     test "each domain reason maps to its promised gRPC status" do

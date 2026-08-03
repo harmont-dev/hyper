@@ -157,6 +157,13 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:invalid_ref),
     do: GRPC.RPCError.exception(:invalid_argument, "image_ref is malformed")
 
+  defp rpc_error(:no_host),
+    do:
+      GRPC.RPCError.exception(
+        :failed_precondition,
+        "cluster has no host node to load the image on"
+      )
+
   defp rpc_error({:missing_tools, tools}),
     do:
       GRPC.RPCError.exception(

@@ -40,6 +40,42 @@ work_dir = "/srv/hyper"
 ```
 <!-- tabs close -->
 
+## Node Role
+
+Whether this machine runs microVMs. A `host` (the default) starts the full VM
+stack and needs KVM, Firecracker, the setuid helper and a `[network]` table. A
+`control` node never runs a VM: it forms the cluster, serves the gRPC API, reads
+and writes the image database, and regulates the fleet — which is what lets an
+operator laptop, a CI runner or a small API box provision hosts without being
+able to be one.
+
+A control node is never a placement candidate, because candidacy is earned by
+publishing a budget snapshot and a control node publishes none. Image loads it
+receives over gRPC are forwarded to a host; with no host in the cluster, the
+call fails with `FAILED_PRECONDITION` rather than being attempted locally.
+
+Distinct from draining a node (`Hyper.Node.Cordon`), which is the temporary
+refusal of a machine that *can* host and is being emptied.
+
+| Config Key | `config.exs` | `config.toml` | Default  | Notes |
+| ---------- | ------------ | ------------- | -------- | ----- |
+| `role`     | `:role`      | `node.role`   | `"host"` | `"host"` or `"control"`. Any other value refuses to start rather than guessing. |
+
+<!-- tabs open -->
+### `config.toml`
+
+```toml
+[node]
+role = "control"
+```
+
+### `config.exs`
+
+```elixir
+config :hyper, Hyper.Cfg.Node, role: :control
+```
+<!-- tabs close -->
+
 ## Tool Configuration
 
 Hyper relies on a large number of external tools, of which the paths are

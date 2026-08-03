@@ -25,10 +25,18 @@ defmodule Hyper.Application do
         # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
         # Hyper.Node so VM registrations and budget advertisements have their
         # registries on boot.
-        Hyper.Cluster,
-        Hyper.Node
-      ] ++ Hyper.Grpc.server_children()
+        Hyper.Cluster
+      ] ++ host_children() ++ Hyper.Grpc.server_children()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
+  end
+
+  # `Hyper.Node` is what makes a machine able to run microVMs, and starting it
+  # asserts the whole host stack exists (KVM, firecracker, the setuid helper,
+  # `[network]`) through `Hyper.Node.test_system/0`. A `:control` node makes no
+  # such claim and boots without any of it — see `Hyper.Cfg.Node`.
+  @spec host_children() :: [Supervisor.child_spec() | module()]
+  defp host_children do
+    if Hyper.Cfg.Node.host?(), do: [Hyper.Node], else: []
   end
 end
