@@ -100,6 +100,7 @@ enum InstanceType {
   INSTANCE_TYPE_MEGA = 9;    // 64 vCPU,   32 GiB
   INSTANCE_TYPE_GIGA = 10;   // 128 vCPU,  64 GiB
   INSTANCE_TYPE_TERA = 11;   // 256 vCPU,  128 GiB
+  INSTANCE_TYPE_TALL = 12;   // 3 vCPU,    4 GiB (memory-optimized)
 }
 
 // Guest CPU architecture. Must match the architecture the image was built for.

@@ -28,6 +28,7 @@ defmodule Hyper.Grpc.Codec do
     INSTANCE_TYPE_MILLI: :milli,
     INSTANCE_TYPE_CENTI: :centi,
     INSTANCE_TYPE_DECI: :deci,
+    INSTANCE_TYPE_TALL: :tall,
     INSTANCE_TYPE_BASE: :base,
     INSTANCE_TYPE_DECA: :deca,
     INSTANCE_TYPE_HECTO: :hecto,

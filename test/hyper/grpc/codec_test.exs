@@ -84,6 +84,15 @@ defmodule Hyper.Grpc.CodecTest do
   # maps to a domain Spec with the right field placement, or is refused with a
   # specific reason the server then classifies to a gRPC status.
   describe "from_grpc/1 CreateVmRequest" do
+    test "the tall wire type decodes to the memory-optimized domain type" do
+      assert {:ok, %Spec{type: :tall}} =
+               Codec.from_grpc(%CreateVmRequest{
+                 img_id: "img",
+                 instance_type: :INSTANCE_TYPE_TALL,
+                 arch: :ARCHITECTURE_X86_64
+               })
+    end
+
     test "a well-formed request decodes to a Spec preserving every field" do
       assert {:ok,
               %Spec{
