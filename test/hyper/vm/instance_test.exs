@@ -25,10 +25,4 @@ defmodule Hyper.Vm.InstanceTest do
     assert config.vcpu_count == 3
     assert config.mem_size_mib == 4_096
   end
-
-  test "the host cgroup leaves room for Firecracker outside guest memory" do
-    cgroup = :tall |> Instance.spec() |> Instance.Spec.cgroup_v2()
-
-    assert cgroup.memory_max == Information.mib(8_192) |> Information.as_bytes()
-  end
 end

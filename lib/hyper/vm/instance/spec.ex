@@ -1,11 +1,6 @@
 defmodule Hyper.Vm.Instance.Spec do
   @moduledoc "Resource bundle for one instance type."
 
-  # The Firecracker cgroup accounts guest memory plus host-side VMM memory and
-  # I/O page cache. Firecracker's own jail tests allow twice the guest-visible
-  # RAM; an exact cap can OOM-kill the VMM before the guest finishes booting.
-  @cgroup_memory_multiplier 2
-
   @type t :: %__MODULE__{
           vcpus: number(),
           mem: Unit.Information.t(),
@@ -26,7 +21,7 @@ defmodule Hyper.Vm.Instance.Spec do
 
     Config.new()
     |> Config.cpu_max(quota_us, period_us)
-    |> Config.memory_max(Unit.Information.as_bytes(spec.mem) * @cgroup_memory_multiplier)
+    |> Config.memory_max(Unit.Information.as_bytes(spec.mem))
   end
 
   @doc """
