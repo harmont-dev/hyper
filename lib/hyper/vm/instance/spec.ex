@@ -1,6 +1,11 @@
 defmodule Hyper.Vm.Instance.Spec do
   @moduledoc "Resource bundle for one instance type."
 
+  # Firecracker's process, page tables, and virtio devices consume host memory
+  # outside the RAM mapped into the guest. Capping the process at exactly the
+  # guest allocation can OOM-kill the VMM before it finishes booting.
+  @vmm_memory_overhead Unit.Information.mib(64)
+
   @type t :: %__MODULE__{
           vcpus: number(),
           mem: Unit.Information.t(),
@@ -21,7 +26,9 @@ defmodule Hyper.Vm.Instance.Spec do
 
     Config.new()
     |> Config.cpu_max(quota_us, period_us)
-    |> Config.memory_max(Unit.Information.as_bytes(spec.mem))
+    |> Config.memory_max(
+      Unit.Information.as_bytes(spec.mem) + Unit.Information.as_bytes(@vmm_memory_overhead)
+    )
   end
 
   @doc """
