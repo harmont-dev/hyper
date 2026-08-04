@@ -20,9 +20,12 @@ defmodule Hyper.Vm.InstanceTest do
   end
 
   test "tall exposes all three vCPUs and four GiB to the guest" do
-    config = :tall |> Instance.spec() |> Instance.Spec.machine_config()
+    spec = Instance.spec(:tall)
+    config = Instance.Spec.machine_config(spec)
+    cgroup = Instance.Spec.cgroup_v2(spec)
 
     assert config.vcpu_count == 3
     assert config.mem_size_mib == 4_096
+    assert cgroup.memory_max == Information.mib(4_096) |> Information.as_bytes()
   end
 end
