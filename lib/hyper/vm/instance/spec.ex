@@ -4,7 +4,7 @@ defmodule Hyper.Vm.Instance.Spec do
   # Firecracker's process, page tables, and virtio devices consume host memory
   # outside the RAM mapped into the guest. Capping the process at exactly the
   # guest allocation can OOM-kill the VMM before it finishes booting.
-  @vmm_memory_overhead Unit.Information.mib(64)
+  @vmm_memory_overhead Unit.Information.mib(256)
 
   @type t :: %__MODULE__{
           vcpus: number(),
