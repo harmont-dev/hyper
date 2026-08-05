@@ -93,6 +93,15 @@ defmodule Hyper.Grpc.CodecTest do
                })
     end
 
+    test "the builder wire type decodes to the build-optimized domain type" do
+      assert {:ok, %Spec{type: :builder}} =
+               Codec.from_grpc(%CreateVmRequest{
+                 img_id: "img",
+                 instance_type: :INSTANCE_TYPE_BUILDER,
+                 arch: :ARCHITECTURE_X86_64
+               })
+    end
+
     test "a well-formed request decodes to a Spec preserving every field" do
       assert {:ok,
               %Spec{

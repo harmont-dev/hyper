@@ -23,6 +23,7 @@ defmodule Hyper.Vm.Instance do
           | :centi
           | :deci
           | :tall
+          | :builder
           | :base
           | :deca
           | :hecto
@@ -66,6 +67,13 @@ defmodule Hyper.Vm.Instance do
     tall: %Spec{
       vcpus: 3,
       mem: Information.mib(4096),
+      disk: Information.gib(16),
+      disk_bw: Bandwidth.mibps(128),
+      net_bw: Bandwidth.mibps(64)
+    },
+    builder: %Spec{
+      vcpus: 3,
+      mem: Information.mib(8192),
       disk: Information.gib(16),
       disk_bw: Bandwidth.mibps(128),
       net_bw: Bandwidth.mibps(64)
