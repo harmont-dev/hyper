@@ -195,4 +195,85 @@ defmodule Hyper do
   catch
     :error, {:erpc, _} -> nil
   end
+
+  @doc """
+  The host-routable veth namespace IP for `vm_id` — the address on the host's
+  network namespace side that DNATs into the guest's inner `172.30.0.2`.
+
+  Derived from the VM's allocated uid and the node's clone pool config, mirroring
+  the Rust suid helper's `Plan::derive`. Returns `{:error, :not_found}` when the
+  VM is not running anywhere.
+  """
+  @spec vm_address(Hyper.Vm.Id.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def vm_address(vm_id) when is_binary(vm_id) do
+    case whereis(vm_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        opts = :erpc.call(node, Hyper.Node.FireVMM.State, :describe, [vm_id])
+        {floor, _ceiling} = :erpc.call(node, Hyper.Cfg.Jails, :uid_gid_range, [])
+        clone_pool_cidr = :erpc.call(node, Hyper.Cfg.Network, :clone_pool, [])
+        [ip_str | _] = String.split(clone_pool_cidr, "/")
+        {:ok, {a, b, c, d}} = :inet.parse_ipv4_address(String.to_charlist(ip_str))
+        base = Bitwise.bsl(a, 24) + Bitwise.bsl(b, 16) + Bitwise.bsl(c, 8) + d
+        slot = opts.uid - floor
+        veth_ns_ip_int = base + slot * 4 + 2
+
+        {:ok,
+         Enum.join(
+           [
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 24), 0xFF),
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 16), 0xFF),
+             Bitwise.band(Bitwise.bsr(veth_ns_ip_int, 8), 0xFF),
+             Bitwise.band(veth_ns_ip_int, 0xFF)
+           ],
+           "."
+         )}
+    end
+  rescue
+    _ -> {:error, :not_found}
+  end
+
+  @doc """
+  The host's own address on `vm_id`'s veth — what the guest dials to reach a
+  host-local service, and the peer of the address `vm_address/1` returns.
+
+  Only ports named in `[network] host_ports` are actually reachable there; the
+  rest are dropped on the input hook.
+  """
+  @spec host_address(Hyper.Vm.Id.t()) :: {:ok, String.t()} | {:error, :not_found}
+  def host_address(vm_id) when is_binary(vm_id) do
+    # The /30's .1 to the guest side's .2 — derived by stepping back from
+    # vm_address/1 rather than recomputing, so the two can never disagree.
+    with {:ok, ns_ip} <- vm_address(vm_id),
+         [a, b, c, d] <- String.split(ns_ip, "."),
+         {last, ""} <- Integer.parse(d) do
+      {:ok, Enum.join([a, b, c, last - 1], ".")}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Host-side Unix socket that speaks to `vm_id`'s Docker daemon.
+
+  Connections are relayed over the VM's vsock device to the guest agent, which
+  forwards them to the daemon's own socket. The daemon therefore never binds a
+  network address, and no host firewall exception is needed to drive it.
+
+  The path is deterministic, so this only fails when the VM is not running.
+  """
+  @spec docker_socket(Hyper.Vm.Id.t()) :: {:ok, Path.t()} | {:error, :not_found}
+  def docker_socket(vm_id) when is_binary(vm_id) do
+    case whereis(vm_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        {:ok, :erpc.call(node, Hyper.Node.FireVMM.Agent.Relay, :docker_socket_path, [vm_id])}
+    end
+  rescue
+    _ -> {:error, :not_found}
+  end
 end

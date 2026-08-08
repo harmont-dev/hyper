@@ -1,6 +1,6 @@
 use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
 
-use hyper_guest_agent::{agent, init, pb};
+use hyper_guest_agent::{agent, docker_proxy, init, pb};
 
 const VSOCK_PORT: u32 = 1024;
 
@@ -45,6 +45,18 @@ fn main() -> ! {
 }
 
 async fn serve() -> Result<(), Box<dyn std::error::Error>> {
+    // The Docker forwarder shares this VM's vsock device on its own port. It
+    // is spawned rather than awaited so a bind failure (no dockerd installed
+    // in this guest's image, say) degrades to "no Docker access" instead of
+    // taking the exec agent down with it.
+    tokio::spawn(async {
+        if let Err(e) =
+            docker_proxy::serve(docker_proxy::DOCKER_VSOCK_PORT, docker_proxy::DOCKER_SOCKET).await
+        {
+            eprintln!("hyper-init: docker proxy stopped: {e}");
+        }
+    });
+
     let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, VSOCK_PORT))?;
     tonic::transport::Server::builder()
         .add_service(pb::guest_agent_server::GuestAgentServer::new(agent::Agent))

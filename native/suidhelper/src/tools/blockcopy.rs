@@ -77,17 +77,37 @@ pub fn copy_ranges(
     for &(begin, len) in &spec.ranges {
         let offset = begin.checked_mul(block_bytes).ok_or_else(overflow)?;
         let mut remaining = len.checked_mul(block_bytes).ok_or_else(overflow)?;
-        src.seek(SeekFrom::Start(offset))?;
-        dst.seek(SeekFrom::Start(offset))?;
+        src.seek(SeekFrom::Start(offset)).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("seeking source to offset {offset}: {err}"),
+            )
+        })?;
+        dst.seek(SeekFrom::Start(offset)).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("seeking destination to offset {offset}: {err}"),
+            )
+        })?;
 
         while remaining > 0 {
             let want = remaining.min(chunk_bytes as u64) as usize;
-            let n = read_full(src, &mut buf[..want])?;
+            let n = read_full(src, &mut buf[..want]).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("reading source at offset {offset}: {err}"),
+                )
+            })?;
             if n == 0 {
                 // Device shorter than the mapping claims: stop this range.
                 break;
             }
-            dst.write_all(&buf[..n])?;
+            dst.write_all(&buf[..n]).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("writing destination at offset {offset}: {err}"),
+                )
+            })?;
             stats.scanned_chunks += 1;
             stats.written_chunks += 1;
             remaining -= n as u64;

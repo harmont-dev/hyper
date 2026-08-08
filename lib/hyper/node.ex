@@ -85,7 +85,9 @@ defmodule Hyper.Node do
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid} <- Users.claim(),
          {:ok, mutable} <-
-           acquire_or_release(uid, fn -> Img.create_mutable(spec.img_id, vm_id) end) do
+           acquire_or_release(uid, fn ->
+             Img.create_mutable(spec.img_id, vm_id, instance_disk(spec.type))
+           end) do
       boot_with_mutable(vm_id, spec, uid, mutable)
     end
   end
@@ -108,11 +110,22 @@ defmodule Hyper.Node do
     with {:ok, uid} <- Users.claim(),
          {:ok, mutable} <-
            acquire_or_release(uid, fn ->
-             Img.create_fork(parent.img_id, parent.vm_id, child_vm_id)
+             Img.create_fork(
+               parent.img_id,
+               parent.vm_id,
+               child_vm_id,
+               instance_disk(parent.type)
+             )
            end) do
       boot_with_mutable(child_vm_id, spec, uid, mutable)
     end
   end
+
+  # The disk the instance type promises. Budget admission already charged the
+  # node for it, so the VM should actually receive it rather than a volume
+  # sized to whatever the image happened to need.
+  @spec instance_disk(Hyper.Vm.Instance.t()) :: Unit.Information.t()
+  defp instance_disk(type), do: Hyper.Vm.Instance.spec(type).disk
 
   # The shared boot tail: kernel + opts + VM supervisor, binding uid and mutable
   # to the supervisor's lifetime (previously inline in start_image_vm/2).

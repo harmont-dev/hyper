@@ -31,11 +31,14 @@ defmodule Hyper.Node.Img.Mutable do
   defmodule Opts do
     @moduledoc false
     @enforce_keys [:img_id, :vm_id]
-    defstruct [:img_id, :vm_id, fork_of: nil]
+    defstruct [:img_id, :vm_id, :disk, fork_of: nil]
 
     @type t :: %__MODULE__{
             img_id: Hyper.Img.id(),
             vm_id: Hyper.Vm.Id.t(),
+            # The instance type's disk. `nil` keeps the volume at the image's
+            # own size, which is only enough for the image itself.
+            disk: Unit.Information.t() | nil,
             fork_of: Hyper.Vm.Id.t() | nil
           }
   end
@@ -99,16 +102,31 @@ defmodule Hyper.Node.Img.Mutable do
   @spec release(GenServer.server()) :: :ok
   def release(server), do: GenServer.call(server, {:release, self()})
 
+  @doc """
+  Sectors for a VM's writable volume: the instance type's disk, but never less
+  than the image it overlays.
+
+  The volume is an external-origin snapshot of the read-only image, so sizing
+  it below the origin would truncate the rootfs rather than merely give the
+  guest less room.
+  """
+  @spec volume_sectors(non_neg_integer(), Unit.Information.t() | nil) :: non_neg_integer()
+  def volume_sectors(origin_sectors, nil), do: origin_sectors
+
+  def volume_sectors(origin_sectors, disk),
+    do: max(origin_sectors, Unit.Information.as_sectors(disk))
+
   @impl true
   @decorate with_span("Hyper.Node.Img.Mutable.init", include: [:img_id, :vm_id])
-  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: nil}) do
+  def init(%Opts{img_id: img_id, vm_id: vm_id, disk: disk, fork_of: nil}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)
 
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+         {:ok, origin_sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+         sectors = volume_sectors(origin_sectors, disk),
          {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev, sectors) do
       state = %State{
         img_id: img_id,
@@ -128,7 +146,7 @@ defmodule Hyper.Node.Img.Mutable do
   @decorate with_span("Hyper.Node.Img.Mutable.init_fork",
               include: [:img_id, :vm_id, :parent_vm_id]
             )
-  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: parent_vm_id}) do
+  def init(%Opts{img_id: img_id, vm_id: vm_id, disk: disk, fork_of: parent_vm_id}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)
 
@@ -140,7 +158,8 @@ defmodule Hyper.Node.Img.Mutable do
          {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+         {:ok, origin_sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+         sectors = volume_sectors(origin_sectors, disk),
          {:ok, %{dev: dev, id: id}} <-
            ThinPool.snapshot(name, origin_name, origin_id, sectors, ro_dev) do
       release_parent(parent)

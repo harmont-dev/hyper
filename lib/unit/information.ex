@@ -78,6 +78,22 @@ defmodule Unit.Information do
       {:error, _} -> raise ArgumentError, "invalid Information string: #{inspect(s)}"
     end
   end
+
+  @doc """
+  Normalise a config-supplied size to an `Information`, raising `ArgumentError`
+  on anything else.
+
+  Config reaches us either already typed (a `t()` from `config.exs`) or as a
+  string to parse (from TOML), and callers cannot tell the two apart without
+  inspecting `t()`, which is opaque to them. Doing it here keeps that inspection
+  inside the module that owns the type.
+  """
+  @spec coerce!(t() | String.t()) :: t()
+  def coerce!(%__MODULE__{} = v), do: v
+  def coerce!(s) when is_binary(s), do: parse!(s)
+
+  def coerce!(other),
+    do: raise(ArgumentError, "expected an Information or a string, got: #{inspect(other)}")
 end
 
 defimpl Unit.Quantity, for: Unit.Information do

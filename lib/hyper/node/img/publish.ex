@@ -58,14 +58,23 @@ defmodule Hyper.Node.Img.Publish do
   end
 
   @spec materialize(map(), Hyper.Img.id()) :: {:ok, Hyper.Img.id()} | {:error, term()}
-  defp materialize(%{thin_name: origin_name, thin_id: origin_id, origin_dev: ro_dev}, img_id) do
+  defp materialize(
+         %{thin_name: origin_name, thin_id: origin_id, blk_path: mutable_dev, origin_dev: ro_dev},
+         img_id
+       ) do
     tmp = Hyper.Vm.Id.generate()
 
-    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
+    # The VM's mutable thin volume can be larger than its immutable base image
+    # (instance types promise a disk size). Snapshotting at the base-image size
+    # drops the higher mapped blocks before blockcopy gets a chance to publish
+    # them.
+    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(mutable_dev),
          {:ok, %{dev: snap_dev, id: snap_id}} <-
            ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, sectors, ro_dev) do
       try do
-        write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, img_id)
+        with_padded_origin(tmp, ro_dev, sectors, fn origin_dev ->
+          write_delta(tmp, origin_dev, {snap_dev, snap_id}, sectors, img_id)
+        end)
       after
         :ok = ThinPool.destroy(snap_name(tmp), snap_id)
       end
@@ -85,12 +94,15 @@ defmodule Hyper.Node.Img.Publish do
   defp write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, parent_img_id) do
     cow_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-delta-#{tmp}.img")
 
-    with :ok <- create_sparse(cow_path, cow_size(sectors)),
-         {:ok, cow_loop} <- SuidHelper.Losetup.attach_rw(cow_path) do
+    with :ok <- tag(:create_sparse, create_sparse(cow_path, cow_size(sectors))),
+         {:ok, cow_loop} <- tag(:attach_cow_loop, SuidHelper.Losetup.attach_rw(cow_path)) do
       try do
         with {:ok, write_dev} <-
-               SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors),
-             {:ok, _stats} <- copy_divergence(snap_dev, snap_id, write_dev),
+               tag(
+                 :create_write_snapshot,
+                 SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_loop, sectors)
+               ),
+             {:ok, _stats} <- tag(:copy_divergence, copy_divergence(snap_dev, snap_id, write_dev)),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
              :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)),
@@ -146,6 +158,29 @@ defmodule Hyper.Node.Img.Publish do
       end
     end
   end
+
+  defp with_padded_origin(tmp, origin_dev, sectors, fun) do
+    with {:ok, origin_sectors} <- SuidHelper.Blockdev.device_sectors(origin_dev) do
+      if origin_sectors >= sectors do
+        fun.(origin_dev)
+      else
+        name = "hyper-forkorigin-#{tmp}"
+
+        with {:ok, padded_dev} <-
+               SuidHelper.Dmsetup.create_padded(name, origin_dev, origin_sectors, sectors) do
+          try do
+            fun.(padded_dev)
+          after
+            :ok = SuidHelper.Dmsetup.remove(name)
+          end
+        end
+      end
+    end
+  end
+
+  defp tag(_operation, :ok), do: :ok
+  defp tag(_operation, {:ok, _} = success), do: success
+  defp tag(operation, {:error, reason}), do: {:error, {operation, reason}}
 
   @spec snap_name(String.t()) :: String.t()
   defp snap_name(tmp), do: "hyper-fork-#{tmp}"

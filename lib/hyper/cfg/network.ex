@@ -43,6 +43,18 @@ defmodule Hyper.Cfg.Network do
   def clone_pool, do: get_cfg(toml: "network.clone_pool", default: @default_clone_pool)
 
   @doc """
+  Host TCP ports guests are allowed to reach, as `[network] host_ports`.
+
+  Guests are otherwise cut off from the host entirely — the input chain drops
+  everything sourced from the clone pool, so a host-local service is
+  unreachable even though the guest can route to it. Naming a port here punches
+  a single hole for it. Empty by default; each entry is a deliberate,
+  auditable exemption.
+  """
+  @spec host_ports() :: [non_neg_integer()]
+  def host_ports, do: get_cfg(toml: "network.host_ports", default: [])
+
+  @doc """
   DNS resolver IP handed to the guest via the `hyper.resolver=` kernel cmdline
   param, since the kernel's `ip=` autoconfig sets the guest's address/route but
   never DNS. The PID-1 guest agent reads this back out of `/proc/cmdline` and

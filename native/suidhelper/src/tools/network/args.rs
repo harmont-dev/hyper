@@ -294,18 +294,26 @@ pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
 }
 
 /// One-time host setup: a `hyper` nftables table that masquerades the clone
-/// pool out `uplink`, a forward-chain default-drop policy that only admits
-/// the pool's own traffic — explicitly dropping anything addressed to the
-/// cloud metadata IP (`169.254.169.254`), so no VM can ever reach it — and an
-/// input-chain rule that drops all clone-pool-sourced traffic addressed to
-/// the host itself.
+/// pool out `uplink`, a forward chain that explicitly drops pool traffic not
+/// matching the allowed egress and return paths — including anything
+/// addressed to the cloud metadata IP (`169.254.169.254`), so no VM can ever
+/// reach it — and an input-chain rule that drops all clone-pool-sourced
+/// traffic addressed to the host itself.
 ///
-/// The input-chain drop closes a distinct hook from the forward-chain policy:
+/// The forward chain uses `policy accept` (not `policy drop`) so that
+/// traffic unrelated to the clone pool — notably Docker bridge traffic
+/// between containers on the same host — falls through to other chains on
+/// the forward hook rather than being silently dropped. Hyper's own
+/// isolation is enforced by explicit catch-all drop rules at the end of the
+/// chain that match pool-sourced or pool-destined packets not already
+/// accepted by the egress and established/related rules above them.
+///
+/// The input-chain drop closes a distinct hook from the forward chain:
 /// a guest packet addressed to a *host-owned* IP (the guest's own gateway
 /// address, or any other address the host answers for) is locally delivered
 /// and hits the kernel's INPUT hook, never FORWARD — so without this rule a
 /// guest could reach host-local services (epmd, distribution, Postgres, the
-/// gRPC listener) regardless of the forward-chain policy above. The input
+/// gRPC listener) regardless of the forward-chain rules above. The input
 /// chain's own policy stays `accept` so unrelated host traffic (SSH, other
 /// subnets) is untouched; only clone-pool-sourced packets are dropped. This
 /// does not affect guest egress (which is FORWARDed, never delivered to
@@ -319,10 +327,10 @@ pub fn teardown_orphan_commands(netns: &str) -> Vec<Command> {
 /// scratch. This makes host-init idempotent by construction — the table is
 /// always either absent or complete, never partially applied — so a
 /// crash/interruption mid-sequence on one run can never strand a later run
-/// with, say, NAT but no forward-chain drop policy (or no input-chain
+/// with, say, NAT but no forward-chain drop rules (or no input-chain
 /// isolation).
-pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
-    vec![
+pub fn host_init_commands(uplink: &str, clone_pool: &str, host_ports: &[u16]) -> Vec<Command> {
+    let mut commands = vec![
         Command::nft_allow_failure(argv!["delete", "table", "ip", "hyper"]),
         Command::nft(argv!["add", "table", "ip", "hyper"]),
         Command::nft(argv![
@@ -356,7 +364,7 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
         ]),
         Command::nft(argv![
             "add", "chain", "ip", "hyper", "forward", "{", "type", "filter", "hook", "forward",
-            "priority", "0", ";", "policy", "drop", ";", "}"
+            "priority", "0", ";", "policy", "accept", ";", "}"
         ]),
         // Must precede the broad egress accept below: `accept` is a
         // terminating verdict in nftables, so a rule reachable before this
@@ -394,12 +402,46 @@ pub fn host_init_commands(uplink: &str, clone_pool: &str) -> Vec<Command> {
             "established,related",
             "accept"
         ]),
+        // Catch-all: pool-sourced traffic not matched by the egress accept
+        // or metadata drop above — prevents pool-to-pool forwarding and
+        // any other unexpected path.
+        Command::nft(argv![
+            "add", "rule", "ip", "hyper", "forward", "ip", "saddr", clone_pool, "drop"
+        ]),
+        // Catch-all: traffic destined for the pool that wasn't
+        // established/related — blocks unsolicited inbound to any VM.
+        Command::nft(argv![
+            "add", "rule", "ip", "hyper", "forward", "ip", "daddr", clone_pool, "drop"
+        ]),
         Command::nft(argv![
             "add", "chain", "ip", "hyper", "input", "{", "type", "filter", "hook", "input",
             "priority", "0", ";", "policy", "accept", ";", "}"
         ]),
-        Command::nft(argv![
-            "add", "rule", "ip", "hyper", "input", "ip", "saddr", clone_pool, "drop"
-        ]),
-    ]
+    ];
+
+    // Opt-in exemptions, stated per port so the hole is auditable: a guest may
+    // reach these host-local services and nothing else. They precede the drop
+    // below because `drop` is a terminating verdict.
+    for port in host_ports {
+        commands.push(Command::nft(argv![
+            "add",
+            "rule",
+            "ip",
+            "hyper",
+            "input",
+            "ip",
+            "saddr",
+            clone_pool,
+            "tcp",
+            "dport",
+            port.to_string(),
+            "accept"
+        ]));
+    }
+
+    commands.push(Command::nft(argv![
+        "add", "rule", "ip", "hyper", "input", "ip", "saddr", clone_pool, "drop"
+    ]));
+
+    commands
 }

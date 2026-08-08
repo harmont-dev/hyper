@@ -63,4 +63,32 @@ defmodule Hyper.Node.Img.MutableTest do
         eventually(fun, attempts - 1)
     end
   end
+
+  describe "volume_sectors/2" do
+    test "grows the volume to the instance type's disk" do
+      # The writable volume was sized to the read-only image, so a guest got a
+      # filesystem exactly as large as its own contents and Docker could not
+      # pull anything into it. The instance type's disk is what the VM was
+      # admitted against, so it is what the VM should actually get.
+      origin = Unit.Information.as_sectors(Unit.Information.mib(566))
+
+      assert Mutable.volume_sectors(origin, Unit.Information.gib(16)) ==
+               Unit.Information.as_sectors(Unit.Information.gib(16))
+    end
+
+    test "never shrinks below the image it overlays" do
+      # The volume is an external-origin snapshot of the read-only image;
+      # sizing it under the origin would truncate the rootfs rather than
+      # merely give the guest less room.
+      origin = Unit.Information.as_sectors(Unit.Information.gib(4))
+
+      assert Mutable.volume_sectors(origin, Unit.Information.mib(64)) == origin
+    end
+
+    test "falls back to the image size when no disk is given" do
+      origin = Unit.Information.as_sectors(Unit.Information.mib(566))
+
+      assert Mutable.volume_sectors(origin, nil) == origin
+    end
+  end
 end

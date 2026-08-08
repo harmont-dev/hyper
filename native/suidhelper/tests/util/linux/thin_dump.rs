@@ -170,6 +170,19 @@ fn layout_variance_is_irrelevant() {
 }
 
 #[test]
+fn shared_mapping_references_expand_to_the_definition_ranges() {
+    let xml = "<superblock data_block_size=\"128\"><def name=\"1\"><range_mapping origin_begin=\"0\" data_begin=\"10\" length=\"8\" time=\"0\"/></def><device dev_id=\"3\" mapped_blocks=\"8\"><ref name=\"1\"/></device></superblock>";
+
+    assert_eq!(
+        parse_mappings(xml, 3).unwrap(),
+        ThinMappings {
+            block_sectors: 128,
+            ranges: vec![(0, 8)]
+        }
+    );
+}
+
+#[test]
 fn malformed_xml_is_an_error_not_a_guess() {
     assert!(parse_mappings(
         "<superblock data_block_size=\"128\"><device dev_id=\"3\"",

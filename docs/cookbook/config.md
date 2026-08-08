@@ -132,6 +132,14 @@ clone_pool = "172.31.0.0/16"
 # optional -- defaults shown. DNS resolver handed to guests via the kernel
 # cmdline (the guest agent writes it to /etc/resolv.conf).
 resolver = "1.1.1.1"
+
+# optional -- empty by default. Host TCP ports guests may reach. Guests are
+# otherwise cut off from the host entirely: the input chain drops everything
+# sourced from the clone pool, so a host-local service is unreachable even
+# though the guest can route to it. Each entry punches a single, auditable
+# hole -- name only what a guest genuinely needs, such as an image registry
+# mirror. Guests dial the host at the address `Hyper.host_address/1` returns.
+host_ports = [5001]
 ```
 
 ## gRPC Configuration
@@ -263,8 +271,18 @@ Hyper requires Linux images for the architectures it runs on:
 
 | Config Key | `config.exs` | `config.toml` | Default                                                                                      | Notes |
 | ---------- | ------------ | ------------- | -------------------------------------------------------------------------------------------- | ----- |
-| `amd64`    | `.amd64`     | `.amd64`      | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
-| `aarch64`  | `.aarch64`   | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path). |
+| `amd64`    | `.amd64`     | `.amd64`      | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path), on the same filesystem as [`work_dir`](#root-keys). |
+| `aarch64`  | `.aarch64`   | `.aarch64`    | Automatically downloaded from [hyper-vmlinux](https://github.com/harmont-dev/hyper-vmlinux). | [Absolute Path](#absolute-path), on the same filesystem as [`work_dir`](#root-keys). |
+
+> #### Keep the kernel on the `work_dir` filesystem {: .warning}
+>
+> Booting a VM hard-links the kernel into that VM's jail at
+> `<work_dir>/jails/firecracker/<vm_id>/root/vmlinux` rather than copying it, so
+> the two paths must live on one filesystem — a hard link cannot cross a mount
+> point. Point these keys at a path under `work_dir` (or at least on the same
+> volume); an override on a separate disk fails at boot, not at config load.
+>
+> The default download already satisfies this: it lands under `work_dir`.
 
 <!-- tabs open -->
 ### `config.exs`
@@ -287,19 +305,27 @@ aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 ## Image Configuration
 
 Hyper's image provisioning layer stores read-only layers on a configurable
-medium. (The device-mapper geometry behind it is fixed at compile time and
-rarely needs tweaking.)
+medium, backed by a dm-thin pool sized at node setup. (The device-mapper
+*geometry* — chunk and block sizes — is fixed at compile time and rarely needs
+tweaking; the pool's sparse sizes are configurable below.)
 
-| Config Key | `config.exs` | `config.toml` | Default             | Notes |
-| ---------- | ------------ | ------------- | ------------------- | ----- |
-| `store`    | `.store`     | `.store`      | `<work_dir>/layers` | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
+| Config Key             | `config.exs`             | `config.toml`            | Default             | Notes |
+| ---------------------- | ------------------------ | ------------------------ | ------------------- | ----- |
+| `store`                | `.store`                 | `.store`                 | `<work_dir>/layers` | [Absolute Path](#absolute-path) to the [layer storage medium](./architecture.md#storage). |
+| `thin_pool_data_size`  | `.thin_pool_data_size`   | `.thin_pool_data_size`   | `64 GiB`            | Sparse size ([unit](#unit)) of the thin pool's data device. Ceiling on the disk a node hands out across all its VMs, so it bounds what [`disk_max`](#budget-configuration) can honestly be set to. |
+| `thin_pool_meta_size`  | `.thin_pool_meta_size`   | `.thin_pool_meta_size`   | `1 GiB`             | Sparse size ([unit](#unit)) of the thin pool's metadata device. |
+
+> **Note:** Both sizes are only consulted when the pool is first created.
+> Growing them on a node that already has a pool means recreating the backing
+> device, not just editing config.
 
 <!-- tabs open -->
 ### `config.exs`
 
 ```elixir
 config :hyper, Hyper.Cfg.Img,
-  store: "/mnt/hyper/layers"
+  store: "/mnt/hyper/layers",
+  thin_pool_data_size: Unit.Information.gib(256)
 ```
 
 ### `config.toml`
@@ -307,6 +333,7 @@ config :hyper, Hyper.Cfg.Img,
 ```toml
 [img]
 store = "/mnt/hyper/layers"
+thin_pool_data_size = "256GiB"
 ```
 <!-- tabs close -->
 
@@ -531,6 +558,8 @@ aarch64 = "/opt/hyper/kernels/vmlinux-aarch64"
 
 [img]
 store = "/mnt/hyper/layers"
+thin_pool_data_size = "256GiB"
+thin_pool_meta_size = "2GiB"
 
 [img.gc]
 batch_size = 200

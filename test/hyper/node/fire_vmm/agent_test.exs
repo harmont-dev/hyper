@@ -165,5 +165,23 @@ defmodule Hyper.Node.FireVMM.AgentTest do
       # No server at this path; connect or the RPC itself fails.
       assert {:error, _} = Agent.exec(dead_id, ["/bin/echo", "nope"], timeout: 500)
     end
+
+    test "fails fast when the relay socket does not exist yet" do
+      # Models the window between VM launch and the relay creating its socket,
+      # which callers poll through. Deciding when to give up is the caller's
+      # job, so exec/3 must surface the failure promptly rather than stalling
+      # in the transport's connect-retry backoff until the RPC deadline.
+      missing_id = "vmissing000000000"
+      File.rm(Agent.relay_socket_path(missing_id))
+
+      {elapsed_us, result} =
+        :timer.tc(fn -> Agent.exec(missing_id, ["/bin/echo", "nope"], timeout: 30_000) end)
+
+      assert {:error, _} = result
+
+      # A refused connect is known immediately; with connect-retries left
+      # enabled the transport instead sleeps out a ~5s backoff cycle first.
+      assert System.convert_time_unit(elapsed_us, :microsecond, :millisecond) < 1_000
+    end
   end
 end

@@ -25,17 +25,45 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
 
   alias Hyper.Node.FireVMM.Agent.RelayDialer
 
-  @vsock_port 1024
+  @default_vsock_port 1024
+  @docker_vsock_port 2375
   @dial_timeout_ms 5_000
+
+  @doc "vsock port the in-guest agent serves gRPC on."
+  @spec default_vsock_port() :: pos_integer()
+  def default_vsock_port, do: @default_vsock_port
+
+  @doc """
+  vsock port the in-guest agent forwards to the Docker daemon's Unix socket.
+
+  Matches `DOCKER_VSOCK_PORT` in the guest agent's `docker_proxy` module.
+  """
+  @spec docker_vsock_port() :: pos_integer()
+  def docker_vsock_port, do: @docker_vsock_port
+
+  @doc """
+  Host-side socket path for a VM's Docker relay.
+
+  Deterministic like the agent's own relay path, so a caller can find it
+  without a registry lookup. Distinct filename: both relays live in the same
+  directory and each unlinks its path at bind.
+  """
+  @spec docker_socket_path(Hyper.Vm.Id.t()) :: Path.t()
+  def docker_socket_path(vm_id) do
+    Path.join(Hyper.Cfg.Dirs.socket_dir(), "docker-#{vm_id}.sock")
+  end
 
   @spec child_spec(%{
           required(:vm_id) => term(),
           required(:vsock_uds) => Path.t(),
-          required(:listen_path) => Path.t()
+          required(:listen_path) => Path.t(),
+          optional(:vsock_port) => pos_integer()
         }) :: Supervisor.child_spec()
   def child_spec(init_arg) do
     %{
-      id: __MODULE__,
+      # Keyed by port so a VM can supervise one relay per in-guest service —
+      # a fixed id would collide the moment a second relay is added.
+      id: {__MODULE__, Map.get(init_arg, :vsock_port, @default_vsock_port)},
       start: {__MODULE__, :start_link, [init_arg]},
       restart: :transient,
       type: :worker
@@ -46,6 +74,7 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
           required(:vm_id) => term(),
           required(:vsock_uds) => Path.t(),
           required(:listen_path) => Path.t(),
+          optional(:vsock_port) => pos_integer(),
           optional(:name) => GenServer.name()
         }) :: GenServer.on_start()
   def start_link(opts) do
@@ -57,20 +86,26 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
   def listen_path(server), do: GenServer.call(server, :listen_path)
 
   @impl GenServer
-  def init(%{vsock_uds: vsock_uds, listen_path: listen_path, vm_id: vm_id}) do
+  def init(%{vsock_uds: vsock_uds, listen_path: listen_path, vm_id: vm_id} = opts) do
     Process.flag(:trap_exit, true)
     _ = File.rm(listen_path)
     {:ok, sock} = :socket.open(:local, :stream)
     :ok = :socket.bind(sock, %{family: :local, path: listen_path})
     :ok = :socket.listen(sock, 16)
 
-    {:ok, %{listen: sock, listen_path: listen_path, vsock_uds: vsock_uds, vm_id: vm_id},
-     {:continue, :start_acceptor}}
+    {:ok,
+     %{
+       listen: sock,
+       listen_path: listen_path,
+       vsock_uds: vsock_uds,
+       vm_id: vm_id,
+       vsock_port: Map.get(opts, :vsock_port, @default_vsock_port)
+     }, {:continue, :start_acceptor}}
   end
 
   @impl GenServer
   def handle_continue(:start_acceptor, state) do
-    _ = spawn_link(fn -> accept_loop(state.listen, state.vsock_uds) end)
+    _ = spawn_link(fn -> accept_loop(state.listen, state.vsock_uds, state.vsock_port) end)
     {:noreply, state}
   end
 
@@ -91,11 +126,11 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     :ok
   end
 
-  defp accept_loop(listen_sock, vsock_uds) do
+  defp accept_loop(listen_sock, vsock_uds, vsock_port) do
     case :socket.accept(listen_sock) do
       {:ok, client} ->
-        _ = spawn(fn -> handle_connection(client, vsock_uds) end)
-        accept_loop(listen_sock, vsock_uds)
+        _ = spawn(fn -> handle_connection(client, vsock_uds, vsock_port) end)
+        accept_loop(listen_sock, vsock_uds, vsock_port)
 
       # terminate/2 closes the listen socket, which unblocks accept with
       # {:error, :closed}. That is the expected shutdown path: exit normally
@@ -112,8 +147,8 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     end
   end
 
-  defp handle_connection(client_sock, vsock_uds) do
-    case RelayDialer.dial(vsock_uds, @vsock_port, @dial_timeout_ms) do
+  defp handle_connection(client_sock, vsock_uds, vsock_port) do
+    case RelayDialer.dial(vsock_uds, vsock_port, @dial_timeout_ms) do
       {:ok, upstream_sock} ->
         # spawn_link so that if this handler process dies unexpectedly the
         # workers are reaped via the link rather than orphaned holding FDs.

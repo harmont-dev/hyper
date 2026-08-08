@@ -58,15 +58,19 @@ defmodule Hyper.Node.Img do
     end
   end
 
-  @doc "Create a per-VM mutable layer for `vm_id` over `img_id`."
-  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.Id.t()) :: {:ok, pid()} | {:error, term()}
-  def create_mutable(img_id, vm_id) do
+  @doc """
+  Create a per-VM mutable layer for `vm_id` over `img_id`, sized to `disk` —
+  the instance type's disk, not the image's own size.
+  """
+  @spec create_mutable(Hyper.Img.id(), Hyper.Vm.Id.t(), Unit.Information.t() | nil) ::
+          {:ok, pid()} | {:error, term()}
+  def create_mutable(img_id, vm_id, disk \\ nil) do
     # Unlike activate/1, we intentionally do NOT map {:already_started, pid} -> {:ok, pid}:
     # vm_ids are unique per VM, so a duplicate vm_id is a bug, not a shared-server reuse.
     # Surfacing {:error, {:already_started, pid}} enforces the one-mutable-per-vm invariant.
     case DynamicSupervisor.start_child(
            @mutable_sup,
-           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id}}
+           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: vm_id, disk: disk}}
          ) do
       {:ok, pid} -> {:ok, pid}
       {:error, _} = err -> err
@@ -77,12 +81,22 @@ defmodule Hyper.Node.Img do
   Create `child_vm_id`'s mutable layer as a thin snapshot of `parent_vm_id`'s
   live volume — same `img_id` lineage, blocks shared COW-style in the node pool.
   """
-  @spec create_fork(Hyper.Img.id(), Hyper.Vm.Id.t(), Hyper.Vm.Id.t()) ::
-          {:ok, pid()} | {:error, term()}
-  def create_fork(img_id, parent_vm_id, child_vm_id) do
+  @spec create_fork(
+          Hyper.Img.id(),
+          Hyper.Vm.Id.t(),
+          Hyper.Vm.Id.t(),
+          Unit.Information.t() | nil
+        ) :: {:ok, pid()} | {:error, term()}
+  def create_fork(img_id, parent_vm_id, child_vm_id, disk \\ nil) do
     case DynamicSupervisor.start_child(
            @mutable_sup,
-           {Mutable, %Mutable.Opts{img_id: img_id, vm_id: child_vm_id, fork_of: parent_vm_id}}
+           {Mutable,
+            %Mutable.Opts{
+              img_id: img_id,
+              vm_id: child_vm_id,
+              disk: disk,
+              fork_of: parent_vm_id
+            }}
          ) do
       {:ok, pid} -> {:ok, pid}
       {:error, _} = err -> err
