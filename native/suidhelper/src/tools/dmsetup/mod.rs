@@ -85,14 +85,12 @@ impl Dmsetup {
     pub fn new(bin: PathBuf, args: DmsetupArgs) -> Self {
         Self { bin, op: args.op }
     }
-}
 
-impl IsTool for Dmsetup {
-    type Args = DmsetupArgs;
-    type Output = DmsetupOut;
-    type RunT = io::Result<Output>;
-
-    fn run_privileged(&self) -> Self::RunT {
+    /// The `dmsetup` invocation this op runs, environment included.
+    ///
+    /// Exposed so tests can assert the argv and environment without needing
+    /// root or a real device-mapper.
+    pub fn command(&self) -> Command {
         let mut cmd = Command::new(&self.bin);
         match &self.op {
             DmOp::Create {
@@ -133,7 +131,25 @@ impl IsTool for Dmsetup {
             }
         }
 
-        cmd.env_clear().output()
+        // Setuid: the caller's environment never carries through. The one
+        // variable we add back takes udev out of the node-creation decision, so
+        // libdevmapper makes /dev/mapper/<name> itself and `create` has really
+        // produced the device by the time it returns. Inside a container the
+        // udev sync cannot work at all — its SysV semaphores are IPC-namespaced
+        // away from the host's udevd — and the next table load in an image chain
+        // fails to resolve the path.
+        cmd.env_clear().env("DM_DISABLE_UDEV", "1");
+        cmd
+    }
+}
+
+impl IsTool for Dmsetup {
+    type Args = DmsetupArgs;
+    type Output = DmsetupOut;
+    type RunT = io::Result<Output>;
+
+    fn run_privileged(&self) -> Self::RunT {
+        self.command().output()
     }
 
     fn parse(&self, res: Self::RunT) -> Result<DmsetupOut, Box<dyn std::error::Error>> {
