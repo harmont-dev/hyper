@@ -74,7 +74,7 @@ defmodule Hyper.Vm.Instance do
     builder: %Spec{
       vcpus: 3,
       mem: Information.mib(8192),
-      disk: Information.gib(16),
+      disk: Information.gib(32),
       disk_bw: Bandwidth.mibps(128),
       net_bw: Bandwidth.mibps(64)
     },

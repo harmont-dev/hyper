@@ -34,14 +34,14 @@ defmodule Hyper.Vm.InstanceTest do
     assert cgroup.memory_max == Information.mib(4_096) |> Information.as_bytes()
   end
 
-  test "builder keeps tall's CPU and disk while doubling its memory" do
+  test "builder keeps tall's CPU and bandwidth but gets a 32 GiB disk for devcontainer provisioning" do
     tall = Instance.spec(:tall)
     spec = Instance.spec(:builder)
     config = Instance.Spec.machine_config(spec)
     cgroup = Instance.Spec.cgroup_v2(spec)
 
     assert spec.vcpus == 3
-    assert spec.disk == tall.disk
+    assert Information.as_gib(spec.disk) == 32
     assert spec.disk_bw == tall.disk_bw
     assert spec.net_bw == tall.net_bw
     assert config.vcpu_count == 3
