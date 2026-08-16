@@ -4,6 +4,9 @@ defmodule Hyper.Grpc.CodecTest do
   alias Hyper.Grpc.Codec
   alias Hyper.Grpc.V1.CreateVmRequest
   alias Hyper.Grpc.V1.CreateVmResponse
+  alias Hyper.Grpc.V1.GetDockerEndpointResponse
+  alias Hyper.Grpc.V1.GetHostAddressResponse
+  alias Hyper.Grpc.V1.GetVmAddressResponse
   alias Hyper.Grpc.V1.GetVmResponse
   alias Hyper.Grpc.V1.GetVmUsageResponse
   alias Hyper.Grpc.V1.ListVmsResponse
@@ -162,6 +165,25 @@ defmodule Hyper.Grpc.CodecTest do
 
     test "a loaded result carries the image id" do
       assert %LoadImageResponse{img_id: "img-1"} = Codec.to_grpc({:loaded, "img-1"})
+    end
+  end
+
+  # The addressing RPCs each answer a single VM-scoped lookup with one string.
+  # Their encode boundary just places that string in the field a client reads.
+  describe "to_grpc/1 addressing responses" do
+    test "a vm_address result carries the guest-facing address" do
+      assert %GetVmAddressResponse{address: "10.100.0.2"} =
+               Codec.to_grpc({:vm_address, "10.100.0.2"})
+    end
+
+    test "a host_address result carries the host-facing address" do
+      assert %GetHostAddressResponse{address: "10.100.0.1"} =
+               Codec.to_grpc({:host_address, "10.100.0.1"})
+    end
+
+    test "a docker_endpoint result carries the endpoint verbatim" do
+      assert %GetDockerEndpointResponse{endpoint: "/run/hyper/docker-vabc.sock"} =
+               Codec.to_grpc({:docker_endpoint, "/run/hyper/docker-vabc.sock"})
     end
   end
 

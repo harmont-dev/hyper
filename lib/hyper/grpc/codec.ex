@@ -12,6 +12,9 @@ defmodule Hyper.Grpc.Codec do
     CreateVmRequest,
     CreateVmResponse,
     ForkVmResponse,
+    GetDockerEndpointResponse,
+    GetHostAddressResponse,
+    GetVmAddressResponse,
     GetVmResponse,
     GetVmUsageResponse,
     ListVmsResponse,
@@ -96,6 +99,18 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc({:loaded, Hyper.Img.id()}) :: LoadImageResponse.t()
   def to_grpc({:loaded, img_id}) when is_binary(img_id),
     do: %LoadImageResponse{img_id: img_id}
+
+  @spec to_grpc({:vm_address, String.t()}) :: GetVmAddressResponse.t()
+  def to_grpc({:vm_address, address}) when is_binary(address),
+    do: %GetVmAddressResponse{address: address}
+
+  @spec to_grpc({:host_address, String.t()}) :: GetHostAddressResponse.t()
+  def to_grpc({:host_address, address}) when is_binary(address),
+    do: %GetHostAddressResponse{address: address}
+
+  @spec to_grpc({:docker_endpoint, String.t()}) :: GetDockerEndpointResponse.t()
+  def to_grpc({:docker_endpoint, endpoint}) when is_binary(endpoint),
+    do: %GetDockerEndpointResponse{endpoint: endpoint}
 
   @spec to_grpc(:stopped) :: StopVmResponse.t()
   def to_grpc(:stopped), do: %StopVmResponse{}
