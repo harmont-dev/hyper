@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# Hyper worker bootstrap for Latitude bare-metal (Ubuntu 22.04/24.04), rendered
+# from priv/deploy/latitude/user-data.sh.eex by EEx and delivered as cloud-init
+# user-data. Unlike setup.sh / provision-kvm-host.sh, this path ships a PREBUILT
+# release tarball: no Elixir, Rust, protoc or any build toolchain is installed
+# or invoked here. The suidhelper and guest-agent are already inside the tarball
+# (bundled by the `mix release` steps), so the runtime deps below are the whole
+# story.
+#
+# Assigns rendered in: @release_url @pg_url @cookie @resolver @hostname
+#
+# Kept in lockstep with docs/cookbook/install.md and .github/scripts/
+# provision-kvm-host.sh -- the runtime requirements (packages, dm modules,
+# ip_forward, dereferenced thin_dump, cgroup subtree, config.toml shape) mirror
+# those exactly; the deltas are that this runs unattended (cloud-init, no tty)
+# and installs prebuilt binaries instead of compiling.
+set -euo pipefail
+
+# cloud-init runs us as root with no tty. Everything must be non-interactive.
+export DEBIAN_FRONTEND=noninteractive
+
+LOG=/var/log/hyper-bootstrap.log
+# tee every line to the bootstrap log AND cloud-init's console so a failed boot
+# is diagnosable from the Latitude serial console.
+exec > >(tee -a "$LOG") 2>&1
+
+log() { printf '\033[1;34m==> [hyper-bootstrap]\033[0m %s\n' "$*"; }
+
+log "starting Hyper worker bootstrap on $(hostname) (<%= @hostname %>)"
+
+ARCH="$(uname -m)"   # x86_64 or aarch64
+KREL="$(uname -r)"
+
+log "installing runtime packages (no build toolchain -- prebuilt release)"
+apt-get update
+# Runtime-only deps. Deliberately NOT installing rustup/elixir/protobuf-compiler
+# (the build machine baked those into the tarball). linux-modules-extra-$(uname
+# -r) provides the dm_* / nf_* modules loaded below.
+apt-get install -y \
+  coreutils \
+  e2fsprogs \
+  iproute2 \
+  nftables \
+  lvm2 \
+  skopeo \
+  thin-provisioning-tools \
+  util-linux \
+  libc-bin \
+  ca-certificates \
+  curl \
+  "linux-modules-extra-${KREL}"
+
+log "loading + persisting kernel modules"
+# -a is load-bearing: without it modprobe reads the 2nd+ names as module
+# PARAMETERS of the first, and the load fails.
+#
+# dm_snapshot/dm_thin_pool/loop back the COW filesystem layer; nf_tables/nf_nat
+# back host-init's `hyper` nftables table and its masquerade/SNAT/DNAT rules.
+# The netfilter family does not always autoload on first `nft` use, so load the
+# bases explicitly -- the nat sub-modules autoload once a rule is issued.
+modprobe -av dm_snapshot dm_thin_pool loop nf_tables nf_nat
+printf 'dm_snapshot\ndm_thin_pool\nloop\nnf_tables\nnf_nat\n' \
+  > /etc/modules-load.d/hyper.conf
+
+log "enabling + persisting IPv4 forwarding"
+# host-init only ASSERTS ip_forward=1 (it refuses to set it), so we must turn it
+# on and persist it across reboots.
+sysctl -w net.ipv4.ip_forward=1
+echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-hyper-ip-forward.conf
+
+log "installing dereferenced thin_dump"
+# Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
+# rejects symlinks, so install a dereferenced hard copy under the name the
+# multi-call binary dispatches on.
+install -o root -g root -m 0755 \
+  "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
+[ ! -L /usr/local/sbin/thin_dump ] \
+  || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
+
+log "creating cgroup subtree /sys/fs/cgroup/hyper"
+mkdir -p /sys/fs/cgroup/hyper
+# Delegate cpu + memory control to the subtree so per-VM ephemeral cgroups can
+# set those controllers. Owned root:root -- the suidhelper (not the BEAM) writes
+# here.
+echo '+cpu +memory' > /sys/fs/cgroup/hyper/cgroup.subtree_control
+# Recreate it on every boot (cgroupfs is not persistent).
+echo 'd /sys/fs/cgroup/hyper 0755 root root -' > /etc/tmpfiles.d/hyper-cgroup.conf
+
+log "creating system user 'hyper'"
+# Idempotent: a re-run (or a cloud-init retry) must not fail on an existing user.
+if ! id -u hyper >/dev/null 2>&1; then
+  useradd --system --shell /usr/sbin/nologin --home-dir /srv/hyper hyper
+fi
+# layers/ must pre-exist: boot validation (Layer.Repo.test_system) checks it,
+# and the node only creates it lazily on first image load.
+mkdir -p /srv/hyper/layers
+chown -R hyper:hyper /srv/hyper
+
+log "downloading + extracting prebuilt release into /opt/hyper"
+mkdir -p /opt/hyper
+# The tarball root contains bin/hyper and the bundled setuid helper at
+# bin/hyper-suidhelper (placed there by the release :tar step). --strip nothing:
+# the mix release tar already has bin/ at the archive root.
+curl -fsSL "<%= @release_url %>" | tar -xz -C /opt/hyper
+[ -x /opt/hyper/bin/hyper ] \
+  || { echo "ERROR: /opt/hyper/bin/hyper missing after extract" >&2; exit 1; }
+
+log "installing bundled suidhelper setuid-root"
+# The BEAM refuses to run as root; every privileged op is routed through this
+# helper, which MUST be setuid-root (4755). It's the exact binary this release
+# was built with -- boot verifies its BLAKE3 stamp against the baked-in value.
+install -o root -g root -m 4755 \
+  /opt/hyper/bin/hyper-suidhelper /usr/local/bin/hyper-suidhelper
+[ -u /usr/local/bin/hyper-suidhelper ] \
+  || { echo "ERROR: hyper-suidhelper missing or not setuid-root" >&2; exit 1; }
+
+log "installing Firecracker + jailer v1.16.0 for ${ARCH}"
+# Mirror the URLs mix firecracker.install uses. The release ships version-stamped
+# names; copy to BARE basenames (firecracker, jailer) -- the helper's SafeBin
+# matches on basename and rejects version-stamped names.
+FC_VERSION="1.16.0"
+FC_TARBALL="firecracker-v${FC_VERSION}-${ARCH}.tgz"
+FC_URL="https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/${FC_TARBALL}"
+FC_EXTRACT="$(mktemp -d)"
+curl -fsSL "$FC_URL" | tar -xz -C "$FC_EXTRACT"
+mkdir -p /opt/firecracker
+cp "$FC_EXTRACT/release-v${FC_VERSION}-${ARCH}/firecracker-v${FC_VERSION}-${ARCH}" \
+  /opt/firecracker/firecracker
+cp "$FC_EXTRACT/release-v${FC_VERSION}-${ARCH}/jailer-v${FC_VERSION}-${ARCH}" \
+  /opt/firecracker/jailer
+rm -rf "$FC_EXTRACT"
+# The helper requires both root-owned and not group/world writable.
+chown root:root /opt/firecracker/firecracker /opt/firecracker/jailer
+chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
+
+log "detecting uplink interface"
+# A single-uplink host NATs guest egress out of its default-route NIC.
+uplink="$(ip route show default | awk '{print $5; exit}')"
+[ -n "$uplink" ] \
+  || { echo "ERROR: could not detect a default-route uplink interface" >&2; exit 1; }
+log "detected uplink: ${uplink}"
+
+log "writing /etc/hyper/config.toml"
+mkdir -p /etc/hyper
+cat > /etc/hyper/config.toml <<EOF
+work_dir = "/srv/hyper"
+
+[tools]
+firecracker = "/opt/firecracker/firecracker"
+jailer = "/opt/firecracker/jailer"
+thin_dump = "/usr/local/sbin/thin_dump"
+suidhelper = "/usr/local/bin/hyper-suidhelper"
+
+[jails]
+uid_gid_range = [900000, 999999]
+cgroup = "hyper"
+
+role = "worker"
+
+[network]
+uplink = "${uplink}"
+resolver = "<%= @resolver %>"
+EOF
+# This file MUST be root-owned and not group/world writable or Hyper refuses to
+# boot.
+chown root:root /etc/hyper/config.toml
+chmod 0644 /etc/hyper/config.toml
+
+log "writing /etc/hyper/config.exs"
+cat > /etc/hyper/config.exs <<'EOF'
+import Config
+
+config :hyper, Hyper.Img.Db.Repo,
+  url: "<%= @pg_url %>",
+  pool_size: 10
+
+config :hyper, Hyper.Cfg.Cluster,
+  topologies: [
+    hyper: [
+      strategy: Hyper.Cluster.Strategy.Postgres,
+      config: [poll_interval: 5000, node_ttl: 15000]
+    ]
+  ]
+EOF
+chown root:root /etc/hyper/config.exs
+chmod 0644 /etc/hyper/config.exs
+
+log "writing /etc/hyper/env"
+# The public IPv4 is what other cluster nodes must reach this worker on, so the
+# BEAM distribution node name uses it. Prefer the ipify-reported public address;
+# fall back to the primary interface's address (the src of the default route) if
+# egress to ipify is blocked or slow.
+public_ip="$(curl -fsS --max-time 5 https://api.ipify.org || true)"
+if [ -z "$public_ip" ]; then
+  public_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')"
+fi
+[ -n "$public_ip" ] \
+  || { echo "ERROR: could not determine this host's IPv4 for RELEASE_NODE" >&2; exit 1; }
+log "RELEASE_NODE will be hyper@${public_ip}"
+
+cat > /etc/hyper/env <<EOF
+RELEASE_DISTRIBUTION=name
+RELEASE_NODE=hyper@${public_ip}
+RELEASE_COOKIE=<%= @cookie %>
+HYPER_CONFIG=/etc/hyper/config.exs
+EOF
+chown root:hyper /etc/hyper/env
+# Contains the distribution cookie -- keep it out of world read.
+chmod 0640 /etc/hyper/env
+
+log "installing + starting systemd unit"
+# Written inline (kept byte-identical to priv/deploy/latitude/hyper.service, the
+# canonical source) so the bootstrap is self-contained: cloud-init has no repo
+# checkout to copy the unit from.
+cat > /etc/systemd/system/hyper.service <<'EOF'
+[Unit]
+Description=Hyper worker node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hyper
+Group=hyper
+EnvironmentFile=/etc/hyper/env
+ExecStart=/opt/hyper/bin/hyper start
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now hyper
+
+log "Hyper worker bootstrap complete on $(hostname) -- node hyper@${public_ip}"

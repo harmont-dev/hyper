@@ -21,6 +21,7 @@ defmodule Hyper.MixProject do
         :grpc_gen | Mix.compilers()
       ],
       deps: deps(),
+      releases: releases(),
       test_coverage: [tool: ExCoveralls],
       docs: docs(),
       package: package(),
@@ -37,6 +38,30 @@ defmodule Hyper.MixProject do
         flags: [:unmatched_returns, :extra_return, :missing_return]
       ]
     ]
+  end
+
+  # A self-contained OTP release for deploying a Hyper node without a build
+  # toolchain on the target (see docs/cookbook/autoscale.md). The `mix compile`
+  # step already stamps the setuid helper and bakes its identity into the BEAM;
+  # `copy_suidhelper/1` then folds the *same* stamped binary into the release so
+  # the deployed helper matches the one this build produced (`Hyper.SuidHelper`'s
+  # boot-time identity check). Bootstrap installs it setuid-root from bin/.
+  defp releases do
+    [
+      hyper: [
+        include_executables_for: [:unix],
+        steps: [:assemble, &copy_suidhelper/1, :tar]
+      ]
+    ]
+  end
+
+  @suidhelper_binary "native/suidhelper/target/release/hyper-suidhelper"
+
+  defp copy_suidhelper(release) do
+    dst = Path.join(release.path, "bin/hyper-suidhelper")
+    File.cp!(@suidhelper_binary, dst)
+    File.chmod!(dst, 0o755)
+    release
   end
 
   # Run the coverage tasks in :test so test-only deps (excoveralls) load and the

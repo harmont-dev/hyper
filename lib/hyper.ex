@@ -31,9 +31,25 @@ defmodule Hyper do
       layers = Hyper.Img.Db.Image.chain_sizes(spec.img_id)
 
       case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
-        {:ok, {_node, pid}} -> {:ok, pid}
-        {:error, _} = err -> err
+        {:ok, {_node, pid}} ->
+          {:ok, pid}
+
+        {:error, reason} = err ->
+          if Hyper.Vm.capacity_error?(reason), do: request_more_capacity()
+          err
       end
+    end
+  end
+
+  # Best-effort reactive burst: a cluster-wide placement that ran out of room
+  # asks the autoscaler (only running on a :client node) to provision another
+  # worker, so a retry or the next request finds capacity. A no-op when the
+  # autoscaler is not running here.
+  @spec request_more_capacity() :: :ok
+  defp request_more_capacity do
+    case Process.whereis(Hyper.Autoscale) do
+      nil -> :ok
+      _pid -> Hyper.Autoscale.request_capacity()
     end
   end
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Hyper worker node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hyper
+Group=hyper
+EnvironmentFile=/etc/hyper/env
+ExecStart=/opt/hyper/bin/hyper start
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

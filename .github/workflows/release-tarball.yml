@@ -1,0 +1,86 @@
+name: release-tarball
+
+# Builds a self-contained, PREBUILT Hyper release tarball for bare-metal
+# (Latitude) worker bootstrap. `mix release` runs the repo's Mix compilers,
+# which stamp + bundle the suidhelper and build the guest-agent, so the tarball
+# ships every native binary a node needs -- the bootstrap script never compiles.
+#
+# Postgres is NOT needed to build a release: none of the compilers or the
+# `mix release` step touch the database (migrations run once per cluster at
+# deploy time, not at build time).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Elixir / OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '~> 1.20'
+          otp-version: '28'
+
+      - name: Install Rust (with musl target for the guest-agent)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-musl
+
+      - name: Install protoc + protoc-gen-elixir
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          mix local.hex --force
+          mix local.rebar --force
+          mix escript.install --force hex protobuf 0.17.0
+
+      - name: Fetch deps
+        env:
+          MIX_ENV: prod
+        run: mix deps.get
+
+      - name: Build release
+        env:
+          MIX_ENV: prod
+        # Runs :suidhelper_stamp (bundles hyper-suidhelper), :guest_agent_build,
+        # :firecracker_gen and :grpc_gen, then assembles + tars the release. The
+        # release's copy_suidhelper step (see mix.exs) places the stamped helper
+        # at bin/hyper-suidhelper inside the tarball.
+        run: mix release hyper
+
+      - name: Package tarball
+        id: package
+        run: |
+          set -euo pipefail
+          TARBALL="hyper-x86_64-linux.tar.gz"
+          # mix release already produces a tar under _build/prod/rel; repackage
+          # from the assembled rel dir so we control the final name AND can assert
+          # the setuid helper binary is present before we publish.
+          REL=_build/prod/rel/hyper
+          [ -x "$REL/bin/hyper-suidhelper" ] \
+            || { echo "ERROR: bundled suidhelper missing from release ($REL/bin/hyper-suidhelper)" >&2; exit 1; }
+          tar -czf "$TARBALL" -C "$REL" .
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyper-x86_64-linux
+          path: ${{ steps.package.outputs.tarball }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.tarball }}

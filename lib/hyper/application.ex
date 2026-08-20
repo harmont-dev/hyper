@@ -24,11 +24,28 @@ defmodule Hyper.Application do
         {Cluster.Supervisor, [topologies, [name: Hyper.ClusterSupervisor]]},
         # Cluster-wide CRDTs (VM routing + budget telemetry). Must precede
         # Hyper.Node so VM registrations and budget advertisements have their
-        # registries on boot.
-        Hyper.Cluster,
-        Hyper.Node
-      ] ++ Hyper.Grpc.server_children()
+        # registries on boot. Runs on every role: a client needs the routing +
+        # budget registries to *read* peer state and schedule onto workers.
+        Hyper.Cluster
+      ] ++ role_children() ++ Hyper.Grpc.server_children()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
+  end
+
+  # A :worker runs microVMs (Hyper.Node, which preflights KVM/Firecracker/the
+  # setuid helper/networking). A :client is control-plane only: it never boots a
+  # VM, so it starts neither Hyper.Node nor its privileged preflight, and instead
+  # runs the autoscaler that provisions workers on demand.
+  @spec role_children() :: [Supervisor.child_spec() | module()]
+  defp role_children do
+    case Hyper.Cfg.Role.get() do
+      :worker -> [Hyper.Node]
+      :client -> autoscale_children()
+    end
+  end
+
+  @spec autoscale_children() :: [module()]
+  defp autoscale_children do
+    if Hyper.Cfg.Autoscale.enabled?(), do: [Hyper.Autoscale], else: []
   end
 end
