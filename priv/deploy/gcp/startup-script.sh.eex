@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+# Hyper worker bootstrap for Google Compute Engine (Ubuntu 24.04), rendered from
+# priv/deploy/gcp/startup-script.sh.eex by EEx and delivered as the instance's
+# `startup-script` metadata. Like the Latitude path, this ships a PREBUILT
+# release tarball: no Elixir, Rust, protoc or any build toolchain is installed
+# or invoked here. The suidhelper and guest-agent are already inside the tarball.
+#
+# Assigns rendered in: @release_url @pg_url @cookie @resolver @hostname
+#
+# Kept in lockstep with docs/cookbook/install.md and .github/scripts/
+# provision-kvm-host.sh -- the runtime requirements (packages, dm modules,
+# ip_forward, dereferenced thin_dump, cgroup subtree, config.toml shape) mirror
+# those exactly. The GCE deltas versus Latitude: the node addresses peers by its
+# VPC INTERNAL IP (from the metadata server, not a public-IP echo service), and
+# /dev/kvm is asserted explicitly because nested virtualization is a per-instance
+# flag that fails silently when it did not take.
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+LOG=/var/log/hyper-bootstrap.log
+# tee every line to the bootstrap log AND stdout; GCE captures stdout into the
+# serial console, which is how a failed worker gets debugged.
+exec > >(tee -a "$LOG") 2>&1
+
+log() { printf '\033[1;34m==> [hyper-bootstrap]\033[0m %s\n' "$*"; }
+
+echo "================================================================"
+echo "  HYPER WORKER BOOTSTRAP STARTING"
+echo "  host: $(hostname)  expected: <%= @hostname %>"
+echo "  date: $(date -Is)"
+echo "================================================================"
+
+ARCH="$(uname -m)"   # x86_64 or aarch64
+KREL="$(uname -r)"
+
+log "resolving VPC internal IP from the metadata server"
+# Every Hyper node on GCE talks over the VPC internal network (the default VPC's
+# default-allow-internal rule covers EPMD + the distribution ports), so the BEAM
+# node name must be the internal address, never a public one.
+internal_ip="$(curl -fsS --max-time 5 -H 'Metadata-Flavor: Google' \
+  http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip || true)"
+if [ -z "$internal_ip" ]; then
+  # Fall back to the src address of the default route.
+  internal_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')"
+fi
+[ -n "$internal_ip" ] \
+  || { echo "ERROR: could not determine this host's internal IPv4 for RELEASE_NODE" >&2; exit 1; }
+log "internal IP: ${internal_ip} -- node will be hyper@${internal_ip}"
+
+log "installing runtime packages (no build toolchain -- prebuilt release)"
+apt-get update
+# Runtime-only deps. linux-modules-extra-$(uname -r) provides the dm_* / nf_*
+# modules loaded below.
+apt-get install -y \
+  coreutils \
+  e2fsprogs \
+  iproute2 \
+  nftables \
+  lvm2 \
+  skopeo \
+  thin-provisioning-tools \
+  util-linux \
+  libc-bin \
+  ca-certificates \
+  curl \
+  "linux-modules-extra-${KREL}"
+
+log "loading + persisting kernel modules"
+# -a is load-bearing: without it modprobe reads the 2nd+ names as module
+# PARAMETERS of the first, and the load fails.
+#
+# dm_snapshot/dm_thin_pool/loop back the COW filesystem layer; nf_tables/nf_nat
+# back host-init's `hyper` nftables table and its masquerade/SNAT/DNAT rules.
+modprobe -av dm_snapshot dm_thin_pool loop nf_tables nf_nat
+printf 'dm_snapshot\ndm_thin_pool\nloop\nnf_tables\nnf_nat\n' \
+  > /etc/modules-load.d/hyper.conf
+
+log "verifying /dev/kvm (nested virtualization)"
+# The instance is created with --enable-nested-virtualization. If that did not
+# take, /dev/kvm is absent and EVERY VM placement on this worker fails in a way
+# that is near-impossible to diagnose after the fact. Fail here instead.
+if [ ! -e /dev/kvm ]; then
+  echo "ERROR: /dev/kvm is missing -- nested virtualization is not enabled on this instance" >&2
+  exit 1
+fi
+# install.md assumes a host with a `kvm` group the Hyper user belongs to.
+getent group kvm >/dev/null || groupadd --system kvm
+# Jailed VMs run as an ephemeral uid in [900000, 999999] which is in no group,
+# so the group alone is not sufficient -- mirror provision-kvm-host.sh's 0666
+# udev rule (the documented KVM-for-all scheme) so the jailed uid can open it.
+echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+  > /etc/udev/rules.d/99-kvm4all.rules
+udevadm control --reload-rules || true
+udevadm trigger --name-match=kvm || true
+chmod 0666 /dev/kvm
+log "kvm ok: $(ls -l /dev/kvm)"
+
+log "enabling + persisting IPv4 forwarding"
+# host-init only ASSERTS ip_forward=1 (it refuses to set it), so we must turn it
+# on and persist it across reboots.
+sysctl -w net.ipv4.ip_forward=1
+echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-hyper-ip-forward.conf
+
+log "installing dereferenced thin_dump"
+# Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
+# rejects symlinks, so install a dereferenced hard copy under the name the
+# multi-call binary dispatches on.
+install -o root -g root -m 0755 \
+  "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
+[ ! -L /usr/local/sbin/thin_dump ] \
+  || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
+
+log "creating cgroup subtree /sys/fs/cgroup/hyper"
+mkdir -p /sys/fs/cgroup/hyper
+# A controller can only be enabled in a child if its PARENT already offers it.
+# We boot early enough that systemd may not have delegated cpu/memory at the
+# root yet, and the child write then fails with a bare ENOENT ("echo: write
+# error: No such file or directory") that reads like a missing path rather than
+# a not-yet-available controller. Wait for the root to offer them, topping it up
+# ourselves if it does not, then write the child with a retry.
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  for controller in cpu memory; do
+    grep -qw "$controller" /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null \
+      || echo "+${controller}" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null \
+      || true
+  done
+  if echo '+cpu +memory' > /sys/fs/cgroup/hyper/cgroup.subtree_control 2>/dev/null; then
+    log "cgroup subtree delegated (+cpu +memory) on attempt ${attempt}"
+    break
+  fi
+  [ "$attempt" = 10 ] \
+    && { echo "ERROR: could not delegate +cpu +memory to /sys/fs/cgroup/hyper" >&2; exit 1; }
+  sleep 2
+done
+# Recreate it on every boot (cgroupfs is not persistent).
+echo 'd /sys/fs/cgroup/hyper 0755 root root -' > /etc/tmpfiles.d/hyper-cgroup.conf
+
+log "creating system user 'hyper'"
+# Idempotent: a re-run (or a startup-script retry) must not fail on an existing
+# user.
+if ! id -u hyper >/dev/null 2>&1; then
+  useradd --system --shell /usr/sbin/nologin --home-dir /srv/hyper hyper
+fi
+usermod -aG kvm hyper
+# layers/ must pre-exist: boot validation (Layer.Repo.test_system) checks it,
+# and the node only creates it lazily on first image load.
+mkdir -p /srv/hyper/layers
+chown -R hyper:hyper /srv/hyper
+
+log "downloading + extracting prebuilt release into /opt/hyper"
+mkdir -p /opt/hyper
+# The tarball root contains bin/hyper and the bundled setuid helper at
+# bin/hyper-suidhelper (placed there by the release :tar step). --strip nothing:
+# the mix release tar already has bin/ at the archive root. --no-same-owner (plus
+# the chown below) keeps the build machine's numeric uid out of the tree, so
+# systemd never execs a non-root-owned binary.
+curl -fsSL "<%= @release_url %>" | tar -xz --no-same-owner -C /opt/hyper
+chown -R root:root /opt/hyper
+[ -x /opt/hyper/bin/hyper ] \
+  || { echo "ERROR: /opt/hyper/bin/hyper missing after extract" >&2; exit 1; }
+# The release is built on a dev box and must run unmodified here. If the ERTS
+# was linked against a newer glibc than this image ships, every start silently
+# turns into a restart loop -- assert the ABI now, loudly.
+if ldd /opt/hyper/erts-*/bin/beam.smp 2>&1 | grep -q "not found"; then
+  echo "ERROR: ABI mismatch -- the bundled ERTS does not link on this host:" >&2
+  ldd /opt/hyper/erts-*/bin/beam.smp >&2 || true
+  exit 1
+fi
+
+log "installing bundled suidhelper setuid-root"
+# The BEAM refuses to run as root; every privileged op is routed through this
+# helper, which MUST be setuid-root (4755). It's the exact binary this release
+# was built with -- boot verifies its BLAKE3 stamp against the baked-in value.
+install -o root -g root -m 4755 \
+  /opt/hyper/bin/hyper-suidhelper /usr/local/bin/hyper-suidhelper
+[ -u /usr/local/bin/hyper-suidhelper ] \
+  || { echo "ERROR: hyper-suidhelper missing or not setuid-root" >&2; exit 1; }
+
+log "installing Firecracker + jailer v1.16.0 for ${ARCH}"
+# Mirror the URLs mix firecracker.install uses. The release ships version-stamped
+# names; copy to BARE basenames (firecracker, jailer) -- the helper's SafeBin
+# matches on basename and rejects version-stamped names.
+FC_VERSION="1.16.0"
+FC_TARBALL="firecracker-v${FC_VERSION}-${ARCH}.tgz"
+FC_URL="https://github.com/firecracker-microvm/firecracker/releases/download/v${FC_VERSION}/${FC_TARBALL}"
+FC_EXTRACT="$(mktemp -d)"
+curl -fsSL "$FC_URL" | tar -xz -C "$FC_EXTRACT"
+mkdir -p /opt/firecracker
+cp "$FC_EXTRACT/release-v${FC_VERSION}-${ARCH}/firecracker-v${FC_VERSION}-${ARCH}" \
+  /opt/firecracker/firecracker
+cp "$FC_EXTRACT/release-v${FC_VERSION}-${ARCH}/jailer-v${FC_VERSION}-${ARCH}" \
+  /opt/firecracker/jailer
+rm -rf "$FC_EXTRACT"
+# The helper requires both root-owned and not group/world writable.
+chown root:root /opt/firecracker/firecracker /opt/firecracker/jailer
+chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
+
+log "detecting uplink interface"
+# A single-uplink host NATs guest egress out of its default-route NIC.
+uplink="$(ip route show default | awk '{print $5; exit}')"
+[ -n "$uplink" ] \
+  || { echo "ERROR: could not detect a default-route uplink interface" >&2; exit 1; }
+log "detected uplink: ${uplink}"
+
+log "writing /etc/hyper/config.toml"
+mkdir -p /etc/hyper
+# `role` is a TOP-LEVEL key and so must precede the first table header -- placed
+# after a header TOML would parse it as a key of THAT table (e.g. jails.role).
+cat > /etc/hyper/config.toml <<EOF
+role = "worker"
+work_dir = "/srv/hyper"
+
+[tools]
+firecracker = "/opt/firecracker/firecracker"
+jailer = "/opt/firecracker/jailer"
+thin_dump = "/usr/local/sbin/thin_dump"
+suidhelper = "/usr/local/bin/hyper-suidhelper"
+
+[jails]
+uid_gid_range = [900000, 999999]
+cgroup = "hyper"
+
+[network]
+uplink = "${uplink}"
+resolver = "<%= @resolver %>"
+EOF
+# This file MUST be root-owned and not group/world writable or Hyper refuses to
+# boot.
+chown root:root /etc/hyper/config.toml
+chmod 0644 /etc/hyper/config.toml
+
+log "writing /etc/hyper/config.exs"
+cat > /etc/hyper/config.exs <<'EOF'
+import Config
+
+config :hyper, Hyper.Img.Db.Repo,
+  url: "<%= @pg_url %>",
+  pool_size: 10
+
+config :hyper, Hyper.Cfg.Cluster,
+  topologies: [
+    hyper: [
+      strategy: Hyper.Cluster.Strategy.Postgres,
+      config: [poll_interval: 5000, node_ttl: 15000]
+    ]
+  ]
+EOF
+chown root:root /etc/hyper/config.exs
+chmod 0644 /etc/hyper/config.exs
+
+log "writing /etc/hyper/env"
+cat > /etc/hyper/env <<EOF
+RELEASE_DISTRIBUTION=name
+RELEASE_NODE=hyper@${internal_ip}
+RELEASE_COOKIE=<%= @cookie %>
+HYPER_CONFIG=/etc/hyper/config.exs
+EOF
+chown root:hyper /etc/hyper/env
+# Contains the distribution cookie -- keep it out of world read.
+chmod 0640 /etc/hyper/env
+
+log "installing + starting systemd unit"
+# Written inline (kept byte-identical to priv/deploy/latitude/hyper.service, the
+# canonical source) so the bootstrap is self-contained: the instance has no repo
+# checkout to copy the unit from.
+cat > /etc/systemd/system/hyper.service <<'EOF'
+[Unit]
+Description=Hyper worker node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hyper
+Group=hyper
+EnvironmentFile=/etc/hyper/env
+ExecStart=/opt/hyper/bin/hyper start
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now hyper
+
+echo "================================================================"
+echo "  HYPER WORKER BOOTSTRAP COMPLETE"
+echo "  host: $(hostname)  node: hyper@${internal_ip}"
+echo "  log:  ${LOG}"
+echo "================================================================"

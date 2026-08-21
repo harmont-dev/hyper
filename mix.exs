@@ -148,6 +148,7 @@ defmodule Hyper.MixProject do
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",
         "docs/cookbook/architecture.md",
+        "docs/cookbook/autoscale.md",
         "docs/grpc.md"
       ],
       groups_for_extras: [
@@ -229,7 +230,7 @@ defmodule Hyper.MixProject do
       # because cargo resolves the declared `[[test]]` target paths at manifest
       # load even for plain `cargo build`.
       files: ~w(
-        lib priv/firecracker priv/repo priv/vmlinux proto config mix.exs
+        lib priv/firecracker priv/repo priv/vmlinux priv/deploy proto config mix.exs
         README.md LICENSE
         native/guest-agent/src native/guest-agent/tests native/guest-agent/build.rs
         native/guest-agent/Cargo.toml native/guest-agent/Cargo.lock

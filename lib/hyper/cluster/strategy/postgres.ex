@@ -32,6 +32,8 @@ defmodule Hyper.Cluster.Strategy.Postgres do
 
   use GenServer
 
+  @behaviour Cluster.Strategy
+
   alias Cluster.Strategy.State
 
   require Logger
@@ -49,7 +51,8 @@ defmodule Hyper.Cluster.Strategy.Postgres do
   WHERE updated_at > now() - ($1 || ' milliseconds')::interval AND node <> $2
   """
 
-  @spec start_link([State.t()]) :: {:ok, pid} | {:error, term}
+  @impl Cluster.Strategy
+  @spec start_link([State.t()]) :: {:ok, pid} | :ignore | {:error, term}
   def start_link([%State{} = state]) do
     GenServer.start_link(__MODULE__, state)
   end

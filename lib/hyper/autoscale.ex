@@ -1,53 +1,3 @@
-defmodule Hyper.Autoscale.UserData do
-  @moduledoc """
-  Renders the cloud-init user-data (a bash script) handed to a freshly
-  provisioned worker so it joins this Hyper cluster on boot. The body lives in
-  `priv/deploy/latitude/user-data.sh.eex` and is rendered with the bootstrap
-  params from `Hyper.Cfg.Autoscale.provider_cfg/0`. If that template is missing
-  (e.g. a stripped release) a minimal script that only logs is used instead, so
-  provisioning still returns a valid — if inert — script rather than crashing.
-  """
-
-  @template_segments ["priv", "deploy", "latitude", "user-data.sh.eex"]
-
-  @doc "Render the worker bootstrap script for `cfg` (see `Hyper.Cfg.Autoscale.provider_cfg/0`)."
-  @spec render(map()) :: String.t()
-  def render(cfg) do
-    assigns = %{
-      release_url: cfg[:release_url],
-      pg_url: cfg[:pg_url],
-      cookie: cfg[:cookie],
-      resolver: cfg[:resolver],
-      hostname: hostname(cfg)
-    }
-
-    case template_file() do
-      {:ok, path} -> EEx.eval_file(path, assigns: assigns)
-      :error -> fallback(assigns)
-    end
-  end
-
-  @spec hostname(map()) :: String.t()
-  defp hostname(cfg) do
-    prefix = cfg[:hostname_prefix] || "hyper-worker"
-    "#{prefix}-#{:erlang.unique_integer([:positive])}"
-  end
-
-  @spec template_file() :: {:ok, Path.t()} | :error
-  defp template_file do
-    path = Application.app_dir(:hyper, @template_segments)
-    if File.regular?(path), do: {:ok, path}, else: :error
-  end
-
-  @spec fallback(map()) :: String.t()
-  defp fallback(assigns) do
-    """
-    #!/usr/bin/env bash
-    echo "hyper: user-data template missing; cannot bootstrap #{assigns.hostname}" >&2
-    """
-  end
-end
-
 defmodule Hyper.Autoscale do
   @moduledoc """
   Reactive + periodic worker autoscaler. Started only on a `:client` node, it
@@ -62,25 +12,35 @@ defmodule Hyper.Autoscale do
     * `request_capacity/0` — a reactive burst the scheduler casts when it returns
       `:no_capacity`, adding one node if there is still headroom under `max_nodes/0`.
 
+  A provisioned machine is *committed capacity* long before it is *live*: the
+  provider returns as soon as the machine is RUNNING, but the node only shows up
+  in `cluster_nodes` once its bootstrap script has installed and started Hyper,
+  which takes minutes. Counting only live + in-flight machines therefore orders a
+  new machine on every tick of that gap. So a successful create moves into
+  `:pending`, where it is counted as committed until either its
+  `Hyper.Cfg.Autoscale.provision_timeout_ms/0` deadline passes or the live worker
+  count has risen to cover it.
+
   Everything is demo-grade and best-effort: failures are logged via `Logger` and
   never crash the process. Provisioning runs in an unlinked `Task` so a slow or
-  failing provider API call cannot block the reconcile loop; in-flight
-  provisions are counted in state so overlapping ticks never double-provision.
-  If autoscaling is disabled or no API token is configured, it logs once and
-  idles.
+  failing provider API call cannot block the reconcile loop.
   """
 
   use GenServer
   require Logger
 
-  alias Hyper.Autoscale.UserData
   alias Hyper.Cfg.Autoscale, as: Config
   alias Hyper.Img.Db.Repo
 
   @node_ttl_seconds 15
 
-  @type t :: %__MODULE__{in_flight: non_neg_integer(), skip_logged: boolean()}
-  defstruct in_flight: 0, skip_logged: false
+  @type t :: %__MODULE__{
+          in_flight: non_neg_integer(),
+          pending: %{optional(String.t()) => integer()},
+          pending_baseline: non_neg_integer(),
+          skip_logged: boolean()
+        }
+  defstruct in_flight: 0, pending: %{}, pending_baseline: 0, skip_logged: false
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -88,8 +48,9 @@ defmodule Hyper.Autoscale do
   end
 
   @doc """
-  Reactive burst: provision one more worker if in-flight + live workers is still
-  below `max_nodes/0`. Cast by the scheduler when it cannot place a VM.
+  Reactive burst: provision one more worker if committed capacity (live +
+  in-flight + pending) is still below `max_nodes/0`. Cast by the scheduler when
+  it cannot place a VM.
   """
   @spec request_capacity() :: :ok
   def request_capacity, do: GenServer.cast(__MODULE__, :request_capacity)
@@ -108,31 +69,33 @@ defmodule Hyper.Autoscale do
   end
 
   def handle_info({:provision_done, result}, state) do
-    case result do
-      {:ok, ref} -> Logger.info("autoscale: provisioned worker #{inspect(ref)}")
-      {:error, reason} -> Logger.warning("autoscale: provision failed: #{inspect(reason)}")
-    end
+    state = %{state | in_flight: max(0, state.in_flight - 1)}
 
-    {:noreply, %{state | in_flight: max(0, state.in_flight - 1)}}
+    case result do
+      {:ok, ref} ->
+        Logger.info("autoscale: provisioned worker #{inspect(ref)}; awaiting bootstrap")
+        {:noreply, add_pending(state, ref)}
+
+      {:error, reason} ->
+        Logger.warning("autoscale: provision failed: #{inspect(reason)}")
+        {:noreply, state}
+    end
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_cast(:request_capacity, state) do
-    cond do
-      not Config.enabled?() ->
-        {:noreply, state}
-
-      is_nil(Config.provider_cfg().token) ->
-        {:noreply, state}
-
-      live_worker_count() + state.in_flight < Config.max_nodes() ->
+    with true <- Config.enabled?(),
+         :ok <- validate_provider() do
+      if committed(state, live_worker_count()) < Config.max_nodes() do
         Logger.info("autoscale: reactive capacity request; provisioning 1 worker")
         {:noreply, provision(state, 1)}
-
-      true ->
+      else
         {:noreply, state}
+      end
+    else
+      _ -> {:noreply, state}
     end
   end
 
@@ -142,26 +105,86 @@ defmodule Hyper.Autoscale do
       not Config.enabled?() ->
         log_skip(state, "autoscaling disabled (autoscale.enabled = false)")
 
-      is_nil(Config.provider_cfg().token) ->
-        log_skip(state, "LATITUDE_API_TOKEN not set; autoscaler idle")
+      match?({:error, _}, validate_provider()) ->
+        {:error, reason} = validate_provider()
+        log_skip(state, "provider #{inspect(Config.provider())} not usable: #{inspect(reason)}")
 
       true ->
-        scale_up(drain_idle(reset_skip(state)))
+        live = live_worker_count()
+
+        state
+        |> reset_skip()
+        |> retire_pending(live)
+        |> drain_idle()
+        |> scale_up(live)
     end
   end
 
-  @spec scale_up(t()) :: t()
-  defp scale_up(state) do
-    live = live_worker_count()
+  @spec validate_provider() :: :ok | {:error, term()}
+  defp validate_provider do
+    provider = Config.provider()
+    provider.validate_cfg(Config.provider_cfg())
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @spec committed(t(), non_neg_integer()) :: non_neg_integer()
+  defp committed(%__MODULE__{in_flight: in_flight, pending: pending}, live)
+       when is_integer(live) and is_integer(in_flight),
+       do: live + in_flight + map_size(pending)
+
+  @spec add_pending(t(), term()) :: t()
+  defp add_pending(state, ref) do
+    deadline = System.monotonic_time(:millisecond) + Config.provision_timeout_ms()
+
+    baseline =
+      if map_size(state.pending) == 0, do: live_worker_count(), else: state.pending_baseline
+
+    %{
+      state
+      | pending: Map.put(state.pending, pending_key(ref), deadline),
+        pending_baseline: baseline
+    }
+  end
+
+  @spec pending_key(term()) :: String.t()
+  defp pending_key(%{ref: ref}) when is_binary(ref), do: ref
+  defp pending_key(other), do: inspect(other)
+
+  @spec retire_pending(t(), non_neg_integer()) :: t()
+  defp retire_pending(%__MODULE__{pending: pending} = state, _live) when map_size(pending) == 0,
+    do: state
+
+  defp retire_pending(state, live) do
+    now = System.monotonic_time(:millisecond)
+    kept = Map.filter(state.pending, fn {_key, deadline} -> deadline > now end)
+
+    kept =
+      if map_size(kept) > 0 and live >= state.pending_baseline + map_size(kept),
+        do: %{},
+        else: kept
+
+    if map_size(kept) != map_size(state.pending) do
+      Logger.info(
+        "autoscale: retired #{map_size(state.pending) - map_size(kept)} pending provision(s); " <>
+          "#{map_size(kept)} still awaiting bootstrap"
+      )
+    end
+
+    %{state | pending: kept}
+  end
+
+  @spec scale_up(t(), non_neg_integer()) :: t()
+  defp scale_up(state, live) do
     min_n = Config.min_nodes()
     max_n = Config.max_nodes()
-    committed = live + state.in_flight
+    committed = committed(state, live)
     to_provision = max(0, min(min_n - committed, max_n - committed))
 
     if to_provision > 0 do
       Logger.info(
-        "autoscale: #{live} live workers (+#{state.in_flight} in-flight) below min #{min_n}; " <>
-          "provisioning #{to_provision}"
+        "autoscale: #{live} live workers (+#{state.in_flight} in-flight, " <>
+          "+#{map_size(state.pending)} pending) below min #{min_n}; provisioning #{to_provision}"
       )
     end
 
@@ -169,17 +192,50 @@ defmodule Hyper.Autoscale do
   end
 
   @spec provision(t(), non_neg_integer()) :: t()
-  defp provision(state, n) when n > 0 do
+  defp provision(state, n) when is_integer(n) and n > 0 do
     cfg = Config.provider_cfg()
     provider = Config.provider()
-    user_data = UserData.render(cfg)
     parent = self()
 
-    Enum.each(1..n, fn _ -> spawn_provision(provider, cfg, user_data, parent) end)
-    %{state | in_flight: state.in_flight + n}
+    case render_user_data(provider, cfg) do
+      {:ok, user_data} ->
+        Enum.each(1..n, fn _ -> spawn_provision(provider, cfg, user_data, parent) end)
+        %{state | in_flight: state.in_flight + n}
+
+      {:error, reason} ->
+        Logger.error("autoscale: refusing to provision: #{inspect(reason)}")
+        state
+    end
   end
 
   defp provision(state, _n), do: state
+
+  @spec render_user_data(module(), map()) :: {:ok, String.t()} | {:error, term()}
+  defp render_user_data(provider, cfg) do
+    path = Application.app_dir(:hyper, provider.template_segments())
+
+    if File.regular?(path) do
+      assigns = [
+        release_url: cfg[:release_url],
+        pg_url: cfg[:pg_url],
+        cookie: cfg[:cookie],
+        resolver: cfg[:resolver],
+        hostname: hostname(cfg)
+      ]
+
+      {:ok, EEx.eval_file(path, assigns: assigns)}
+    else
+      {:error, {:template_missing, path}}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @spec hostname(map()) :: String.t()
+  defp hostname(cfg) do
+    prefix = cfg[:hostname_prefix] || "hyper-worker"
+    "#{prefix}-#{:erlang.unique_integer([:positive])}"
+  end
 
   @spec spawn_provision(module(), map(), String.t(), pid()) :: :ok
   defp spawn_provision(provider, cfg, user_data, parent) do
@@ -211,7 +267,10 @@ defmodule Hyper.Autoscale do
     e ->
       # On a DB hiccup, report the ceiling so this tick provisions nothing: a
       # transient failure must never trigger a provisioning storm.
-      Logger.warning("autoscale: could not count live workers (#{Exception.message(e)}); skipping")
+      Logger.warning(
+        "autoscale: could not count live workers (#{Exception.message(e)}); skipping"
+      )
+
       Config.max_nodes()
   end
 

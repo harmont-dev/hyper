@@ -40,6 +40,23 @@ defmodule Hyper.Provider.Latitude do
   @default_hostname_prefix "hyper"
 
   @impl Hyper.Provider
+  @spec cfg_namespace() :: String.t()
+  def cfg_namespace, do: "latitude"
+
+  @impl Hyper.Provider
+  @spec template_segments() :: [String.t()]
+  def template_segments, do: ["priv", "deploy", "latitude", "user-data.sh.eex"]
+
+  @impl Hyper.Provider
+  @spec validate_cfg(Hyper.Provider.cfg()) :: :ok | {:error, term()}
+  def validate_cfg(cfg) do
+    case Enum.reject([:token, :project, :plan, :site, :operating_system], &optional_cfg(cfg, &1)) do
+      [] -> :ok
+      missing -> {:error, {:latitude, :missing_cfg, missing}}
+    end
+  end
+
+  @impl Hyper.Provider
   @spec create_node(Hyper.Provider.cfg(), String.t()) ::
           {:ok, Hyper.Provider.node_ref()} | {:error, term()}
   def create_node(cfg, user_data) do

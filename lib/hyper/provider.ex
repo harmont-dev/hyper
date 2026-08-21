@@ -44,4 +44,22 @@ defmodule Hyper.Provider do
 
   @doc "Enumerate the nodes this provider currently owns for the configured pool."
   @callback list_nodes(cfg()) :: {:ok, [node_ref()]} | {:error, term()}
+
+  @doc """
+  The `[autoscale.<namespace>]` TOML sub-table holding this provider's settings
+  (e.g. `"latitude"`, `"gcp"`).
+  """
+  @callback cfg_namespace() :: String.t()
+
+  @doc """
+  Path segments, relative to the application directory, of this provider's
+  user-data/startup-script EEx template.
+  """
+  @callback template_segments() :: [String.t()]
+
+  @doc """
+  Whether `cfg` has everything this provider needs to provision. `{:error,
+  reason}` names the missing piece so an operator can see which key is unset.
+  """
+  @callback validate_cfg(cfg()) :: :ok | {:error, term()}
 end
