@@ -144,7 +144,7 @@ defmodule Hyper.Node.Budget.HardTest do
 
     # The re-claim turned the grace lease back into a reservation, so the grace
     # deadline no longer applies: capacity is still held well past it. Were the
-    # entry still a lease, it would expire at 200ms and this would fail.
+    # entry still a lease, it would expire at 500ms and this would fail.
     assert steadily(fn -> Hard.headroom().mem == before - @vm_mem end, 400)
 
     # Only the NEW owner's death releases it. Had the claim rebound to the dead
