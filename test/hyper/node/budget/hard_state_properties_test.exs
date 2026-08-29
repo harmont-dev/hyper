@@ -191,11 +191,16 @@ defmodule Hyper.Node.Budget.HardStatePropertiesTest do
 
     property "re-claiming a claimed vm_id rebinds it without double-counting" do
       check all({s, caps} <- spec_within_caps(), id <- vm_id()) do
+        first = ref()
+        second = ref()
+
         {:ok, _token, leased} = State.lease(State.new(), id, s, caps, @never)
-        {:ok, once} = State.claim(leased, id, ref())
-        {:ok, twice} = State.claim(once, id, ref())
+        {:ok, once} = State.claim(leased, id, first)
+        {:ok, twice} = State.claim(once, id, second)
 
         assert State.allocated(twice) == State.allocated(once)
+        assert State.vm_id_for_owner(twice, second) == id
+        assert State.vm_id_for_owner(twice, first) == nil
       end
     end
 

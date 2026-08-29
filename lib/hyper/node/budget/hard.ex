@@ -275,10 +275,16 @@ defmodule Hyper.Node.Budget.Hard do
 
   @impl true
   def handle_call({:drop, vm_id, token}, _from, s) do
-    republish()
+    ledger = State.drop(s.ledger, vm_id, token)
 
-    {:reply, :ok,
-     %{s | ledger: State.drop(s.ledger, vm_id, token), leasers: forget_leaser(s.leasers, vm_id)}}
+    # A drop carrying a stale token changes nothing, and must not retire the
+    # leaser's monitor — that monitor is still the lease's release path.
+    if ledger == s.ledger do
+      {:reply, :ok, s}
+    else
+      republish()
+      {:reply, :ok, %{s | ledger: ledger, leasers: forget_leaser(s.leasers, vm_id)}}
+    end
   end
 
   @impl true
