@@ -286,9 +286,21 @@ defmodule Hyper.Node do
       try do
         start_fun.()
       after
-        :ok = Hyper.Node.Budget.drop(vm_id, token)
+        release(vm_id, token)
       end
     end
+  end
+
+  # Dropping the lease must not turn a successful boot into a raise: `Hard` is a
+  # single GenServer, so a restart or a queue timeout here would otherwise
+  # propagate out of the `after` over a VM that is already live and claimed.
+  # Swallowing is safe because the lease is monitored on this process too, and
+  # this process exits as soon as `try_run/3` returns.
+  @spec release(Hyper.Vm.Id.t(), reference()) :: :ok
+  defp release(vm_id, token) do
+    Hyper.Node.Budget.drop(vm_id, token)
+  catch
+    :exit, _ -> :ok
   end
 
   @spec test_system :: :ok | {:error, term()}
