@@ -20,6 +20,13 @@ defmodule Hyper.Node.FireVMM do
        final usage window before the daemon removes the cgroup.
 
   Strategy is `:one_for_one`: the four children are restarted independently.
+
+  `init/1` claims this VM's budget lease (`Hyper.Node.Budget.claim/2`) before
+  starting any child, so a VM that reaches `{:ok, pid}` is always accounted.
+  That path needs a real jail and a live budget server, so it is covered by the
+  `:integration` suite (`test/e2e/vm_lifecycle_test.exs`) rather than a unit
+  test; the hermetic half — that `try_run/3` does not itself own the
+  reservation — is pinned by `test/hyper/node/try_run_admission_test.exs`.
   """
 
   use Supervisor
@@ -77,34 +84,36 @@ defmodule Hyper.Node.FireVMM do
 
   @impl true
   def init(opts) do
-    # Self-register the cluster routing entry here rather than via a start name;
-    # see `Hyper.Cluster.Routing.register_self/1`. A fresh random vm_id never
-    # collides, so `:already_registered` only happens against a stale dead
-    # incarnation - decline the start and let the supervisor retry clean.
-    case Hyper.Cluster.Routing.register_self({opts.vm_id, :supervisor}) do
-      :ok ->
-        children = [
-          # Client must be registered before Core: Core starts the State machine,
-          # which calls Client.run while waiting for the daemon's API. Client
-          # depends only on vm_id (an independent peer), so no reverse dependency.
-          {Client, %Client.Opts{vm_id: opts.vm_id}},
-          {Core, opts},
-          {Relay,
-           %{
-             vm_id: opts.vm_id,
-             vsock_uds: Jailer.host_vsock(opts.vm_id),
-             listen_path: Agent.relay_socket_path(opts.vm_id)
-           }},
-          # Last on purpose: children stop in reverse start order, so the meter
-          # stops first at teardown and flushes its final usage window while
-          # Core's Daemon (and the cgroup it removes) is still alive.
-          {Meter, %Meter.Opts{vm_id: opts.vm_id, cgroup_dir: Jailer.cgroup_dir(opts.vm_id)}}
-        ]
+    # Self-register the cluster routing entry and claim this VM's budget here
+    # rather than from the placing caller. `DynamicSupervisor.start_child`
+    # returns only after this function does, so a successful start already
+    # implies both — which is what leaves no window in which a booted VM is
+    # unaccounted. A fresh random vm_id never collides, so `:already_registered`
+    # only happens against a stale dead incarnation; `:no_lease` means nothing
+    # admitted this VM. Decline the start either way.
+    with :ok <- Hyper.Cluster.Routing.register_self({opts.vm_id, :supervisor}),
+         :ok <- Hyper.Node.Budget.claim(opts.vm_id, self()) do
+      children = [
+        # Client must be registered before Core: Core starts the State machine,
+        # which calls Client.run while waiting for the daemon's API. Client
+        # depends only on vm_id (an independent peer), so no reverse dependency.
+        {Client, %Client.Opts{vm_id: opts.vm_id}},
+        {Core, opts},
+        {Relay,
+         %{
+           vm_id: opts.vm_id,
+           vsock_uds: Jailer.host_vsock(opts.vm_id),
+           listen_path: Agent.relay_socket_path(opts.vm_id)
+         }},
+        # Last on purpose: children stop in reverse start order, so the meter
+        # stops first at teardown and flushes its final usage window while
+        # Core's Daemon (and the cgroup it removes) is still alive.
+        {Meter, %Meter.Opts{vm_id: opts.vm_id, cgroup_dir: Jailer.cgroup_dir(opts.vm_id)}}
+      ]
 
-        Supervisor.init(children, strategy: :one_for_one)
-
-      {:error, _} ->
-        :ignore
+      Supervisor.init(children, strategy: :one_for_one)
+    else
+      {:error, _reason} -> :ignore
     end
   end
 
