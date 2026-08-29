@@ -1,0 +1,307 @@
+TODO: an unreachable scheduler candidate crashes placement instead of cutting
+      over to the next node.
+
+Status: known, not fixed. Deliberately deferred to its own PR — it is
+independent of the budget-admission window (`Hyper.Node.try_run/3`) currently
+being worked on, though both live in the same placement path.
+
+
+THE DEFECT
+----------
+
+`Hyper.Cluster.Scheduler.run/4` confirms each candidate node by RPC:
+
+    # lib/hyper/cluster/scheduler.ex:78-80
+    attempt = fn target ->
+      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+    end
+
+    place(spec, layers, attempt)
+
+`place/3` treats `attempt` as returning `{:ok, result} | {:error, reason}`, and
+on `{:error, _}` continues to the next candidate:
+
+    # lib/hyper/cluster/scheduler.ex:47-58
+    |> Enum.reduce_while({:error, :no_capacity}, fn node, acc ->
+      case attempt.(node) do
+        {:ok, result} -> {:halt, {:ok, {node, result}}}
+        {:error, reason} ->
+          Logger.warning("scheduler: #{inspect(node)} refused placement: ...")
+          {:cont, acc}
+      end
+    end)
+
+`:erpc.call/4` does not return `{:error, _}` on failure. It RAISES. There is no
+try/catch at either site, so the exception propagates straight out of `place/3`,
+out of `Scheduler.run/4`, and out of `Hyper.create_vm/1` — and the remaining
+candidates are never tried.
+
+One dead candidate at the head of the list fails the entire placement, on a
+cluster with plenty of free capacity behind it.
+
+
+THIS IS AN OMISSION, NOT A POLICY
+---------------------------------
+
+Every other `:erpc.call` in the tree is guarded:
+
+    lib/hyper.ex:93-95      exec/3            -> {:error, :node_unreachable}
+    lib/hyper.ex:133-135    unflushed_usage   -> Unit.Time.zero()
+    lib/hyper.ex:163-166    stop_vm           -> {:error, :machine_unreachable}
+    lib/hyper.ex:194-196    id/1              -> nil
+    lib/hyper/vm.ex:42-44   fast_fork/1       -> {:error, :node_unreachable}
+    lib/hyper/vm.ex:109-111 publish_on_owner  -> {:error, :node_unreachable}
+
+    lib/hyper/cluster/scheduler.ex:79            UNGUARDED
+
+All six use the same idiom: `catch :error, {:erpc, _} -> ...`. scheduler.ex:79
+is the only one that does not.
+
+
+WHY THE WINDOW IS REAL, NOT THEORETICAL
+---------------------------------------
+
+The candidate list comes from `Hyper.Cluster.Budget.all_states/0` — a
+`Horde.Registry` over a delta-CRDT, read from the LOCAL replica. Its own
+moduledoc says "eventually consistent and partition-tolerant", and
+`Scheduler`'s says "All filtering is best-effort on a possibly-stale snapshot".
+
+A node's entry is registered against its `Budget.Advertiser` pid, so a cleanly
+dead node does eventually drop out cluster-wide. But the entry outlives
+reachability in at least three ordinary situations:
+
+  1. CRDT convergence lag — the node died milliseconds ago and this replica has
+     not been told yet.
+  2. Network partition — the Advertiser is alive and happily re-registering on
+     its side of the split; unreachable from ours.
+  3. A wedged-but-alive BEAM — distribution tick failures mark the node down
+     while its registry entry is still present locally.
+
+Scheduling reads a snapshot that is stale by design. Treating a stale entry as
+fatal rather than as one candidate to skip inverts the whole point of having a
+ranked candidate list.
+
+
+WHAT ELSE ESCAPES THROUGH THE SAME HOLE
+---------------------------------------
+
+`:erpc` also re-raises exceptions thrown by the remote function, so anything
+inside `start_fun` that raises rather than returning `{:error, _}` takes the
+same path out. `start_fun` is
+`fn -> Hyper.Node.start_image_vm(vm_id, spec) end` (lib/hyper.ex:25), and that
+call tree contains at least:
+
+  - `Hyper.Node.Vmlinux.path/1` (lib/hyper/node/vmlinux.ex:26) — documented as
+    "Raises if neither resolves"; a `MatchError` on `{:ok, path} = ...`.
+  - every `GenServer.call` in the boot path (`Users.claim`, `Img.Mutable`,
+    `ThinPool`, `Budget.Hard.reserve`) — each EXITS on timeout or on a dead
+    server. An overloaded `Hard` is enough.
+
+Per OTP's erpc contract these arrive at the caller as (VERIFY THE EXACT SHAPES
+WHEN FIXING — these are from the documented contract, not observed here):
+
+    error:{erpc, noconnection}          node unreachable / connection lost
+    error:{erpc, timeout}               deadline exceeded (n/a: no timeout set)
+    error:{erpc, notsup}                remote node does not support erpc
+    error:{exception, Reason, Stack}    remote raised (class :error)
+    exit:{exception, Reason}            remote exited (class :exit)
+    exit:{signal, Reason}               remote process killed
+
+Note that the `catch :error, {:erpc, _}` idiom used at the six guarded sites
+only covers the first three. A remote GenServer.call timeout arrives as class
+`:exit` and escapes even the guarded sites. Worth auditing as part of this fix,
+but the unguarded scheduler site is the priority.
+
+Also relevant: neither `:erpc.call` in the placement path sets a timeout, so
+both default to `infinity` (scheduler.ex:79, vm.ex:42). A wedged remote
+`start_fun` parks the calling process forever.
+
+
+USER-VISIBLE CONSEQUENCE
+------------------------
+
+At the gRPC boundary, `Hyper.Grpc.Server.create_vm/2` (lib/hyper/grpc/server.ex:43)
+maps `{:error, reason}` through `Codec.rpc_error/1` into a proper status. An
+escaping `:erpc` exception is not `{:error, reason}`, so it never reaches the
+`else` clause — the client gets grpc-elixir's generic handling of an unexpected
+exception (UNKNOWN) instead of a mapped status.
+
+The correct mapping already exists and is currently unreachable:
+
+    # lib/hyper/grpc/codec.ex:147
+    defp rpc_error(:node_unreachable),
+      do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
+
+So returning `{:error, :node_unreachable}` from the guard is enough to make the
+client see UNAVAILABLE, with no codec change.
+
+
+FIX SKETCH
+----------
+
+Minimum: guard scheduler.ex:79 the way the other six sites are guarded, so a
+transport failure becomes a `{:cont, acc}` and the walk continues.
+
+Two decisions the fix has to make, neither obvious:
+
+  1. Which failures should cut over, and which should abort the placement?
+     A transport failure (`{erpc, noconnection}`) is node-specific — cut over.
+     A remote application exception (missing kernel, corrupt image) will
+     usually fail identically on every candidate, so cutting over means paying
+     for it N times. But it is not always node-specific — a missing vmlinux IS
+     per-node. Leaning: cut over on everything, and rely on `place/3`'s existing
+     `Logger.warning` to keep the real reason visible. Cheap once the budget
+     window is fixed, since a refusal will no longer cost a full VM boot.
+
+  2. What should the aggregate error be when every candidate was UNREACHABLE
+     rather than full? `place/3` currently returns `{:error, :no_capacity}` for
+     any exhausted walk, which would then be an outright lie. Probably wants a
+     distinct `:no_reachable_candidate`, but that is a public API change:
+     `Hyper.Vm.capacity_error?/1` (lib/hyper/vm.ex:82) gates the fast-fork ->
+     slow-fork fallback on that atom list, and test/e2e/create_vm_refusal_test.exs
+     pins `{:error, :no_capacity}` exactly.
+
+
+TESTING
+-------
+
+Hermetic, no cluster needed. `place/3` takes `attempt` as an argument
+(scheduler.ex:45), so a unit test can pass an `attempt` that raises
+`:erpc.call`-shaped exceptions for the first N candidates and returns `{:ok, _}`
+for the last, then assert the walk reached the last one. That test fails today.
+
+Same trick as test/hyper/node/try_run_admission_test.exs, which exploits
+`try_run/3` taking `start_fun`/`stop_fun` as arguments.
+
+
+RELATED
+-------
+
+The budget-admission window in `Hyper.Node.try_run/3` (boots the VM, then asks
+permission) is a separate defect in the same path, tracked in the current work.
+Fixing it makes a refused candidate cheap, which is what makes an aggressive
+cut-over policy in decision (1) above affordable.
+
+
+================================================================================
+
+
+TODO: `Users.claim/0` leaks a uid permanently if the boot path dies between
+      claim and bind.
+
+Status: known, not fixed. Same defect class as the budget-admission window, in
+a worse form. Deliberately out of scope for the budget PR; the lease mechanism
+built there is the intended eventual home for this.
+
+
+THE DEFECT
+----------
+
+Three resources are acquired during a VM boot and handed to the VM once it
+exists. They handle a mid-boot caller death very differently:
+
+  RESOURCE                 HELD DURING BOOT BY     BACKSTOP IF CALLER DIES
+  -----------------------  ----------------------  ------------------------
+  mutable layer            caller pid, monitored   monitor + idle-reap + Reaper
+  (Img.Mutable)
+
+  uid (Users)              NOBODY                  NONE
+
+  budget (Budget.Hard)     nobody (reserved        n/a - not held at all
+                           after the boot)         (the current work)
+
+`Img.Mutable` is correct. Its boot-path handoff (lib/hyper/node.ex:126-128) is:
+
+    :ok = Users.bind(uid, pid)
+    :ok = Img.Mutable.acquire(mutable, pid)   # VM supervisor becomes a holder
+    :ok = Img.Mutable.release(mutable)        # caller drops its hold
+
+`acquire(server)` with no pid registers `self()` as a holder AND monitors it
+(mutable.ex:82, 193-201). Acquire-new-before-release-old, so the refcount never
+touches zero and the idle timer never arms. A caller that dies anywhere in that
+window has its hold dropped by the monitor.
+
+`Users` has the same two-phase shape with the safety removed:
+
+    # lib/hyper/node/users.ex:58
+    def claim, do: GenServer.call(__MODULE__, {:new})       # NO monitor
+
+    # lib/hyper/node/users.ex:66
+    def bind(id, owner), do: GenServer.call(__MODULE__, {:bind, id, owner})
+
+`claim/0` hands out an id and records nothing. Only `bind/2` monitors
+(users.ex:122-125). Between them the id is owned by no one, and the sole
+recovery is the explicit `Users.release/1` call in `acquire_or_release/2`
+(lib/hyper/node.ex:145) and `start_vm_or_release/3` (lib/hyper/node.ex:363) —
+which run only on a clean `{:error, _}` return, never on a crash or an exit.
+
+
+WHY IT IS WORSE THAN THE OTHER TWO
+----------------------------------
+
+A leaked uid is unrecoverable without restarting the node.
+
+`Hyper.Node.Reaper` reconciles orphaned host resources against liveness, but its
+candidate set is only `hyper-rw-*` dm volumes, per-VM cgroup leaves, and per-VM
+netns names (see `Reaper.Plan.orphans/4`). Uids are not in it, and could not
+easily be — a uid leaves no trace on the host to enumerate. `Hyper.Node.Reclaim`
+runs once at boot and clears dm/loop devices, not the in-memory id pool.
+
+So the pool is a bump pointer plus a freed-id stack held in `Users`' GenServer
+state (users.ex:104-118). An id that is never freed is gone for the lifetime of
+that process. Enough of them and `claim/0` returns `{:error, :exhausted}` on a
+node with no VMs running.
+
+`Users.with_id/1` (users.ex:45) is the safe variant — it wraps the callable in
+try/after. The VM boot path does not use it, because the id must outlive the
+function that claimed it.
+
+
+HOW TO TRIGGER IT
+-----------------
+
+Any exit between `Users.claim/0` (lib/hyper/node.ex:88 and :108) and
+`Users.bind/2` (lib/hyper/node.ex:126). That span contains the whole mutable
+layer build: `Img.create_mutable/2` or `Img.create_fork/3`, which shells out to
+the suid helper for dmsetup work, plus `Vmlinux.path/1`, which is documented to
+raise. In the cluster path the process running all of this is an `:erpc`-spawned
+process with no timeout, killed by nothing except a crash.
+
+Note this is NOT the same window as the budget bug and is not closed by fixing
+it: the budget lease is acquired before the boot, whereas the uid is claimed
+during it.
+
+
+FIX SKETCH
+----------
+
+Make the claim self-owning, the way `Img.Mutable.acquire/1` already is:
+
+  - `Users.claim/0` monitors the calling process and frees the id on its `:DOWN`
+    unless a `bind/2` has since transferred ownership. Smallest change, matches
+    the existing `Img.Mutable` idiom exactly, and needs no new concepts.
+
+  - Or, once the budget lease lands, express uid ownership through the same
+    lease mechanism so all three boot-time resources share one lifetime story
+    instead of three hand-rolled variants. Preferred long-term; more churn.
+
+Either way `bind/2` must attach the new owner BEFORE the old monitor is dropped,
+or the fix introduces the mirror-image bug (id freed while a live VM holds it,
+then handed to a second VM — a security hazard, since a uid collision means two
+VMs sharing an identity; cf. `Users.test_system/0`, which fails closed at boot
+precisely to prevent uid collisions).
+
+
+TESTING
+-------
+
+Hermetic and cheap — `Users` is a plain GenServer over an integer range with no
+I/O:
+
+  - claim from a process, kill it, assert the id returns to the pool.
+  - claim, bind to a second process, kill the claimer, assert the id does NOT
+    return (the VM still holds it).
+  - claim, bind, kill the owner, assert it does return.
+  - property: over any interleaving of claim/bind/release/owner-death, the set
+    of outstanding ids equals the set of live owners, and no id is ever handed
+    out twice while still held. That second half is the security-relevant one.
