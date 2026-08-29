@@ -178,6 +178,27 @@ defmodule Hyper.Node.Budget.HardStatePropertiesTest do
       end
     end
 
+    property "leasing a vm_id that already holds capacity is refused, not overwritten" do
+      check all({s, caps} <- spec_within_caps(), id <- vm_id()) do
+        {:ok, _token, leased} = State.lease(State.new(), id, s, caps, @never)
+
+        assert {:error, :already_held} = State.lease(leased, id, s, caps, @never)
+
+        {:ok, claimed} = State.claim(leased, id, ref())
+        assert {:error, :already_held} = State.lease(claimed, id, s, caps, @never)
+      end
+    end
+
+    property "re-claiming a claimed vm_id rebinds it without double-counting" do
+      check all({s, caps} <- spec_within_caps(), id <- vm_id()) do
+        {:ok, _token, leased} = State.lease(State.new(), id, s, caps, @never)
+        {:ok, once} = State.claim(leased, id, ref())
+        {:ok, twice} = State.claim(once, id, ref())
+
+        assert State.allocated(twice) == State.allocated(once)
+      end
+    end
+
     property "no interleaving of operations exceeds the caps or loses an entry" do
       check all({ops, s, caps} <- op_sequence()) do
         {state, model} =
