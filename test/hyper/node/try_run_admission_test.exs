@@ -81,13 +81,6 @@ defmodule Hyper.Node.TryRunAdmissionTest do
                "#{boots - @capacity} VMs were built only to be thrown away"
     end
 
-    test "a refused placement never invokes stop_fun" do
-      %{teardowns: teardowns} = run_herd()
-
-      assert teardowns == 0,
-             "#{teardowns} refusals tore a VM down, so #{teardowns} VMs had been built to refuse"
-    end
-
     test "the ledger admits exactly the node's capacity" do
       %{results: results} = run_herd()
 
@@ -101,12 +94,7 @@ defmodule Hyper.Node.TryRunAdmissionTest do
       before = Hard.headroom().mem
 
       assert {:error, :boom} =
-               Hyper.Node.try_run(
-                 "vm-fails",
-                 spec(),
-                 fn -> {:error, :boom} end,
-                 teardown(self())
-               )
+               Hyper.Node.try_run("vm-fails", spec(), fn -> {:error, :boom} end)
 
       assert Hard.headroom().mem == before
     end
@@ -117,15 +105,10 @@ defmodule Hyper.Node.TryRunAdmissionTest do
 
       caller =
         spawn(fn ->
-          Hyper.Node.try_run(
-            "vm-abandoned",
-            spec(),
-            fn ->
-              send(parent, :booting)
-              Process.sleep(:infinity)
-            end,
-            teardown(parent)
-          )
+          Hyper.Node.try_run("vm-abandoned", spec(), fn ->
+            send(parent, :booting)
+            Process.sleep(:infinity)
+          end)
         end)
 
       assert_receive :booting
@@ -139,19 +122,13 @@ defmodule Hyper.Node.TryRunAdmissionTest do
     test "the reservation outlives the placing caller" do
       before = Hard.headroom().mem
       vm = spawn_idle()
-      parent = self()
 
       task =
         Task.async(fn ->
-          Hyper.Node.try_run(
-            "vm-claims",
-            spec(),
-            fn ->
-              :ok = Hard.claim("vm-claims", vm)
-              {:ok, vm}
-            end,
-            teardown(parent)
-          )
+          Hyper.Node.try_run("vm-claims", spec(), fn ->
+            :ok = Hard.claim("vm-claims", vm)
+            {:ok, vm}
+          end)
         end)
 
       assert {:ok, ^vm} = Task.await(task)
@@ -164,11 +141,10 @@ defmodule Hyper.Node.TryRunAdmissionTest do
     test "a boot that never claims leaves no reservation behind" do
       before = Hard.headroom().mem
       vm = spawn_idle()
-      parent = self()
 
       task =
         Task.async(fn ->
-          Hyper.Node.try_run("vm-silent", spec(), fn -> {:ok, vm} end, teardown(parent))
+          Hyper.Node.try_run("vm-silent", spec(), fn -> {:ok, vm} end)
         end)
 
       assert {:ok, ^vm} = Task.await(task)
@@ -192,7 +168,7 @@ defmodule Hyper.Node.TryRunAdmissionTest do
     callers =
       for i <- 1..@herd do
         Task.async(fn ->
-          Hyper.Node.try_run("vm-herd-#{i}", spec(), boot(parent), teardown(parent))
+          Hyper.Node.try_run("vm-herd-#{i}", spec(), boot(parent))
         end)
       end
 
@@ -202,7 +178,7 @@ defmodule Hyper.Node.TryRunAdmissionTest do
     results = Task.await_many(callers, 5_000)
     for {_caller, vm} <- booted, do: Process.exit(vm, :kill)
 
-    %{boots: length(booted), results: results, teardowns: drain_teardowns()}
+    %{boots: length(booted), results: results}
   end
 
   # Stands in for a real boot: a live process representing the VM's physical
@@ -217,24 +193,6 @@ defmodule Hyper.Node.TryRunAdmissionTest do
       after
         @boot_window_ms -> {:ok, vm}
       end
-    end
-  end
-
-  # Reports to the TEST process, not to whichever task ran the teardown — a
-  # `send(self(), ...)` here would make every teardown assertion vacuous.
-  defp teardown(parent) do
-    fn vm ->
-      send(parent, {:torn_down, vm})
-      Process.exit(vm, :kill)
-      :ok
-    end
-  end
-
-  defp drain_teardowns(count \\ 0) do
-    receive do
-      {:torn_down, _vm} -> drain_teardowns(count + 1)
-    after
-      50 -> count
     end
   end
 

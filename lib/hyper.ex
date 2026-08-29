@@ -23,14 +23,13 @@ defmodule Hyper do
       instance_spec = Hyper.Vm.Instance.spec(spec.type)
 
       start_fun = fn -> Hyper.Node.start_image_vm(vm_id, spec) end
-      stop_fun = fn pid -> Hyper.Node.stop_image_vm(pid) end
 
       # Rank candidates by how many of the image's layer bytes they already
       # have mounted; a fork's freshly published delta is resident nowhere yet,
       # so its parent's base layers dominate the score — which is the point.
       layers = Hyper.Img.Db.Image.chain_sizes(spec.img_id)
 
-      case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
+      case Hyper.Cluster.Scheduler.run(vm_id, instance_spec, layers, start_fun) do
         {:ok, {_node, pid}} -> {:ok, pid}
         {:error, _} = err -> err
       end
