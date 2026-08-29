@@ -226,6 +226,8 @@ keys you need to change.
 | `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): disk-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
 | `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft network-bandwidth capacity ([unit](#unit)). |
 | `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): network-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `boot_lease_ttl`   | `.boot_lease_ttl`   | `.boot_lease_ttl`   | `300 s`   | How long a placement may hold admitted capacity before its VM has booted. A backstop for a wedged boot; must exceed the slowest legitimate boot, including a cold image pull. |
+| `restart_grace`    | `.restart_grace`    | `.restart_grace`    | `5 s`     | How long a crashed VM's capacity is held while its supervisor restarts it, so a competing placement cannot take capacity the VM is about to reclaim. |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -239,7 +241,9 @@ config :hyper, Hyper.Cfg.Budget,
   disk_bw_cap: Unit.Bandwidth.gibps(1),
   disk_bw_max_load: 0.8,
   net_bw_cap: Unit.Bandwidth.gibps(1),
-  net_bw_max_load: 0.8
+  net_bw_max_load: 0.8,
+  boot_lease_ttl: Unit.Time.s(300),
+  restart_grace: Unit.Time.s(5)
 ```
 
 ### `config.toml`
@@ -254,6 +258,8 @@ disk_bw_cap = "1GiBps"
 disk_bw_max_load = 0.8
 net_bw_cap = "1GiBps"
 net_bw_max_load = 0.8
+boot_lease_ttl = "300s"
+restart_grace = "5s"
 ```
 <!-- tabs close -->
 
