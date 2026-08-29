@@ -250,7 +250,10 @@ defmodule Hyper.Node.Budget.HardStatePropertiesTest do
           mem_mib <- integer(1..64),
           disk_mib <- integer(1..64),
           slots <- integer(1..6),
-          ids <- uniq_list_of(vm_id(), min_length: 1, max_length: 6),
+          # Unique by construction, not by rejection: `uniq_list_of` over a
+          # size-dependent generator raises TooManyDuplicatesError at small
+          # generation sizes rather than re-generating, which aborts the run.
+          ids <- map(integer(1..6), fn n -> Enum.map(1..n, &"vm-#{&1}") end),
           ops <-
             list_of(
               tuple({member_of([:lease, :claim, :drop]), member_of(ids)}),
