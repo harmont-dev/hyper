@@ -1,6 +1,6 @@
 defmodule Hyper.Node.TryRunAdmissionTest do
   @moduledoc """
-  `Hyper.Node.try_run/4` is the node's authoritative admission gate: the
+  `Hyper.Node.try_run/3` is the node's authoritative admission gate: the
   scheduler picks a candidate from a stale gossip snapshot, and the target node
   confirms. Two different contracts hang off it, and only one is about the
   ledger.
@@ -15,10 +15,10 @@ defmodule Hyper.Node.TryRunAdmissionTest do
       is running consumes it whether or not anything has reserved it.
 
   The second is what keeps the host off the OOM killer, and it is what these
-  tests pin. `try_run/4` takes `start_fun`/`stop_fun` as arguments, so the boot
-  window is observable without KVM: the fake boot parks, which is what a real
-  firecracker boot (uid claim, dm-thin snapshot, jailer exec, guest init) does
-  for hundreds of milliseconds.
+  tests pin. `try_run/3` takes `start_fun` as an argument and the fake boot
+  parks until the test releases it, so the boot window is observable without
+  KVM — which is what a real firecracker boot (uid claim, dm-thin snapshot,
+  jailer exec, guest init) occupies for hundreds of milliseconds.
 
   On the handoff tests: the fake `start_fun` calls `Hard.claim/2` because that is
   what `Hyper.Node.FireVMM.init/1` does for a real VM, and
@@ -95,6 +95,16 @@ defmodule Hyper.Node.TryRunAdmissionTest do
 
       assert {:error, :boom} =
                Hyper.Node.try_run("vm-fails", spec(), fn -> {:error, :boom} end)
+
+      assert Hard.headroom().mem == before
+    end
+
+    test "a boot that raises releases the capacity it was granted" do
+      before = Hard.headroom().mem
+
+      assert_raise RuntimeError, fn ->
+        Hyper.Node.try_run("vm-raises", spec(), fn -> raise "kernel missing" end)
+      end
 
       assert Hard.headroom().mem == before
     end
