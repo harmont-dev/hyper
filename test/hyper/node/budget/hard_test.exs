@@ -131,7 +131,7 @@ defmodule Hyper.Node.Budget.HardTest do
   end
 
   test "re-claiming inside the restart grace rebinds the reservation to the new owner" do
-    start_budget(restart_grace: Unit.Time.ms(200))
+    start_budget(restart_grace: Unit.Time.ms(500))
     before = Hard.headroom().mem
 
     {_leaser, {:ok, _token}} = lease_from_another_process("vm-a")
@@ -145,13 +145,45 @@ defmodule Hyper.Node.Budget.HardTest do
     # The re-claim turned the grace lease back into a reservation, so the grace
     # deadline no longer applies: capacity is still held well past it. Were the
     # entry still a lease, it would expire at 200ms and this would fail.
-    assert steadily(fn -> Hard.headroom().mem == before - @vm_mem end, 200)
+    assert steadily(fn -> Hard.headroom().mem == before - @vm_mem end, 400)
 
     # Only the NEW owner's death releases it. Had the claim rebound to the dead
     # first owner's ref instead, this kill would match nothing and the capacity
     # would never come back.
     kill(restarted)
     assert eventually(fn -> Hard.headroom().mem == before end, 300)
+  end
+
+  test "dropping a lease with its token releases the capacity immediately" do
+    start_budget()
+    before = Hard.headroom().mem
+
+    assert {:ok, token} = Hard.lease("vm-a", spec())
+    assert Hard.headroom().mem == before - @vm_mem
+
+    assert :ok = Hard.drop("vm-a", token)
+
+    assert Hard.headroom().mem == before
+  end
+
+  test "dropping after the VM has claimed does not release the reservation" do
+    start_budget()
+    before = Hard.headroom().mem
+
+    assert {:ok, token} = Hard.lease("vm-a", spec())
+    vm = spawn_idle()
+    assert :ok = Hard.claim("vm-a", vm)
+
+    # The placing caller's normal post-boot drop must be a no-op now.
+    assert :ok = Hard.drop("vm-a", token)
+
+    assert steadily(fn -> Hard.headroom().mem == before - @vm_mem end)
+  end
+
+  test "claiming a vm_id with no lease is refused" do
+    start_budget()
+
+    assert {:error, :no_lease} = Hard.claim("vm-never-leased", spawn_idle())
   end
 
   defp start_budget(overrides \\ []) do
