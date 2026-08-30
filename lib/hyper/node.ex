@@ -186,7 +186,7 @@ defmodule Hyper.Node do
       child_vm_id = Hyper.Vm.Id.generate()
       spec = Hyper.Vm.Instance.spec(parent.type)
 
-      try_run(spec, fn -> start_forked_vm(child_vm_id, parent) end, &stop_image_vm/1)
+      try_run(child_vm_id, spec, fn -> start_forked_vm(child_vm_id, parent) end)
     end
   end
 
@@ -269,33 +269,38 @@ defmodule Hyper.Node do
   end
 
   @doc """
-  Start a VM here and confirm its budget.
+  Admit `spec` on this node, then boot it.
 
-  `start_fun` boots the VM and returns `{:ok, vm_pid}`; the reservation is held
-  against `vm_pid` and released when it dies. If the reserve loses a race (the
-  node filled up since the scheduler's snapshot) the just-started VM is torn down
-  via `stop_fun` and `{:error, reason}` is returned.
+  Capacity is leased BEFORE `start_fun` runs, so a refusal costs nothing
+  physical and a concurrent herd cannot boot past the node's budget. The VM
+  turns that lease into its own reservation from `Hyper.Node.FireVMM.init/1`,
+  which `DynamicSupervisor.start_child` has already run by the time `start_fun`
+  returns — so this function drops its lease unconditionally and never owns the
+  reservation itself.
   """
-  @spec try_run(
-          Hyper.Vm.Instance.Spec.t(),
-          (-> {:ok, pid()} | {:error, term()}),
-          (pid() -> :ok)
-        ) :: {:ok, pid()} | {:error, term()}
-  def try_run(spec, start_fun, stop_fun) do
-    case start_fun.() do
-      {:ok, pid} ->
-        case Hyper.Node.Budget.admit(spec, pid) do
-          :ok ->
-            {:ok, pid}
-
-          {:error, reason} ->
-            :ok = stop_fun.(pid)
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+  @spec try_run(Hyper.Vm.Id.t(), Hyper.Vm.Instance.Spec.t(), (-> {:ok, pid()} | {:error, term()})) ::
+          {:ok, pid()} | {:error, term()}
+  @decorate with_span("Hyper.Node.try_run", include: [:vm_id, :spec])
+  def try_run(vm_id, spec, start_fun) do
+    with {:ok, token} <- Hyper.Node.Budget.lease(vm_id, spec) do
+      try do
+        start_fun.()
+      after
+        release(vm_id, token)
+      end
     end
+  end
+
+  # Dropping the lease must not turn a successful boot into a raise: `Hard` is a
+  # single GenServer, so a restart or a queue timeout here would otherwise
+  # propagate out of the `after` over a VM that is already live and claimed.
+  # Swallowing is safe because the lease is monitored on this process too, and
+  # this process exits as soon as `try_run/3` returns.
+  @spec release(Hyper.Vm.Id.t(), reference()) :: :ok
+  defp release(vm_id, token) do
+    Hyper.Node.Budget.drop(vm_id, token)
+  catch
+    :exit, _ -> :ok
   end
 
   @spec test_system :: :ok | {:error, term()}
@@ -357,10 +362,28 @@ defmodule Hyper.Node do
     end
   end
 
-  defp start_vm_or_release(opts, uid, mutable) do
+  @doc false
+  # Public (not private) so the `:ignore` handling below is reachable from a
+  # hermetic test without a real jail — `boot_with_mutable/4`'s only caller.
+  @spec start_vm_or_release(FireVMM.Opts.t(), Users.id(), pid()) ::
+          {:ok, pid()} | {:error, term()}
+  def start_vm_or_release(opts, uid, mutable) do
     case start_vm(opts) do
       {:ok, pid} ->
         {:ok, pid}
+
+      # `FireVMM.init/1` declines with `:ignore` when either step of its `with`
+      # refuses: `Hyper.Cluster.Routing.register_self/1` finds the vm_id
+      # already registered (a stale dead incarnation), or
+      # `Hyper.Node.Budget.claim/2` has no lease left to claim (the lease
+      # expired or its holder died mid-boot). Either way it is a refusal, not
+      # a fault, but it must still hand back the uid and the mutable layer:
+      # nothing else will, and a leaked uid is unrecoverable short of
+      # restarting the node.
+      :ignore ->
+        Img.Mutable.release(mutable)
+        Users.release(uid)
+        {:error, :not_admitted}
 
       {:error, reason} ->
         Img.Mutable.release(mutable)

@@ -18,7 +18,9 @@ defmodule Hyper.Cfg.Budget do
           disk_bw_cap: Unit.Bandwidth.t(),
           disk_bw_max_load: float(),
           net_bw_cap: Unit.Bandwidth.t(),
-          net_bw_max_load: float()
+          net_bw_max_load: float(),
+          boot_lease_ttl: Unit.Time.t(),
+          restart_grace: Unit.Time.t()
         }
   defstruct [
     :mem_max,
@@ -28,7 +30,9 @@ defmodule Hyper.Cfg.Budget do
     :disk_bw_cap,
     :disk_bw_max_load,
     :net_bw_cap,
-    :net_bw_max_load
+    :net_bw_max_load,
+    :boot_lease_ttl,
+    :restart_grace
   ]
 
   @default_mem_max Unit.Information.gib(4)
@@ -39,6 +43,15 @@ defmodule Hyper.Cfg.Budget do
   @default_disk_bw_max_load 0.8
   @default_net_bw_cap Unit.Bandwidth.gibps(1)
   @default_net_bw_max_load 0.8
+
+  # A boot lease is a backstop for a caller that is alive but wedged, not the
+  # primary release mechanism (the monitor is). It must comfortably exceed the
+  # slowest legitimate boot — a cold image pull — because expiring a lease under
+  # a still-booting VM leaves it running unaccounted.
+  @default_boot_lease_ttl Unit.Time.s(300)
+  # Long enough to cover a `:transient` FireVMM restart, short enough that a VM
+  # that is never coming back frees its capacity promptly.
+  @default_restart_grace Unit.Time.s(5)
 
   @spec load :: {:ok, t()} | {:error, term()}
   def load do
@@ -52,7 +65,11 @@ defmodule Hyper.Cfg.Budget do
            number(:disk_bw_max_load, "budget.disk_bw_max_load", @default_disk_bw_max_load),
          {:ok, net_bw_cap} <- bandwidth(:net_bw_cap, "budget.net_bw_cap", @default_net_bw_cap),
          {:ok, net_bw_max_load} <-
-           number(:net_bw_max_load, "budget.net_bw_max_load", @default_net_bw_max_load) do
+           number(:net_bw_max_load, "budget.net_bw_max_load", @default_net_bw_max_load),
+         {:ok, boot_lease_ttl} <-
+           duration(:boot_lease_ttl, "budget.boot_lease_ttl", @default_boot_lease_ttl),
+         {:ok, restart_grace} <-
+           duration(:restart_grace, "budget.restart_grace", @default_restart_grace) do
       config = %__MODULE__{
         mem_max: mem_max,
         disk_max: disk_max,
@@ -61,7 +78,9 @@ defmodule Hyper.Cfg.Budget do
         disk_bw_cap: disk_bw_cap,
         disk_bw_max_load: disk_bw_max_load,
         net_bw_cap: net_bw_cap,
-        net_bw_max_load: net_bw_max_load
+        net_bw_max_load: net_bw_max_load,
+        boot_lease_ttl: boot_lease_ttl,
+        restart_grace: restart_grace
       }
 
       :persistent_term.put(__MODULE__, config)
@@ -85,6 +104,14 @@ defmodule Hyper.Cfg.Budget do
   defp bandwidth(key, toml, default) do
     with {:ok, v} <- required(key, toml, default) do
       coerce(v, &Unit.Bandwidth.parse/1, Unit.Bandwidth, key)
+    end
+  end
+
+  @spec duration(atom(), String.t(), Unit.Time.t()) ::
+          {:ok, Unit.Time.t()} | {:error, term()}
+  defp duration(key, toml, default) do
+    with {:ok, v} <- required(key, toml, default) do
+      coerce(v, &Unit.Time.parse/1, Unit.Time, key)
     end
   end
 
