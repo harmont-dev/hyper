@@ -308,3 +308,121 @@ I/O:
   - property: over any interleaving of claim/bind/release/owner-death, the set
     of outstanding ids equals the set of live owners, and no id is ever handed
     out twice while still held. That second half is the security-relevant one.
+
+
+================================================================================
+
+
+TODO: `Hyper.Node.Budget.Hard.init/1` starts from an empty ledger, so a `Hard`
+      restart forgets every reservation while the VMs it was tracking keep
+      running.
+
+Status: known, not fixed. Same severity as before the budget-lease PR — the
+old reservation-only ledger lost the same information on a restart — so this
+is not a regression and not a blocker. Deliberately out of scope here: the
+lease work is what makes it tractable, not what caused it.
+
+
+THE DEFECT
+----------
+
+`Hard` is one `GenServer` under `Hyper.Node.Budget.Supervisor`, `:one_for_one`:
+
+    # lib/hyper/node/budget/hard.ex:241
+    def init(_opts), do: {:ok, %Server{ledger: State.new()}}
+
+A crash restarts `Hard` alone. Every `Hyper.Node.FireVMM` supervisor — and the
+real cgroup memory it holds — survives untouched; only the ledger's record of
+them is gone. The node then advertises full headroom
+(`Hyper.Node.Budget.NodeState.build/0` reads `Hard.headroom/0`, which is
+`caps() - State.allocated(ledger)`, and the fresh ledger allocates nothing).
+
+`Hyper.Cluster.Scheduler` trusts that gossiped headroom as its first filtering
+pass. A node that just lost its ledger looks, cluster-wide, like the emptiest
+node available — so the scheduler preferentially piles new placements onto a
+machine that is already at or near its real cap, and each of those placements
+still passes local admission too: `Hard.lease/2` in the freshly-restarted
+process has nothing recorded to refuse against.
+
+
+WHY IT IS THE SAME SEVERITY, NOT WORSE
+---------------------------------------
+
+The pre-lease ledger (`reserve`/`release`, one entry per booted VM) had
+exactly the same `init/1 -> empty state` restart behavior and the same
+consequence. The lease work changed *when* capacity is claimed, not *whether*
+a `Hard` restart remembers it. Nothing in this PR makes the blast radius wider;
+it just happens to also make the fix newly buildable (see below), which is
+worth recording before the trail goes cold.
+
+
+WHY IT IS NOW TRACTABLE
+------------------------
+
+Before this PR, `Hard`'s ledger was keyed by a bare `reference()` monitor —
+`%{reference() => Spec}` — with no path from "a running VM" back to its ledger
+entry; reconciling on restart would have meant inventing a new correlation
+mechanism from scratch.
+
+The lease ledger is keyed by `vm_id` and each `:claimed` entry's `owner_ref`
+monitors the owning `Hyper.Node.FireVMM` supervisor pid
+(`hard.ex` `State.claim/3`, `handle_call({:claim, ...})`). That owner is a
+child of `Hyper.Node.VMSupervisor`, itself enumerable, and it already knows how
+to answer "what am I running": `Hyper.Node.FireVMM.State.describe/1` returns
+the `Opts.t()` a running VM booted with, including `type` — from which
+`Hyper.Vm.Instance.spec/1` derives the exact `Spec.t()` `Hard` needs to
+re-lease. Every piece the ledger threw away is independently reconstructable
+from state that survives a `Hard` restart.
+
+
+FIX SKETCH
+----------
+
+In `Hard.init/1`, before returning `{:ok, %Server{ledger: State.new()}}`, walk
+`DynamicSupervisor.which_children(Hyper.Node.VMSupervisor)` and, for each
+`{_, pid, :supervisor, _}` child:
+
+  1. `vm_id = Hyper.Cluster.Routing.id_for(pid)` (or read it directly off the
+     child's `Opts` via `FireVMM.State.describe/1`, whichever avoids the
+     already-known race in `Routing`'s async materialisation).
+  2. `spec = Hyper.Vm.Instance.spec(opts.type)`.
+  3. Fold each into a fresh `State.t()` directly as a `:claimed` entry owned by
+     `Process.monitor(pid)` — NOT through `State.lease/5` + `State.claim/3`,
+     since there was never a boot-in-flight lease to grant here and forcing one
+     through the two-step path would spuriously apply `fits/3` against caps
+     the VM already legitimately exceeds mid-reconciliation (e.g. a node
+     restarted mid-overcommit-drain). A rebuild is unconditional; only fresh
+     admission is capacity-checked.
+
+A child whose `describe/1` call fails or times out (the `Core`/`Client` half of
+the same supervisor hasn't reached the point of answering yet) should be
+retried on a short delay rather than silently dropped — dropping it re-creates
+this exact bug for that one VM.
+
+`DynamicSupervisor.which_children/1` requires `Hyper.Node.VMSupervisor` to
+already be up when `Hard` starts, which is not guaranteed by declaration order
+in `Hyper.Node.init/1` today (`Budget.Supervisor` starts before `VMSupervisor`,
+deliberately — see that moduledoc). Reordering to fix this is itself a
+blast-radius question (Budget.Advertiser currently assumes an empty node at
+startup) and belongs in the implementation task, not this note.
+
+
+TESTING
+-------
+
+Hermetic: `Hard`, `Hyper.Node.VMSupervisor`, and `Hyper.Cluster.Routing` all
+start standalone in a unit test (see `test/hyper/node/budget/hard_test.exs`
+and `test/hyper/node/try_run_admission_test.exs` for the pattern). A fake
+`FireVMM`-shaped child — anything answering `:describe` the way
+`FireVMM.State` does — is enough to avoid a real jail:
+
+  - start a claimed entry, kill and restart `Hard`, assert `headroom/0`
+    reflects the still-running child rather than the full caps.
+  - two claimed children, restart `Hard`, assert both are rebuilt and the sum
+    still matches configured caps minus both specs (no double-counting, no
+    drop).
+  - a child that fails to answer `describe` within the retry window: assert it
+    is still eventually reconciled rather than permanently forgotten (the
+    property that matters — this is the same never-under-reserve family as
+    `hard_state_properties_test.exs`, just exercised across a restart instead
+    of within one ledger's lifetime).
