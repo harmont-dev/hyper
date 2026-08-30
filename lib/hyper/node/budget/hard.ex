@@ -320,7 +320,7 @@ defmodule Hyper.Node.Budget.Hard do
     case Map.pop(s.leasers, ref) do
       {{vm_id, token}, leasers} ->
         ledger = State.drop(s.ledger, vm_id, token)
-        if ledger != s.ledger, do: republish()
+        _ = if ledger != s.ledger, do: republish()
         %{s | ledger: ledger, leasers: leasers}
 
       {nil, _leasers} ->

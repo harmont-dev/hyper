@@ -2,13 +2,16 @@ defmodule Hyper.Node.StartVmIgnoreTest do
   @moduledoc """
   Pins the merge-blocker fix in `Hyper.Node.start_vm_or_release/3`.
 
-  `Hyper.Node.FireVMM.init/1` declines a boot with `:ignore` when its budget
-  lease is gone by the time it tries to claim (expired ttl, or the leaser died
-  mid-boot) — `Hyper.Node.Budget.claim/2` returns `{:error, :no_lease}` before
-  any jailer/cgroup child is ever built. `DynamicSupervisor.start_child`
-  propagates that `:ignore` verbatim, and `start_vm_or_release/3` must turn it
-  into `{:error, _}` rather than crash on an unmatched case clause — a crash
-  would skip the uid and mutable-layer release the ordinary `{:error, _}` arm
+  `Hyper.Node.FireVMM.init/1` declines a boot with `:ignore` when either step
+  of its `with` refuses: `Hyper.Cluster.Routing.register_self/1` finds the
+  vm_id already registered (a stale dead incarnation), or
+  `Hyper.Node.Budget.claim/2` has no lease left to claim (the lease expired,
+  or its holder died mid-boot) — either way before any jailer/cgroup child is
+  ever built. This test drives the budget-claim cause, since it needs no more
+  than a dropped lease to trigger. `DynamicSupervisor.start_child` propagates
+  that `:ignore` verbatim, and `start_vm_or_release/3` must turn it into
+  `{:error, _}` rather than crash on an unmatched case clause — a crash would
+  skip the uid and mutable-layer release the ordinary `{:error, _}` arm
   performs, and `Hyper.Node.Users` has no other way to recover a leaked uid
   (see `TODO.txt`).
 
@@ -32,16 +35,21 @@ defmodule Hyper.Node.StartVmIgnoreTest do
   defmodule FakeMutable do
     @moduledoc false
     # Stands in for `Hyper.Node.Img.Mutable`: the declined-start path only ever
-    # calls `release/1` on it, so that is the only call this needs to answer.
+    # calls `release/1` on it. Reports each release to `reporter` so the test
+    # can assert the call actually happened, rather than merely that answering
+    # it didn't crash.
     use GenServer
 
-    def start_link(_), do: GenServer.start_link(__MODULE__, nil)
+    def start_link(reporter), do: GenServer.start_link(__MODULE__, reporter)
 
     @impl true
-    def init(_), do: {:ok, nil}
+    def init(reporter), do: {:ok, reporter}
 
     @impl true
-    def handle_call({:release, _pid}, _from, state), do: {:reply, :ok, state}
+    def handle_call({:release, _pid}, _from, reporter) do
+      send(reporter, :mutable_released)
+      {:reply, :ok, reporter}
+    end
   end
 
   setup do
@@ -86,7 +94,7 @@ defmodule Hyper.Node.StartVmIgnoreTest do
     assert {:ok, uid} = Users.claim()
     assert uid == @uid
 
-    {:ok, mutable} = start_supervised(FakeMutable)
+    {:ok, mutable} = start_supervised({FakeMutable, self()})
 
     opts =
       Hyper.Node.build_opts(
@@ -98,6 +106,12 @@ defmodule Hyper.Node.StartVmIgnoreTest do
       )
 
     assert {:error, :not_admitted} = Hyper.Node.start_vm_or_release(opts, uid, mutable)
+
+    # The mutable layer's hold must actually be dropped, not just survive
+    # answering a call: `acquire_or_release/2` took this hold before the boot
+    # even reached `start_vm_or_release/3`, and nothing else on this path
+    # drops it.
+    assert_received :mutable_released
 
     # The single configured uid must be back in the pool, not leaked.
     assert {:ok, ^uid} = Users.claim()

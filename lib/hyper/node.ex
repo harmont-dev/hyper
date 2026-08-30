@@ -372,11 +372,14 @@ defmodule Hyper.Node do
       {:ok, pid} ->
         {:ok, pid}
 
-      # `FireVMM.init/1` declines with `:ignore` when this VM has no budget
-      # lease to claim — the lease expired or its holder died mid-boot. It is a
-      # refusal, not a fault, but it must still hand back the uid and the
-      # mutable layer: nothing else will, and a leaked uid is unrecoverable
-      # short of restarting the node.
+      # `FireVMM.init/1` declines with `:ignore` when either step of its `with`
+      # refuses: `Hyper.Cluster.Routing.register_self/1` finds the vm_id
+      # already registered (a stale dead incarnation), or
+      # `Hyper.Node.Budget.claim/2` has no lease left to claim (the lease
+      # expired or its holder died mid-boot). Either way it is a refusal, not
+      # a fault, but it must still hand back the uid and the mutable layer:
+      # nothing else will, and a leaked uid is unrecoverable short of
+      # restarting the node.
       :ignore ->
         Img.Mutable.release(mutable)
         Users.release(uid)
