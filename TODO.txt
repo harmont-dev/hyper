@@ -177,10 +177,11 @@ Same trick as test/hyper/node/try_run_admission_test.exs, which exploits
 RELATED
 -------
 
-The budget-admission window in `Hyper.Node.try_run/3` (boots the VM, then asks
-permission) is a separate defect in the same path, tracked in the current work.
-Fixing it makes a refused candidate cheap, which is what makes an aggressive
-cut-over policy in decision (1) above affordable.
+The budget-admission window in `Hyper.Node.try_run/3` (which used to boot the VM
+and then ask permission) was a separate defect in the same path. It is fixed:
+capacity is now leased before the boot, so a refused candidate costs nothing
+physical — which is what makes an aggressive cut-over policy in decision (1)
+above affordable.
 
 
 ================================================================================

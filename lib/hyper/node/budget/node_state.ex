@@ -5,7 +5,7 @@ defmodule Hyper.Node.Budget.NodeState do
 
   Approximate by design: hard headroom is exact at publish time but soft load is
   an EWMA that drifts and the record gossips with lag. The authoritative decision
-  is always the owning node's `Hyper.Node.Budget.admit/2`. Each record carries the
+  is always the owning node's `Hyper.Node.Budget.lease/2`. Each record carries the
   node's load *and* its ceilings, so a scheduler anywhere can evaluate fit without
   knowing the target's config or core count.
   """
@@ -73,7 +73,7 @@ defmodule Hyper.Node.Budget.NodeState do
   Whether this snapshot's node can hold `spec`: hard memory/disk headroom plus the
   soft cpu/disk-bw/net-bw load ceilings. A pure predicate over the published
   snapshot; the authoritative check is still the owning node's
-  `Hyper.Node.Budget.admit/2`.
+  `Hyper.Node.Budget.lease/2`.
   """
   @spec fits?(t(), Spec.t()) :: boolean()
   def fits?(state, spec), do: hard_fits?(state, spec) and soft_fits?(state, spec)
