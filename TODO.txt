@@ -234,7 +234,7 @@ window has its hold dropped by the monitor.
 `claim/0` hands out an id and records nothing. Only `bind/2` monitors
 (users.ex:122-125). Between them the id is owned by no one, and the sole
 recovery is the explicit `Users.release/1` call in `acquire_or_release/2`
-(lib/hyper/node.ex:148) and `start_vm_or_release/3` (lib/hyper/node.ex:365) —
+(lib/hyper/node.ex:148) and `start_vm_or_release/3` (lib/hyper/node.ex:370) —
 which run only on a clean `{:error, _}` return, never on a crash or an exit.
 
 
