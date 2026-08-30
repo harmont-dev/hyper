@@ -362,10 +362,25 @@ defmodule Hyper.Node do
     end
   end
 
-  defp start_vm_or_release(opts, uid, mutable) do
+  @doc false
+  # Public (not private) so the `:ignore` handling below is reachable from a
+  # hermetic test without a real jail — `boot_with_mutable/4`'s only caller.
+  @spec start_vm_or_release(FireVMM.Opts.t(), Users.id(), pid()) ::
+          {:ok, pid()} | {:error, term()}
+  def start_vm_or_release(opts, uid, mutable) do
     case start_vm(opts) do
       {:ok, pid} ->
         {:ok, pid}
+
+      # `FireVMM.init/1` declines with `:ignore` when this VM has no budget
+      # lease to claim — the lease expired or its holder died mid-boot. It is a
+      # refusal, not a fault, but it must still hand back the uid and the
+      # mutable layer: nothing else will, and a leaked uid is unrecoverable
+      # short of restarting the node.
+      :ignore ->
+        Img.Mutable.release(mutable)
+        Users.release(uid)
+        {:error, :not_admitted}
 
       {:error, reason} ->
         Img.Mutable.release(mutable)

@@ -5,6 +5,11 @@ defmodule Hyper.E2e.VmLifecycleTest do
   - `OciLoader.load/1` of a real registry image yields a bootable image id;
   - `create_vm/1` boots a guest whose per-VM writable dm volume
     (`Mutable.dm_name/1`) exists while the VM runs;
+  - the boot actually claims the node's hard budget: headroom drops by the
+    instance type's `mem` while the VM runs, and comes back once it is stopped
+    and `restart_grace` has elapsed — the one assertion this branch's central
+    invariant (`Hyper.Node.FireVMM.init/1` claiming its lease) actually needs
+    and did not have;
   - the guest agent answers `exec` with the command's captured output;
   - `stop_image_vm/1` reclaims the writable volume (no dm leak);
   - stopping flushes a final metering window: the VM's recorded compute
@@ -15,12 +20,15 @@ defmodule Hyper.E2e.VmLifecycleTest do
   provisioned per docs/cookbook/install.md (CI: the `integration` job).
   """
   use ExUnit.Case, async: false
+  use Unit.Operators
 
   import Ecto.Query
   import Hyper.E2e
 
   alias Hyper.Img.Db.Repo
   alias Hyper.Metering.Usage
+  alias Hyper.Node.Budget.Hard
+  alias Hyper.Vm.Instance
   alias Unit.Time
 
   @moduletag :integration
@@ -32,6 +40,9 @@ defmodule Hyper.E2e.VmLifecycleTest do
 
   test "load -> create_vm -> exec -> stop reclaims the VM's dm volume" do
     assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
+
+    mem_before = Hard.headroom().mem
+    instance_mem = Instance.spec(:micro).mem
 
     # :micro, not the :base default — :base asks for 32 GiB of disk budget,
     # which the default node budget (4 GiB) refuses with :no_capacity on the
@@ -49,6 +60,12 @@ defmodule Hyper.E2e.VmLifecycleTest do
     assert MapSet.member?(dm_devices(), rw_dev),
            "expected writable dm volume #{rw_dev} while the VM is running"
 
+    # `create_vm/1` only returns once `FireVMM.init/1` has claimed this VM's
+    # lease (`DynamicSupervisor.start_child` waits on `init/1`), so the drop is
+    # visible immediately — no poll needed here, unlike the release below.
+    assert Hard.headroom().mem == mem_before - instance_mem,
+           "hard budget headroom did not drop by the booted instance's mem"
+
     assert {:ok, %{stdout: out, exit_code: 0}} =
              await_exec(vm, ["/bin/echo", "hello from guest"])
 
@@ -58,6 +75,14 @@ defmodule Hyper.E2e.VmLifecycleTest do
 
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),
            "writable dm volume #{rw_dev} leaked after stop_image_vm"
+
+    # A clean stop still turns the reservation back into a lease for
+    # `restart_grace` (so a `:transient` FireVMM restart could reclaim it) —
+    # it only actually expires once that grace elapses. 90s matches the other
+    # polls in this test: generous headroom over the default 5s grace for a
+    # runner busy with the rest of this job's E2E fleet.
+    assert poll_until(fn -> Hard.headroom().mem == mem_before end, :timer.seconds(90)),
+           "hard budget headroom did not return after stop_image_vm + restart_grace"
 
     # The Meter is the FireVMM supervisor's LAST child: at stop it terminates
     # first and flushes a final usage window while the cgroup still exists.

@@ -264,7 +264,11 @@ defmodule Hyper.Node.Budget.Hard do
 
     case State.claim(s.ledger, vm_id, owner_ref) do
       {:ok, ledger} ->
-        republish()
+        # `claim` only ever moves an entry between kinds, never what it adds up
+        # to (the conservation law in HardStatePropertiesTest), so the
+        # NodeState a republish here would gossip is always identical to what
+        # `lease` already published. Only publish when that stops being true.
+        _ = if State.allocated(ledger) != State.allocated(s.ledger), do: republish()
         {:reply, :ok, %{s | ledger: ledger, leasers: forget_leaser(s.leasers, vm_id)}}
 
       {:error, :no_lease} = err ->
@@ -315,8 +319,9 @@ defmodule Hyper.Node.Budget.Hard do
   defp handle_down(s, ref) do
     case Map.pop(s.leasers, ref) do
       {{vm_id, token}, leasers} ->
-        republish()
-        %{s | ledger: State.drop(s.ledger, vm_id, token), leasers: leasers}
+        ledger = State.drop(s.ledger, vm_id, token)
+        if ledger != s.ledger, do: republish()
+        %{s | ledger: ledger, leasers: leasers}
 
       {nil, _leasers} ->
         release_owner(s, ref)

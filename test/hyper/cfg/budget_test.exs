@@ -75,7 +75,8 @@ defmodule Hyper.Cfg.BudgetTest do
   @bad_budgets [
     {[mem_max: 123], {:error, {:bad_value, :mem_max, 123}}},
     {[mem_max: "notabytes"], {:error, {:bad_value, :mem_max, "notabytes"}}},
-    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}}
+    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}},
+    {[boot_lease_ttl: "forever"], {:error, {:bad_value, :boot_lease_ttl, "forever"}}}
   ]
 
   for {env, expected} <- @bad_budgets do
