@@ -2,8 +2,8 @@ TODO: an unreachable scheduler candidate crashes placement instead of cutting
       over to the next node.
 
 Status: known, not fixed. Deliberately deferred to its own PR — it is
-independent of the budget-admission window (`Hyper.Node.try_run/3`) currently
-being worked on, though both live in the same placement path.
+independent of the budget-admission window (`Hyper.Node.try_run/3`), since
+fixed, though both live in the same placement path.
 
 
 THE DEFECT
@@ -11,9 +11,9 @@ THE DEFECT
 
 `Hyper.Cluster.Scheduler.run/4` confirms each candidate node by RPC:
 
-    # lib/hyper/cluster/scheduler.ex:78-80
+    # lib/hyper/cluster/scheduler.ex:78-82
     attempt = fn target ->
-      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+      :erpc.call(target, Hyper.Node, :try_run, [vm_id, spec, start_fun])
     end
 
     place(spec, layers, attempt)
@@ -45,10 +45,10 @@ THIS IS AN OMISSION, NOT A POLICY
 
 Every other `:erpc.call` in the tree is guarded:
 
-    lib/hyper.ex:93-95      exec/3            -> {:error, :node_unreachable}
-    lib/hyper.ex:133-135    unflushed_usage   -> Unit.Time.zero()
-    lib/hyper.ex:163-166    stop_vm           -> {:error, :machine_unreachable}
-    lib/hyper.ex:194-196    id/1              -> nil
+    lib/hyper.ex:92-94      exec/3            -> {:error, :node_unreachable}
+    lib/hyper.ex:132-134    unflushed_usage   -> Unit.Time.zero()
+    lib/hyper.ex:162-165    stop_vm           -> {:error, :machine_unreachable}
+    lib/hyper.ex:193-195    id/1              -> nil
     lib/hyper/vm.ex:42-44   fast_fork/1       -> {:error, :node_unreachable}
     lib/hyper/vm.ex:109-111 publish_on_owner  -> {:error, :node_unreachable}
 
@@ -94,8 +94,8 @@ call tree contains at least:
   - `Hyper.Node.Vmlinux.path/1` (lib/hyper/node/vmlinux.ex:26) — documented as
     "Raises if neither resolves"; a `MatchError` on `{:ok, path} = ...`.
   - every `GenServer.call` in the boot path (`Users.claim`, `Img.Mutable`,
-    `ThinPool`, `Budget.Hard.reserve`) — each EXITS on timeout or on a dead
-    server. An overloaded `Hard` is enough.
+    `ThinPool`, `Budget.Hard.lease`, `Budget.Hard.claim`) — each EXITS on
+    timeout or on a dead server. An overloaded `Hard` is enough.
 
 Per OTP's erpc contract these arrive at the caller as (VERIFY THE EXACT SHAPES
 WHEN FIXING — these are from the documented contract, not observed here):
@@ -171,7 +171,7 @@ Hermetic, no cluster needed. `place/3` takes `attempt` as an argument
 for the last, then assert the walk reached the last one. That test fails today.
 
 Same trick as test/hyper/node/try_run_admission_test.exs, which exploits
-`try_run/3` taking `start_fun`/`stop_fun` as arguments.
+`try_run/3` taking `start_fun` as an argument.
 
 
 RELATED
@@ -208,10 +208,11 @@ exists. They handle a mid-boot caller death very differently:
 
   uid (Users)              NOBODY                  NONE
 
-  budget (Budget.Hard)     nobody (reserved        n/a - not held at all
-                           after the boot)         (the current work)
+  budget (Budget.Hard)     leasing process,        monitor + boot_lease_ttl +
+                           monitored               drop/2 (fixed by the
+                                                    budget-lease work)
 
-`Img.Mutable` is correct. Its boot-path handoff (lib/hyper/node.ex:126-128) is:
+`Img.Mutable` is correct. Its boot-path handoff (lib/hyper/node.ex:127-129) is:
 
     :ok = Users.bind(uid, pid)
     :ok = Img.Mutable.acquire(mutable, pid)   # VM supervisor becomes a holder
@@ -233,7 +234,7 @@ window has its hold dropped by the monitor.
 `claim/0` hands out an id and records nothing. Only `bind/2` monitors
 (users.ex:122-125). Between them the id is owned by no one, and the sole
 recovery is the explicit `Users.release/1` call in `acquire_or_release/2`
-(lib/hyper/node.ex:145) and `start_vm_or_release/3` (lib/hyper/node.ex:363) —
+(lib/hyper/node.ex:148) and `start_vm_or_release/3` (lib/hyper/node.ex:365) —
 which run only on a clean `{:error, _}` return, never on a crash or an exit.
 
 
@@ -261,8 +262,8 @@ function that claimed it.
 HOW TO TRIGGER IT
 -----------------
 
-Any exit between `Users.claim/0` (lib/hyper/node.ex:88 and :108) and
-`Users.bind/2` (lib/hyper/node.ex:126). That span contains the whole mutable
+Any exit between `Users.claim/0` (lib/hyper/node.ex:86 and :108) and
+`Users.bind/2` (lib/hyper/node.ex:127). That span contains the whole mutable
 layer build: `Img.create_mutable/2` or `Img.create_fork/3`, which shells out to
 the suid helper for dmsetup work, plus `Vmlinux.path/1`, which is documented to
 raise. In the cluster path the process running all of this is an `:erpc`-spawned
@@ -282,9 +283,10 @@ Make the claim self-owning, the way `Img.Mutable.acquire/1` already is:
     unless a `bind/2` has since transferred ownership. Smallest change, matches
     the existing `Img.Mutable` idiom exactly, and needs no new concepts.
 
-  - Or, once the budget lease lands, express uid ownership through the same
-    lease mechanism so all three boot-time resources share one lifetime story
-    instead of three hand-rolled variants. Preferred long-term; more churn.
+  - Or, express uid ownership through the same lease mechanism the budget
+    work already added, so all three boot-time resources share one lifetime
+    story instead of three hand-rolled variants. Preferred long-term; more
+    churn.
 
 Either way `bind/2` must attach the new owner BEFORE the old monitor is dropped,
 or the fix introduces the mirror-image bug (id freed while a live VM holds it,
