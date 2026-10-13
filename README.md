@@ -26,8 +26,8 @@ same niche as [Daytona](https://github.com/daytonaio/daytona),
 
 ## Quick Start
 
-On an Ubuntu/Debian machine with KVM (bare metal, or a cloud instance with
-nested virtualization):
+On a Linux machine with KVM (bare metal, or a cloud instance with nested
+virtualization) using apt, dnf, zypper or pacman:
 
 ```sh
 git clone https://github.com/harmont-dev/hyper && cd hyper

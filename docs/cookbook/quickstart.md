@@ -9,9 +9,10 @@ follow the [installation guide](install.md).
 
 ## What you need
 
-- An Ubuntu/Debian host (x86_64 or aarch64) with KVM -- `stat /dev/kvm` must
-  succeed. (Other distros work too, via the manual [installation
-  guide](install.md).)
+- A Linux host (x86_64 or aarch64) with KVM -- `stat /dev/kvm` must succeed.
+  `setup.sh` installs packages with apt (Debian, Ubuntu, Pop!_OS), dnf
+  (Fedora, RHEL, Rocky), zypper (openSUSE) or pacman (Arch); on anything else,
+  follow the manual [installation guide](install.md).
 - cgroups v2 (the default on any modern distro).
 - `sudo` -- host provisioning (device-mapper, the setuid helper) needs root.
   Hyper itself never runs as root.
@@ -22,7 +23,8 @@ follow the [installation guide](install.md).
   and the in-guest agent.
 
 `setup.sh` checks every requirement up front and stops with an actionable
-error before touching the host.
+error before touching the host. `./setup.sh --check` prints what is missing
+without changing anything -- include its output when reporting a setup bug.
 
 ## Run it
 

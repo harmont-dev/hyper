@@ -30,7 +30,6 @@ sudo apt update && sudo apt install -y \
   coreutils \
   e2fsprogs \
   libc-bin \
-  linux-modules-extra-$(uname -r) \
   lvm2 \
   skopeo \
   thin-provisioning-tools \
@@ -47,7 +46,6 @@ sudo dnf install -y \
   device-mapper-persistent-data \
   e2fsprogs \
   glibc-common \
-  kernel-modules-extra-$(uname -r) \
   lvm2 \
   skopeo \
   util-linux
@@ -66,6 +64,15 @@ sudo dnf install -y \
 > unaffected.
 
 <!-- tabs-close -->
+
+> #### Cloud kernels {: .info}
+>
+> Some kernels (notably Ubuntu's cloud flavours) split `dm_thin_pool` into a
+> separate extra-modules package. If `modinfo dm_thin_pool` fails, install
+> `linux-modules-extra-$(uname -r)` (Ubuntu) or
+> `kernel-modules-extra-$(uname -r)` (Rocky). Kernels that do not split their
+> modules -- Pop!_OS, Debian, most custom kernels -- have no such package and
+> need nothing extra.
 
 ### Build Toolchain
 
@@ -95,7 +102,7 @@ Hyper relies on `dm-snapshot` and `dm-thin` to build COW filesystems. Load the
 modules and confirm the targets are present:
 
 ```sh
-sudo modprobe -a dm_snapshot dm_thin_pool loop
+sudo modprobe -a dm_snapshot dm_thin_pool loop nf_tables nf_nat
 sudo dmsetup targets # must list snapshot, thin, and thin-pool
 ```
 
@@ -105,7 +112,7 @@ sudo dmsetup targets # must list snapshot, thin, and thin-pool
 > To make your config persistent:
 >
 > ```sh
-> printf 'dm_snapshot\ndm_thin_pool\nloop\n' \
+> printf 'dm_snapshot\ndm_thin_pool\nloop\nnf_tables\nnf_nat\n' \
 >     | sudo tee /etc/modules-load.d/hyper.conf
 > ```
 

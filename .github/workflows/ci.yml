@@ -164,6 +164,28 @@ jobs:
       - name: ShellCheck
         run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
+  host-deps:
+    name: Host deps (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One image per package-manager family scripts/host-deps.sh supports,
+        # plus the non-merged-usr layouts (Leap, Debian) that move tool paths.
+        image:
+          - ubuntu:24.04
+          - debian:12
+          - fedora:42
+          - rockylinux:9
+          - opensuse/leap:15.6
+          - archlinux:latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve and verify host packages
+        run: bash .github/scripts/check-host-deps.sh
+
   rust:
     name: Rust (suidhelper)
     runs-on: ubuntu-latest
