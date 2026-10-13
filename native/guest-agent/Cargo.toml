@@ -3,7 +3,7 @@ name = "hyper-guest-agent"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "PID-1 guest agent for Hyper microVMs: mounts, resolv.conf, and a vsock exec server."
+description = "PID-1 guest agent for Hyper microVMs: mounts and a vsock exec server."
 repository = "https://github.com/harmont-dev/hyper"
 
 [lib]
@@ -33,10 +33,6 @@ tokio-stream = "0.1"
 [[test]]
 name = "exec"
 path = "tests/exec.rs"
-
-[[test]]
-name = "init"
-path = "tests/init.rs"
 
 [profile.release]
 opt-level = "z"

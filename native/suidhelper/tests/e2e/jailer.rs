@@ -64,12 +64,13 @@ fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     p
 }
 
-/// Same as [`write_root_config`] but with a `[network]` table present, so
-/// `Config::network()` is `Some` and `run()` derives a `--netns` flag.
-fn write_root_config_with_network(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
+/// Same as [`write_root_config`] plus a legacy `[network]` table and
+/// `[tools] ip`/`nft`/`sysctl` keys, as an operator config written before the
+/// networking rewrite would carry.
+fn write_root_config_with_legacy_network(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n[network]\nuplink = \"eth0\"\n",
+        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\nip = \"/usr/bin/ip\"\nnft = \"/usr/sbin/nft\"\nsysctl = \"/usr/sbin/sysctl\"\n[network]\nuplink = \"eth0\"\nclone_pool = \"172.31.0.0/16\"\n",
         jailer.display(),
         firecracker.display(),
     );
@@ -174,9 +175,11 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
 }
 
 #[test]
-fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
+fn execs_jailer_without_netns_with_legacy_network_table_as_root() {
     if !is_root() {
-        eprintln!("SKIP jailer netns: needs root to become_root_permanently + own the fakes");
+        eprintln!(
+            "SKIP jailer legacy [network]: needs root to become_root_permanently + own the fakes"
+        );
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
@@ -184,7 +187,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
     let env_rec = tmp.path().join("environ.bin");
     let jailer = install_recorder(tmp.path(), &argv_rec, &env_rec);
     let firecracker = install_firecracker(tmp.path());
-    let cfg = write_root_config_with_network(tmp.path(), &jailer, &firecracker);
+    let cfg = write_root_config_with_legacy_network(tmp.path(), &jailer, &firecracker);
 
     let out = run(
         &cfg,
@@ -210,19 +213,9 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
 
     let argv: Vec<String> =
         serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
-    let i = argv
-        .iter()
-        .position(|a| a == "--netns")
-        .expect("--netns present when [network] is configured");
-    assert_eq!(
-        argv[i + 1],
-        "/var/run/netns/vnet1",
-        "netns path must be derived from --id, not caller-supplied"
-    );
-    let sep = argv.iter().position(|a| a == "--").unwrap();
     assert!(
-        i < sep,
-        "--netns must precede the `--` firecracker separator"
+        !argv.iter().any(|a| a == "--netns"),
+        "the jailer must never be told to enter a netns: {argv:?}"
     );
 }
 

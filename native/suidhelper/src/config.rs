@@ -94,6 +94,10 @@ fn config_path() -> PathBuf {
 }
 
 /// Hyper's /etc/hyper/config.toml file format.
+///
+/// A legacy `[network]` table and `[tools] ip`/`nft`/`sysctl` keys are accepted
+/// and ignored (serde drops unknown keys), so operator configs written before
+/// the networking rewrite keep working.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     work_dir: PathBuf,
@@ -101,8 +105,6 @@ pub struct Config {
     tools: Tools,
     #[serde(default)]
     jails: Jails,
-    #[serde(default)]
-    network: Option<Network>,
 }
 
 /// The `[jails]` table: how the helper places and confines each VM jail.
@@ -142,9 +144,6 @@ pub struct Tools {
     dmsetup: PathBuf,
     losetup: PathBuf,
     blockdev: PathBuf,
-    ip: PathBuf,
-    nft: PathBuf,
-    sysctl: PathBuf,
     thin_dump: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
@@ -156,12 +155,6 @@ impl Default for Tools {
             dmsetup: "/usr/sbin/dmsetup".into(),
             losetup: "/usr/sbin/losetup".into(),
             blockdev: "/usr/sbin/blockdev".into(),
-            // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
-            // is a symlink to the former, and SafeBin rejects symlinked tool
-            // paths. iproute2's real binary lives at /usr/bin/ip.
-            ip: "/usr/bin/ip".into(),
-            nft: "/usr/sbin/nft".into(),
-            sysctl: "/usr/sbin/sysctl".into(),
             thin_dump: "/usr/sbin/thin_dump".into(),
             firecracker: None,
             jailer: None,
@@ -187,32 +180,8 @@ impl Default for Config {
             work_dir: default_work_dir(),
             tools: Tools::default(),
             jails: Jails::default(),
-            network: None,
         }
     }
-}
-
-/// The `[network]` table: VM egress networking. Absent, or present without
-/// `uplink`, ⇒ networking disabled — see [`Config::network`]. `uplink` is the
-/// physical interface guest traffic is masqueraded out of; `clone_pool` is the
-/// IPv4 CIDR per-VM /30 clone addresses are carved from (default
-/// `172.31.0.0/16`). Both are read identically by the Elixir node
-/// (`Hyper.Cfg.Network`) — keep the defaults in sync.
-///
-/// `uplink` is `Option` rather than required so that a `[network]` table
-/// present with only `clone_pool` set (`uplink` omitted) parses as
-/// networking-disabled rather than failing to deserialize the whole
-/// [`Config`] — see [`Config::network`]'s doc for why that asymmetry would be
-/// dangerous.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Network {
-    pub uplink: Option<String>,
-    #[serde(default = "default_clone_pool")]
-    pub clone_pool: String,
-}
-
-fn default_clone_pool() -> String {
-    "172.31.0.0/16".into()
 }
 
 impl Config {
@@ -256,43 +225,6 @@ impl Config {
     /// The validated `blockdev` binary the helper will run.
     pub fn blockdev(&self) -> Result<SafeBin<"blockdev">, safe_bin::Error> {
         SafeBin::from_path(&self.tools.blockdev)
-    }
-
-    /// The validated `ip` (iproute2) binary the network tool runs.
-    pub fn ip(&self) -> Result<SafeBin<"ip">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.ip)
-    }
-
-    /// The validated `nft` (nftables) binary the network tool runs.
-    pub fn nft(&self) -> Result<SafeBin<"nft">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.nft)
-    }
-
-    /// The `sysctl` binary, used to enable IPv4 forwarding inside a VM's netns
-    /// (a fresh netns defaults `net.ipv4.ip_forward` to 0, independent of the
-    /// host, so the netns would not route the guest's egress without it).
-    pub fn sysctl(&self) -> Result<SafeBin<"sysctl">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.sysctl)
-    }
-
-    /// The `[network]` table, or `None` when VM networking is disabled — either
-    /// because `[network]` is absent entirely, or because it is present but
-    /// `uplink` is not set.
-    ///
-    /// The latter case matters on its own: `Config` is a process-wide
-    /// [`LazyLock`] that exits the whole helper on any parse failure (every
-    /// subcommand — dmsetup, losetup, chroot-jail, jailer, not just
-    /// networking — calls [`Config::get`] first), so if `uplink` were a
-    /// required field, an operator who sets `clone_pool` before `uplink` (or
-    /// simply omits `uplink` to disable networking, mirroring the Elixir
-    /// node's `Hyper.Cfg.Network.enabled?/0`, which treats absent `uplink` as
-    /// disabled rather than an error) would brick every tool the helper
-    /// offers, not just networking. Filtering here — rather than making
-    /// `uplink` required — keeps this side symmetric with Elixir's.
-    pub fn network(&self) -> Option<&Network> {
-        self.network
-            .as_ref()
-            .filter(|network| network.uplink.is_some())
     }
 
     /// The validated `thin_dump` binary (thin-provisioning-tools) the helper

@@ -1,19 +1,17 @@
 defmodule Hyper.Node.FireVMM.DaemonTest do
   @moduledoc """
-  `Daemon` shells every privileged step (netns prepare/teardown, chroot
-  removal, jailer launch) through the setuid helper binary named by
-  `Hyper.Cfg.Tools.suidhelper/0`. These tests point that at a small fake
-  script instead of the real setuid helper — the same seam `JailerTest` uses
-  for `tools.firecracker`/`tools.jailer` — so they can observe real call
-  order and gating without root, a real netns, or a real firecracker process.
+  `Daemon` shells every privileged step (chroot removal, jailer launch)
+  through the setuid helper binary named by `Hyper.Cfg.Tools.suidhelper/0`.
+  These tests point that at a small fake script instead of the real setuid
+  helper — the same seam `JailerTest` uses for `tools.firecracker`/`tools.jailer`
+  — so they can observe the real calls without root or a real firecracker
+  process.
 
-  Invariants under test (networking is mandatory — these fire unconditionally,
-  even with no `[network]` table in config):
+  Invariants under test:
 
-    * the jailer enters the netns via `--netns` (Task 8), so it must already
-      exist: `network prepare` must run before the `jailer` launch.
-    * jail clearing (`chroot-jail remove`) and network teardown both fire
-      wherever the jail is cleared (stale-reset on relaunch, and terminate).
+    * the jailer is launched, and no `network` subcommand is ever invoked
+      (VM networking is unimplemented pending its rewrite).
+    * `terminate/2` clears the chroot jail.
   """
 
   use ExUnit.Case, async: false
@@ -83,10 +81,8 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     Hyper.Cfg.Toml.put_cache(%{"tools" => tools})
   end
 
-  describe "netns lifecycle (mandatory)" do
-    test "start_link prepares the netns before launching the jailer", %{log: log, fake: fake} do
-      # No [network] table on purpose: the netns prepare must fire regardless,
-      # since networking is mandatory rather than config-gated.
+  describe "jail lifecycle" do
+    test "start_link launches the jailer without any network setup", %{log: log, fake: fake} do
       put_toml(fake)
 
       Process.flag(:trap_exit, true)
@@ -94,15 +90,14 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       ops = calls(log)
-      prepare_at = Enum.find_index(ops, &(&1 == "network"))
-      jailer_at = Enum.find_index(ops, &(&1 == "jailer"))
-
-      assert prepare_at, "expected a `network` (prepare) call before the jailer launch"
-      assert jailer_at, "expected the jailer to have been launched"
-      assert prepare_at < jailer_at, "netns must be prepared before the jailer enters it"
+      assert "jailer" in ops
+      refute "network" in ops
     end
 
-    test "terminate/2 tears down both the network and the chroot jail", %{log: log, fake: fake} do
+    test "terminate/2 removes the chroot jail without any network teardown", %{
+      log: log,
+      fake: fake
+    } do
       put_toml(fake)
 
       assert :ok =
@@ -112,8 +107,8 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                })
 
       ops = calls(log)
-      assert "network" in ops
       assert "chroot-jail" in ops
+      refute "network" in ops
     end
   end
 end
