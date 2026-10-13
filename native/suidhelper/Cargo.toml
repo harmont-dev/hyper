@@ -40,18 +40,6 @@ name = "tools_jailer"
 path = "tests/tools/jailer.rs"
 
 [[test]]
-name = "tools_network_addr"
-path = "tests/tools/network_addr.rs"
-
-[[test]]
-name = "tools_network_args"
-path = "tests/tools/network_args.rs"
-
-[[test]]
-name = "tools_host_init"
-path = "tests/tools/host_init.rs"
-
-[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 

@@ -86,6 +86,9 @@ integrating Hyper.
   call it from any language you already use.
   ⚠️ The gRPC API is unauthenticated and off by default — bind it to a trusted network or front it with an authenticating proxy. See [the gRPC guide](docs/grpc.md).
 
+> **VM networking** is being rewritten from the ground up and is currently
+> unavailable: VMs boot with no NIC and have no network egress.
+
 ## Docs
 
 Full docs on getting started, as well as useful diagrams are available on

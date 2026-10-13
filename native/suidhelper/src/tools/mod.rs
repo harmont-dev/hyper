@@ -124,7 +124,7 @@ pub enum Tool {
         #[command(subcommand)]
         op: ChrootJailOp,
     },
-    /// Per-VM egress networking (netns + veth + TAP + NAT).
+    /// Per-VM networking (unimplemented placeholder pending the networking rewrite).
     Network {
         #[command(subcommand)]
         op: NetworkOp,
@@ -153,7 +153,7 @@ impl Tool {
             Tool::Blockdev { args } => Blockdev::new(args).run(token),
             Tool::Blockcopy { args } => Blockcopy::new(args).run(token),
             Tool::ChrootJail { op } => op.run(token),
-            Tool::Network { op } => op.run(token),
+            Tool::Network { op } => op.run(),
             Tool::ThinDump { args } => {
                 let bin = config
                     .thin_dump()

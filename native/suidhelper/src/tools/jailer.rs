@@ -17,8 +17,7 @@ use clap::Args;
 use hyperrs_firecracker::jailer::chroot::JailLayout;
 use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer};
 use hyperrs_firecracker::VmId;
-use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
-use hyperrs_linux::netns;
+use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_process::privilege::Unprivileged;
 use std::convert::Infallible;
 use std::num::NonZeroU64;
@@ -100,14 +99,6 @@ fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, JailerEr
     let uid = range.uid(args.uid)?;
     let gid = range.gid(args.gid)?;
 
-    // The netns path is derived entirely from trusted config (whether VM
-    // networking is enabled) and the already-validated `--id` — the caller
-    // cannot name it. Must match the `ip netns add <id>` path the network tool
-    // creates. Networking is mandatory, so in practice this is always `Some`.
-    let netns = config
-        .network()
-        .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&args.id));
-
     let layout = JailLayout::new(&jail_base, &args.id);
 
     Jailer::builder()
@@ -124,7 +115,6 @@ fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, JailerEr
                 .build(),
         )
         .api_sock(&args.api_sock)
-        .maybe_netns(netns.as_deref())
         .build()
         .invoke(token)
 }
