@@ -103,7 +103,7 @@ pub enum Tool {
         #[command(subcommand)]
         op: ChrootJailOp,
     },
-    /// Per-VM egress networking (netns + veth + TAP + NAT).
+    /// Per-VM networking (unimplemented placeholder pending the networking rewrite).
     Network {
         #[command(subcommand)]
         op: NetworkOp,

@@ -214,11 +214,6 @@ pub struct Jailer<'a> {
     gid: u32,
     cgroups: &'a [CgroupSetting],
     api_sock: &'a JailSock,
-    /// The netns the jailer must enter (`--netns`), `Some` when VM networking is
-    /// enabled. Derived by the caller from trusted config + the validated `vm`
-    /// id — never from caller input — and must match the `ip netns add <id>`
-    /// path the `network` tool creates.
-    netns: Option<&'a Path>,
 }
 
 impl Jailer<'_> {
@@ -247,11 +242,6 @@ impl Jailer<'_> {
         for cg in self.cgroups {
             argv.push("--cgroup".to_cstring()?);
             argv.push(cg.to_string().to_cstring()?);
-        }
-
-        if let Some(netns) = self.netns {
-            argv.push("--netns".to_cstring()?);
-            argv.push(netns.to_cstring()?);
         }
 
         argv.push("--".to_cstring()?);

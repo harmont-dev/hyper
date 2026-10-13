@@ -1,76 +1,70 @@
 // SPDX-License-Identifier: MIT
-//! `network`: per-VM egress networking (netns + veth + TAP + NAT).
+//! `network`: per-VM networking — an **unimplemented placeholder** pending a
+//! ground-up rewrite.
 //!
-//! Each op ([`prepare`], [`teardown`], [`host_init`]) derives its `ip`/`nft`
-//! argv (built in [`args`]) from the validated uid and [`crate::config::Config::network`],
-//! then runs it through [`exec::run_all`], which stops at the first non-zero
-//! exit. Every refusal — `uid` outside the configured range, a malformed
-//! `clone_pool` CIDR, or `[network]` absent from config — happens while
-//! resolving the op (see `prepare::resolve`), strictly before `run_privileged`
-//! is ever reached, so no privileged command runs on invalid input.
-pub mod addr;
-pub mod args;
-mod exec;
-pub mod host_init;
-pub mod prepare;
-pub mod teardown;
-pub mod teardown_orphan;
+//! The subcommand tree and its arguments are kept as the CLI interface, but
+//! every op fails with [`Unimplemented`] without acquiring privilege or
+//! touching the system.
 
-use crate::config::Network;
-use clap::Subcommand;
-use serde::Serialize;
+use crate::util::jailer::VmId;
+use clap::{Args, Subcommand};
 use thiserror::Error as ThisError;
 
-pub use host_init::HostInitArgs;
-pub use prepare::PrepareArgs;
-pub use teardown::TeardownArgs;
-pub use teardown_orphan::TeardownOrphanArgs;
-
-/// `[network]` is absent from config, i.e. VM networking is disabled.
+/// Returned by every `network` op until VM networking is rewritten.
 #[derive(Debug, ThisError, PartialEq, Eq)]
-#[error("VM networking is not configured ([network] absent from config)")]
-pub struct NetworkingDisabled;
+#[error("VM networking is unimplemented (pending the networking rewrite)")]
+pub struct Unimplemented;
 
-/// Refuse before any privileged command is ever spawned when `[network]` is
-/// absent from config. Pure — takes the already-loaded `Option<&Network>`
-/// rather than reaching into [`crate::config::Config`] itself — so this exact
-/// refusal path is exercisable from tests without root or a live config file,
-/// and `prepare`/`teardown`/`host_init` all resolve through this one function
-/// rather than duplicating the check.
-pub fn resolve_network(network: Option<&Network>) -> Result<&Network, NetworkingDisabled> {
-    network.ok_or(NetworkingDisabled)
+#[derive(Args)]
+pub struct PrepareArgs {
+    /// Microvm id.
+    #[arg(long)]
+    pub vm_id: VmId,
+    /// Unprivileged uid the VM runs as.
+    #[arg(long)]
+    pub uid: u32,
 }
 
-/// The result shape shared by all three networking ops, tagged by which ran.
-#[derive(Serialize)]
-#[serde(tag = "result", rename_all = "snake_case")]
-pub enum NetworkOut {
-    Prepared,
-    ToreDown,
-    HostReady,
+#[derive(Args)]
+pub struct TeardownArgs {
+    /// Microvm id.
+    #[arg(long)]
+    pub vm_id: VmId,
+    /// Unprivileged uid the VM ran as.
+    #[arg(long)]
+    pub uid: u32,
 }
+
+#[derive(Args)]
+pub struct TeardownOrphanArgs {
+    /// Microvm id.
+    #[arg(long)]
+    pub vm_id: VmId,
+}
+
+#[derive(Args)]
+pub struct HostInitArgs {}
 
 #[derive(Subcommand)]
 pub enum NetworkOp {
-    /// Create a VM's netns, veth pair, TAP device, and in-netns NAT.
+    /// Set up a VM's networking (unimplemented).
     Prepare(PrepareArgs),
-    /// Remove a VM's netns and any lingering host-side veth end.
+    /// Tear down a VM's networking (unimplemented).
     Teardown(TeardownArgs),
-    /// Idempotently remove an orphan VM's netns by vm_id alone (no uid).
+    /// Reclaim an orphan VM's networking by vm_id alone (unimplemented).
     TeardownOrphan(TeardownOrphanArgs),
-    /// One-time host setup: the `hyper` nftables table and forward policy.
+    /// One-time host networking setup (unimplemented).
     HostInit(HostInitArgs),
 }
 
 impl NetworkOp {
-    /// Route to the selected op; each runs in its own privileged scope and
-    /// returns its own serialized `Value`.
+    /// Every op refuses with [`Unimplemented`]; nothing is run.
     pub fn run(self) -> Result<serde_json::Value, crate::tools::Error> {
         match self {
-            NetworkOp::Prepare(args) => prepare::run(args),
-            NetworkOp::Teardown(args) => teardown::run(args),
-            NetworkOp::TeardownOrphan(args) => teardown_orphan::run(args),
-            NetworkOp::HostInit(args) => host_init::run(args),
+            NetworkOp::Prepare(_)
+            | NetworkOp::Teardown(_)
+            | NetworkOp::TeardownOrphan(_)
+            | NetworkOp::HostInit(_) => Err(crate::tools::Error::Tool(Box::new(Unimplemented))),
         }
     }
 }

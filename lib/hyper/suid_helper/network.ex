@@ -1,54 +1,40 @@
 defmodule Hyper.SuidHelper.Network do
   @moduledoc """
-  Privileged per-VM egress networking via the setuid helper's `network`
-  subcommands. The helper derives every address, interface name, and netns path
-  from `vm_id` + the validated `uid` + the root-owned `[network]` config — the
-  node passes only those two untrusted values.
-  """
-  use OpenTelemetryDecorator
-  alias Hyper.SuidHelper
+  Unimplemented placeholder pending the VM-networking rewrite.
 
-  @type err :: SuidHelper.err()
+  Mirrors the setuid helper's `network` subcommands (`prepare --vm-id --uid`,
+  `teardown --vm-id --uid`, `teardown-orphan --vm-id`, `host-init`), which
+  themselves return an unimplemented error without touching the system. Nothing
+  in Hyper calls this module; VMs currently boot with no NIC.
+  """
+
+  @type err :: Hyper.SuidHelper.err()
 
   @doc false
-  @spec argv(:prepare | :teardown, Hyper.Vm.Id.t(), non_neg_integer()) :: [String.t()]
-  def argv(op, vm_id, uid),
-    do: ["network", Atom.to_string(op), "--vm-id", vm_id, "--uid", to_string(uid)]
+  @spec argv(:prepare | :teardown, Hyper.Vm.Id.t(), non_neg_integer()) :: no_return()
+  def argv(_op, _vm_id, _uid),
+    do:
+      raise("Hyper.SuidHelper.Network.argv/3 is unimplemented: VM networking is being rewritten")
 
   @doc false
-  @spec argv(:teardown_orphan, Hyper.Vm.Id.t()) :: [String.t()]
-  def argv(:teardown_orphan, vm_id), do: ["network", "teardown-orphan", "--vm-id", vm_id]
+  @spec argv(:teardown_orphan, Hyper.Vm.Id.t()) :: no_return()
+  def argv(_op, _vm_id),
+    do:
+      raise("Hyper.SuidHelper.Network.argv/2 is unimplemented: VM networking is being rewritten")
 
-  @doc "Create `vm_id`'s netns, veth pair, TAP, and NAT rules. Idempotent-safe on relaunch."
-  @spec prepare(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Network.prepare", include: [:vm_id, :uid])
-  def prepare(vm_id, uid), do: run(argv(:prepare, vm_id, uid))
+  @doc "Unimplemented: will prepare `vm_id`'s networking once the rewrite lands."
+  @spec prepare(Hyper.Vm.Id.t(), non_neg_integer()) :: {:error, :unimplemented}
+  def prepare(_vm_id, _uid), do: {:error, :unimplemented}
 
-  @doc "Remove `vm_id`'s netns and host veth. Idempotent (a never-prepared VM is a no-op)."
-  @spec teardown(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Network.teardown", include: [:vm_id, :uid])
-  def teardown(vm_id, uid), do: run(argv(:teardown, vm_id, uid))
+  @doc "Unimplemented: will tear down `vm_id`'s networking once the rewrite lands."
+  @spec teardown(Hyper.Vm.Id.t(), non_neg_integer()) :: {:error, :unimplemented}
+  def teardown(_vm_id, _uid), do: {:error, :unimplemented}
 
-  @doc """
-  Remove `vm_id`'s netns by id alone, with no `uid` — for the `Reaper`'s
-  crashed-node backstop, where the owning node never persisted a uid to derive
-  the clone-pool slot from. Idempotent: a netns already gone (raced with a
-  normal `teardown/2`, or never fully created) is not an error.
-  """
-  @spec teardown_orphan(Hyper.Vm.Id.t()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Network.teardown_orphan", include: [:vm_id])
-  def teardown_orphan(vm_id), do: run(argv(:teardown_orphan, vm_id))
+  @doc "Unimplemented: will tear down an orphaned VM's networking by id alone."
+  @spec teardown_orphan(Hyper.Vm.Id.t()) :: {:error, :unimplemented}
+  def teardown_orphan(_vm_id), do: {:error, :unimplemented}
 
-  @doc "Ensure the host-wide `hyper` nft table (masquerade + forward policy) exists. Idempotent."
-  @spec host_init() :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Network.host_init", include: [])
-  def host_init, do: run(["network", "host-init"])
-
-  @spec run([String.t()]) :: :ok | {:error, err()}
-  defp run(args) do
-    case SuidHelper.exec(args) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
-    end
-  end
+  @doc "Unimplemented: will perform host-wide networking setup."
+  @spec host_init() :: {:error, :unimplemented}
+  def host_init, do: {:error, :unimplemented}
 end
