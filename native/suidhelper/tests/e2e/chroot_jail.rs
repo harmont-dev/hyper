@@ -3,11 +3,6 @@
 //! never touch /etc/hyper or /srv. Root-gated: the helper acquires privileges for
 //! mknod/chown, so these self-skip without root. The cgroup half is exercised
 //! only with a MISSING leaf (idempotent, mutates nothing on the real host).
-//!
-//! The `dev/net/tun` node `prepare` creates when `[network]` is configured is
-//! likewise privileged `mknod` — no unit-level substitute exists; it is proven
-//! only here, root-gated, with the insecure config seam supplying a `[network]`
-//! table.
 #![cfg(feature = "insecure_mode")]
 
 use assert_fs::prelude::*;

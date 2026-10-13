@@ -7,14 +7,12 @@ use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config};
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
-use crate::network::{self, prepare::NetworkPrepareError};
 use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
 use hyperrs_firecracker::jailer::{CgroupLimits, Jailer};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::DirError;
 use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
 use hyperrs_linux::dm::OpenDeviceError;
-use hyperrs_linux::netns;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -30,8 +28,6 @@ pub enum LaunchError {
     Kernel(#[from] KernelError),
     #[error(transparent)]
     Teardown(#[from] TeardownError),
-    #[error(transparent)]
-    Network(#[from] NetworkPrepareError),
     #[error("creating the jail root: {0}")]
     Root(#[from] DirError),
     #[error("opening rootfs device: {0}")]
@@ -69,19 +65,12 @@ impl Op for Launch {
         let uid = range.uid(self.uid)?;
         let gid = range.gid(self.gid)?;
         let kernel = KernelImage::open(&self.kernel)?;
-        let netns = config
-            .network()
-            .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&self.id));
 
         let layout = JailLayout::new(&jail_base, &self.id);
         let api_sock =
             SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
 
-        Teardown::new(self.id.clone(), Some(self.uid)).teardown(&mut token)?;
-
-        if netns.is_some() {
-            network::prepare::Prepare::new(self.uid, &self.id)?.run(&mut token)?;
-        }
+        Teardown::new(self.id.clone()).teardown(&mut token)?;
 
         {
             let _root = token.elevate()?;
@@ -103,7 +92,6 @@ impl Op for Launch {
             .gid(gid.into())
             .limits(self.limits)
             .api_sock(&api_sock)
-            .maybe_netns(netns.as_deref())
             .build()
             .invoke(token)
     }

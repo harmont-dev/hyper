@@ -1,9 +1,9 @@
 // TODO(markovejnovic): This is slop and should be removed when networking is re-done.
 use crate::cli::Op;
 use crate::config::Config;
-use crate::network::{self, host_init::HostInitError};
 use hyperrs_process::privilege::Unprivileged;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::path::PathBuf;
 
 #[derive(Deserialize)]
@@ -18,10 +18,9 @@ pub enum HostInitOut {
 
 impl Op for HostInit {
     type Output = HostInitOut;
-    type Error = HostInitError;
+    type Error = Infallible;
 
-    fn run(self, mut token: Unprivileged) -> Result<HostInitOut, HostInitError> {
-        network::host_init::HostInit::new()?.run(&mut token)?;
+    fn run(self, _token: Unprivileged) -> Result<HostInitOut, Infallible> {
         Ok(HostInitOut::HostReady {
             hyper_base: Config::get().hyper_base().as_path().to_path_buf(),
         })

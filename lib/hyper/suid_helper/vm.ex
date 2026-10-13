@@ -7,10 +7,10 @@ defmodule Hyper.SuidHelper.Vm do
 
   @type err :: SuidHelper.err()
 
-  @spec teardown(Hyper.Vm.Id.t(), non_neg_integer() | nil) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.teardown", include: [:vm_id, :uid])
-  def teardown(vm_id, uid) do
-    run(%{op: "vm_teardown", id: vm_id, uid: uid})
+  @spec teardown(Hyper.Vm.Id.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Vm.teardown", include: [:vm_id])
+  def teardown(vm_id) do
+    run(%{op: "vm_teardown", id: vm_id})
   end
 
   @doc """

@@ -50,7 +50,7 @@ impl Launch {
         p
     }
 
-    fn networked_config(&self) -> PathBuf {
+    fn legacy_network_config(&self) -> PathBuf {
         let tools: String = ["ip", "nft", "sysctl"]
             .map(|name| {
                 let fake = self.tmp.path().join(name);
@@ -58,7 +58,9 @@ impl Launch {
                 format!("{name} = \"{}\"\n", fake.display())
             })
             .concat();
-        self.config(&format!("{tools}[network]\nuplink = \"eth0\"\n"))
+        self.config(&format!(
+            "{tools}[network]\nuplink = \"eth0\"\nclone_pool = \"172.31.0.0/16\"\n"
+        ))
     }
 
     fn request(&self, overrides: Value) -> Value {
@@ -240,26 +242,16 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
 }
 
 #[rstest]
-fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(launch: Option<Launch>) {
+fn execs_jailer_without_netns_with_legacy_network_table_as_root(launch: Option<Launch>) {
     let launch = require!(launch);
-    let cfg = launch.networked_config();
+    let cfg = launch.legacy_network_config();
 
     run(&cfg, launch.request(json!({}))).code(RECORDER_EXIT);
 
     let argv = launch.recorded_argv().expect("the jailer was exec'd");
-    let i = argv
-        .iter()
-        .position(|a| a == "--netns")
-        .expect("--netns present when [network] is configured");
-    assert_eq!(
-        argv[i + 1],
-        "/var/run/netns/vm1",
-        "netns path must be derived from --id, not caller-supplied"
-    );
-    let sep = argv.iter().position(|a| a == "--").unwrap();
     assert!(
-        i < sep,
-        "--netns must precede the `--` firecracker separator"
+        !argv.iter().any(|a| a == "--netns"),
+        "a legacy [network] table must not enable --netns: {argv:?}"
     );
 }
 

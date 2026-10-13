@@ -95,8 +95,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # attempted regardless of the other's outcome (a `Reaper` backstops either
   # failure); the first error is surfaced to the caller.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
-  defp clear_jail(%Opts{vm_id: id, uid: uid}) do
-    SuidHelper.Vm.teardown(id, uid)
+  defp clear_jail(%Opts{vm_id: id}) do
+    SuidHelper.Vm.teardown(id)
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}

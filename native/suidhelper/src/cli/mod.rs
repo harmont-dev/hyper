@@ -161,7 +161,6 @@ mod tests {
     fn dropping_any_required_field_is_refused() {
         for request in valid_requests() {
             let optional: &[&str] = match request["op"].as_str().unwrap() {
-                "vm_teardown" => &["uid"],
                 "thin_volume_create" => &["parent"],
                 _ => &[],
             };

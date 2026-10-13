@@ -14,7 +14,7 @@ defmodule Hyper.Node do
 
     * `Hyper.Node.VMSupervisor` - a **local** `DynamicSupervisor` that starts one
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
-      this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
+      this machine's kernel/rootfs/cgroup and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
       VMs on a surviving node - cold-booting a ghost).
 
@@ -309,22 +309,9 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
-         {:ok, base} <- init_network(),
+         {:ok, base} <- Hyper.SuidHelper.host_init(),
          :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
-    end
-  end
-
-  # VM networking is mandatory: refuse to start unless `[network]` is
-  # configured, then idempotently reconcile the host-wide `hyper` nftables
-  # table. Runs after `Hyper.SuidHelper.test_system/0` so the helper is
-  # confirmed present first.
-  @spec init_network :: {:ok, Path.t()} | {:error, term()}
-  defp init_network do
-    if Hyper.Cfg.Network.configured?() do
-      Hyper.SuidHelper.host_init()
-    else
-      {:error, :network_not_configured}
     end
   end
 

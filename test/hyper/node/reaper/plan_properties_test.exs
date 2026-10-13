@@ -29,22 +29,10 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
     check all(
             live <- id_set(),
             leaves <- id_list(),
-            rw <- id_list(),
-            netns <- id_list()
+            rw <- id_list()
           ) do
-      orphans = Plan.orphans(live, leaves, rw, netns)
+      orphans = Plan.orphans(live, leaves, rw)
       assert MapSet.disjoint?(orphans, live)
-    end
-  end
-
-  property "every orphan netns name not in live is a candidate, and none from live are" do
-    check all(
-            live <- id_set(),
-            netns <- id_list()
-          ) do
-      orphans = Plan.orphans(live, [], [], netns)
-      expected = MapSet.difference(MapSet.new(netns), live)
-      assert orphans == expected
     end
   end
 

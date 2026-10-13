@@ -20,34 +20,22 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   defmodule Cold do
     @moduledoc "A resolved cold boot."
     @enforce_keys [:machine_config, :boot_source, :drives]
-    defstruct [:machine_config, :boot_source, drives: [], network_interfaces: []]
+    defstruct [:machine_config, :boot_source, drives: []]
 
     @type t :: %__MODULE__{
             machine_config: MachineConfiguration.t(),
             boot_source: BootSource.t(),
-            drives: [Drive.t()],
-            network_interfaces: [Hyper.Firecracker.Api.NetworkInterface.t()]
+            drives: [Drive.t()]
           }
   end
 
   @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
-    # Networking is mandatory: every VM gets a NIC on the uniform inner-world
-    # address plus the kernel `ip=`/`hyper.resolver=` cmdline. A node that
-    # reached here has already passed the startup network preflight.
-    vm_id = Map.fetch!(source, :vm_id)
-
-    boot_args =
-      Map.get(source, :boot_args, @default_boot_args) <>
-        " " <>
-        Hyper.Node.FireVMM.Net.ip_cmdline() <>
-        " " <> Hyper.Node.FireVMM.Net.resolver_cmdline(Hyper.Cfg.Network.resolver())
-
     %Cold{
       machine_config: Instance.Spec.machine_config(Instance.spec(type)),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
-        boot_args: boot_args
+        boot_args: Map.get(source, :boot_args, @default_boot_args)
       },
       drives: [
         %Drive{
@@ -56,8 +44,7 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           is_read_only: false,
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
-      ],
-      network_interfaces: [Hyper.Node.FireVMM.Net.interface(vm_id)]
+      ]
     }
   end
 end

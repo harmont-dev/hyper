@@ -1,19 +1,17 @@
 defmodule Hyper.Node.FireVMM.DaemonTest do
   @moduledoc """
-  `Daemon` shells every privileged step (netns prepare/teardown, chroot
-  removal, jailer launch) through the setuid helper binary named by
-  `Hyper.Cfg.Tools.suidhelper/0`. These tests point that at a small fake
-  script instead of the real setuid helper — the same seam `JailerTest` uses
-  for `tools.firecracker`/`tools.jailer` — so they can observe real call
-  order and gating without root, a real netns, or a real firecracker process.
+  `Daemon` shells every privileged step (jail teardown, jailer launch)
+  through the setuid helper binary named by `Hyper.Cfg.Tools.suidhelper/0`.
+  These tests point that at a small fake script instead of the real setuid
+  helper — the same seam `JailerTest` uses for `tools.firecracker`/`tools.jailer`
+  — so they can observe the real calls without root or a real firecracker
+  process.
 
-  Invariants under test (networking is mandatory — these fire unconditionally,
-  even with no `[network]` table in config):
+  Invariants under test:
 
-    * the jailer enters the netns via `--netns` (Task 8), so it must already
-      exist: `network prepare` must run before the `jailer` launch.
-    * jail clearing (`chroot-jail remove`) and network teardown both fire
-      wherever the jail is cleared (stale-reset on relaunch, and terminate).
+    * `start_link` boots with one `vm_launch` carrying the kernel and the
+      volume's device.
+    * `terminate/2` clears the jail with `vm_teardown`.
   """
 
   use ExUnit.Case, async: false
@@ -97,7 +95,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     Hyper.Cfg.Toml.put_cache(%{"tools" => tools})
   end
 
-  describe "netns lifecycle (mandatory)" do
+  describe "jail lifecycle" do
     test "start_link boots with one vm_launch carrying the kernel and the volume's device",
          %{log: log, fake: fake} do
       put_toml(fake)
@@ -114,7 +112,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       assert Enum.map(exit, & &1["op"]) == ["vm_teardown"]
     end
 
-    test "terminate/2 tears down the jail and its network", %{log: log, fake: fake} do
+    test "terminate/2 tears down the jail", %{log: log, fake: fake} do
       put_toml(fake)
 
       assert :ok =

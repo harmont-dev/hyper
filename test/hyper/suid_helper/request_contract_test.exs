@@ -40,10 +40,7 @@ defmodule Hyper.SuidHelper.RequestContractTest do
         {~s({"result":"claimed"}), fn -> SuidHelper.Vm.claim_api_socket(@vm_id) end},
       "vm_claim_vsock_socket" =>
         {~s({"result":"claimed"}), fn -> SuidHelper.Vm.claim_vsock_socket(@vm_id) end},
-      "vm_teardown" =>
-        {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id, 900_001) end},
-      "vm_teardown_orphan" =>
-        {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id, nil) end},
+      "vm_teardown" => {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id) end},
       "img_activate" =>
         {~s({"result":"activated","device":"/dev/mapper/hyper-img-x","names":[]}),
          fn ->
