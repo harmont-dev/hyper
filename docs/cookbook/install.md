@@ -16,6 +16,23 @@ Before proceeding, ensure you meet all of these hard requirements:
 | [KVM](https://linux-kvm.org/page/Main_Page) available | `stat /dev/kvm` returns zero. |
 | You have root access through `sudo`. | - |
 | Your machine has cgroups V2 | `stat -fc %T /sys/fs/cgroup` returns zero. |
+| Your host kernel carries current KVM and networking fixes | See [Host Kernel](#host-kernel). |
+
+### Host Kernel
+
+A guest's isolation ends at the host kernel: KVM, and the network stack every
+guest packet is forwarded through. Run a host kernel that carries the fixes
+for:
+
+| CVE | Affects |
+|-----|---------|
+| [CVE-2026-99999](https://nvd.nist.gov/vuln/detail/CVE-2026-99999) | All hosts (IPv4 checksum handling) |
+| [CVE-2026-53359](https://nvd.nist.gov/vuln/detail/CVE-2026-53359) | x86_64 hosts (KVM shadow paging) |
+| [CVE-2026-46316](https://nvd.nist.gov/vuln/detail/CVE-2026-46316) | aarch64 hosts (KVM vGIC ITS) |
+
+Your distribution's kernel changelog or security tracker lists the package
+version that fixes each one. Hyper does not check this at boot: a backported
+fix is invisible in the kernel version string.
 
 ### OS Packages
 
