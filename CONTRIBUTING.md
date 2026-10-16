@@ -111,7 +111,7 @@ mix firecracker.gen
 
 Open a GitHub issue for bugs, with the version, your environment, and a minimal
 reproduction. For anything security-sensitive, **do not open a public issue**
--- email the maintainer at <marko@harmont.dev> instead.
+-- follow [SECURITY.md](SECURITY.md) instead.
 
 You can also ask questions in the [community
 Discord](https://discord.gg/hm-dev).
