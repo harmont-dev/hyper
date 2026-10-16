@@ -11,7 +11,7 @@ defmodule Hyper.Node.FireVMM.BootSpecTest do
   @source %{vm_id: "vabc", kernel_image_path: "/vmlinux", root_drive_path: "/rootfs"}
 
   test "default cmdline boots our agent as init with no serial console" do
-    cold = BootSpec.resolve(@source, :micro)
+    cold = BootSpec.resolve(@source, :micro, :x86_64)
     assert cold.boot_source.boot_args =~ "init=/hyper-init"
     # No console by default: serial printk blocks the boot vCPU. A debug boot
     # re-adds console=ttyS0 through the per-VM boot_args override.
@@ -19,7 +19,7 @@ defmodule Hyper.Node.FireVMM.BootSpecTest do
   end
 
   test "every VM gets a NIC and the ip=/hyper.resolver= cmdline" do
-    cold = BootSpec.resolve(@source, :micro)
+    cold = BootSpec.resolve(@source, :micro, :x86_64)
     assert length(cold.network_interfaces) == 1
     assert cold.boot_source.boot_args =~ "ip="
     assert cold.boot_source.boot_args =~ "hyper.resolver="

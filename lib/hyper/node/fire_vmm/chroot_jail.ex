@@ -13,7 +13,7 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
 
   alias Hyper.Node.FireVMM.BootSpec.Cold
 
-  # In-jail filenames + the rootfs drive id (matches BootSpec.resolve/2).
+  # In-jail filenames + the rootfs drive id (matches BootSpec.resolve/3).
   @kernel_name "vmlinux"
   @root_name "rootfs"
   @root_drive_id "rootfs"
