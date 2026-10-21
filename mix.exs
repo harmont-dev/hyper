@@ -123,6 +123,7 @@ defmodule Hyper.MixProject do
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",
         "docs/cookbook/architecture.md",
+        "docs/cookbook/networking.md",
         "docs/grpc.md",
         "CONTRIBUTING.md",
         "LICENSE"
