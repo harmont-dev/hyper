@@ -1,53 +1,30 @@
 defmodule Hyper.Cfg.Network do
   @moduledoc """
-  VM egress networking settings from the `[network]` table — `config.toml`-only
-  because the setuid helper reads the same `uplink` and `clone_pool` to build
-  each VM's netns, veth, and NAT rules.
+  Unimplemented placeholder pending the VM-networking rewrite.
 
-  Networking is **mandatory**: a node refuses to start unless `[network]` is
-  configured (see `Hyper.Node.FireVMM.Jailer.Checks.network_ready/0`). Every VM
-  gets a NIC; there is no opt-out. `configured?/0` exists only so the startup
-  preflight can fail fast with a clear message rather than crash later.
+  A `[network]` table in `/etc/hyper/config.toml` is tolerated but ignored
+  (`Hyper.Cfg.Toml` is a loose dotted-path lookup), and a node no longer
+  requires it to start. Every function raises; nothing in Hyper calls them.
   """
 
-  import Hyper.Cfg, only: [get_cfg: 1]
+  @doc "Unimplemented: whether VM networking is configured."
+  @spec configured?() :: no_return()
+  def configured?,
+    do:
+      raise("Hyper.Cfg.Network.configured?/0 is unimplemented: VM networking is being rewritten")
 
-  @default_clone_pool "172.31.0.0/16"
-  @default_resolver "1.1.1.1"
+  @doc "Unimplemented: the uplink interface guest egress leaves through."
+  @spec uplink() :: no_return()
+  def uplink,
+    do: raise("Hyper.Cfg.Network.uplink/0 is unimplemented: VM networking is being rewritten")
 
-  @doc """
-  Whether the required `[network] uplink` is present. Used only by the startup
-  preflight to fail fast; once a node is running, networking is guaranteed
-  configured, so runtime code calls `uplink/0` directly.
-  """
-  @spec configured?() :: boolean()
-  def configured?, do: not is_nil(get_cfg(toml: "network.uplink", default: nil))
+  @doc "Unimplemented: the address pool per-VM links are carved from."
+  @spec clone_pool() :: no_return()
+  def clone_pool,
+    do: raise("Hyper.Cfg.Network.clone_pool/0 is unimplemented: VM networking is being rewritten")
 
-  @doc "Physical uplink interface guest egress is NAT'd out of. Raises if unset (a running node has already passed the preflight)."
-  @spec uplink() :: String.t()
-  def uplink do
-    case get_cfg(toml: "network.uplink", default: nil) do
-      nil ->
-        raise Hyper.Cfg.MissingError, "network.uplink is required — VM networking is mandatory"
-
-      v when is_binary(v) ->
-        v
-
-      other ->
-        raise ArgumentError, "network.uplink must be a string, got: #{inspect(other)}"
-    end
-  end
-
-  @doc "IPv4 CIDR the per-VM clone /30s are carved from. `[network] clone_pool`."
-  @spec clone_pool() :: String.t()
-  def clone_pool, do: get_cfg(toml: "network.clone_pool", default: @default_clone_pool)
-
-  @doc """
-  DNS resolver IP handed to the guest via the `hyper.resolver=` kernel cmdline
-  param, since the kernel's `ip=` autoconfig sets the guest's address/route but
-  never DNS. The PID-1 guest agent reads this back out of `/proc/cmdline` and
-  writes it to `/etc/resolv.conf`. `[network] resolver`.
-  """
-  @spec resolver() :: String.t()
-  def resolver, do: get_cfg(toml: "network.resolver", default: @default_resolver)
+  @doc "Unimplemented: the DNS resolver handed to guests."
+  @spec resolver() :: no_return()
+  def resolver,
+    do: raise("Hyper.Cfg.Network.resolver/0 is unimplemented: VM networking is being rewritten")
 end

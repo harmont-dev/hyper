@@ -57,7 +57,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
     # link kill) and so `terminate/2` runs on supervisor shutdown.
     Process.flag(:trap_exit, true)
 
-    with :ok <- prelaunch(opts),
+    with :ok <- clear_jail(opts),
          {:ok, muontrap} <- launch(opts) do
       {:ok, %__MODULE__{opts: opts, muontrap: muontrap}}
     else
@@ -91,25 +91,12 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  # Clear any stale jail + netns left by a prior incarnation, then prepare the
-  # fresh netns the jailer's `--netns` will enter. Must run before `launch/1`:
-  # the jailer refuses to start if the netns it is told to enter does not yet
-  # exist. Networking is mandatory, so this is unconditional.
-  @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
-  defp prelaunch(%Opts{vm_id: id, uid: uid} = opts) do
-    with :ok <- clear_jail(opts) do
-      Hyper.SuidHelper.Network.prepare(id, uid)
-    end
-  end
-
-  # Best-effort: both the chroot/cgroup removal and the network teardown are
-  # attempted regardless of the other's outcome (a `Reaper` backstops either
-  # failure); the first error is surfaced to the caller.
+  # Remove the VM's chroot and kill its cgroup leaf. On (re)start this clears any
+  # stale jail left by a prior incarnation, which must happen before `launch/1`
+  # because the jailer refuses to reuse an existing chroot.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
-  defp clear_jail(%Opts{vm_id: id, uid: uid}) do
-    net = Hyper.SuidHelper.Network.teardown(id, uid)
-    jail = SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
-    with :ok <- net, do: jail
+  defp clear_jail(%Opts{vm_id: id}) do
+    SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
