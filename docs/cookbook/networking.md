@@ -7,7 +7,41 @@ terms.
 
 ## Goals
 
-TODO
+Hyper's networking is designed to make a VM feel like a real machine on the
+internet.
+
+- **Any protocol**: Hyper must support any IP-based protocol. This enables
+  `ssh`, `http`, `udp`, `tcp`, `quic`, whatever!
+- **Reachable**: VMs must be reachable from the public internet.
+- **Isolated**: VMs cannot reach any of the host's services, nor other VMs
+  directly.
+- **Hostable**: Hypervisors need to be hostable on most cloud providers.
+- **Secure**: Hyper's networking needs to be secure out-of-the-box.
+
+### Security
+
+There are two malicious actors that Hyper aims to protect against. A malicious
+VM should never impact any other VM nor the hypervisor itself.
+
+The external internet is considered antagonistically and Hyper aims to protect
+against external malactors.
+
+The goals for Hyper are:
+
+- VMs cannot open connections to any host address. Hyper handles this by
+  confining VMs to isolated namespaces and firewalls.
+- VMs cannot connect to infrastructure providers. Hyper enables this via
+  explicit inbound and outbound firewall rules.
+- VMs should not be able to reach other VMs within the hypervisor. VMs which
+  try to talk to other VMs over the public IPs are intended to successfully do
+  so, but directly talking is not allowed.
+- VMs should be banned from running some ports. Hyper achieves this through its
+  firewall rules.
+- VMs have all inbound ports blocked, unless the operator (you) opens ports.
+- VMs have a default set of outbound ports blocked, unless explicitly permitted
+  by the operator.
+- VMs can only send traffic from their own addresses. Forged IP addresses are
+  dropped.
 
 ## Architecture Overview
 
@@ -274,6 +308,12 @@ VM-specific IPv6 address, the ND Proxy on the hypervisor's NDP proxy responds
 with its own MAC address, routing all VM-specific IP traffic to the hypervisor
 itself. The kernels IP tables then internally route to the appropriate VM's
 virtual interface.
+
+## Firewalls
+
+TODO
+
+Do not forget about default firewall rules.
 
 ## FAQ
 
