@@ -134,6 +134,29 @@ clone_pool = "172.31.0.0/16"
 resolver = "1.1.1.1"
 ```
 
+## Security Configuration
+
+At boot a node checks its kernel against known KVM guest-to-host escapes and
+refuses to start when one is reachable and the kernel is not provably fixed
+(see the [install guide](install.md#kvm-nested-virtualization)).
+`allow_vulnerable_kernel` waives that refusal for **every** advisory, present
+and future; each waived exposure is still logged as a warning on boot.
+
+### `config.exs`
+
+```elixir
+config :hyper, Hyper.Cfg.Security,
+  allow_vulnerable_kernel: false
+```
+
+### `config.toml`
+
+```toml
+[security]
+# optional -- default shown.
+allow_vulnerable_kernel = false
+```
+
 ## gRPC Configuration
 
 Hyper supports a [gRPC](https://grpc.io/) interface enabling you to interface

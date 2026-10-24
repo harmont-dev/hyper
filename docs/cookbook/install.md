@@ -109,6 +109,31 @@ sudo dmsetup targets # must list snapshot, thin, and thin-pool
 >     | sudo tee /etc/modules-load.d/hyper.conf
 > ```
 
+### KVM Nested Virtualization
+
+Hyper refuses to boot (`{:vulnerable_kernel, ids}`) on a kernel exposed to a
+known KVM guest-to-host escape — currently
+[Januscape (CVE-2026-53359)](https://www.cve.org/CVERecord?id=CVE-2026-53359)
+and [Zapscape (CVE-2026-64561)](https://www.cve.org/CVERecord?id=CVE-2026-64561),
+both in the x86 shadow MMU and reachable only through nested virtualization.
+Distro kernels (Ubuntu's `6.8.0-*`, Debian's `6.1.0-*`, ...) backport fixes
+without changing their version, so Hyper cannot prove them fixed: disable
+nesting, which Firecracker guests never need.
+
+```sh
+printf 'options kvm_intel nested=0\noptions kvm_amd nested=0\n' \
+    | sudo tee /etc/modprobe.d/hyper-kvm.conf
+# Reload the vendor module (fails while any VM is running).
+for m in kvm_intel kvm_amd; do
+  [ -e /sys/module/$m ] && sudo modprobe -r $m && sudo modprobe $m
+done
+cat /sys/module/kvm_*/parameters/nested # must print N (Intel) or 0 (AMD)
+```
+
+On a vanilla upstream kernel at or above the fixed stable release (e.g.
+`6.12.101`, `7.2`) nesting may stay on. To boot anyway on an exposed host, set
+`allow_vulnerable_kernel` (see [config](config.md#security-configuration)).
+
 ### PostgreSQL
 
 Hyper needs a **PostgreSQL** server reachable from every node - it is the image

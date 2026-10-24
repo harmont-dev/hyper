@@ -25,6 +25,21 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# The node's kernel boot guard refuses Ubuntu kernels with KVM nesting on
+# (they can't prove the Januscape/Zapscape fixes). Reload before the udev rule
+# below, since the reload recreates /dev/kvm.
+printf 'options kvm_intel nested=0\noptions kvm_amd nested=0\n' \
+  | sudo tee /etc/modprobe.d/hyper-kvm.conf >/dev/null
+for m in kvm_intel kvm_amd; do
+  [ -e "/sys/module/$m/parameters/nested" ] || continue
+  case "$(cat "/sys/module/$m/parameters/nested")" in
+    N | 0) ;;
+    *) sudo modprobe -r "$m" && sudo modprobe "$m" ;;
+  esac
+done
+! grep -qx '[Y1]' /sys/module/kvm_*/parameters/nested \
+  || { echo "ERROR: KVM nesting still enabled" >&2; exit 1; }
+
 # The jailed VM uid (900000+) opens /dev/kvm; 0666 is GitHub's own documented
 # rule for KVM access on hosted runners.
 echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
