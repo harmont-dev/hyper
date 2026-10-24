@@ -28,8 +28,8 @@ defmodule Sys.Linux.SubidPropertiesTest do
 
   property "a line without exactly three colon fields is invalid" do
     check all(
-            fields <- list_of(name(), min_length: 0, max_length: 5),
-            fields != [] and length(fields) != 3
+            len <- member_of([1, 2, 4, 5]),
+            fields <- list_of(name(), length: len)
           ) do
       assert Subid.parse(Enum.join(fields, ":")) == {:error, :invalid_format}
     end
