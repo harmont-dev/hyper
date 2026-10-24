@@ -14,10 +14,7 @@ TODO
 ```mermaid
 flowchart BT
     subgraph host-netns
-        subgraph if0
-            ipv4["ipv4 108.....54/23"]
-            ipv6["ipv6 2001:...:1a00/64<br>proxy NDP for VM addresses"]
-        end
+        if0["if0<br>108.....54/23<br>2001:...:1a00/64<br>proxy NDP for VM addresses"]
 
         nat0{{"nat0"}}
 
@@ -29,37 +26,47 @@ flowchart BT
         uplink1["uplink<br>10.200.0.2/30<br>fe80::2"]
         nat1{{"vm1-nat"}}
         tap1["tap0<br>172.16.0.1/30<br>fe80::1"]
+
+        subgraph vm1["vm1 · Firecracker guest"]
+            eth1["eth0<br>172.16.0.2/30<br>2001:...:1:0:0:0/128"]
+        end
     end
 
     subgraph host-vm2-netns
         uplink2["uplink<br>10.200.0.6/30<br>fe80::2"]
         nat2{{"vm2-nat"}}
         tap2["tap0<br>172.16.0.1/30<br>fe80::1"]
-    end
 
-    subgraph vm1
-        subgraph vm1-netns
-            eth1["eth0<br>172.16.0.2/30<br>2001:...:1:0:0:0/128"]
-        end
-    end
-
-    subgraph vm2
-        subgraph vm2-netns
+        subgraph vm2["vm2 · Firecracker guest"]
             eth2["eth0<br>172.16.0.2/30<br>2001:...:1:0:0:1/128"]
         end
     end
 
     eth1 -->|IPv4| tap1 --> nat1 --> uplink1 --> veth1 --> nat0
-    eth2 -->|IPv4| tap2 --> nat2 --> uplink2 --> veth2 --> nat0
-    nat0 --> ipv4
+    eth2 --> tap2 --> nat2 --> uplink2 --> veth2 --> nat0
+    nat0 --> if0
 
-    eth1 <-.->|IPv6| tap1 <-.-> uplink1 <-.-> veth1 <-.-> ipv6
-    eth2 <-.->|IPv6| tap2 <-.-> uplink2 <-.-> veth2 <-.-> ipv6
+    eth1 <-->|IPv6| tap1 <--> uplink1 <--> veth1 <--> if0
+    eth2 <--> tap2 <--> uplink2 <--> veth2 <--> if0
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10 stroke:#1887dc,stroke-width:2.5px
+    linkStyle 11,12,13,14,15,16,17,18 stroke:#e68019,stroke-width:2.5px
+
+    classDef netns fill:#8c7ae61f,stroke:#8c7ae6,stroke-width:1.5px,stroke-dasharray:6 4
+    classDef guest fill:#90a3b61a,stroke:#90a3b6,stroke-width:2.5px
+    classDef nic fill:#637d9726,stroke:#637d97,stroke-width:2px
+    classDef veth fill:#30a65b26,stroke:#30a65b,stroke-width:2px
+    classDef tap fill:#e0b40626,stroke:#e0b406,stroke-width:2px
+    classDef nat fill:#e73a2326,stroke:#e73a23,stroke-width:2px
+    class host-netns,host-vm1-netns,host-vm2-netns netns
+    class vm1,vm2 guest
+    class if0 nic
+    class veth1,veth2,uplink1,uplink2 veth
+    class tap1,tap2,eth1,eth2 tap
+    class nat0,nat1,nat2 nat
 ```
 
-Solid arrows are outbound-only IPv4, translated by both NATs. Dotted arrows are
-bidirectional IPv6, routed without translation. Both families share the same
-`eth0`, `tap0` and veth devices.
+Both address families share the same `eth0`, `tap0` and veth devices.
 
 ### VM Namespaces
 
@@ -78,9 +85,7 @@ IPv4 traffic on hyper is outbound only.
 ```mermaid
 flowchart BT
     subgraph host-netns
-        subgraph if0
-            ipv4["ipv4 108.....54/23"]
-        end
+        if0["if0<br>108.....54/23"]
 
         nat0{{"nat0"}}
 
@@ -92,29 +97,40 @@ flowchart BT
         uplink1["uplink 10.200.0.2/30"]
         nat1{{"vm1-nat"}}
         tap1["tap0 172.16.0.1/30"]
+
+        subgraph vm1["vm1 · Firecracker guest"]
+            eth1["eth0 172.16.0.2/30"]
+        end
     end
 
     subgraph host-vm2-netns
         uplink2["uplink 10.200.0.6/30"]
         nat2{{"vm2-nat"}}
         tap2["tap0 172.16.0.1/30"]
-    end
 
-    subgraph vm1
-        subgraph vm1-netns
-            eth1["eth0 172.16.0.2/30"]
-        end
-    end
-
-    subgraph vm2
-        subgraph vm2-netns
+        subgraph vm2["vm2 · Firecracker guest"]
             eth2["eth0 172.16.0.2/30"]
         end
     end
 
     eth1 --> tap1 --> nat1 --> uplink1 --> veth1 --> nat0
     eth2 --> tap2 --> nat2 --> uplink2 --> veth2 --> nat0
-    nat0 --> ipv4
+    nat0 --> if0
+
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10 stroke:#1887dc,stroke-width:2.5px
+
+    classDef netns fill:#8c7ae61f,stroke:#8c7ae6,stroke-width:1.5px,stroke-dasharray:6 4
+    classDef guest fill:#90a3b61a,stroke:#90a3b6,stroke-width:2.5px
+    classDef nic fill:#637d9726,stroke:#637d97,stroke-width:2px
+    classDef veth fill:#30a65b26,stroke:#30a65b,stroke-width:2px
+    classDef tap fill:#e0b40626,stroke:#e0b406,stroke-width:2px
+    classDef nat fill:#e73a2326,stroke:#e73a23,stroke-width:2px
+    class host-netns,host-vm1-netns,host-vm2-netns netns
+    class vm1,vm2 guest
+    class if0 nic
+    class veth1,veth2,uplink1,uplink2 veth
+    class tap1,tap2,eth1,eth2 tap
+    class nat0,nat1,nat2 nat
 ```
 
 For outgoing [IPv4](https://en.wikipedia.org/wiki/IPv4) traffic, Hyper
@@ -171,7 +187,7 @@ directions. I expect users to prefer this route.
 ```mermaid
 flowchart TD
     subgraph host-netns
-        if0["if0 2001:db8::5400:6ff:fe12:1a00/64, proxy NDP for VM addresses"]
+        if0["if0<br>2001:db8::5400:6ff:fe12:1a00/64<br>proxy NDP for VM addresses"]
         veth1["vm-veth-1 fe80::1"]
         veth2["vm-veth-2 fe80::1"]
     end
@@ -179,29 +195,39 @@ flowchart TD
     subgraph host-vm1-netns
         uplink1["uplink fe80::2"]
         tap1["tap0 fe80::1"]
+
+        subgraph vm1["vm1 · Firecracker guest"]
+            eth1["eth0 2001:db8::1:0:0:0/128"]
+        end
     end
 
     subgraph host-vm2-netns
         uplink2["uplink fe80::2"]
         tap2["tap0 fe80::1"]
-    end
 
-    subgraph vm1
-        subgraph vm1-netns
-            eth1["eth0 2001:db8::1:0:0:0/128"]
-        end
-    end
-
-    subgraph vm2
-        subgraph vm2-netns
+        subgraph vm2["vm2 · Firecracker guest"]
             eth2["eth0 2001:db8::1:0:0:1/128"]
         end
     end
 
-    if0 <-->|"route 2001:db8::1:0:0:0/128"| veth1
     if0 <-->|"route 2001:db8::1:0:0:1/128"| veth2
-    veth1 <--> uplink1 <--> tap1 <--> eth1
+    if0 <-->|"route 2001:db8::1:0:0:0/128"| veth1
     veth2 <--> uplink2 <--> tap2 <--> eth2
+    veth1 <--> uplink1 <--> tap1 <--> eth1
+
+    linkStyle 0,1,2,3,4,5,6,7 stroke:#e68019,stroke-width:2.5px
+
+    classDef netns fill:#8c7ae61f,stroke:#8c7ae6,stroke-width:1.5px,stroke-dasharray:6 4
+    classDef guest fill:#90a3b61a,stroke:#90a3b6,stroke-width:2.5px
+    classDef nic fill:#637d9726,stroke:#637d97,stroke-width:2px
+    classDef veth fill:#30a65b26,stroke:#30a65b,stroke-width:2px
+    classDef tap fill:#e0b40626,stroke:#e0b406,stroke-width:2px
+    classDef nat fill:#e73a2326,stroke:#e73a23,stroke-width:2px
+    class host-netns,host-vm1-netns,host-vm2-netns netns
+    class vm1,vm2 guest
+    class if0 nic
+    class veth1,veth2,uplink1,uplink2 veth
+    class tap1,tap2,eth1,eth2 tap
 ```
 
 ### Addressing
@@ -256,7 +282,7 @@ This section aims to answer some commonly-asked questions.
 ### Why not reverse HTTP proxy?
 
 One of my goals with Hyper is to be able to support arbitrary
-protocols---`ssh`, `quic`, `tcp`, `udp` and pretty much anything on top of
+protocols—`ssh`, `quic`, `tcp`, `udp` and pretty much anything on top of
 [IP](https://en.wikipedia.org/wiki/Internet_Protocol). If Hyper used a reverse
 HTTP proxy, we would only be able to support HTTP and websockets, which implies
 all the aforementioned protocols would not be supported.
