@@ -209,7 +209,7 @@ $$
 
 The $\beta_m^{\text{max}}(N)$ value should never be exceeded, just as the
 $\alpha_m(N)$ is never to be exceeded. On the other hand, the $\beta_m^i(N)$
-value, acts as a cap -- if a machine is above that threshold, then no further
+value, acts as a cap – if a machine is above that threshold, then no further
 VMs can be scheduled. This acts as an instantaneous measurement.
 
 ## Scheduling
@@ -260,19 +260,19 @@ NVMe drives on each node, there is a desirable property in colocating VMs on
 machines that already have the pre-requisite layers loaded, as that enables
 avoiding the relatively long and painful download of each layer.
 
-> A further optimization, as it turns out, exists -- colocation can be improved
+> A further optimization, as it turns out, exists – colocation can be improved
 > not only by spawning VMs on nodes that have layers mounted, but by also
 > colocating VMs on nodes which have _recently_ had the required layers
 > mounted.
 >
 > At current, a layer is considered mounted if the layers are all mounted as
 > block devices. The net result is that even though a block device is umounted
-> (and by proxy -- `Hyper` believes the layer is not locally available), the
+> (and by proxy – `Hyper` believes the layer is not locally available), the
 > shared layer medium may cache the data itself, which could be useful to
 > speed up bootup.
 >
 > It is worth noting that in this document, the author hand-waves what
-> "caching a layer" means -- many network-attached media cache at the block
+> "caching a layer" means – many network-attached media cache at the block
 > layer, so in certain cases it is more valuable to ask "how much of an image
 > is cached".
 >
