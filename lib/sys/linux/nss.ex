@@ -48,8 +48,8 @@ defmodule Sys.Linux.Nss do
     @spec parse(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
     defp parse(line) do
       with [name, password, uid_str, gid_str, gecos, home_dir, shell] <- String.split(line, ":"),
-           {uid, ""} <- Integer.parse(uid_str),
-           {gid, ""} <- Integer.parse(gid_str) do
+           {:ok, uid} <- Sys.Linux.Id.parse(uid_str),
+           {:ok, gid} <- Sys.Linux.Id.parse(gid_str) do
         {:ok,
          %Spec{
            name: name,
@@ -110,7 +110,7 @@ defmodule Sys.Linux.Nss do
     @spec parse(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
     defp parse(line) do
       with [name, password, gid_str, members] <- String.split(line, ":", parts: 4),
-           {gid, ""} <- Integer.parse(gid_str) do
+           {:ok, gid} <- Sys.Linux.Id.parse(gid_str) do
         {:ok,
          %Spec{
            name: name,
