@@ -21,11 +21,26 @@ registry="${image%%/*}"
 path="${image#*/}"
 tag="${path##*:}"
 
+# Seeding a cold cache is itself an upstream pull, which the same rate limit can
+# refuse. ECR's docker/library/* republishes Docker Hub's official images with
+# identical digests, so Docker Hub (a separate quota) is an exact fallback.
+sources=("docker://$image")
+if [[ $image == public.ecr.aws/docker/library/* ]]; then
+  sources+=("docker://docker.io/library/${image#public.ecr.aws/docker/library/}")
+fi
+
 # --multi-arch all keeps the index: the loader picks the entry for the node's
 # architecture, so a single-arch copy would not be a faithful stand-in.
 if [[ ! -e "$cache/index.json" ]]; then
-  mkdir -p "$cache"
-  skopeo copy --multi-arch all --retry-times 3 "docker://$image" "oci:$cache:$tag"
+  for src in "${sources[@]}"; do
+    rm -rf "$cache" && mkdir -p "$cache"
+    skopeo copy --multi-arch all --retry-times 3 "$src" "oci:$cache:$tag" && break
+    echo "seeding from $src failed; trying the next source" >&2
+  done
+  if [[ ! -e "$cache/index.json" ]]; then
+    echo "could not seed $image from any source" >&2
+    exit 1
+  fi
 fi
 
 export DEBIAN_FRONTEND=noninteractive
