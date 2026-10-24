@@ -43,7 +43,7 @@ Then load an OCI image and boot it:
 {:ok, %{stdout: "hello\n"}} = Hyper.exec(vm, ["/bin/echo", "hello"])
 ```
 
-That's a real Firecracker microVM with a copy-on-write rootfs -- the
+That's a real Firecracker microVM with a copy-on-write rootfs – the
 [quickstart guide](https://hexdocs.pm/hypervm/quickstart.html) has the
 details. To embed Hyper in your own application instead, add it to your Mix
 project:
@@ -63,24 +63,24 @@ integrating Hyper.
 
 ## Features
 
-- **Fully distributed** -- nodes that are added to the cluster automatically
+- **Fully distributed** – nodes that are added to the cluster automatically
   become VM runners.
-- **Affinity-based scheduling** -- Hyper automatically schedules new VMs on
+- **Affinity-based scheduling** – Hyper automatically schedules new VMs on
   nodes with the most shared resources. Forked VMs prefer being scheduled on
   nodes where the original VM ran, with fallbacks across the cluster.
-- **Disk layering** -- Forking virtual machines creates thin COW layers rather
+- **Disk layering** – Forking virtual machines creates thin COW layers rather
   than full disk snapshots. This gives Hyper a significant performance edge
   over sandbox providers which do not implement this.
-- **Telemetry** -- Hyper is mostly fully instrumented with
+- **Telemetry** – Hyper is mostly fully instrumented with
   [Otel](https://opentelemetry.io/) so you get full traces on if/why things are
   not performing as expected.
-- **Minimal stack** -- Hyper makes very few assumptions on your cloud, and only
+- **Minimal stack** – Hyper makes very few assumptions on your cloud, and only
   requires a Postgres database as a minimal external dependency.
-- **🔮 BEAM-native** -- Hyper is written on the
+- **🔮 BEAM-native** – Hyper is written on the
   [BEAM](https://en.wikipedia.org/wiki/BEAM_(Erlang_virtual_machine)). This
   means that fault-tolerance is built into the virtual machine, and allows you
   to interactively debug any issues you run into.
-- **gRPC Interface** -- although the author exclusively uses Hyper through the
+- **gRPC Interface** – although the author exclusively uses Hyper through the
   BEAM-native interfaces, we recognize this may not be ideal for all languages
   and existing stacks. For that reason, Hyper has a GRPC interface, so you can
   call it from any language you already use.
@@ -107,7 +107,7 @@ not enjoy existing products:
 
 - [Daytona](http://daytona.io/) (the best overall, in my experience) was a
   container-first SAAS. Their recent additions of VMs have been unreliable and
-  buggy for me -- between snapshots not getting committed and their VM feature
+  buggy for me – between snapshots not getting committed and their VM feature
   not being available open-source, I was ultimately dissatisfied and decided to
   write my own. **Daytona has much better support than Hyper ever will. If you
   do not want to maintain your code and want a Slack channel with really awesome
@@ -128,7 +128,7 @@ The reasons to use Hyper are:
 - You need good distributed performance. Hyper is designed to scale to
   extremely high numbers of host nodes.
 - You do not want limits. All other providers have limits, and although those
-  are in place to avoid abuse, I believe that limits should not exist -- just
+  are in place to avoid abuse, I believe that limits should not exist – just
   charge per compute hour and abuse should be curbed financially. Why can you
   not get a 128-core VM? With Hyper, you can.
 - You need good disk forking. Hyper has great support for forking block storage
