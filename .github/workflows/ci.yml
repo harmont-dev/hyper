@@ -65,6 +65,11 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      # :httpc can't fetch makeup_syntect's NIF from GitHub releases (headers
+      # over 10 KiB); see the script. Only this :dev job compiles that dep.
+      - name: Prefetch makeup_syntect NIF
+        run: .github/scripts/prefetch-makeup-syntect-nif.sh
+
       # protoc + the protoc-gen-elixir escript drive the `:grpc_gen` Mix compiler,
       # which generates the (gitignored) gRPC bindings before the Elixir compiler.
       - name: Install protoc
@@ -163,6 +168,27 @@ jobs:
       # without a hand-maintained list and skips untracked _build/deps.
       - name: ShellCheck
         run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
+  # The guest agent is otherwise only built by the `:guest_agent_build` Mix
+  # compiler, where cargo warnings scroll past without failing the build.
+  guest-agent:
+    name: Rust (guest-agent)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/guest-agent
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/guest-agent
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   rust:
     name: Rust (suidhelper)
