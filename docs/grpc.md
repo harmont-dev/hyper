@@ -2,7 +2,7 @@
 
 Hyper's native API is BEAM-native (Elixir/Erlang processes calling `Hyper.*`).
 The gRPC interface puts that same machine lifecycle behind a language-agnostic
-contract, so consumers in **any** language -- and off-BEAM services -- can
+contract, so consumers in **any** language – and off-BEAM services – can
 create, stop, locate, and list microVMs.
 
 > #### No authentication {: .warning}
@@ -67,7 +67,7 @@ client = hyper_pb2_grpc.HyperStub(grpc.aio.insecure_channel("localhost:50051"))
 ### Loading Images
 
 Before you can create a VM you need an image in the cluster. `LoadImage` pulls an
-OCI image, builds its rootfs, and records it -- returning the `img_id` you pass to
+OCI image, builds its rootfs, and records it – returning the `img_id` you pass to
 `CreateVm`. It blocks until the load finishes (this can take minutes), so set a
 generous deadline.
 

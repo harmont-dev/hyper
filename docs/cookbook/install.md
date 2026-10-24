@@ -69,8 +69,8 @@ sudo dnf install -y \
 
 ### Build Toolchain
 
-Hyper compiles two Rust components as part of `mix compile` -- the setuid
-helper and the in-guest agent -- and generates its Firecracker/gRPC bindings
+Hyper compiles two Rust components as part of `mix compile` – the setuid
+helper and the in-guest agent – and generates its Firecracker/gRPC bindings
 from the shipped specs. Every machine that **compiles** Hyper (including as a
 Mix dependency) therefore needs, besides Elixir `~> 1.20` on OTP 28+:
 
@@ -86,7 +86,7 @@ sudo apt install -y protobuf-compiler   # dnf install protobuf-compiler
 mix escript.install hex protobuf 0.17.0
 ```
 
-`~/.mix/escripts` does not need to be on your `PATH` -- the build finds
+`~/.mix/escripts` does not need to be on your `PATH` – the build finds
 `protoc-gen-elixir` there itself.
 
 ### Device Mapper Config
@@ -111,7 +111,7 @@ sudo dmsetup targets # must list snapshot, thin, and thin-pool
 
 ### PostgreSQL
 
-Hyper needs a **PostgreSQL** server reachable from every node - it is the image
+Hyper needs a **PostgreSQL** server reachable from every node – it is the image
 database and the only stateful external dependency.
 
 For local development the quickest path is Docker. The connection details below
@@ -128,7 +128,7 @@ docker run -d --name hyper-pg \
 
 > #### Persistence {: .warning}
 >
-> Note that the example container should not be used in production -- it will
+> Note that the example container should not be used in production – it will
 > be deleted on boot.
 >
 > We highly suggest you get a managed PostgresSQL instance. The following
@@ -220,7 +220,7 @@ echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control
 
 > #### Security {: .error}
 >
-> Note that Hyper does not manage the `cgroup` with its user -- it rather
+> Note that Hyper does not manage the `cgroup` with its user – it rather
 > delegates to `hyper-suidhelper`, which is why `/sys/fs/cgroup/hyper` should
 > be `root:root` owned.
 
@@ -242,7 +242,7 @@ as this user; every operation that genuinely needs root is routed through the
 setuid helper (see [SUID Helper](#suid-helper)), so the node itself never holds
 privilege.
 
-Create the user -- system account, no login shell:
+Create the user – system account, no login shell:
 
 ```sh
 sudo useradd --system --shell /usr/sbin/nologin --home-dir /srv/hyper hyper
@@ -258,7 +258,7 @@ The node builds its entire on-disk tree (`jails`, `socks`, `scratch`, `layers`,
 `redist`) under `work_dir` (from `/etc/hyper/config.toml`, default `/srv/hyper`)
 **as this user**. It must therefore own that directory. Boot validation
 (`Hyper.Node.Layer.Repo.test_system/0`) refuses to start unless the `layers`
-subdirectory already exists -- the node only creates it lazily on first image
+subdirectory already exists – the node only creates it lazily on first image
 load, so pre-create it now:
 
 ```sh
@@ -283,7 +283,7 @@ end
 ```
 
 Then `mix deps.get && mix compile`. Alternatively, work from a source
-checkout of the [repository](https://github.com/harmont-dev/hyper) -- every
+checkout of the [repository](https://github.com/harmont-dev/hyper) – every
 step below is identical.
 
 ### Firecracker
@@ -297,7 +297,7 @@ mix firecracker.install            # installs to /opt/firecracker
 ```
 
 The task installs the binaries under their bare basenames (`firecracker`,
-`jailer` -- the setuid helper rejects version-stamped names), marks them
+`jailer` – the setuid helper rejects version-stamped names), marks them
 executable, and prints the `[tools]` snippet for `/etc/hyper/config.toml`.
 After installing, make both binaries root-owned and not group- or
 world-writable (the task prints the exact `chown` command); the helper refuses
@@ -316,7 +316,7 @@ operations. This is achieved through a side-car binary called
 > build produced**: `mix compile` stamps the helper with a BLAKE3 checksum and
 > bakes that identity into the release, and a deployed helper whose version or
 > checksum differs is refused. A binary from another machine or build will not
-> pass -- always install the helper from the same tree you compiled.
+> pass – always install the helper from the same tree you compiled.
 
 Build and install it with:
 
@@ -337,7 +337,7 @@ sudo install -o root -g root -m 4755 \
 
 With PostgreSQL reachable (see above) and your database credentials configured
 (see the [configuration guide](config.md)), create and migrate the image
-database -- once per cluster, from any node:
+database – once per cluster, from any node:
 
 ```sh
 mix ecto.create -r Hyper.Img.Db.Repo
@@ -346,7 +346,7 @@ mix ecto.migrate -r Hyper.Img.Db.Repo
 
 ## Booting
 
-Start your application as the `hyper` user -- Hyper's supervision tree boots
+Start your application as the `hyper` user – Hyper's supervision tree boots
 with it and the node becomes a VM runner. From a source checkout, an
 interactive session is the quickest smoke test:
 
@@ -357,7 +357,7 @@ sudo -u hyper iex -S mix
 At boot Hyper validates the node: config file ownership, the setuid helper's
 build identity, and the device-mapper targets. A misconfigured node refuses to
 start with a specific error rather than limping along. Once up, load an image
-and boot a VM -- see the [intro](intro.md#usage) for the walkthrough.
+and boot a VM – see the [intro](intro.md#usage) for the walkthrough.
 
 For production, run it under a supervisor of your choice (e.g. a systemd unit
 with `User=hyper`). Nodes that join the BEAM cluster become additional VM

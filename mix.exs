@@ -165,12 +165,43 @@ defmodule Hyper.MixProject do
         });
       });
 
+      // Diagrams are authored with light-theme colors from the ExDoc palette.
+      // Mermaid has no per-theme classDef, so on the dark theme each one is
+      // swapped for a lighter shade of the same hue and node text is forced light.
+      const mermaidDarkColors = {
+        "#1887dc": "#50abf1",
+        "#e68019": "#f59e47",
+        "#8c7ae6": "#b1a5ee",
+        "#90a3b6": "#b2c2d2",
+        "#637d97": "#90a3b6",
+        "#30a65b": "#47d17a",
+        "#e0b406": "#facd38",
+        "#e73a23": "#f66c5a"
+      };
+
+      function mermaidForDarkTheme(source) {
+        for (const [light, dark] of Object.entries(mermaidDarkColors)) {
+          source = source.split(light).join(dark);
+        }
+        return source
+          .split("stroke-width:1.5px")
+          .join("stroke-width:2px")
+          .split("\\n")
+          .map((line) => line.trimStart().startsWith("classDef ") ? line + ",color:#e2e8f0" : line)
+          .join("\\n");
+      }
+
       let mermaidInitialized = false;
       window.addEventListener("exdoc:loaded", () => {
+        const dark = document.body.className.includes("dark");
+
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
-            theme: document.body.className.includes("dark") ? "dark" : "default"
+            theme: dark ? "dark" : "neutral",
+            themeVariables: dark ? {edgeLabelBackground: "#1e293b", titleColor: "#f1f5f9"} : {},
+            // Room under subgraph titles so edges entering a box don't cross its label.
+            flowchart: {subGraphTitleMargin: {top: 4, bottom: 16}}
           });
           mermaidInitialized = true;
         }
@@ -179,7 +210,8 @@ defmodule Hyper.MixProject do
         for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
           const preEl = codeEl.parentElement;
           const graphEl = document.createElement("div");
-          mermaid.render("mermaid-graph-" + id++, codeEl.textContent).then(({svg, bindFunctions}) => {
+          const source = dark ? mermaidForDarkTheme(codeEl.textContent) : codeEl.textContent;
+          mermaid.render("mermaid-graph-" + id++, source).then(({svg, bindFunctions}) => {
             graphEl.innerHTML = svg;
             bindFunctions?.(graphEl);
             preEl.insertAdjacentElement("afterend", graphEl);
