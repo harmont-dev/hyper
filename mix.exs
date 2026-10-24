@@ -268,6 +268,39 @@ defmodule Hyper.MixProject do
     :ok
   end
 
+  # Needs `entr` and `npx` on PATH. The port runs the script in its own session,
+  # so Ctrl-C never reaches it: instead it watches its stdin (the port pipe) and
+  # `kill 0`s its whole group when mix exits. Only git-visible files are watched;
+  # the codegen compilers rewrite gitignored files under lib/ on every build,
+  # which would retrigger the watcher forever. New files need a restart.
+  defp docs_serve(args) do
+    {opts, _, _} = OptionParser.parse(args, strict: [host: :string, port: :integer])
+    host = Keyword.get_lazy(opts, :host, &docs_serve_default_host/0)
+    port = Keyword.get(opts, :port, 8000)
+
+    script = """
+    exec 3<&0
+    trap 'kill 0' EXIT
+    (cat <&3 >/dev/null; kill 0) &
+    git ls-files -co --exclude-standard docs README.md mix.exs lib | entr -n mix docs &
+    npx -y browser-sync@3.0.3 start --server doc --files 'doc/*.html' \\
+      --listen #{host} --port #{port} --no-open --no-ui --no-notify
+    """
+
+    {_, status} = System.cmd("sh", ["-c", script], into: IO.stream())
+    if status != 0, do: Mix.raise("docs.serve exited with status #{status}")
+  end
+
+  # The tailnet address keeps the docs off the public interface while still
+  # reachable from your own machines; plain localhost when Tailscale is down.
+  defp docs_serve_default_host do
+    case System.find_executable("tailscale") &&
+           System.cmd("tailscale", ["ip", "-4"], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split() |> hd()
+      _ -> "127.0.0.1"
+    end
+  end
+
   defp aliases do
     [
       check: [
@@ -283,6 +316,9 @@ defmodule Hyper.MixProject do
       # Alias them to the shell grammar before ExDoc runs (same VM, so the
       # registration is visible to the highlighter).
       docs: ["loadpaths", &register_doc_lexers/1, "docs"],
+      # Rebuild the docs on every save and live-reload the browser.
+      # `mix docs.serve [--host IP] [--port 8000]`; host defaults to the Tailscale IP.
+      "docs.serve": &docs_serve/1,
       # Force a regeneration of the Firecracker bindings (ignores staleness).
       "firecracker.gen": ["compile.firecracker_gen --force"],
       # Force a regeneration of the gRPC bindings (ignores staleness).
