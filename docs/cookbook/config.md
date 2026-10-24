@@ -140,7 +140,9 @@ At boot a node checks its kernel against known KVM guest-to-host escapes and
 refuses to start when one is reachable and the kernel is not provably fixed
 (see the [install guide](install.md#kvm-nested-virtualization)).
 `allow_vulnerable_kernel` waives that refusal for **every** advisory, present
-and future; each waived exposure is still logged as a warning on boot.
+and future; each waived exposure is still logged as a warning on boot. Distro
+kernels need it for advisories without a host-side mitigation (PwnEscape):
+set it only after confirming the running kernel carries the fix.
 
 ### `config.exs`
 

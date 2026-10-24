@@ -12,11 +12,14 @@ defmodule Hyper.Node.KernelGuard do
       without bumping the version (`6.8.0-147-generic`), so they can never prove
       a fix this way — the guard errs towards "vulnerable", never "fixed". A
       version below the one that introduced the bug is unaffected.
-    * **reachable** is the advisory's attack surface on this host. Both current
-      advisories live in the x86 KVM shadow MMU, which a guest reaches only
-      through nested virtualization; with `kvm_{intel,amd}.nested=0` they are
-      unreachable on any kernel version. That is the remediation for distro
-      kernels.
+    * **reachable** is the advisory's attack surface on this host:
+      * `:x86_nested_mmu` — the x86 KVM shadow MMU, which a guest reaches only
+        through nested virtualization; with `kvm_{intel,amd}.nested=0` it is
+        unreachable on any kernel version. That is the remediation for distro
+        kernels.
+      * `:guest_network` — the host network stack behind every VM's
+        virtio-net NIC. Networking is mandatory, so it is always reachable and
+        only a provably fixed kernel (or the waiver) passes.
 
   An unknown version or nested state counts against the host. Operators can
   waive the guard wholesale with `Hyper.Cfg.Security.allow_vulnerable_kernel?/0`.
@@ -30,7 +33,7 @@ defmodule Hyper.Node.KernelGuard do
     first fixed patch; `mainline` is the first release carrying the fix.
     """
 
-    @type surface :: :x86_nested_mmu
+    @type surface :: :x86_nested_mmu | :guest_network
     @type t :: %__MODULE__{
             id: String.t(),
             name: String.t(),
@@ -87,6 +90,22 @@ defmodule Hyper.Node.KernelGuard do
           {6, 12} => 101,
           {6, 18} => 42,
           {7, 1} => 6
+        }
+      },
+      %Advisory{
+        id: "CVE-2026-99999",
+        name: "PwnEscape",
+        surface: :guest_network,
+        introduced: {2, 6, 27},
+        mainline: {7, 3},
+        fixed_in: %{
+          {5, 10} => 272,
+          {5, 15} => 223,
+          {6, 1} => 190,
+          {6, 6} => 159,
+          {6, 12} => 113,
+          {6, 18} => 57,
+          {7, 2} => 11
         }
       }
     ]
@@ -151,13 +170,22 @@ defmodule Hyper.Node.KernelGuard do
   defp reachable?(:x86_nested_mmu, %Host{arch: arch, nested: nested}),
     do: arch != :aarch64 and nested != false
 
+  defp reachable?(:guest_network, %Host{}), do: true
+
   defp describe(%Advisory{} = advisory, %Host{} = host) do
     "#{advisory.id} (#{advisory.name}) guest-to-host escape: kernel #{format(host.version)} " <>
-      "is not provably fixed and KVM nested virtualization is #{nested_state(host.nested)}. " <>
-      "Upgrade to a fixed kernel or disable nesting (options kvm_intel nested=0 / " <>
-      "options kvm_amd nested=0 in /etc/modprobe.d, then reload the module). " <>
+      "is not provably fixed#{exposure(advisory.surface, host)}. " <>
       "Set [security] allow_vulnerable_kernel = true to boot anyway."
   end
+
+  defp exposure(:x86_nested_mmu, %Host{nested: nested}) do
+    " and KVM nested virtualization is #{nested_state(nested)}. " <>
+      "Upgrade to a fixed kernel or disable nesting (options kvm_intel nested=0 / " <>
+      "options kvm_amd nested=0 in /etc/modprobe.d, then reload the module)"
+  end
+
+  defp exposure(:guest_network, %Host{}),
+    do: ", and every VM's virtio-net NIC reaches it. Upgrade to a fixed kernel"
 
   defp format({maj, min, patch}), do: "#{maj}.#{min}.#{patch}"
   defp format(:unknown), do: "(unknown version)"

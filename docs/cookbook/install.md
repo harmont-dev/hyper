@@ -112,13 +112,17 @@ sudo dmsetup targets # must list snapshot, thin, and thin-pool
 ### KVM Nested Virtualization
 
 Hyper refuses to boot (`{:vulnerable_kernel, ids}`) on a kernel exposed to a
-known KVM guest-to-host escape — currently
-[Januscape (CVE-2026-53359)](https://www.cve.org/CVERecord?id=CVE-2026-53359)
-and [Zapscape (CVE-2026-64561)](https://www.cve.org/CVERecord?id=CVE-2026-64561),
-both in the x86 shadow MMU and reachable only through nested virtualization.
-Distro kernels (Ubuntu's `6.8.0-*`, Debian's `6.1.0-*`, ...) backport fixes
-without changing their version, so Hyper cannot prove them fixed: disable
-nesting, which Firecracker guests never need.
+known guest-to-host escape. Distro kernels (Ubuntu's `6.8.0-*`, Debian's
+`6.1.0-*`, ...) backport fixes without changing their version, so Hyper cannot
+prove them fixed and judges each advisory by whether it is reachable:
+
+| Advisory | Reachable via | Mitigation on a distro kernel |
+|----------|---------------|-------------------------------|
+| [Januscape (CVE-2026-53359)](https://www.cve.org/CVERecord?id=CVE-2026-53359) | x86 KVM nested virtualization | disable nesting (below) |
+| [Zapscape (CVE-2026-64561)](https://www.cve.org/CVERecord?id=CVE-2026-64561) | x86 KVM nested virtualization | disable nesting (below) |
+| [PwnEscape (CVE-2026-99999)](https://www.cve.org/CVERecord?id=CVE-2026-99999) | every VM's virtio-net NIC | none -- confirm your distro shipped the fix, then waive |
+
+Disable nesting, which Firecracker guests never need:
 
 ```sh
 printf 'options kvm_intel nested=0\noptions kvm_amd nested=0\n' \
@@ -130,9 +134,12 @@ done
 cat /sys/module/kvm_*/parameters/nested # must print N (Intel) or 0 (AMD)
 ```
 
-On a vanilla upstream kernel at or above the fixed stable release (e.g.
-`6.12.101`, `7.2`) nesting may stay on. To boot anyway on an exposed host, set
-`allow_vulnerable_kernel` (see [config](config.md#security-configuration)).
+A vanilla upstream kernel at or above every fixed stable release (e.g.
+`6.12.113`, `7.2.11`, `7.3`) passes with nesting on. A distro kernel cannot
+prove the PwnEscape fix, so once you have confirmed with your distro's security
+tracker that the running kernel carries it, set `allow_vulnerable_kernel` (see
+[config](config.md#security-configuration)). The waiver covers **every**
+advisory, so keep nesting off too.
 
 ### PostgreSQL
 

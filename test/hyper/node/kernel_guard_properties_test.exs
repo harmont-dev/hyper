@@ -5,6 +5,8 @@ defmodule Hyper.Node.KernelGuardPropertiesTest do
 
     * mitigation — with nested virtualization confirmed off, or on aarch64, no
       host is exposed to an x86 nested-MMU advisory, whatever its version;
+    * no mitigation — a guest-network advisory has no off switch: whatever the
+      arch or nested state, only the version decides;
     * no false fix — a version on a branch the advisory never fixed, between
       `introduced` and `mainline`, is never judged fixed;
     * monotonic — on a backported branch, fixed iff `patch >= fixed patch`;
@@ -39,7 +41,10 @@ defmodule Hyper.Node.KernelGuardPropertiesTest do
     end
   end
 
-  property "nested virt off or aarch64 leaves no host exposed" do
+  defp nested_mmu, do: Enum.filter(KernelGuard.advisories(), &(&1.surface == :x86_nested_mmu))
+  defp guest_network, do: Enum.filter(KernelGuard.advisories(), &(&1.surface == :guest_network))
+
+  property "nested virt off or aarch64 leaves no host exposed to a nested-MMU advisory" do
     check all(h <- host(), mitigated <- member_of([:nested_off, :aarch64])) do
       h =
         case mitigated do
@@ -47,7 +52,14 @@ defmodule Hyper.Node.KernelGuardPropertiesTest do
           :aarch64 -> %{h | arch: :aarch64}
         end
 
-      assert KernelGuard.exposed(h, KernelGuard.advisories()) == []
+      assert KernelGuard.exposed(h, nested_mmu()) == []
+    end
+  end
+
+  property "a guest-network advisory is exposed iff the version is not fixed" do
+    check all(h <- host(), a <- member_of(guest_network())) do
+      assert KernelGuard.exposed(h, [a]) ==
+               if(KernelGuard.fixed?(a, h.version), do: [], else: [a])
     end
   end
 
@@ -106,13 +118,15 @@ defmodule Hyper.Node.KernelGuardPropertiesTest do
   test "exposure of representative hosts with nesting on" do
     for {version, expected} <- [
           # Ubuntu 24.04: 6.8 never got an upstream backport.
-          {{6, 8, 0}, ["CVE-2026-53359", "CVE-2026-64561"]},
-          {{6, 12, 95}, ["CVE-2026-64561"]},
-          {{6, 12, 101}, []},
-          {{7, 2, 0}, []},
+          {{6, 8, 0}, ["CVE-2026-53359", "CVE-2026-64561", "CVE-2026-99999"]},
+          {{6, 12, 95}, ["CVE-2026-64561", "CVE-2026-99999"]},
+          {{6, 12, 101}, ["CVE-2026-99999"]},
+          {{6, 12, 113}, []},
+          {{7, 2, 0}, ["CVE-2026-99999"]},
+          {{7, 2, 11}, []},
           # Predates Zapscape's 5.9 introduction, but Januscape has no 5.4 fix.
-          {{5, 4, 300}, ["CVE-2026-53359"]},
-          {{2, 6, 35}, []}
+          {{5, 4, 300}, ["CVE-2026-53359", "CVE-2026-99999"]},
+          {{2, 6, 26}, []}
         ] do
       host = %Host{arch: :x86_64, version: version, nested: true}
       ids = host |> KernelGuard.exposed(KernelGuard.advisories()) |> Enum.map(& &1.id)

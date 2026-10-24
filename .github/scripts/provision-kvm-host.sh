@@ -18,6 +18,10 @@
 #     the node)
 #   - DEBIAN_FRONTEND=noninteractive (install.md is written for an interactive
 #     operator session; CI has no tty to prompt on)
+#   - [security] allow_vulnerable_kernel = true: the runner's Ubuntu kernel
+#     can never prove the PwnEscape (CVE-2026-99999) fix, which has no
+#     off switch, so the boot guard would refuse it. Nesting is still turned
+#     off below so the runner stays unexposed to Januscape/Zapscape.
 #   - [network] is always written here (install.md presents it as an optional
 #     section) since the runner's default route interface is detected fresh
 #     each run and integration coverage wants egress networking exercised
@@ -25,9 +29,9 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-# The node's kernel boot guard refuses Ubuntu kernels with KVM nesting on
-# (they can't prove the Januscape/Zapscape fixes). Reload before the udev rule
-# below, since the reload recreates /dev/kvm.
+# Ubuntu kernels can't prove the Januscape/Zapscape fixes, so take nesting off
+# to make them unreachable. Reload before the udev rule below, since the reload
+# recreates /dev/kvm.
 printf 'options kvm_intel nested=0\noptions kvm_amd nested=0\n' \
   | sudo tee /etc/modprobe.d/hyper-kvm.conf >/dev/null
 for m in kvm_intel kvm_amd; do
@@ -124,6 +128,10 @@ cpu_max_load = 4.0
 # (created idempotently at node start), not by this script.
 [network]
 uplink = "${uplink}"
+
+# See the header: a distro kernel cannot prove the PwnEscape fix.
+[security]
+allow_vulnerable_kernel = true
 EOF
 sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml
