@@ -2,7 +2,9 @@ defmodule Sys.Linux.SubidPropertiesTest do
   @moduledoc """
   Invariants of `Subid.parse/1`: a well-formed `name:start:count` round-trips to
   a range whose width is exactly `count` (max_id = start + count), and malformed
-  lines (wrong field count, non-integer fields) are rejected.
+  lines (wrong field count, non-integer or signed fields) are rejected. Subids
+  are unsigned, so a signed start/count is malformed even though it parses as an
+  integer — accepting `-` would let `max_id < min_id` slip past conflict checks.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -40,6 +42,13 @@ defmodule Sys.Linux.SubidPropertiesTest do
       # `junk` is letters only, so it can never be a bare integer string.
       assert Subid.parse("#{n}:#{junk}:5") == {:error, :invalid_format}
       assert Subid.parse("#{n}:#{start}:#{junk}") == {:error, :invalid_format}
+    end
+  end
+
+  property "signed start or count is rejected" do
+    check all(n <- name(), sign <- member_of(["+", "-"]), id <- nonneg(), ok <- nonneg()) do
+      assert Subid.parse("#{n}:#{sign}#{id}:#{ok}") == {:error, :invalid_format}
+      assert Subid.parse("#{n}:#{ok}:#{sign}#{id}") == {:error, :invalid_format}
     end
   end
 end

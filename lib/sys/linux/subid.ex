@@ -51,17 +51,28 @@ defmodule Sys.Linux.Subid do
   @doc """
   Parse one `/etc/subuid`/`/etc/subgid` line (`name:start:count`) into a `Spec`,
   where `min_id` is `start` and `max_id` is `start + count`. A line that is not
-  exactly three colon-separated fields, or whose start/count are not integers,
-  yields `{:error, :invalid_format}`.
+  exactly three colon-separated fields, or whose start/count are not unsigned
+  integers, yields `{:error, :invalid_format}`.
   """
   @spec parse(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
   def parse(line) do
     with [name, start_str, count_str] <- String.split(line, ":"),
-         {start, ""} <- Integer.parse(start_str),
-         {count, ""} <- Integer.parse(count_str) do
+         {:ok, start} <- parse_unsigned(start_str),
+         {:ok, count} <- parse_unsigned(count_str) do
       {:ok, %Spec{name: name, min_id: start, max_id: start + count}}
     else
       _ -> {:error, :invalid_format}
     end
   end
+
+  # `Integer.parse/1` accepts a leading sign; requiring a leading digit rejects
+  # it, so a negative count can never yield `max_id < min_id`.
+  defp parse_unsigned(<<digit, _::binary>> = str) when digit in ?0..?9 do
+    case Integer.parse(str) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_unsigned(_), do: :error
 end
