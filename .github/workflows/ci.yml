@@ -184,6 +184,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # build.rs compiles agent.proto with prost-build, which shells out to protoc.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/guest-agent
