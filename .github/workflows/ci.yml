@@ -101,6 +101,10 @@ jobs:
       - name: Credo
         run: mix credo --strict
 
+      # Broken or hidden references in docs only surface when ExDoc runs.
+      - name: Docs (warnings as errors)
+        run: mix docs --warnings-as-errors
+
       - name: Create and migrate test DB
         env:
           MIX_ENV: test

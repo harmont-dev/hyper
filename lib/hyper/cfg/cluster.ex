@@ -3,7 +3,7 @@ defmodule Hyper.Cfg.Cluster do
   BEAM cluster (Distributed Erlang) topology for Hyper. Set it in `config.exs`
   via `config :hyper, Hyper.Cfg.Cluster, topologies: [...]` using
   [libcluster](https://github.com/bitwalker/libcluster) topology syntax;
-  `Hyper.Application` forwards it straight to `Cluster.Supervisor`, which is what
+  the application forwards it straight to `Cluster.Supervisor`, which is what
   Horde's `members: :auto` registries form over. `config.exs`-only because a
   topology references strategy modules. The default — `[]` — is a single,
   unclustered node.

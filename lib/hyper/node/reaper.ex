@@ -16,7 +16,7 @@ defmodule Hyper.Node.Reaper do
   candidate must also survive two consecutive ticks (`Plan.confirm/2`) before it
   is reaped, so a VM caught mid-boot (resources present, not yet registered) is
   given a grace tick rather than destroyed — this is what protects a netns that
-  `Hyper.Node.FireVMM.Daemon.prelaunch/1` just created for a VM that has not yet
+  `Hyper.Node.FireVMM.Daemon` just created before launch for a VM that has not yet
   appeared in `gather_live/0`: it takes two orphan sightings to reap, and a
   normally-booting VM never produces a second one.
 
