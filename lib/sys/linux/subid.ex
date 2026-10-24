@@ -57,8 +57,8 @@ defmodule Sys.Linux.Subid do
   @spec parse(String.t()) :: {:ok, Spec.t()} | {:error, :invalid_format}
   def parse(line) do
     with [name, start_str, count_str] <- String.split(line, ":"),
-         {:ok, start} <- Sys.Linux.Id.parse(start_str),
-         {:ok, count} <- Sys.Linux.Id.parse(count_str) do
+         {:ok, start} <- Num.Int.parse_unsigned(start_str),
+         {:ok, count} <- Num.Int.parse_unsigned(count_str) do
       {:ok, %Spec{name: name, min_id: start, max_id: start + count}}
     else
       _ -> {:error, :invalid_format}
