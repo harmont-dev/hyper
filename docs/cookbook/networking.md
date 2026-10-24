@@ -12,47 +12,54 @@ TODO
 ## Architecture Overview
 
 ```mermaid
-flowchart TD
+flowchart BT
     subgraph host-netns
         subgraph if0
             ipv4["ipv4 108.....54/23"]
-            ipv6["ipv6 2001:...:1a00/64"]
+            ipv6["ipv6 2001:...:1a00/64<br>proxy NDP for VM addresses"]
         end
 
         nat0{{"nat0"}}
 
-        veth1["vm-veth-1 10.200.0.1/30"]
-        veth2["vm-veth-2 10.200.0.5/30"]
+        veth1["vm-veth-1<br>10.200.0.1/30<br>fe80::1"]
+        veth2["vm-veth-2<br>10.200.0.5/30<br>fe80::1"]
     end
 
     subgraph host-vm1-netns
-        uplink1["uplink 10.200.0.2/30"]
+        uplink1["uplink<br>10.200.0.2/30<br>fe80::2"]
         nat1{{"vm1-nat"}}
-        tap1["tap0 172.16.0.1/30"]
+        tap1["tap0<br>172.16.0.1/30<br>fe80::1"]
     end
 
     subgraph host-vm2-netns
-        uplink2["uplink 10.200.0.6/30"]
+        uplink2["uplink<br>10.200.0.6/30<br>fe80::2"]
         nat2{{"vm2-nat"}}
-        tap2["tap0 172.16.0.1/30"]
+        tap2["tap0<br>172.16.0.1/30<br>fe80::1"]
     end
 
     subgraph vm1
         subgraph vm1-netns
-            eth1["eth0 172.16.0.2/30"]
+            eth1["eth0<br>172.16.0.2/30<br>2001:...:1:0:0:0/128"]
         end
     end
 
     subgraph vm2
         subgraph vm2-netns
-            eth2["eth0 172.16.0.2/30"]
+            eth2["eth0<br>172.16.0.2/30<br>2001:...:1:0:0:1/128"]
         end
     end
 
-    eth1 --> tap1 --> nat1 --> uplink1 --> veth1 --> nat0
-    eth2 --> tap2 --> nat2 --> uplink2 --> veth2 --> nat0
+    eth1 -->|IPv4| tap1 --> nat1 --> uplink1 --> veth1 --> nat0
+    eth2 -->|IPv4| tap2 --> nat2 --> uplink2 --> veth2 --> nat0
     nat0 --> ipv4
+
+    eth1 <-.->|IPv6| tap1 <-.-> uplink1 <-.-> veth1 <-.-> ipv6
+    eth2 <-.->|IPv6| tap2 <-.-> uplink2 <-.-> veth2 <-.-> ipv6
 ```
+
+Solid arrows are outbound-only IPv4, translated by both NATs. Dotted arrows are
+bidirectional IPv6, routed without translation. Both families share the same
+`eth0`, `tap0` and veth devices.
 
 ### VM Namespaces
 
@@ -69,7 +76,7 @@ host's `localhost`.
 IPv4 traffic on hyper is outbound only.
 
 ```mermaid
-flowchart TD
+flowchart BT
     subgraph host-netns
         subgraph if0
             ipv4["ipv4 108.....54/23"]
@@ -157,6 +164,90 @@ firecracker supports.
 
 ## Bidirectional IPv6
 
+Unlike IPv4, every VM gets its own globally routable
+[IPv6](https://en.wikipedia.org/wiki/IPv6) address, reachable in both
+directions. I expect users to prefer this route.
+
+```mermaid
+flowchart TD
+    subgraph host-netns
+        if0["if0 2001:db8::5400:6ff:fe12:1a00/64, proxy NDP for VM addresses"]
+        veth1["vm-veth-1 fe80::1"]
+        veth2["vm-veth-2 fe80::1"]
+    end
+
+    subgraph host-vm1-netns
+        uplink1["uplink fe80::2"]
+        tap1["tap0 fe80::1"]
+    end
+
+    subgraph host-vm2-netns
+        uplink2["uplink fe80::2"]
+        tap2["tap0 fe80::1"]
+    end
+
+    subgraph vm1
+        subgraph vm1-netns
+            eth1["eth0 2001:db8::1:0:0:0/128"]
+        end
+    end
+
+    subgraph vm2
+        subgraph vm2-netns
+            eth2["eth0 2001:db8::1:0:0:1/128"]
+        end
+    end
+
+    if0 <-->|"route 2001:db8::1:0:0:0/128"| veth1
+    if0 <-->|"route 2001:db8::1:0:0:1/128"| veth2
+    veth1 <--> uplink1 <--> tap1 <--> eth1
+    veth2 <--> uplink2 <--> tap2 <--> eth2
+```
+
+### Addressing
+
+Each hypervisor node owns an IPv6 **prefix**. Hyper reserves the
+`<prefix>:1::/80` sub-range for VMs. A VM in slot `N` gets
+`<prefix>:1:0:0:N/128`:
+
+| Slot  | VM address              |
+|-------|-------------------------|
+| 0     | `2001:db8::1:0:0:0`     |
+| 1     | `2001:db8::1:0:0:1`     |
+| 64    | `2001:db8::1:0:0:40`    |
+| 16383 | `2001:db8::1:0:0:3fff`  |
+
+> #### Hardcoded Addresses {: .info}
+>
+> Note that at the time of writing, Hyper expects the whole sub-range
+> `<prefix>:1::/80` to be available. Most cloud providers provide at least a
+> `/64` prefix, so this is more than fine.
+
+### Outbound
+
+The guest's `eth0` holds its `/128` with a default route via `fe80::1`, which
+is `tap0`. The VM's namespace forwards the packet out of `uplink` to its
+default route, `fe80::1` on `vm-veth-N`.
+
+### Inbound
+
+From the perspective of the external network (ie. internet), Hyper presents VMs
+as on-link hosts. The internet should not need to know/care about the
+specifics of the hypervisor networking.
+
+The external network (ie. your cloud provider's router) queries the
+hypervisor's `/64` segment: _"Which MAC address holds this IPv6 address?"_.
+This is done via the
+[NDP](https://en.wikipedia.org/wiki/Neighbor_Discovery_Protocol), which is
+IPv6's equivalent to
+[ARP](https://en.wikipedia.org/wiki/Address_Resolution_Protocol).
+
+Hyper hosts an [ND Proxy (RFC 4389)](https://www.rfc-editor.org/info/rfc4389/)
+on the hypervisor to answer this question. When the upstream link solicits a
+VM-specific IPv6 address, the ND Proxy on the hypervisor's NDP proxy responds
+with its own MAC address, routing all VM-specific IP traffic to the hypervisor
+itself. The kernels IP tables then internally route to the appropriate VM's
+virtual interface.
 
 ## FAQ
 
