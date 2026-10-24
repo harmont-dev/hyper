@@ -13,7 +13,7 @@ defmodule Hyper.Grpc do
 
   @doc """
   The gRPC server's supervisor child, or `[]` when the server is disabled (the
-  default). Spliced into the app supervision tree by `Hyper.Application`.
+  default). Spliced into the application's supervision tree at boot.
   """
   @spec server_children() :: [{module(), keyword()}]
   def server_children do

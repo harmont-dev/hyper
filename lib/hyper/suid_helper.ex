@@ -70,8 +70,8 @@ defmodule Hyper.SuidHelper do
 
   @doc """
   Check the deployed helper is the one this build produced: its `version` output
-  must match `Hyper.SuidHelper.Expected` (the identity captured from the stamped
-  binary at compile time). Catches a stale or wrong binary at the configured path.
+  must match the identity captured from the stamped binary at compile time.
+  Catches a stale or wrong binary at the configured path.
 
   This compares the helper's *self-reported* identity, so it is a build-provenance
   check, not an adversarial tamper proof -- a malicious binary could report any

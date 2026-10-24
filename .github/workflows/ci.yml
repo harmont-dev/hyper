@@ -65,6 +65,11 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      # :httpc can't fetch makeup_syntect's NIF from GitHub releases (headers
+      # over 10 KiB); see the script. Only this :dev job compiles that dep.
+      - name: Prefetch makeup_syntect NIF
+        run: .github/scripts/prefetch-makeup-syntect-nif.sh
+
       # protoc + the protoc-gen-elixir escript drive the `:grpc_gen` Mix compiler,
       # which generates the (gitignored) gRPC bindings before the Elixir compiler.
       - name: Install protoc
@@ -95,6 +100,10 @@ jobs:
 
       - name: Credo
         run: mix credo --strict
+
+      # Broken or hidden references in docs only surface when ExDoc runs.
+      - name: Docs (warnings as errors)
+        run: mix docs --warnings-as-errors
 
       - name: Create and migrate test DB
         env:
@@ -163,6 +172,31 @@ jobs:
       # without a hand-maintained list and skips untracked _build/deps.
       - name: ShellCheck
         run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
+  # The guest agent is otherwise only built by the `:guest_agent_build` Mix
+  # compiler, where cargo warnings scroll past without failing the build.
+  guest-agent:
+    name: Rust (guest-agent)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/guest-agent
+    steps:
+      - uses: actions/checkout@v7
+
+      # build.rs compiles agent.proto with prost-build, which shells out to protoc.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/guest-agent
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   rust:
     name: Rust (suidhelper)
@@ -384,6 +418,29 @@ jobs:
       # and the helper's checksum stamp must come from this build.
       - name: Provision Firecracker host
         run: .github/scripts/provision-kvm-host.sh
+
+      # The E2E image is served from a local registry mirror seeded from this
+      # cache, so runs don't pull it anonymously from public.ecr.aws (shared
+      # runner IPs hit its data limit). The key pins the first-pulled digest of
+      # the mutable tag; bump the suffix to refresh it.
+      - name: Restore E2E image cache
+        id: e2e-image
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/hyper-e2e-image
+          key: e2e-image-public.ecr.aws-docker-library-alpine-3.19-v1
+
+      - name: Serve E2E image from local mirror
+        run: HYPER_E2E_IMAGE_CACHE="$HOME/.cache/hyper-e2e-image" .github/scripts/e2e-image-mirror.sh
+
+      # Saved right after seeding rather than at job end, so a failing suite
+      # still persists the cache instead of re-pulling upstream next run.
+      - name: Save E2E image cache
+        if: steps.e2e-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/hyper-e2e-image
+          key: ${{ steps.e2e-image.outputs.cache-primary-key }}
 
       - name: Create and migrate test DB
         run: |

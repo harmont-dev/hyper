@@ -29,7 +29,11 @@ defmodule Hyper.Node.Img.Mutable do
   use OpenTelemetryDecorator
 
   defmodule Opts do
-    @moduledoc false
+    @moduledoc """
+    Arguments to `Hyper.Node.Img.Mutable.start_link/1`: the image to build the
+    VM's writable root disk from, the VM it belongs to, and — for a fork — the
+    VM whose disk to snapshot instead.
+    """
     @enforce_keys [:img_id, :vm_id]
     defstruct [:img_id, :vm_id, fork_of: nil]
 

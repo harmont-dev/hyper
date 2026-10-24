@@ -43,8 +43,9 @@ run in CI's `integration` job, which provisions the GitHub-hosted runner via
 ## Layout
 
 - `lib/` — Elixir source. Tests in `test/` mirror this tree.
-- `lib/unit/`, `lib/controls/`, `lib/sys/linux/proc/`, `lib/hyper/redist/` —
-  **pure cores**: units algebra, EWMA/rate controls, `/proc` parsers, hashing.
+- `lib/unit/`, `lib/num/`, `lib/controls/`, `lib/sys/linux/proc/`,
+  `lib/hyper/redist/` — **pure cores**: units algebra, strict number parsing,
+  EWMA/rate controls, `/proc` parsers, hashing.
   No processes, no I/O. These are where property tests pay off most.
 - `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests in
   `tests/` (see Rust rules below).

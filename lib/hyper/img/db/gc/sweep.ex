@@ -10,7 +10,12 @@ defmodule Hyper.Img.Db.Gc.Sweep do
   """
 
   defmodule State do
-    @moduledoc false
+    @moduledoc """
+    Tally of one GC pass over `blobs`: the keyset `cursor` to resume from, and
+    counts of blobs scanned, by probe result (present / missing / unknown),
+    pruned (with `pruned_bytes` reclaimed), and dangling (file gone but still
+    referenced by an image, so reported and never deleted).
+    """
 
     @type t :: %__MODULE__{
             cursor: String.t() | nil,

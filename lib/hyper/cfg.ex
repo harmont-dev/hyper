@@ -18,7 +18,7 @@ defmodule Hyper.Cfg do
 
   Read values through the focused submodules — `Hyper.Cfg.Tools`,
   `Hyper.Cfg.Dirs`, `Hyper.Cfg.Jails`, `Hyper.Cfg.Budget`, ... — never reach for
-  `Application.get_env` or `Hyper.Cfg.Toml` directly.
+  `Application.get_env` or the raw `config.toml` loader directly.
   """
 
   defmodule MissingError do

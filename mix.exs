@@ -123,7 +123,9 @@ defmodule Hyper.MixProject do
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",
         "docs/cookbook/architecture.md",
-        "docs/grpc.md"
+        "docs/grpc.md",
+        "CONTRIBUTING.md",
+        "LICENSE"
       ],
       groups_for_extras: [
         Cookbook: ~r/docs\/cookbook\/.*/
@@ -137,6 +139,7 @@ defmodule Hyper.MixProject do
         VM: ~r/^Hyper\.Vm(\.|$)/,
         Node: ~r/^Hyper\.Node(\.|$)/,
         Images: ~r/^Hyper\.(Img|Layer)(\.|$)/,
+        gRPC: ~r/^Hyper\.Grpc(\.|$)/,
         Controls: ~r/^Controls\./,
         Monitoring: ~r/^Sys\.Mon(\.|$)/,
         System: ~r/^(Sys\.|Hyper\.SuidHelper$)/,
@@ -349,7 +352,7 @@ defmodule Mix.Tasks.Compile.GrpcGen do
         args = [
           "--proto_path=#{Path.dirname(proto)}",
           "--proto_path=#{@proto_root}",
-          "--elixir_out=plugins=grpc:lib",
+          "--elixir_out=#{plugin_opts(proto)}:lib",
           Path.basename(proto)
         ]
 
@@ -377,6 +380,12 @@ defmodule Mix.Tasks.Compile.GrpcGen do
       File.write!(path, [Code.format_string!(File.read!(path)), "\n"])
     end)
   end
+
+  # The public gRPC API keeps its proto comments as @moduledoc: `Hyper.Grpc`
+  # points BEAM clients at these modules, and public specs reference their
+  # types. Other protos (the guest-agent wire) stay hidden, the plugin default.
+  defp plugin_opts("#{@proto_root}/hyper/grpc/" <> _), do: "plugins=grpc,include_docs=true"
+  defp plugin_opts(_proto), do: "plugins=grpc"
 
   defp stale? do
     Enum.any?(proto_files(), fn proto ->

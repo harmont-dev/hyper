@@ -2,7 +2,8 @@ defmodule Sys.Linux.NssPropertiesTest do
   @moduledoc """
   Round-trip and rejection laws of the pure `Nss.Passwd.from_output/1` and
   `Nss.Group.from_output/1` parsers. A well-formed line reconstructs its fields
-  exactly; a line with the wrong field count or a non-integer id is rejected.
+  exactly; a line with the wrong field count or a non-integer or signed id is
+  rejected.
   Mirrors `Sys.Linux.SubidPropertiesTest`.
   """
   use ExUnit.Case, async: true
@@ -20,6 +21,8 @@ defmodule Sys.Linux.NssPropertiesTest do
   defp id, do: integer(0..4_000_000_000)
   # Letters only, so it can never be parsed as a bare integer (malformed id case).
   defp alpha, do: string([?a..?z, ?A..?Z], min_length: 1, max_length: 8)
+  # Parses as an integer but is not an unsigned id; ids are never signed.
+  defp signed, do: gen(all(sign <- member_of(["+", "-"]), n <- id()), do: "#{sign}#{n}")
 
   describe "Passwd.from_output/1" do
     property "round-trips a well-formed passwd line into its seven fields" do
@@ -63,6 +66,15 @@ defmodule Sys.Linux.NssPropertiesTest do
       end
     end
 
+    property "a signed uid or gid is rejected" do
+      check all(name <- nonempty(), bad <- signed(), ok <- id()) do
+        for {uid, gid} <- [{bad, ok}, {ok, bad}] do
+          line = Enum.join([name, "x", uid, gid, "", "/h", "/sh"], ":")
+          assert Passwd.from_output(line <> "\n") == {:error, :invalid_format}
+        end
+      end
+    end
+
     property "a line without exactly seven colon-fields is rejected" do
       check all(
               fields <- list_of(nonempty(), min_length: 1, max_length: 10),
@@ -96,6 +108,13 @@ defmodule Sys.Linux.NssPropertiesTest do
     property "a non-integer gid is rejected" do
       check all(name <- nonempty(), junk <- alpha(), members <- field()) do
         line = Enum.join([name, "x", junk, members], ":")
+        assert Group.from_output(line <> "\n") == {:error, :invalid_format}
+      end
+    end
+
+    property "a signed gid is rejected" do
+      check all(name <- nonempty(), bad <- signed(), members <- field()) do
+        line = Enum.join([name, "x", bad, members], ":")
         assert Group.from_output(line <> "\n") == {:error, :invalid_format}
       end
     end

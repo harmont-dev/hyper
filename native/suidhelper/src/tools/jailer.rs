@@ -72,7 +72,7 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         .network()
         .map(|_| PathBuf::from(format!("/var/run/netns/{}", args.id)));
 
-    Ok(Jailer::builder()
+    Jailer::builder()
         .jailer(&jailer)
         .firecracker(&firecracker)
         .jail_base(&jail_base)
@@ -84,5 +84,6 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         .api_sock(&args.api_sock)
         .maybe_netns(netns.as_deref())
         .build()
-        .invoke()?)
+        .invoke()
+        .map_err(Error::Jail)
 }

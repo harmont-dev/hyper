@@ -3,7 +3,7 @@ defmodule Hyper.Cfg.Img.Db do
   Image-database (Ecto/Postgres) connection settings — `database`/`username`/
   `password`/`hostname`. These are secrets, so they are read from `config.exs`
   only (`config :hyper, Hyper.Cfg.Img.Db, ...`), never the shared `config.toml`.
-  `Hyper.Img.Db.Repo.init/2` merges these over its compile-time defaults.
+  `Hyper.Img.Db.Repo` merges these over its compile-time defaults at init.
   """
 
   @keys [:database, :username, :password, :hostname]

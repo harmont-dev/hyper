@@ -33,7 +33,7 @@ defmodule Hyper.Node.Layer.Server do
   end
 
   defmodule Opts do
-    @moduledoc false
+    @moduledoc "Arguments to `Hyper.Node.Layer.Server.start_link/1`: the layer to mount."
 
     @type t :: %__MODULE__{
             layer_id: Hyper.Layer.id()
