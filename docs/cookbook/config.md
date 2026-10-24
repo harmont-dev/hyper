@@ -212,20 +212,21 @@ headers = { "authorization" = "Bearer YOUR_TOKEN" }
 
 ## Budget Configuration
 
-Hyper allows you to control the absolute maximal budgets that are available to
-all VMs on a particular node. Every field has a built-in default; set only the
+Hyper allows you to control how much of each resource a node offers its VMs.
+See [Budgets](./architecture.md#budgets) for the difference between reserved
+and shared resources. Every field has a built-in default; set only the
 keys you need to change.
 
 | Config Key         | `config.exs`        | `config.toml`       | Default   | Notes |
 | ------------------ | ------------------- | ------------------- | --------- | ----- |
-| `mem_max`          | `.mem_max`          | `.mem_max`          | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of RAM the node offers VMs. Must not exceed available system memory. |
-| `disk_max`         | `.disk_max`         | `.disk_max`         | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Must not exceed available system disk. |
-| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): instantaneous CPU load threshold, a fraction `0.0`–`1.0` of the cap. |
-| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `4.0`     | [$\beta$ (soft) budget](./architecture.md#budgets): soft CPU capacity in cores (a float). Optional — an explicit `nil` in `config.exs` disables the cap. |
-| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft disk-bandwidth capacity ([unit](#unit)). |
-| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): disk-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
-| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft network-bandwidth capacity ([unit](#unit)). |
-| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): network-bandwidth load threshold, a fraction `0.0`–`1.0` of the cap. |
+| `mem_max`          | `.mem_max`          | `.mem_max`          | `4 GiB`   | [Reserved](./architecture.md#budgets) capacity: total RAM ([unit](#unit)) the node offers VMs. Must not exceed available system memory. |
+| `disk_max`         | `.disk_max`         | `.disk_max`         | `4 GiB`   | [Reserved](./architecture.md#budgets) capacity: total disk ([unit](#unit)) the node offers VMs. Must not exceed available system disk. |
+| `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | `0.8`     | [Shared](./architecture.md#budgets) busy threshold: refuse VMs that would push live CPU load past this fraction (`0.0`–`1.0`) of the node's cores. |
+| `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `4.0`     | **Currently unused.** Parsed and validated, but scheduling takes CPU capacity from the node's core count. An explicit `nil` in `config.exs` is accepted. |
+| `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | `1 GiBps` | [Shared](./architecture.md#budgets) capacity: the node's disk bandwidth ([unit](#unit)). |
+| `disk_bw_max_load` | `.disk_bw_max_load` | `.disk_bw_max_load` | `0.8`     | [Shared](./architecture.md#budgets) busy threshold: fraction (`0.0`–`1.0`) of `disk_bw_cap` that may be in use. |
+| `net_bw_cap`       | `.net_bw_cap`       | `.net_bw_cap`       | `1 GiBps` | [Shared](./architecture.md#budgets) capacity: the node's network bandwidth ([unit](#unit)). |
+| `net_bw_max_load`  | `.net_bw_max_load`  | `.net_bw_max_load`  | `0.8`     | [Shared](./architecture.md#budgets) busy threshold: fraction (`0.0`–`1.0`) of `net_bw_cap` that may be in use. |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -233,7 +234,7 @@ keys you need to change.
 ```elixir
 config :hyper, Hyper.Cfg.Budget,
   mem_max: Unit.Information.gib(4),
-  disk_max: Unit.Information.gib(64),
+  disk_max: Unit.Information.gib(4),
   cpu_max_load: 0.8,
   cpu_max_cap: 4.0,
   disk_bw_cap: Unit.Bandwidth.gibps(1),
@@ -247,7 +248,7 @@ config :hyper, Hyper.Cfg.Budget,
 ```toml
 [budget]
 mem_max = "4GiB"
-disk_max = "64GiB"
+disk_max = "4GiB"
 cpu_max_load = 0.8
 cpu_max_cap = 4.0
 disk_bw_cap = "1GiBps"

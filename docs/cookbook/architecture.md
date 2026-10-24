@@ -22,9 +22,16 @@ layer in the chain **must** be a base layer. There may be an arbitrary number
 of intermediate layers. A **mutable image** is an image in which the last
 layer is a **mutable layer**.
 
-In algebraic terms, layers compose as a _semi-group_ into an _image_, and it is
-legal to observe an image as merely an application of the layer composition
-operation onto an image and a layer, recursively:
+Think of an image as a **layer stack**, the same model as Docker/OCI image
+layers: start from a base layer and apply each intermediate layer's diff on
+top, in order. The stack `B → L1 → L2` is the image you get by applying `L1` to
+`B`, then `L2` to that result. Attaching a mutable layer on top makes the stack
+writable.
+
+<details>
+<summary>Formal definition</summary>
+
+Layer application is associative, so layers compose into an image recursively:
 
 $$
 I_i = \begin{cases}
@@ -32,6 +39,8 @@ B & i = 0 \\
 I_{i-1} \cdot L_i & \text{ else}
 \end{cases}
 $$
+
+</details>
 
 This mechanism supports mounting mutable images `I` into VMs. The value add of
 doing this fragmented, COW-style operations is twofold:
@@ -117,7 +126,7 @@ following strategy:
   2. All intermediate layers, `L1.img`, `L2.img` are mounted as loopback block
      devices into `/dev/loopL1`, `/dev/loopL2`.
   3. The image `I` containing `[:b, :l1, :l2]` (but not `:m`), is composed
-     through `dev-snapshot`. This results in a `/dev/mapper` block device, call
+     through `dm-snapshot`. This results in a `/dev/mapper` block device, call
      it `/dev/mapper/I`.
   4. Finally, a mutable layer `:m` is attached on top of `/dev/mapper/I` via
      `dm-thin`. This creates a mutable layer on top of the `I` image, which can
@@ -159,106 +168,123 @@ The configurable values are:
 
 ### Budgets
 
-Two categories of budgets $\alpha$ and $\beta$ are defined
-on a per VM-basis.
+Each node offers its resources to VMs under two kinds of budget, split by what
+happens when the node runs out:
 
-$\alpha$ budgets measure the resources **required** to execute this VM. Two
-types of the hard budget exist $\alpha_{\text{mem}}(\texttt{VM})$ and
-$\alpha_{\text{disk}}(\texttt{VM})$. In order for a node `N` to be able to support
-executing a `VM`, it **must** have at least $\alpha_{\text{mem}}(\texttt{VM})$ and
-$\alpha_{\text{disk}}(\texttt{VM})$ of memory and disk space available for use.
-Breaking any of these invariants results in VMs potentially crashing, as they
-use up memory or disk space, potentially in unexpected ways.
+  - **Reserved (hard) resources** — `mem` and `disk`. These are
+    *incompressible*: a VM that cannot get the memory or disk it was promised
+    can crash. Every VM reserves its full spec up front, and a node never
+    reserves more than its capacity (`mem_max`, `disk_max`).
+  - **Shared (soft) resources** — `vcpus`, `disk_bw` and `net_bw`. These are
+    *compressible*: when the node runs short, every VM on it slows down but
+    keeps running. Nothing is reserved; instead, the node measures its live
+    load and refuses new VMs once it is too busy.
 
-On the other hand, the $\beta$ category of budgets enables
-overloading nodes with VMs. Exceeding a soft budget on the node results in a
-speed degradation, but it does not result in a service degradation. It is in
-this category that `vcpus`, `disk_bw` and `net_bw` fit.
+> #### Kubernetes comparison {: .info}
+>
+> If you know Kubernetes: reserved resources behave like memory requests, shared
+> resources like CPU, which can be throttled without killing anything.
+>
+> | Value     | Budget   | Running out means                   |
+> |-----------|----------|-------------------------------------|
+> | `vcpus`   | shared   | All VMs on the node slow down.      |
+> | `mem`     | reserved | VMs may crash.                      |
+> | `disk`    | reserved | VMs may crash.                      |
+> | `disk_bw` | shared   | Disk is slower for all VMs.         |
+> | `net_bw`  | shared   | Network is slower for all VMs.      |
 
-To summarize budgets:
+#### Reserved: free capacity
 
-| Value     | Budget Category | Overloading Impact                       |
-|-----------|-----------------|------------------------------------------|
-| `vcpus`   | $\beta$         | All VMs on the node experience slowdown. |
-| `mem`     | $\alpha$        | VMs spuriously crash.                    |
-| `disk`    | $\alpha$        | VMs spuriously crash.                    |
-| `disk_bw` | $\beta$         | Disk speed is degraded on all VMs.       |
-| `net_bw`  | $\beta$         | Network speed is degraded on all VMs.    |
+A node's **free** memory (or disk) is its capacity minus what running VMs have
+reserved. For example, a node with `mem_max` of 16 GiB running three VMs of
+4 GiB each has 4 GiB free: a 4 GiB VM fits, a 6 GiB VM does not.
 
-Each node measures its own budget at any given state. Hard budgets are measured
-by simply tracking which VMs are currently running, and what their specs are,
-effectively:
+<details>
+<summary>Formal definition</summary>
 
-$$
-\alpha_m(N) = \alpha^{\text{total}}_m(N) - \sum_{\texttt{VM}} \alpha_m(\text{spec}(\texttt{VM}))
-$$
-
-The soft budget is more involved and requires real-time monitoring of the
-active load on any node. Unfortunately, it is impossible to predict what kind
-of soft load any particular VM will cause. We define two soft thresholds:
-
-  - An instantaneous soft-threshold $\beta_m^i(N) = k_m \beta_m^{\text{cap}}$
-    with a tweakable $0 < k_m$ load coefficient. This expresses the idea of
-    _we shall avoid scheduling on machines which have more than 80% load_.
-  - A total maximal threshold which is capped at the same logic as $\alpha$,
-    except that it is allowed to overflow full load:
+For a reserved metric $m$ (memory or disk) on node $N$:
 
 $$
-\beta_m^{\text{max}}(N) = k^{\text{max}}_m \beta^{\text{total}}_m(N) - \sum_{\texttt{VM}} \beta_m(\text{spec}(\texttt{VM}))
+\text{free}_m(N) = \text{capacity}_m(N) - \sum_{\texttt{VM} \text{ on } N} \text{spec}_m(\texttt{VM})
 $$
 
-The $\beta_m^{\text{max}}(N)$ value should never be exceeded, just as the
-$\alpha_m(N)$ is never to be exceeded. On the other hand, the $\beta_m^i(N)$
-value, acts as a cap -- if a machine is above that threshold, then no further
-VMs can be scheduled. This acts as an instantaneous measurement.
+</details>
+
+#### Shared: busy threshold
+
+Shared resources cannot be predicted from a spec, since a VM may sit idle or
+saturate its share. So the node measures its live load (smoothed over recent
+samples) and applies a **busy threshold**, a fraction of capacity set by the
+`*_max_load` keys. A VM fits only if the node's current load plus the VM's
+spec stays at or under that threshold. With the default `0.8`, the rule reads:
+_don't place a VM that would push this node past 80% busy_.
+
+  - CPU load is a fraction of the whole machine, and a VM's demand is its
+    `vcpus` divided by the node's core count.
+  - Bandwidth thresholds are the configured capacity (`disk_bw_cap`,
+    `net_bw_cap`) times the busy threshold.
+
+<details>
+<summary>Formal definition</summary>
+
+For a shared metric $m$, with live load $\text{load}_m(N)$ and busy threshold
+$k_m$ (<code>*_max_load</code>):
+
+$$
+\text{load}_m(N) + \text{spec}_m(\texttt{VM}) \le k_m \cdot \text{capacity}_m(N)
+$$
+
+</details>
+
+> #### No overcommit ratio {: .warning}
+>
+> Hyper does not yet support an **overcommit ratio**, that is, reserving shared
+> resources from specs and letting the total reach some multiple of capacity.
+> Shared resources are governed by live load alone.
 
 ## Scheduling
 
-The process of deciding which node `N` to deploy a `VM` is referred to as
-**scheduling** in `Hyper`.
+The process of deciding which node runs a VM is called **scheduling**. It has
+two phases: **filter** out nodes that cannot take the VM, then **score** the
+ones left and pick the best.
 
-### Hard Budget
+### Filter
 
-Out of the set of nodes $\mathbb{N}$, we first filter out nodes which do not
-have the hard budget to run the given VM. Note we do not filter machines out of
-soft budget yet. The set of nodes with available hard budget is:
+Each node gossips a snapshot of its budget to the cluster. The scheduler keeps
+a node only if, according to that snapshot, the VM:
+
+  1. **fits** its reserved budget: the VM's `mem` and `disk` are each at or
+     under the node's free memory and disk, and
+  2. keeps the node **under its busy threshold** for CPU, disk bandwidth and
+     network bandwidth.
+
+<details>
+<summary>Formal definition</summary>
+
+Over the set of cluster nodes $\mathcal{N}$:
 
 $$
-\text{havail}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
-N \in \mathbb{N} \text{ if }
-\bigwedge_{m \in \alpha} \left( \alpha_m(\texttt{VM}) < \alpha_m(N) \right)
+\text{fits}(\mathcal{N}, \texttt{VM}) = \left\lbrace
+N \in \mathcal{N} :
+\bigwedge_{m \in \text{reserved}} \text{spec}_m(\texttt{VM}) \le \text{free}_m(N)
 \right\rbrace
 $$
 
-### Soft Budgeting
-
-With the hard budget nodes filtered out, we then subsequently filter out nodes
-which have their theoretical soft budget exhausted.
-
 $$
-\text{savail}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
-N \in \text{havail}\left(\mathbb{N}, \texttt{VM}\right) \text{ if }
-\bigwedge_{m \in \beta} \left( \beta_m(\texttt{VM}) < \beta_m^{\text{max}}(N) \right)
+\text{candidates}(\mathcal{N}, \texttt{VM}) = \left\lbrace
+N \in \text{fits}(\mathcal{N}, \texttt{VM}) :
+\bigwedge_{m \in \text{shared}} \text{load}_m(N) + \text{spec}_m(\texttt{VM}) \le k_m \cdot \text{capacity}_m(N)
 \right\rbrace
 $$
 
-This leaves us with nodes which could theoretically support more nodes, but it
-is important to note that some of these machines may already be overloaded, so
-we filter out according to the instantaneous load:
+</details>
 
-$$
-\text{possible}\left(\mathbb{N}, \texttt{VM}\right) = \left\lbrace
-N \in \text{savail}\left(\mathbb{N}, \texttt{VM}\right) \text{ if }
-\bigwedge_{m \in \beta} \left( \beta_m(N) < k_m \beta_m^{\text{cap}}(N) \right)
-\right\rbrace
-$$
+### Score: layer locality
 
-### Colocation
-
-Since the layer storage medium is many orders of magnitude larger than the
-NVMe drives on each node, there is a desirable property in colocating VMs on
-machines that already have the pre-requisite layers loaded, as that enables
-avoiding the relatively long and painful download of each layer.
+Layer storage is far larger, and far slower, than the NVMe drives on each node.
+A node that already has a VM's layers mounted skips downloading them, so the
+scheduler prefers it. Each candidate gets a **layer locality score**: the
+number of bytes of the VM's image that are already mounted on that node.
 
 > A further optimization, as it turns out, exists -- colocation can be improved
 > not only by spawning VMs on nodes that have layers mounted, but by also
@@ -278,38 +304,31 @@ avoiding the relatively long and painful download of each layer.
 >
 > This is considered a future improvement.
 
-This effectively means sorting the list of possible nodes and picking the one
-with the highest number of bytes already mounted.
+<details>
+<summary>Formal definition</summary>
 
-Formally, let $\Lambda(\texttt{VM})$ be the set of layers in the image chain of
-the VM, $\text{mnt}(N)$ the set of layers currently mounted on node $N$, and
-$|L|$ the size of layer $L$ in bytes. The colocation score of a node is the
-number of required bytes already resident on it:
-
-$$
-\text{colo}(N, \texttt{VM}) = \sum_{L \in \Lambda(\texttt{VM}) \cap \text{mnt}(N)} |L|
-$$
-
-The scheduler then deploys onto the highest-scoring node among the viable
-candidates:
+Let $\Lambda(\texttt{VM})$ be the set of layers in the VM's image,
+$\text{mnt}(N)$ the set of layers mounted on node $N$, and $|L|$ the size of
+layer $L$ in bytes:
 
 $$
-\text{schedule}(\texttt{VM}) = \underset{N \in \text{possible}(\mathbb{N}, \texttt{VM})}{\operatorname{arg\,max}}\; \text{colo}(N, \texttt{VM})
+\text{locality}(N, \texttt{VM}) = \sum_{L \in \Lambda(\texttt{VM}) \cap \text{mnt}(N)} |L|
 $$
+
+Candidates are tried in descending order of this score.
+
+</details>
 
 ### Strategy
 
-In total, the scheduling strategy is naive:
+In total, the scheduling strategy is:
 
-  1. Find all nodes for scheduling a new VM would not cause them to overfill
-     their hard caps.
-  2. Out of those nodes, find all nodes where scheduling a new VM would not
-     cause them to overflow the theoretical maximal soft budget.
-  3. Out of those nodes, find all nodes with their instantaneous soft loads
-     are under the instantaneous soft load.
-  4. Out of those nodes, sort them by the highest number of layer bytes that
-     are already loaded in.
-  5. Schedule on the first available machine.
+  1. Keep the nodes with enough free memory and disk for the VM.
+  2. Of those, keep the nodes the VM would not push past their busy threshold.
+  3. Sort them by layer locality score, highest first.
+  4. Ask each node in turn to run the VM. The node re-checks its budget against
+     its live state, since the gossiped snapshot may be stale, and the first one
+     to accept wins.
 
 ## Forking
 
@@ -330,7 +349,7 @@ Forking clones a running VM's disk at a point in time. Two paths exist:
     `dm-snapshot` exception store, which is published to the layer storage
     medium as an intermediate (`:delta`) layer and recorded as a derived image
     (the parent's chain plus the new layer). The child is then scheduled
-    normally; colocation scoring prefers nodes that already hold the parent's
+    normally; layer locality scoring prefers nodes that already hold the parent's
     base layers, so only the delta travels.
 
 Both paths are **disk-only**: the child cold-boots a fresh kernel over the
