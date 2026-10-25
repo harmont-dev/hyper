@@ -55,7 +55,6 @@ pub struct IsRelative;
 #[derive(Debug, Clone)]
 pub struct StrictComponents;
 
-#[cfg(unix)]
 impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
         // This implementation cannot use Path::components because it
@@ -112,7 +111,6 @@ impl<A> SafePath<A, StrictComponents> {
 
 impl SafePath<IsRelative, StrictComponents> {
     /// Given `foo/bar/baz`, returns `[foo, bar, baz]`.
-    #[cfg(unix)]
     pub fn segments(&self) -> impl Iterator<Item = &OsStr> {
         self.path
             .as_os_str()

@@ -9,6 +9,8 @@
 
 pub mod checksum;
 pub mod config;
+// The filesystem utilities are only tested/designed for UNIX.
+#[cfg(unix)]
 pub mod fs;
 pub mod process;
 pub mod security_gate;
