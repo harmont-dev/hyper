@@ -4,6 +4,7 @@ pub mod dm;
 pub mod fork_delta;
 mod host_init;
 pub mod img;
+pub mod net;
 pub mod thin;
 mod version;
 pub mod vm;
@@ -63,6 +64,11 @@ pub enum Request {
     ThinDestroy(thin::ThinDestroy),
     ThinForkDelta(fork_delta::ThinForkDelta),
     HostInit(host_init::HostInit),
+    NetPrepare(net::NetPrepare),
+    NetTeardown(net::NetTeardown),
+    NetIpHostInit(net::ip::NetIpHostInit),
+    NetIpPrepare(net::ip::NetIpPrepare),
+    NetIpTeardown(net::ip::NetIpTeardown),
     Version(version::Version),
 }
 
