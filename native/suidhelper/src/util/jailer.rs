@@ -21,6 +21,7 @@
 //! - [`JailSock`] accepts exactly `/` + one filename and rejects multi-component,
 //!   relative, `..`, and NUL/whitespace inputs.
 
+use crate::util::caps::{self, Caps};
 use crate::util::path::ToCStringExt;
 use crate::util::setuid_privileged;
 use bon::Builder;
@@ -34,6 +35,18 @@ use thiserror::Error as ThisError;
 /// The jailer protects at most a handful of controllers; an unbounded `--cgroup`
 /// list is a caller trying something. Cap it well above any legitimate need.
 pub const MAX_CGROUPS: usize = 16;
+
+/// What the firecracker jailer itself needs as root: create the chroot and
+/// cgroup leaf (possibly in directories the node user owns), `mknod` and chown
+/// its device nodes, `unshare`/`pivot_root`/`setns` into its namespaces, then
+/// drop to the per-VM uid/gid. Its bounding set is confined to this before
+/// `execve`, so neither the jailer nor firecracker can ever regain anything else.
+pub const CAPS: Caps = Caps::CHOWN
+    .union(Caps::DAC_OVERRIDE)
+    .union(Caps::SETGID)
+    .union(Caps::SETUID)
+    .union(Caps::SYS_ADMIN)
+    .union(Caps::MKNOD);
 
 /// `sun_path` in `sockaddr_un` is 108 bytes on Linux; a socket path longer than
 /// that can never be bound, so reject it up front.
@@ -276,6 +289,7 @@ impl Jailer<'_> {
 
         // Point of no return: from here we are permanently root and must execve.
         setuid_privileged::become_root_permanently()?;
+        caps::confine_exec(CAPS).map_err(|_| setuid_privileged::Error::Capabilities)?;
         close_inherited_fds();
 
         // Empty envp: once ruid==0 the kernel clears AT_SECURE, so a smuggled

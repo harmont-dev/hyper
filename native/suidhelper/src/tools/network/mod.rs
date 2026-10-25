@@ -17,6 +17,7 @@ pub mod teardown;
 pub mod teardown_orphan;
 
 use crate::config::Network;
+use crate::util::caps::Caps;
 use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
@@ -25,6 +26,10 @@ pub use host_init::HostInitArgs;
 pub use prepare::PrepareArgs;
 pub use teardown::TeardownArgs;
 pub use teardown_orphan::TeardownOrphanArgs;
+
+/// `ip netns add/del/exec` mount, unmount and `setns`; every link, address,
+/// route and nftables change is netlink.
+pub const NETNS_CAPS: Caps = Caps::NET_ADMIN.union(Caps::SYS_ADMIN);
 
 /// `[network]` is absent from config, i.e. VM networking is disabled.
 #[derive(Debug, ThisError, PartialEq, Eq)]

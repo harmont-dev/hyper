@@ -3,8 +3,10 @@
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::chroot_jail::{self, ChrootJail};
 use crate::util::safe_dev::BlockDev;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -49,7 +51,15 @@ impl IsTool for Prepare {
     type Output = PrepareOut;
     type RunT = Result<(), chroot_jail::Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    // Hard-link the node-user-owned kernel into the node-user-owned chroot,
+    // mknod the rootfs/tun nodes, chown them, and chmod the tun node after it
+    // is already owned by the per-VM uid.
+    const CAPS: Caps = Caps::CHOWN
+        .union(Caps::DAC_OVERRIDE)
+        .union(Caps::FOWNER)
+        .union(Caps::MKNOD);
+
+    fn run_privileged(&self, _privileged: &Privileged) -> Self::RunT {
         let args = &self.args;
         ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
             .with_kernel(args.kernel.clone())

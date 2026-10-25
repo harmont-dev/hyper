@@ -8,11 +8,21 @@
 //! privileges again when it goes out of scope, so the root window is exactly the
 //! guard's lifetime.
 //!
+//! Root is not all-or-nothing: each guard carries a [`Caps`] mask, and only that
+//! mask is effective inside its scope. Children spawned through the guard
+//! ([`Privileged::command`]) exec with exactly that mask too - see
+//! [`crate::util::caps`] for why that needs separate handling.
+//!
 //! If privileges can't be lowered we abort rather than continue as root: neither a
 //! constructor nor a Drop impl can report an error, and silently staying root
 //! would defeat the point.
 
+use crate::util::caps::{self, Caps};
 use nix::unistd::{getuid, seteuid, setgroups, setresgid, setresuid, Gid, Uid};
+use std::ffi::OsStr;
+use std::io;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use thiserror::Error as ThisError;
 
 /// Failures of the privilege transitions. All fatal: if we can't raise we aren't
@@ -26,6 +36,8 @@ pub enum Error {
     DropPrivileges,
     #[error("failed to acquire permanent root for execve handoff")]
     PermanentRoot,
+    #[error("failed to restrict capabilities")]
+    Capabilities,
 }
 
 /// `.preinit_array` runs before `.init_array` and before any shared-library
@@ -52,29 +64,72 @@ extern "C" fn drop_to_real() {
     }
 }
 
+/// Clear the effective set explicitly before lowering euid. When the caller is
+/// genuinely root (ruid 0, as under the e2e suite) `seteuid(getuid())` changes
+/// nothing, so the kernel's euid-0-to-non-zero clearing never fires.
 fn lower() -> Result<(), Error> {
+    caps::set_effective(Caps::empty()).map_err(|_| Error::DropPrivileges)?;
     seteuid(getuid()).map_err(|_| Error::DropPrivileges)
 }
 
 #[must_use = "privileges are dropped when the guard is dropped; bind it for the privileged scope"]
 pub struct Privileged {
     // Private so a guard can only be built via `acquire`.
-    _seal: (),
+    caps: Caps,
 }
 
 impl Privileged {
-    /// Raise to root (euid=0) for the lifetime of the guard. This is the only
-    /// place the process ever becomes root; the guard lowers back on drop.
-    pub fn acquire() -> Result<Self, Error> {
+    /// Raise to root (euid=0) with exactly `caps` effective, for the lifetime of
+    /// the guard. This is the only place the process ever becomes root; the
+    /// guard lowers back on drop.
+    pub fn acquire(caps: Caps) -> Result<Self, Error> {
         seteuid(Uid::from_raw(0)).map_err(|_| Error::NotSetuidRoot)?;
-        Ok(Self { _seal: () })
+        // Built before narrowing so a failed narrowing still lowers on drop.
+        let guard = Self { caps };
+        caps::set_effective(caps).map_err(|_| Error::Capabilities)?;
+        Ok(guard)
+    }
+
+    /// The capability mask this guard holds.
+    pub fn caps(&self) -> Caps {
+        self.caps
+    }
+
+    /// A `Command` whose child execs as root confined to this guard's mask
+    /// (bounding, permitted and effective sets all equal to it).
+    pub fn command(&self, program: impl AsRef<OsStr>) -> Command {
+        let caps = self.caps;
+        let mut cmd = Command::new(program);
+        // SAFETY: `confine_exec` uses only stack buffers and raw capget/capset/
+        // prctl syscalls, the async-signal-safe contract `pre_exec` requires.
+        unsafe {
+            cmd.pre_exec(move || caps::confine_exec(caps).map_err(io::Error::from));
+        }
+        cmd
+    }
+
+    /// Like [`command`](Self::command), but the child first becomes genuine root
+    /// (real, effective and saved uid all 0; see [`become_root_permanently`]) for
+    /// binaries that refuse to run under `AT_SECURE`, such as `ip` and `nft`.
+    pub fn root_command(&self, program: impl AsRef<OsStr>) -> Command {
+        let caps = self.caps;
+        let mut cmd = Command::new(program);
+        // SAFETY: as in `command`; `become_root_permanently` likewise makes only
+        // async-signal-safe setresuid/setresgid/setgroups/capset syscalls.
+        unsafe {
+            cmd.pre_exec(move || {
+                become_root_permanently().map_err(io::Error::other)?;
+                caps::confine_exec(caps).map_err(io::Error::from)
+            });
+        }
+        cmd
     }
 
     /// Verify we can promote to root and back down. Used by the `sys-test`
     /// command to check the helper is correctly installed.
     pub fn smoke_test() -> Result<(), Error> {
         // Raises here, and the guard lowers again when dropped at end of scope.
-        let _guard = Self::acquire()?;
+        let _guard = Self::acquire(Caps::empty())?;
         Ok(())
     }
 }
@@ -86,8 +141,13 @@ impl Privileged {
 /// privileges. We must hand it a *genuine* root process (all of real, effective
 /// and saved uid == 0) so the jailer's own privilege-drop is the real thing.
 ///
+/// The caller must confine capabilities before `execve` (see
+/// [`caps::confine_exec`]); this only sets ids.
+///
 /// Order matters and each step needs the privilege the previous one preserves:
-///   1. `seteuid(0)` — regain effective root; without it the rest are EPERM.
+///   1. `seteuid(0)` and raise effective to permitted — regain effective root
+///      with `CAP_SETGID` (an enclosing guard may have narrowed it away);
+///      without them the rest are EPERM.
 ///   2. `setresgid(0,0,0)` — set every gid to root *before* touching uids, while
 ///      we still hold euid 0 (gid changes require privilege).
 ///   3. `setgroups([0])` — `drop_to_real` only lowered euid; it never touched the
@@ -102,6 +162,7 @@ pub fn become_root_permanently() -> Result<(), Error> {
     let root_gid = Gid::from_raw(0);
 
     seteuid(root_uid).map_err(|_| Error::NotSetuidRoot)?;
+    caps::raise_effective().map_err(|_| Error::PermanentRoot)?;
     setresgid(root_gid, root_gid, root_gid).map_err(|_| Error::PermanentRoot)?;
     setgroups(&[root_gid]).map_err(|_| Error::PermanentRoot)?;
     setresuid(root_uid, root_uid, root_uid).map_err(|_| Error::PermanentRoot)?;

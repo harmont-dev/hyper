@@ -15,8 +15,10 @@
 
 use crate::config::Config;
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_dir::{self, SafeDir};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use nix::errno::Errno;
 use serde::Serialize;
@@ -85,7 +87,10 @@ impl IsTool for Remove {
     type Output = RemoveOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    // Walk and unlink inside the per-VM-uid-owned 0700 jail tree.
+    const CAPS: Caps = Caps::DAC_OVERRIDE;
+
+    fn run_privileged(&self, _privileged: &Privileged) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
         // chroot teardown below is not yanking files out from under a live process.
         remove_cgroup_under(Path::new(CGROUP_BASE), &self.args.cgroup)?;

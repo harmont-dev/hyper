@@ -11,12 +11,14 @@
 
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
+use crate::util::caps::Caps;
 use crate::util::linux::thin_dump::{parse_mappings, Error as ParseError, ThinMappings};
 use crate::util::safe_dev::LoopDev;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 
 /// Errors of running the `thin_dump` binary itself; a bad parse of its
@@ -57,10 +59,14 @@ impl IsTool for ThinDump {
     type Output = ThinMappings;
     type RunT = io::Result<Output>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    // Block nodes are root-owned, so euid 0 opens them as owner, needing no caps.
+    const CAPS: Caps = Caps::empty();
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
         // --metadata-snap reads the caller-reserved metadata snapshot, the
         // only safe way to dump a live pool's metadata device.
-        Command::new(&self.bin)
+        privileged
+            .command(&self.bin)
             .arg("--metadata-snap")
             .arg(self.args.meta.as_ref())
             .env_clear()

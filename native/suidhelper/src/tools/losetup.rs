@@ -1,7 +1,9 @@
 use super::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_dev::LoopDev;
 use crate::util::safe_file::{self, Any, IsRegularFile, SafeFile};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::util::setuid_privileged::Privileged;
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
@@ -94,8 +96,11 @@ impl IsTool for Losetup {
     type Output = LosetupOut;
     type RunT = io::Result<Output>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = Command::new(&self.bin);
+    // losetup reopens the backing file, which the node user owns (often 0600).
+    const CAPS: Caps = Caps::DAC_OVERRIDE;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
+        let mut cmd = privileged.command(&self.bin);
         match &self.op {
             LosetupOp::Attach(args) => {
                 args.enrich_command(&mut cmd);

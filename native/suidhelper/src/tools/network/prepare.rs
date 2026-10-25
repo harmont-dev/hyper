@@ -7,7 +7,9 @@ use super::NetworkOut;
 use crate::config::Config;
 use crate::tools::jailer::{self, VmId};
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_bin;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -124,13 +126,15 @@ impl IsTool for Prepare {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    const CAPS: Caps = super::NETNS_CAPS;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
         let commands = args::prepare_commands(
             &self.plan,
             &self.nft.to_string_lossy(),
             &self.sysctl.to_string_lossy(),
         );
-        exec::run_all(&commands, |which| match which {
+        exec::run_all(privileged, &commands, |which| match which {
             args::Which::Ip => self.ip.as_path(),
             args::Which::Nft => self.nft.as_path(),
         })?;

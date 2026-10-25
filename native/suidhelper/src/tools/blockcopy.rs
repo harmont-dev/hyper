@@ -6,7 +6,9 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_dev::BlockDev;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
@@ -128,7 +130,10 @@ impl IsTool for Blockcopy {
     type Output = CopyStats;
     type RunT = io::Result<CopyStats>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    // Block nodes are root-owned, so euid 0 opens them as owner, needing no caps.
+    const CAPS: Caps = Caps::empty();
+
+    fn run_privileged(&self, _privileged: &Privileged) -> Self::RunT {
         let mut src = File::open(&self.args.src)?;
         let mut dst = OpenOptions::new().write(true).open(&self.args.dst)?;
         let chunk = self.args.chunk_bytes as usize;

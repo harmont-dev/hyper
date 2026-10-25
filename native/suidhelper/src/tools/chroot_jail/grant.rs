@@ -7,6 +7,7 @@
 //! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
 //! the logic block.
 
+use crate::util::caps::Caps;
 use crate::util::safe_dir::{self, SafeDir};
 use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
@@ -19,6 +20,10 @@ use thiserror::Error as ThisError;
 /// Number of parent components between the jail base and the socket leaf:
 /// `<exec>/<id>/root/<leaf>` — three parents.
 pub const SOCKET_PARENT_DEPTH: usize = 3;
+
+/// Search into the per-VM-uid-owned `0700` jail `root`, then chown/chgrp and
+/// chmod files that root does not own.
+pub const CAPS: Caps = Caps::CHOWN.union(Caps::DAC_READ_SEARCH).union(Caps::FOWNER);
 
 /// Mode handed to the node: owner+group read/write, no world access.
 pub const SOCKET_MODE: u32 = 0o660;

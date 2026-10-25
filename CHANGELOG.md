@@ -14,6 +14,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value is now rejected with `INVALID_ARGUMENT`; `ListVms` is now paginated
   (`page_size` / `page_token` / `next_page_token`).
 
+### Security
+- The setuid helper no longer runs its operations with every root capability.
+  Each tool holds only its declared minimal capability set, and exec'd children
+  (`losetup`, `dmsetup`, `ip`, `nft`, the jailer and firecracker) have their
+  bounding set confined to it.
+
 ## [0.1.0]
 
 First public release: a distributed orchestrator for Firecracker microVMs on the

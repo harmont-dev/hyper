@@ -16,7 +16,9 @@ use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_bin;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
@@ -87,7 +89,10 @@ impl IsTool for HostInit {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    // nftables changes only; no namespace is touched.
+    const CAPS: Caps = Caps::NET_ADMIN;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
         let ip_forward = std::fs::read_to_string(IP_FORWARD_PATH).map_err(Error::IpForwardRead)?;
         if !ip_forward_enabled(&ip_forward) {
             return Err(Error::IpForwardDisabled);
@@ -95,7 +100,7 @@ impl IsTool for HostInit {
 
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
         // host_init_commands only ever issues `nft` commands (see args.rs).
-        exec::run_all(&commands, |_which| self.nft.as_path())?;
+        exec::run_all(privileged, &commands, |_which| self.nft.as_path())?;
         Ok(())
     }
 
