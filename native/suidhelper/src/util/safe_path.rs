@@ -1,40 +1,41 @@
 // SPDX-License-Identifier: MIT
-//! Typestate-validated filesystem *names*.
+//! Typesafer filesystem paths.
 
+use ref_cast::{ref_cast_custom, RefCastCustom};
+use std::ffi::OsStr;
 use std::marker::PhantomData;
-use std::path::{Component, Path, PathBuf};
+use std::ops::Deref;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
-/// The single error type shared by every `SafePath` flavor. A given flavor only
-/// ever yields the variants for the axes it actually enforces.
-#[derive(Debug, Clone, Copy, ThisError)]
+#[derive(Debug, ThisError)]
 pub enum ValidationError {
     #[error("path is not absolute")]
     NotAbsolute,
     #[error("path contains `.`, `..`, or empty components")]
     LooseComponents,
-    #[error("path is not under the required base directory")]
-    NotUnderBase,
-    #[error("path has no final component (equals the base)")]
-    NoLeaf,
 }
 
-/// Absoluteness axis: require an absolute path.
-#[derive(Debug)]
-pub struct IsAbsolute;
-/// Components axis: reject `.`, `..`, and empty components.
-#[derive(Debug)]
-pub struct StrictComponents;
+#[derive(Debug, ThisError)]
+pub enum RelativeError {
+    #[error("path is not under the required base directory")]
+    NotUnderBase,
+    #[error("path equals the base directory")]
+    EqualsBase,
+}
 
-/// Absoluteness axis.
 pub trait Absoluteness {
     fn check(path: &Path) -> Result<(), ValidationError>;
 }
 
-/// Components axis.
 pub trait Components {
     fn check(path: &Path) -> Result<(), ValidationError>;
 }
+
+/// Ensure a path is absolute.
+#[derive(Debug, Clone)]
+pub struct IsAbsolute;
 
 impl Absoluteness for IsAbsolute {
     fn check(path: &Path) -> Result<(), ValidationError> {
@@ -46,17 +47,19 @@ impl Absoluteness for IsAbsolute {
     }
 }
 
+/// A path known to be relative. Only produced by [`SafePath::strip_base`].
+#[derive(Debug, Clone)]
+pub struct IsRelative;
+
+/// Ensure there are no `.` nor `..` components.
+#[derive(Debug, Clone)]
+pub struct StrictComponents;
+
+#[cfg(unix)]
 impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
-        use std::os::unix::ffi::OsStrExt;
-
-        // `Path::components()` normalizes `.` and empty (`//`, trailing `/`)
-        // segments away before they can be inspected, so it cannot enforce the
-        // "no `.`/`..`/empty components" rule this gate documents. Validate the
-        // raw bytes instead (this is a Linux-only crate). The IsAbsolute axis
-        // guarantees the leading `/`; strip it, then require every `/`-separated
-        // segment to be a plain name: non-empty, and neither `.` nor `..` -- which
-        // is how the `..` traversal vector is rejected here.
+        // This implementation cannot use Path::components because it
+        // normalizes path elements.
         let raw = path.as_os_str().as_bytes();
         let body = raw.strip_prefix(b"/").unwrap_or(raw);
 
@@ -69,59 +72,88 @@ impl Components for StrictComponents {
     }
 }
 
-/// A `PathBuf` proven to satisfy the lexical axes named by its type parameters.
-#[derive(Debug)]
-pub struct SafePath<A, S>(PathBuf, PhantomData<(A, S)>);
+/// A [`Path`] which satisfies [`Absoluteness`] and [`Components`]
+/// constraints. The borrowed counterpart of [`SafePathBuf`].
+#[derive(Debug, RefCastCustom)]
+#[repr(transparent)]
+pub struct SafePath<A, S> {
+    #[trivial]
+    axes: PhantomData<(A, S)>,
+    path: Path,
+}
+
+/// An owned [`SafePath`].
+#[derive(Debug, Clone)]
+pub struct SafePathBuf<A, S>(PathBuf, PhantomData<(A, S)>);
+
+impl<A, S> SafePath<A, S> {
+    #[ref_cast_custom]
+    fn new_unchecked(path: &Path) -> &Self;
+}
 
 impl<A> SafePath<A, StrictComponents> {
-    /// Decompose the path, relative to `base`, into its parent components and
-    /// final name - the input a directory walk consumes. Gated on
-    /// `StrictComponents`, so there are no `.`/`..` to escape the split; every
-    /// component is a plain name.
-    ///
-    /// Errs if the path is not under `base`, equals `base` (no final component),
-    /// or contains a non-UTF-8 component.
-    pub fn relative_to(&self, base: &Path) -> Result<(Vec<PathBuf>, PathBuf), ValidationError> {
-        let rel = self
-            .0
+    /// Given `/b/x/y`, base `/b`, returns `x/y`.
+    pub fn strip_base(
+        &self,
+        base: &Path,
+    ) -> Result<&SafePath<IsRelative, StrictComponents>, RelativeError> {
+        let rest = self
+            .path
             .strip_prefix(base)
-            .map_err(|_| ValidationError::NotUnderBase)?;
-
-        let mut components = Vec::new();
-        for component in rel.components() {
-            match component {
-                Component::Normal(s) => components.push(PathBuf::from(s)),
-                // StrictComponents guarantees this is unreachable; reject anyway.
-                _ => return Err(ValidationError::NotUnderBase),
-            }
+            .map_err(|_| RelativeError::NotUnderBase)?;
+        if rest.as_os_str().is_empty() {
+            return Err(RelativeError::EqualsBase);
         }
+        // `strip_prefix` matches components, so re-check the remainder's bytes
+        // rather than trust how it sliced them.
+        StrictComponents::check(rest).map_err(|_| RelativeError::NotUnderBase)?;
+        Ok(SafePath::new_unchecked(rest))
+    }
+}
 
-        let leaf = components.pop().ok_or(ValidationError::NoLeaf)?;
-        Ok((components, leaf))
+impl SafePath<IsRelative, StrictComponents> {
+    /// Given `foo/bar/baz`, returns `[foo, bar, baz]`.
+    pub fn segments(&self) -> impl Iterator<Item = &OsStr> {
+        self.path
+            .as_os_str()
+            .as_bytes()
+            .split(|&b| b == b'/')
+            .map(OsStr::from_bytes)
     }
 }
 
 impl<A, S> AsRef<Path> for SafePath<A, S> {
     fn as_ref(&self) -> &Path {
-        &self.0
+        &self.path
     }
 }
 
-// Cloning a validated path only copies the already-proven `PathBuf`; the axis
-// markers are zero-sized, so this is independent of whether they are `Clone`.
-impl<A, S> Clone for SafePath<A, S> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
-    }
-}
-
-impl<A, S> TryFrom<PathBuf> for SafePath<A, S>
+impl<'a, A, S> TryFrom<&'a Path> for &'a SafePath<A, S>
 where
     A: Absoluteness,
     S: Components,
 {
     type Error = ValidationError;
+    fn try_from(path: &'a Path) -> Result<Self, Self::Error> {
+        A::check(path)?;
+        S::check(path)?;
+        Ok(SafePath::new_unchecked(path))
+    }
+}
 
+impl<A, S> Deref for SafePathBuf<A, S> {
+    type Target = SafePath<A, S>;
+    fn deref(&self) -> &SafePath<A, S> {
+        SafePath::new_unchecked(&self.0)
+    }
+}
+
+impl<A, S> TryFrom<PathBuf> for SafePathBuf<A, S>
+where
+    A: Absoluteness,
+    S: Components,
+{
+    type Error = ValidationError;
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
         A::check(&path)?;
         S::check(&path)?;
