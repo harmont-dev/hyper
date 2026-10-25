@@ -18,8 +18,13 @@ defmodule Hyper.Node do
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
       VMs on a surviving node - cold-booting a ghost).
 
-    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
-      and group id.
+    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its
+      own user id and group id.
+
+    * `Hyper.Node.Net` - this node's VM networking: applies the host setup on
+      start, then hands out per-VM network leases bound to each VM's lifetime.
+      Started before the VM supervisor so the host is networked before any VM
+      boots.
 
     * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
       memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
@@ -65,6 +70,7 @@ defmodule Hyper.Node do
       # be up first.
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
+      Hyper.Node.Net,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Img,
       # Last child: :one_for_one starts in order, so the VM supervisor and Img are
