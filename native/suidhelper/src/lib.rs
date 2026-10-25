@@ -9,6 +9,7 @@
 
 pub mod checksum;
 pub mod config;
+pub mod fs;
 pub mod security_gate;
 pub mod tools;
 pub mod util;
