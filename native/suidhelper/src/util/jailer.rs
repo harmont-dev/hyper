@@ -21,12 +21,12 @@
 //! - [`JailSock`] accepts exactly `/` + one filename and rejects multi-component,
 //!   relative, `..`, and NUL/whitespace inputs.
 
-use crate::util::path::ToCStringExt;
 use crate::util::setuid_privileged;
 use bon::Builder;
 use nix::errno::Errno;
 use std::ffi::{CString, NulError};
 use std::fmt;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
@@ -323,5 +323,21 @@ fn close_inherited_fds() {
         unsafe {
             nix::libc::close(fd);
         }
+    }
+}
+
+trait ToCStringExt {
+    fn to_cstring(&self) -> Result<CString, NulError>;
+}
+
+impl ToCStringExt for Path {
+    fn to_cstring(&self) -> Result<CString, NulError> {
+        CString::new(self.as_os_str().as_bytes())
+    }
+}
+
+impl ToCStringExt for str {
+    fn to_cstring(&self) -> Result<CString, NulError> {
+        CString::new(self.as_bytes())
     }
 }

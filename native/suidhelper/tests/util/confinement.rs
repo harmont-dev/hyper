@@ -4,11 +4,11 @@
 //! root (mknod, chown to another uid) are out of scope here.
 
 use hyper_suidhelper::fs::dir::SafeDir;
-use hyper_suidhelper::util::safe_file::{
+use hyper_suidhelper::fs::file::{
     Any, IsBlockDevice, IsDirectory, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner,
     SafeFile, ValidationError,
 };
-use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePathBuf, StrictComponents};
+use hyper_suidhelper::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use nix::dir::Type;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
@@ -32,7 +32,7 @@ fn safe(p: &Path) -> Strict {
 // inside the tree pointing at an external sentinel must leave the sentinel and
 // its contents intact. This is the core TOCTOU guarantee.
 #[test]
-fn remove_dir_all_does_not_follow_symlinks_out_of_tree() {
+fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree() {
     let tmp = tempfile::tempdir().unwrap();
 
     // Sentinel OUTSIDE the tree we will delete.
@@ -47,7 +47,7 @@ fn remove_dir_all_does_not_follow_symlinks_out_of_tree() {
     symlink(&sentinel, tree.join("escape")).unwrap();
 
     let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-    anchor.remove_dir_all(Path::new("tree")).unwrap();
+    anchor.rmdirat_recursive(Path::new("tree")).unwrap();
 
     assert!(!tree.exists(), "tree must be gone");
     assert!(sentinel.exists(), "sentinel dir must survive");
@@ -91,7 +91,7 @@ fn openat_refuses_escape_and_symlinked_components() {
 
 // remove_dir_all recurses through real nested directories.
 #[test]
-fn remove_dir_all_clears_nested_tree() {
+fn rmdirat_recursive_clears_nested_tree() {
     let tmp = tempfile::tempdir().unwrap();
     let tree = tmp.path().join("tree");
     fs::create_dir_all(tree.join("a/b/c")).unwrap();
@@ -99,7 +99,7 @@ fn remove_dir_all_clears_nested_tree() {
     fs::write(tree.join("a/top.txt"), b"y").unwrap();
 
     let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-    anchor.remove_dir_all(Path::new("tree")).unwrap();
+    anchor.rmdirat_recursive(Path::new("tree")).unwrap();
     assert!(!tree.exists());
 }
 

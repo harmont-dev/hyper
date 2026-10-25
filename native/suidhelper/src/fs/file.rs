@@ -8,6 +8,7 @@ use nix::sys::stat::{
     fchmodat, fstat, major, makedev, minor, FchmodatFlags, FileStat, Mode, SFlag,
 };
 use nix::unistd::{fchownat, Gid, Uid};
+use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 use std::ops::BitOr;
@@ -182,6 +183,12 @@ impl From<OpenFlags> for OFlag {
 
 /// An [`OwnedFd`] with compile-time refinements.
 pub struct SafeFile<T, R, O>(OwnedFd, PhantomData<(T, R, O)>);
+
+impl<T, R, O> fmt::Debug for SafeFile<T, R, O> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("SafeFile").field(&self.0).finish()
+    }
+}
 
 impl<T, R, O> SafeFile<T, R, O> {
     pub fn try_clone(&self) -> io::Result<Self> {

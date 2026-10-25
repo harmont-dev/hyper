@@ -16,8 +16,8 @@
 use crate::config::Config;
 use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, Any, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::tools::IsTool;
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
@@ -42,15 +42,15 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--chroot path: {0}")]
-    ChrootPath(#[source] safe_path::ValidationError),
+    ChrootPath(#[source] path::ValidationError),
     #[error("--chroot path: {0}")]
-    ChrootBase(#[source] safe_path::RelativeError),
+    ChrootBase(#[source] path::RelativeError),
     #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
     ChrootDepth(PathBuf),
     #[error("--cgroup path: {0}")]
-    CgroupPath(#[source] safe_path::ValidationError),
+    CgroupPath(#[source] path::ValidationError),
     #[error("--cgroup path: {0}")]
-    CgroupBase(#[source] safe_path::RelativeError),
+    CgroupBase(#[source] path::RelativeError),
     #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
     CgroupDepth(PathBuf),
     #[error("walking: {0}")]
@@ -122,7 +122,7 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error>
     let Some(parent) = walk(jail_base, Path::new(exec))? else {
         return Ok(()); // an ancestor is already gone
     };
-    match parent.remove_dir_all(Path::new(id)) {
+    match parent.rmdirat_recursive(Path::new(id)) {
         Ok(()) => Ok(()),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
         Err(e) => Err(Error::RemoveChroot(e)),
@@ -167,7 +167,7 @@ pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
 /// the caller (a relaunch) over leftover-dir cleanup. `ENOENT` means already gone.
 fn rmdir_drained(parent: &SafeDir, leaf: &Path) -> Result<(), Error> {
     for attempt in 0..RMDIR_ATTEMPTS {
-        match parent.rmdir(leaf) {
+        match parent.rmdirat(leaf) {
             Ok(()) | Err(Errno::ENOENT) => return Ok(()),
             Err(Errno::EBUSY | Errno::ENOTEMPTY) => {
                 if attempt + 1 < RMDIR_ATTEMPTS {

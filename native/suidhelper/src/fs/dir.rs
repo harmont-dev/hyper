@@ -8,7 +8,7 @@ use nix::dir::{Dir, Type};
 use nix::errno::Errno;
 use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
 use nix::libc::{self, dev_t};
-use nix::sys::stat::{fchmodat, fstat, mkdirat, mknodat, FchmodatFlags, FileStat, Mode, SFlag};
+use nix::sys::stat::{fstat, mkdirat, mknodat, FileStat, Mode, SFlag};
 use nix::unistd::{fchownat, linkat, unlinkat, Gid, Uid, UnlinkatFlags};
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
@@ -52,7 +52,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
         mode: Mode,
     ) -> Result<SafeFile<T, R2, O2>, ValidationError> {
         let how = OpenHow::new()
-            .flags(flags.0 | T::OPEN_FLAGS | OFlag::O_CLOEXEC)
+            .flags(OFlag::from(flags) | T::OPEN_FLAGS | OFlag::O_CLOEXEC)
             .mode(mode)
             .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_BENEATH);
         let raw = openat2(self.as_raw_fd(), name, how).map_err(ValidationError::Open)?;

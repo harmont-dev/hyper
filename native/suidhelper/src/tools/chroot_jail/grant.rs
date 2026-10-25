@@ -9,7 +9,7 @@
 
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
-use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};

@@ -8,11 +8,9 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
+use crate::fs::file::{self, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::util::safe_bin::{self, SafeBin};
-use crate::util::safe_file::{
-    self, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner, SafeFile,
-};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use serde::Deserialize;
 use std::os::unix::io::OwnedFd;
 use std::path::PathBuf;
@@ -22,9 +20,9 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum LoadingError {
     #[error(transparent)]
-    Path(#[from] safe_path::ValidationError),
+    Path(#[from] path::ValidationError),
     #[error(transparent)]
-    File(#[from] safe_file::ValidationError),
+    File(#[from] file::ValidationError),
     #[error("{0:?} could not be read")]
     Unreadable(PathBuf),
     #[error("{0:?} is not valid TOML")]
@@ -357,7 +355,7 @@ impl Config {
                 // OTHER failure — a present but wrong-owner/mode file, an I/O error —
                 // stays fatal, because it is a signal (someone put an untrusted file
                 // there), not an absence.
-                Err(safe_file::ValidationError::Open(nix::errno::Errno::ENOENT)) => {
+                Err(file::ValidationError::Open(nix::errno::Errno::ENOENT)) => {
                     return Ok(Self::default())
                 }
                 Err(e) => return Err(e.into()),

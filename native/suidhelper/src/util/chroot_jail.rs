@@ -3,11 +3,9 @@
 
 use crate::config::Config;
 use crate::fs::dir::{self, SafeDir};
+use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::util::safe_dev::BlockDev;
-use crate::util::safe_file::{
-    self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile,
-};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::sys::stat::{makedev, Mode, SFlag};
 use nix::unistd::{Gid, Uid};
@@ -29,15 +27,15 @@ const TUN_MINOR: u64 = 200;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error(transparent)]
-    Path(#[from] safe_path::ValidationError),
+    Path(#[from] path::ValidationError),
     #[error(transparent)]
-    Relative(#[from] safe_path::RelativeError),
+    Relative(#[from] path::RelativeError),
     #[error("opening chroot: {0}")]
-    OpenChroot(#[source] safe_file::ValidationError),
+    OpenChroot(#[source] file::ValidationError),
     #[error("staging kernel: {0}")]
     StageKernel(#[source] dir::Error),
     #[error("opening rootfs device: {0}")]
-    Device(#[source] safe_file::ValidationError),
+    Device(#[source] file::ValidationError),
     #[error("creating rootfs node: {0}")]
     MakeRootfs(#[source] dir::Error),
     #[error("creating /dev/net/tun: {0}")]
@@ -54,7 +52,7 @@ pub enum Error {
     OpenSrc {
         path: PathBuf,
         #[source]
-        source: safe_file::ValidationError,
+        source: file::ValidationError,
     },
     #[error("copy kernel: {0}")]
     Copy(#[source] io::Error),

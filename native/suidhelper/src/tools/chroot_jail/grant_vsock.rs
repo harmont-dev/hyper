@@ -17,8 +17,8 @@
 
 use super::grant::{self, GrantError};
 use crate::config::Config;
+use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::tools::IsTool;
-use crate::util::safe_path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use clap::Args;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -36,9 +36,9 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--socket path: {0}")]
-    SocketPath(#[source] safe_path::ValidationError),
+    SocketPath(#[source] path::ValidationError),
     #[error("--socket path: {0}")]
-    SocketBase(#[source] safe_path::RelativeError),
+    SocketBase(#[source] path::RelativeError),
     #[error("--socket must be exactly <exec>/<id>/root/vsock.sock below JAIL_BASE: {0:?}")]
     SocketShape(PathBuf),
     #[error("--socket leaf must be {VSOCK_NAME:?}: {0:?}")]

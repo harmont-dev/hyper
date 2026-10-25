@@ -14,11 +14,11 @@
 
 use hyper_suidhelper::fs::dir::SafeDir;
 use hyper_suidhelper::fs::file::OpenFlags;
+use hyper_suidhelper::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use hyper_suidhelper::util::chroot_jail::{
     open_chroot_under, stage_kernel_under, ChrootJail, Error,
 };
 use hyper_suidhelper::util::safe_dev::BlockDev;
-use hyper_suidhelper::util::safe_path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use nix::errno::Errno;
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
@@ -78,9 +78,7 @@ fn open_chroot_rejects_path_outside_base() {
     fs::create_dir(&jail).unwrap();
     let outside = tmp.path().join("elsewhere").join("id");
     let result = open_chroot_under(&jail, &outside);
-    let err = result
-        .err()
-        .expect("expected an error for path outside base");
+    let err = result.expect_err("expected an error for path outside base");
     assert!(
         matches!(err, Error::Relative(RelativeError::NotUnderBase)),
         "got {err:?}",

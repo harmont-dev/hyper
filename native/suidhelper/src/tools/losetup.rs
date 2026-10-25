@@ -1,7 +1,7 @@
 use super::IsTool;
+use crate::fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::util::safe_dev::LoopDev;
-use crate::util::safe_file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
 use nix::unistd::dup;
@@ -23,9 +23,9 @@ pub enum Error {
     #[error("backing file must be under {}: {path}", .base.display())]
     OutsideBase { base: &'static Path, path: PathBuf },
     #[error("backing path: {0}")]
-    BackingPath(#[from] safe_path::ValidationError),
+    BackingPath(#[from] path::ValidationError),
     #[error("backing file: {0}")]
-    Backing(#[from] safe_file::ValidationError),
+    Backing(#[from] file::ValidationError),
     #[error("duplicating backing fd {path}: {errno}")]
     OpenBacking { path: PathBuf, errno: Errno },
     #[error("running losetup: {0}")]
