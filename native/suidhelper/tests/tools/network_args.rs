@@ -1,15 +1,14 @@
 use hyper_suidhelper::config::Network;
-use hyper_suidhelper::tools::jailer::VmId;
 use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
 use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
+use hyper_suidhelper::vm::{UidGidRange, VmId};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 fn plan0() -> Plan {
     Plan::derive(
-        900_000,
-        (900_000, 999_999),
+        UidGidRange::DEFAULT.admit(900_000).unwrap(),
         Ipv4Addr::new(172, 31, 0, 0),
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     )
@@ -52,11 +51,11 @@ fn teardown_orphan_is_exactly_ip_netns_del_by_id_alone() {
     // sufficient to reclaim the veth peer, TAP, and in-netns nftables state.
     let cmds = args::teardown_orphan_commands("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     assert_eq!(
-        cmds,
-        vec![cmd(
+        steps(&cmds),
+        steps(&[cmd(
             Which::Ip,
             &["netns", "del", "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-        )]
+        )])
     );
 }
 
@@ -82,11 +81,23 @@ fn host_init_drops_guest_traffic_to_host() {
     // own assertion so a future edit to the forward chain can't silently drop
     // this isolation.
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
-    assert!(cmds.iter().any(|c| c.bin == Which::Nft
+    assert!(cmds.iter().any(|c| matches!(c.bin, Which::Nft)
         && c.argv.contains(&"input".to_string())
         && c.argv.contains(&"saddr".to_string())
         && c.argv.contains(&"172.31.0.0/16".to_string())
         && c.argv.contains(&"drop".to_string())));
+}
+
+fn steps(cmds: &[args::Command]) -> Vec<(&'static str, &[String], bool)> {
+    cmds.iter()
+        .map(|c| {
+            let bin = match c.bin {
+                Which::Ip => "ip",
+                Which::Nft => "nft",
+            };
+            (bin, c.argv.as_slice(), c.allow_failure)
+        })
+        .collect()
 }
 
 fn cmd(bin: Which, argv: &[&str]) -> args::Command {
@@ -247,7 +258,7 @@ fn prepare_commands_golden_sequence() {
             ],
         ),
     ];
-    assert_eq!(cmds, expected);
+    assert_eq!(steps(&cmds), steps(&expected));
 }
 
 /// Full-sequence golden test for the host-init nftables program: pins the
@@ -379,7 +390,7 @@ fn host_init_commands_golden_sequence() {
             ],
         ),
     ];
-    assert_eq!(cmds, expected);
+    assert_eq!(steps(&cmds), steps(&expected));
 }
 
 #[test]
@@ -392,7 +403,7 @@ fn prepare_refuses_uid_outside_range() {
     // itself fails.
     let err = prepare::plan_from(
         42,
-        (900_000, 999_999),
+        UidGidRange::DEFAULT,
         "172.31.0.0/16",
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );
@@ -405,7 +416,7 @@ fn prepare_refuses_malformed_clone_pool_cidr() {
     // uid-range refusal.
     let err = prepare::plan_from(
         900_000,
-        (900_000, 999_999),
+        UidGidRange::DEFAULT,
         "not-a-cidr",
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );

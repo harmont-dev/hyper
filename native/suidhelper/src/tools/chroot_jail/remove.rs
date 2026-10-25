@@ -14,12 +14,13 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use crate::config::Config;
+use crate::safe::fs::dir::{self, SafeDir};
+use crate::safe::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::tools::IsTool;
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
 use nix::errno::Errno;
 use serde::Serialize;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error as ThisError;
@@ -38,21 +39,25 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--chroot path: {0}")]
-    ChrootPath(#[source] safe_path::ValidationError),
+    ChrootPath(#[source] path::ValidationError),
+    #[error("--chroot path: {0}")]
+    ChrootBase(#[source] path::RelativeError),
     #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
     ChrootDepth(PathBuf),
     #[error("--cgroup path: {0}")]
-    CgroupPath(#[source] safe_path::ValidationError),
+    CgroupPath(#[source] path::ValidationError),
+    #[error("--cgroup path: {0}")]
+    CgroupBase(#[source] path::RelativeError),
     #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
     CgroupDepth(PathBuf),
     #[error("walking: {0}")]
-    Walk(#[source] safe_dir::Error),
+    Walk(#[source] dir::Error),
     #[error("removing chroot: {0}")]
-    RemoveChroot(#[source] safe_dir::Error),
+    RemoveChroot(#[source] dir::Error),
     #[error("removing cgroup: {0}")]
-    RemoveCgroup(#[source] safe_dir::Error),
+    RemoveCgroup(#[source] dir::Error),
     #[error("killing cgroup procs: {0}")]
-    KillCgroup(#[source] safe_dir::Error),
+    KillCgroup(#[source] dir::Error),
 }
 
 #[derive(Args)]
@@ -103,16 +108,16 @@ impl IsTool for Remove {
 /// after an `O_NOFOLLOW` walk from `jail_base`. Idempotent on a missing target.
 /// `--chroot` must be exactly `<exec>/<id>` (one parent component, one leaf).
 pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error> {
-    let path: LexicalPath = chroot.to_path_buf().try_into().map_err(Error::ChrootPath)?;
-    let (parents, leaf) = path.relative_to(jail_base).map_err(Error::ChrootPath)?;
-    if parents.len() != 1 {
+    let path: &LexicalPath = chroot.try_into().map_err(Error::ChrootPath)?;
+    let rel = path.strip_base(jail_base).map_err(Error::ChrootBase)?;
+    let [exec, id] = rel.segments().collect::<Vec<_>>()[..] else {
         return Err(Error::ChrootDepth(chroot.to_path_buf()));
-    }
+    };
 
-    let Some(parent) = walk(jail_base.to_path_buf(), &parents)? else {
+    let Some(parent) = walk(jail_base, &[exec])? else {
         return Ok(()); // an ancestor is already gone
     };
-    match parent.remove_dir_all(&leaf) {
+    match parent.remove_dir_all(Path::new(id)) {
         Ok(()) => Ok(()),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
         Err(e) => Err(Error::RemoveChroot(e)),
@@ -125,25 +130,27 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error>
 /// Idempotent: a missing leaf is success, and a leaf that has not finished
 /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
 pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
-    let path: LexicalPath = cgroup.to_path_buf().try_into().map_err(Error::CgroupPath)?;
-    let (parents, leaf) = path.relative_to(base).map_err(Error::CgroupPath)?;
-    if parents.is_empty() {
+    let path: &LexicalPath = cgroup.try_into().map_err(Error::CgroupPath)?;
+    let rel = path.strip_base(base).map_err(Error::CgroupBase)?;
+    let segments: Vec<&OsStr> = rel.segments().collect();
+    let Some((leaf, parents)) = segments.split_last().filter(|(_, p)| !p.is_empty()) else {
         return Err(Error::CgroupDepth(cgroup.to_path_buf()));
-    }
+    };
+    let leaf = Path::new(leaf);
 
-    let Some(parent) = walk(base.to_path_buf(), &parents)? else {
+    let Some(parent) = walk(base, parents)? else {
         return Ok(()); // an ancestor is already gone
     };
 
     // Kill any process still in the leaf cgroup before removing it. Open the leaf
     // O_NOFOLLOW (one step past the parent walk) and write "1" to cgroup.kill.
-    match parent.openat_dir(&leaf) {
+    match parent.openat_dir(leaf) {
         Ok(leaf_dir) => kill_cgroup(&leaf_dir)?,
         Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(()), // leaf already gone
         Err(e) => return Err(Error::Walk(e)),
     }
 
-    rmdir_drained(&parent, &leaf)
+    rmdir_drained(&parent, leaf)
 }
 
 /// `rmdir` the killed cgroup leaf, retrying while it drains. `cgroup.kill` signals
@@ -184,14 +191,14 @@ fn kill_cgroup(leaf_dir: &SafeDir) -> Result<(), Error> {
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
 /// `Ok(None)` if `base` or any parent is already gone (`ENOENT`), so callers can
 /// treat removal as idempotent.
-fn walk(base: PathBuf, parents: &[PathBuf]) -> Result<Option<SafeDir>, Error> {
-    let base_path: LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
-    let anchor = match SafeDir::open(&base_path) {
+fn walk(base: &Path, parents: &[&OsStr]) -> Result<Option<SafeDir>, Error> {
+    let base_path: &LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
+    let anchor = match SafeDir::open(base_path) {
         Ok(dir) => dir,
         Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
         Err(e) => return Err(Error::Walk(e)),
     };
-    match anchor.descend(parents) {
+    match anchor.descend(parents.iter().copied()) {
         Ok(dir) => Ok(Some(dir)),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
         Err(e) => Err(Error::Walk(e)),

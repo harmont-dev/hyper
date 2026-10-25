@@ -71,7 +71,7 @@ for these families (the existing suites are worked examples of each):
 - **Round-trip / inverse** — `parse(render(x)) == x`, `decode(encode(x)) == x`,
   `with_value(value(q)) == q`. See `test/unit/quantity_properties_test.exs`,
   `test/sys/linux/proc/stat_properties_test.exs`,
-  `native/suidhelper/tests/util/safe_path.rs` (`relative_to` reconstructs).
+  `native/suidhelper/tests/safe/fs/path.rs` (`relative_to` reconstructs).
 - **Algebraic laws** — commutativity, associativity, identity, inverse, total
   order. See the additive-group laws in `quantity_properties_test.exs`.
 - **Oracle / model** — the result equals an independent reference computation

@@ -22,7 +22,7 @@ pub enum Error {
 
 /// A thin device's provisioned map: pool block size (512-byte sectors) and
 /// `(origin_begin, length)` ranges in pool blocks.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct ThinMappings {
     pub block_sectors: u64,
     pub ranges: Vec<(u64, u64)>,

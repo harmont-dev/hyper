@@ -15,8 +15,8 @@ use super::args;
 use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
+use crate::safe::bin;
 use crate::tools::IsTool;
-use crate::util::safe_bin;
 use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
@@ -32,7 +32,7 @@ pub enum Error {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] safe_bin::Error),
+    Bin(#[from] bin::Error),
     #[error(transparent)]
     Exec(#[from] exec::Error),
     #[error("failed to read {IP_FORWARD_PATH}: {0}")]
@@ -54,7 +54,7 @@ pub fn ip_forward_enabled(contents: &str) -> bool {
 
 pub fn run(args: HostInitArgs) -> Result<serde_json::Value, crate::tools::Error> {
     HostInit::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(crate::tools::Error::tool)?
         .run()
 }
 

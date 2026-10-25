@@ -4,7 +4,7 @@
 #![cfg(feature = "insecure_test_seams")]
 
 use hyper_suidhelper::config::{BinError, Config};
-use hyper_suidhelper::util::safe_bin;
+use hyper_suidhelper::safe::bin;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -118,7 +118,7 @@ fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
 fn firecracker_unconfigured_when_absent() {
     // Config::default() has firecracker == None; the accessor must signal this
     // distinctly so callers can report a missing-configuration error rather than
-    // a safe_bin validation error.
+    // a SafeBin validation error.
     let err = Config::default()
         .firecracker()
         .expect_err("absent firecracker must return Unconfigured");
@@ -149,7 +149,7 @@ fn jailer_basename_mismatch_rejected() {
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
     assert!(
-        matches!(err, BinError::Bin(safe_bin::Error::Name { .. })),
+        matches!(err, BinError::Bin(bin::Error::Name { .. })),
         "expected a Name error, got {err:?}",
     );
 }

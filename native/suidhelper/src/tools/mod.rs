@@ -22,7 +22,7 @@ pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
-use crate::util::setuid_privileged::{self, Privileged};
+use crate::privilege::{self, Privileged};
 use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
@@ -33,11 +33,17 @@ use thiserror::Error as ThisError;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error(transparent)]
-    Privilege(#[from] setuid_privileged::Error),
+    Privilege(#[from] privilege::Error),
     /// A tool's own error (operand validation or execution), boxed so this layer
     /// stays decoupled from each tool's concrete error type.
     #[error(transparent)]
     Tool(Box<dyn std::error::Error>),
+}
+
+impl Error {
+    pub fn tool(e: impl std::error::Error + 'static) -> Self {
+        Error::Tool(Box::new(e))
+    }
 }
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
@@ -69,7 +75,7 @@ pub trait IsTool {
         };
 
         let output = self.parse(res).map_err(Error::Tool)?;
-        serde_json::to_value(output).map_err(|e| Error::Tool(Box::new(e)))
+        serde_json::to_value(output).map_err(Error::tool)
     }
 }
 
@@ -124,22 +130,22 @@ impl Tool {
         let config = Config::get();
         match self {
             Tool::Losetup { args } => {
-                let bin = config.losetup().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config.losetup().map_err(Error::tool)?;
                 Losetup::new(bin.into(), args).run()
             }
             Tool::Dmsetup { args } => {
-                let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config.dmsetup().map_err(Error::tool)?;
                 Dmsetup::new(bin.into(), args).run()
             }
             Tool::Blockdev { args } => {
-                let bin = config.blockdev().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config.blockdev().map_err(Error::tool)?;
                 Blockdev::new(bin.into(), args).run()
             }
             Tool::Blockcopy { args } => Blockcopy::new(args).run(),
             Tool::ChrootJail { op } => op.run(),
             Tool::Network { op } => op.run(),
             Tool::ThinDump { args } => {
-                let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config.thin_dump().map_err(Error::tool)?;
                 ThinDump::new(bin.into(), args).run()
             }
         }

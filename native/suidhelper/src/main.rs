@@ -3,7 +3,7 @@
 //! library crate (`src/lib.rs`); this file only parses args and renders output.
 //!
 //! Privilege model: at startup we drop to the real uid; root is only ever held
-//! inside a `Privileged` scope (see `setuid_privileged`), which wraps just the
+//! inside a `Privileged` scope (see `privilege`), which wraps just the
 //! tool's `run`. Each subcommand prints its result as JSON on stdout; errors go
 //! to stderr with a non-zero exit.
 //!
@@ -15,9 +15,9 @@
 
 use clap::{Parser, Subcommand};
 use hyper_suidhelper::config;
+use hyper_suidhelper::privilege::{self, Privileged};
 use hyper_suidhelper::tools::jailer::{self, JailerArgs};
 use hyper_suidhelper::tools::Tool;
-use hyper_suidhelper::util::setuid_privileged::{self, Privileged};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -77,7 +77,7 @@ struct SysTest {
 }
 
 impl SysTest {
-    fn perform() -> Result<Self, setuid_privileged::Error> {
+    fn perform() -> Result<Self, privilege::Error> {
         Privileged::smoke_test()?;
         Ok(Self {
             sys_test: "ok",
@@ -104,7 +104,7 @@ fn main() {
     }
 
     // Privileges are already dropped to the real uid by a pre-main constructor
-    // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
+    // (see `privilege`); root is only re-acquired inside `Privileged`.
     config::Config::init();
 
     // Each command yields a serializable value (errors stringified to unify); we

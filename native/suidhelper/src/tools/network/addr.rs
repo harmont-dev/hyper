@@ -4,9 +4,10 @@
 //! - the derived clone `/30` always lands inside the configured pool, never in
 //!   the inner `172.30.0.0/30` constant space;
 //! - `veth` names always satisfy `IFNAMSIZ` (<= 15);
-//! - a `uid` below the accepted range, or a `slot` past the pool's capacity, is
-//!   *always* refused — never wrapped into another VM's address.
-use crate::tools::jailer::VmId;
+//! - a `slot` past the pool's capacity is *always* refused — never wrapped
+//!   into another VM's address. (A uid below the accepted range cannot reach
+//!   here at all: [`JailId`] is only constructed in range.)
+use crate::vm::{JailId, VmId};
 use std::net::Ipv4Addr;
 use thiserror::Error;
 
@@ -14,17 +15,14 @@ pub const INNER_TAP_IP: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 1);
 pub const INNER_GUEST_IP: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 2);
 pub const INNER_PREFIX: u8 = 30;
 pub const TAP_NAME: &str = "tap0";
-pub const GUEST_IFACE: &str = "eth0";
 
 #[derive(Debug, Error)]
 pub enum AddrError {
-    #[error("uid {uid} is below the accepted range floor {floor}")]
-    UidBelowRange { uid: u32, floor: u32 },
     #[error("slot {slot} does not fit the clone pool")]
     SlotOutOfPool { slot: u32 },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Plan {
     pub slot: u32,
     pub netns: String,
@@ -35,17 +33,8 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn derive(
-        uid: u32,
-        uid_range: (u32, u32),
-        clone_pool: Ipv4Addr,
-        vm_id: &VmId,
-    ) -> Result<Self, AddrError> {
-        let floor = uid_range.0;
-        if uid < floor {
-            return Err(AddrError::UidBelowRange { uid, floor });
-        }
-        let slot = uid - floor;
+    pub fn derive(uid: JailId, clone_pool: Ipv4Addr, vm_id: &VmId) -> Result<Self, AddrError> {
+        let slot = uid.slot();
         // Each VM consumes a /30 (4 addresses). The block's last address must
         // stay within the 32-bit space above the pool base.
         let base = u32::from(clone_pool);

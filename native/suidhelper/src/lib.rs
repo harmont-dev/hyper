@@ -9,6 +9,9 @@
 
 pub mod checksum;
 pub mod config;
+pub mod linux;
+pub mod privilege;
+pub mod safe;
 pub mod security_gate;
 pub mod tools;
-pub mod util;
+pub mod vm;

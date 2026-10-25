@@ -7,17 +7,17 @@
 //! `fstat`. Existence is NOT an axis: a `SafeFile` holds an open fd, so the file
 //! provably exists by construction.
 
-use super::safe_path::SafePath;
+use super::path::SafePath;
 use nix::fcntl::{open as nix_open, OFlag};
 use nix::libc::dev_t;
 use nix::sys::stat::{fstat, major, makedev, minor, FileStat, Mode, SFlag};
 use std::marker::PhantomData;
-use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use thiserror::Error as ThisError;
 
 /// The single error type shared by every `SafeFile` flavor. A given flavor only
 /// ever yields the variants for the axes it actually enforces.
-#[derive(Debug, Clone, Copy, ThisError)]
+#[derive(Debug, ThisError)]
 pub enum ValidationError {
     #[error("open failed: {0}")]
     Open(#[source] nix::Error),
@@ -58,11 +58,6 @@ pub trait Writability {
     fn check(stat: &FileStat) -> Result<(), ValidationError>;
 }
 
-impl FileType for Any {
-    fn check(_: &FileStat) -> Result<(), ValidationError> {
-        Ok(())
-    }
-}
 impl Ownership for Any {
     fn check(_: &FileStat) -> Result<(), ValidationError> {
         Ok(())
@@ -171,12 +166,6 @@ where
         // SAFETY: `nix_open` just handed us this fd; nobody else owns it.
         let owned = unsafe { OwnedFd::from_raw_fd(raw) };
         Self::try_from(owned)
-    }
-}
-
-impl<T, R, O> AsFd for SafeFile<T, R, O> {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
     }
 }
 

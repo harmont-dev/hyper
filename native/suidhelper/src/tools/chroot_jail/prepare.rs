@@ -2,9 +2,10 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
+use super::builder::{self, ChrootJail};
+use crate::config::Config;
+use crate::safe::dev::BlockDev;
 use crate::tools::IsTool;
-use crate::util::chroot_jail::{self, ChrootJail};
-use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -47,14 +48,15 @@ struct Prepare {
 impl IsTool for Prepare {
     type Args = PrepareArgs;
     type Output = PrepareOut;
-    type RunT = Result<(), chroot_jail::Error>;
+    type RunT = Result<(), builder::Error>;
 
     fn run_privileged(&self) -> Self::RunT {
         let args = &self.args;
+        let config = Config::get();
         ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
             .with_kernel(args.kernel.clone())
             .with_rootfs(args.device.clone())
-            .build()
+            .build(&config.jail_base(), config.hyper_base())
     }
 
     fn parse(&self, res: Self::RunT) -> Result<PrepareOut, Box<dyn std::error::Error>> {

@@ -12,8 +12,8 @@
 //!     freshly `openat`-ed subdir fds, so no step ever re-resolves a path by name
 //!     (unlike `std::fs::remove_dir_all`, which is a by-name TOCTOU footgun).
 
-use super::safe_file::{Any, SafeFile};
-use super::safe_path::SafePath;
+use super::file::{Any, SafeFile};
+use super::path::SafePath;
 use nix::dir::{Dir, Type};
 use nix::errno::Errno;
 use nix::fcntl::{openat, AtFlags, OFlag};
@@ -110,16 +110,20 @@ impl SafeDir {
         Ok(SafeDir(unsafe { OwnedFd::from_raw_fd(raw) }))
     }
 
-    /// Walk `components` from this dir, one `openat_dir` step each, returning the
+    /// Walk `segments` from this dir, one `openat_dir` step each, returning the
     /// directory they name. Every step is `O_NOFOLLOW` and relative to the
     /// previous pinned fd, so arriving proves confinement under this anchor.
-    pub fn descend(&self, components: &[PathBuf]) -> Result<SafeDir, Error> {
-        let mut dir = match components.first() {
-            None => return self.try_clone(),
-            Some(first) => self.openat_dir(first)?,
+    pub fn descend<'a>(
+        &self,
+        segments: impl IntoIterator<Item = &'a OsStr>,
+    ) -> Result<SafeDir, Error> {
+        let mut segments = segments.into_iter();
+        let Some(first) = segments.next() else {
+            return self.try_clone();
         };
-        for component in &components[1..] {
-            dir = dir.openat_dir(component)?;
+        let mut dir = self.openat_dir(Path::new(first))?;
+        for segment in segments {
+            dir = dir.openat_dir(Path::new(segment))?;
         }
         Ok(dir)
     }

@@ -11,10 +11,10 @@
 //!   * removal — a real `<exec>/<id>` tree is gone afterward, and its siblings
 //!     and the cgroup parent survive.
 
+use hyper_suidhelper::safe::fs::path::ValidationError;
 use hyper_suidhelper::tools::chroot_jail::remove::{
     remove_cgroup_under, remove_chroot_under, Error,
 };
-use hyper_suidhelper::util::safe_path::ValidationError;
 use proptest::prelude::*;
 use std::fs;
 use std::os::unix::fs::symlink;

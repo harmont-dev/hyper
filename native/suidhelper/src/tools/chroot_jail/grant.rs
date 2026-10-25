@@ -7,18 +7,15 @@
 //! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
 //! the logic block.
 
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use crate::safe::fs::dir::{self, SafeDir};
+use crate::safe::fs::path::{IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::sys::stat::SFlag;
 use nix::unistd::{getgid, getuid};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::path::Path;
 use thiserror::Error as ThisError;
-
-/// Number of parent components between the jail base and the socket leaf:
-/// `<exec>/<id>/root/<leaf>` — three parents.
-pub const SOCKET_PARENT_DEPTH: usize = 3;
 
 /// Mode handed to the node: owner+group read/write, no world access.
 pub const SOCKET_MODE: u32 = 0o660;
@@ -46,32 +43,32 @@ pub enum GrantError {
     #[error("not a socket (or is a symlink); refusing to touch it")]
     NotASocket,
     #[error("statting the socket: {0}")]
-    Stat(#[source] safe_dir::Error),
+    Stat(#[source] dir::Error),
     #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] safe_dir::Error),
+    Chown(#[source] dir::Error),
     #[error("chmoding the socket: {0}")]
-    Chmod(#[source] safe_dir::Error),
+    Chmod(#[source] dir::Error),
     #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] safe_dir::Error),
+    ChgrpRoot(#[source] dir::Error),
     #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] safe_dir::Error),
+    ChmodRoot(#[source] dir::Error),
 }
 
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
 /// `Ok(None)` if `base` or any parent is not yet present (`ENOENT`), so the
 /// caller can treat a half-built jail as `Pending` rather than an error. On any
-/// other failure the raw `safe_dir::Error` is returned for the caller to wrap in
+/// other failure the raw `dir::Error` is returned for the caller to wrap in
 /// its own error type.
 pub fn walk_to(
     base: &SafePath<IsAbsolute, StrictComponents>,
-    parents: &[PathBuf],
-) -> Result<Option<SafeDir>, safe_dir::Error> {
+    parents: &[&OsStr],
+) -> Result<Option<SafeDir>, dir::Error> {
     let anchor = match SafeDir::open(base) {
         Ok(dir) => dir,
         Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
         Err(e) => return Err(e),
     };
-    match anchor.descend(parents) {
+    match anchor.descend(parents.iter().copied()) {
         Ok(dir) => Ok(Some(dir)),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
         Err(e) => Err(e),

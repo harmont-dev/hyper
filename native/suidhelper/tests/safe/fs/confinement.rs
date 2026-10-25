@@ -3,18 +3,19 @@
 //! the anchored tree. These run unprivileged in a tempdir; the cases needing
 //! root (mknod, chown to another uid) are out of scope here.
 
-use hyper_suidhelper::util::safe_dir::SafeDir;
-use hyper_suidhelper::util::safe_file::{
+use hyper_suidhelper::safe::fs::dir::SafeDir;
+use hyper_suidhelper::safe::fs::file::{
     Any, IsBlockDevice, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile,
 };
-use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use hyper_suidhelper::safe::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-type Strict = SafePath<IsAbsolute, StrictComponents>;
+type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
 fn safe(p: &Path) -> Strict {
     p.to_path_buf()
@@ -63,7 +64,7 @@ fn descend_rejects_symlinked_component() {
     symlink(&real, tmp.path().join("link")).unwrap();
 
     let anchor = SafeDir::open(&safe(tmp.path())).unwrap();
-    let err = anchor.descend(&[PathBuf::from("link"), PathBuf::from("leaf")]);
+    let err = anchor.descend([OsStr::new("link"), OsStr::new("leaf")]);
     assert!(err.is_err(), "descend followed a symlinked component");
 }
 

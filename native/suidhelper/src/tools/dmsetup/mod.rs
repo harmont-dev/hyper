@@ -5,7 +5,7 @@ mod thin;
 mod thin_pool;
 
 use super::IsTool;
-use crate::util::safe_dev::{self, DmName};
+use crate::safe::dev::{self, DmName};
 use clap::{Args, Subcommand};
 pub use message::ThinMessage;
 use serde::Serialize;
@@ -20,7 +20,7 @@ pub enum Error {
     #[error("dmsetup table must be a snapshot target: {0}")]
     BadTable(String),
     #[error(transparent)]
-    Device(#[from] safe_dev::Error),
+    Device(#[from] dev::Error),
     #[error("running dmsetup: {0}")]
     Spawn(#[source] io::Error),
     #[error("dmsetup failed: {0}")]

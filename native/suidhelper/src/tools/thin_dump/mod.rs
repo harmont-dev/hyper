@@ -7,7 +7,9 @@
 //! implementations (the original C++ and the `pdata_tools` Rust rewrite)
 //! whose formatting can drift (attribute order, whitespace, escaping) without
 //! changing meaning, and a grammar-level parser is immune to that drift. See
-//! `crate::util::linux::thin_dump` for the document model.
+//! [`document`] for the document model.
+
+pub mod document;
 
 use std::io;
 use std::path::PathBuf;
@@ -15,9 +17,9 @@ use std::process::{Command, Output};
 use thiserror::Error as ThisError;
 
 use super::IsTool;
-use crate::util::linux::thin_dump::{parse_mappings, Error as ParseError, ThinMappings};
-use crate::util::safe_dev::LoopDev;
+use crate::safe::dev::LoopDev;
 use clap::Args;
+use document::{parse_mappings, Error as ParseError, ThinMappings};
 
 /// Errors of running the `thin_dump` binary itself; a bad parse of its
 /// output composes in via `Parse`.

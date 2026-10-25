@@ -2,10 +2,10 @@
 //! Declarative builder for a VM's chroot jail contents.
 
 use crate::config::Config;
-use crate::util::safe_dev::BlockDev;
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_file::{self, Any, IsBlockDevice, SafeFile};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::safe::dev::BlockDev;
+use crate::safe::fs::dir::{self, SafeDir};
+use crate::safe::fs::file::{self, Any, IsBlockDevice, SafeFile};
+use crate::safe::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{open as nix_open, OFlag};
 use nix::sys::stat::{makedev, Mode};
@@ -26,11 +26,13 @@ const TUN_MINOR: u64 = 200;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error(transparent)]
-    Path(#[from] safe_path::ValidationError),
+    Path(#[from] path::ValidationError),
     #[error(transparent)]
-    Fs(#[from] safe_dir::Error),
+    Relative(#[from] path::RelativeError),
     #[error(transparent)]
-    Device(#[from] safe_file::ValidationError),
+    Fs(#[from] dir::Error),
+    #[error(transparent)]
+    Device(#[from] file::ValidationError),
     #[error("kernel source {path}: {source}")]
     Source {
         path: PathBuf,
@@ -113,16 +115,10 @@ impl<K> ChrootJail<K, Unset> {
 }
 
 impl ChrootJail<Kernel, Rootfs> {
-    /// Realize the jail on disk under the configured `JAIL_BASE`/`HYPER_BASE`.
-    pub fn build(self) -> Result<(), Error> {
-        let cfg = Config::get();
-        self.build_under(&cfg.jail_base(), cfg.hyper_base())
-    }
-
     /// Realize the jail relative to explicit base directories: confined walk to
     /// the chroot dir, then stage the kernel and create the rootfs node relative
-    /// to that fd. The public [`build`](Self::build) wires `Config` into this.
-    pub fn build_under(self, jail_base: &Path, hyper_base: &Path) -> Result<(), Error> {
+    /// to that fd.
+    pub fn build(self, jail_base: &Path, hyper_base: &Path) -> Result<(), Error> {
         let chroot = open_chroot_under(jail_base, &self.chroot)?;
         stage_kernel_under(&chroot, &self.kernel.0, hyper_base, self.uid, self.gid)?;
         make_rootfs(&chroot, &self.rootfs.0, self.uid, self.gid)?;
@@ -136,13 +132,10 @@ impl ChrootJail<Kernel, Rootfs> {
 /// Open the chroot directory by walking it from `jail_base` with `O_NOFOLLOW`, so
 /// a symlinked component cannot redirect outside the jail.
 pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Error> {
-    let path: SafePath<IsAbsolute, StrictComponents> = chroot.to_path_buf().try_into()?;
-    let (parents, leaf) = path.relative_to(jail_base)?;
-    let anchor: SafePath<IsAbsolute, StrictComponents> = jail_base.to_path_buf().try_into()?;
-
-    let mut components = parents;
-    components.push(leaf);
-    Ok(SafeDir::open(&anchor)?.descend(&components)?)
+    let path: &SafePath<IsAbsolute, StrictComponents> = chroot.try_into()?;
+    let rel = path.strip_base(jail_base)?;
+    let anchor: &SafePath<IsAbsolute, StrictComponents> = jail_base.try_into()?;
+    Ok(SafeDir::open(anchor)?.descend(rel.segments())?)
 }
 
 /// Stage host file `src` into `chroot` as `vmlinux`: confine the source under
@@ -171,7 +164,7 @@ pub fn stage_kernel_under(
         Ok(()) => {}
         // Cross-filesystem: open the confined source O_RDONLY|O_NOFOLLOW, create
         // the dest O_CREAT|O_EXCL|O_NOFOLLOW, and copy. Both fds are RAII.
-        Err(safe_dir::Error::Link {
+        Err(dir::Error::Link {
             source: Errno::EXDEV,
             ..
         }) => {
@@ -214,8 +207,8 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
         path: device.as_ref().to_path_buf(),
         source,
     })?;
-    let dev_path: SafePath<IsAbsolute, StrictComponents> = real.try_into()?;
-    let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
+    let dev_path: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
+    let dev = SafeFile::<IsBlockDevice, Any, Any>::open(dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
     chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;
     Ok(())

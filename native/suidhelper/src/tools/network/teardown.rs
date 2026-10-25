@@ -4,8 +4,8 @@ use super::args;
 use super::exec;
 use super::prepare;
 use super::NetworkOut;
-use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
+use crate::vm::VmId;
 use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
@@ -30,7 +30,7 @@ pub enum Error {
 
 pub fn run(args: TeardownArgs) -> Result<serde_json::Value, crate::tools::Error> {
     Teardown::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(crate::tools::Error::tool)?
         .run()
 }
 

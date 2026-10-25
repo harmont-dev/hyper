@@ -6,7 +6,7 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
-use crate::util::safe_dev::BlockDev;
+use crate::safe::dev::BlockDev;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};

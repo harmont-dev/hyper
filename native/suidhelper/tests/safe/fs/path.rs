@@ -1,12 +1,14 @@
 //! Property tests for the lexical confinement gate. These run against the
 //! `hyper_suidhelper` library crate (Task 6's lib split), not inline in source.
 
-use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePath, StrictComponents, ValidationError};
+use hyper_suidhelper::safe::fs::path::{
+    IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
+};
 use proptest::prelude::*;
 use std::path::PathBuf;
 
 // The fully-enforced flavor used at every real call site.
-type Strict = SafePath<IsAbsolute, StrictComponents>;
+type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
 // A plain, safe path component: no `.`/`..`/`/`/empty.
 fn safe_component() -> impl Strategy<Value = String> {
@@ -69,9 +71,10 @@ proptest! {
         ));
     }
 
-    // relative_to reconstructs the original: base ++ parents ++ leaf == path.
+    // strip_base then segments yields exactly the components below the base,
+    // and base ++ segments rebuilds the original path.
     #[test]
-    fn relative_to_round_trips(
+    fn strip_base_segments_round_trip(
         base_parts in prop::collection::vec(safe_component(), 1..4),
         rel_parts in prop::collection::vec(safe_component(), 1..5),
     ) {
@@ -81,25 +84,22 @@ proptest! {
         let full = join_abs(&full_parts);
 
         let safe = Strict::try_from(full.clone()).unwrap();
-        let (parents, leaf) = safe.relative_to(&base).unwrap();
+        let segments: Vec<String> = safe
+            .strip_base(&base)
+            .unwrap()
+            .segments()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        prop_assert_eq!(&segments, &rel_parts);
 
         let mut rebuilt = base.clone();
-        for p in &parents {
-            rebuilt.push(p);
-        }
-        rebuilt.push(&leaf);
+        rebuilt.extend(&segments);
         prop_assert_eq!(rebuilt, full);
-
-        // The decomposed pieces are exactly the relative components.
-        let mut decomposed: Vec<String> =
-            parents.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-        decomposed.push(leaf.to_string_lossy().into_owned());
-        prop_assert_eq!(decomposed, rel_parts);
     }
 
     // A path that is not under `base` is rejected, never silently decomposed.
     #[test]
-    fn relative_to_rejects_paths_outside_base(
+    fn strip_base_rejects_paths_outside_base(
         base_parts in prop::collection::vec(safe_component(), 1..4),
         other_parts in prop::collection::vec(safe_component(), 1..4),
     ) {
@@ -111,21 +111,20 @@ proptest! {
 
         let safe = Strict::try_from(path).unwrap();
         prop_assert!(matches!(
-            safe.relative_to(&base),
-            Err(ValidationError::NotUnderBase)
+            safe.strip_base(&base),
+            Err(RelativeError::NotUnderBase)
         ));
     }
 
-    // A path equal to the base has no leaf component.
     #[test]
-    fn relative_to_base_itself_has_no_leaf(
+    fn strip_base_refuses_the_base_itself(
         base_parts in prop::collection::vec(safe_component(), 1..4),
     ) {
         let base = join_abs(&base_parts);
         let safe = Strict::try_from(base.clone()).unwrap();
         prop_assert!(matches!(
-            safe.relative_to(&base),
-            Err(ValidationError::NoLeaf)
+            safe.strip_base(&base),
+            Err(RelativeError::EqualsBase)
         ));
     }
 }

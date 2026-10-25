@@ -18,9 +18,9 @@
 use super::args::{self, Command};
 use super::NetworkOut;
 use crate::config::Config;
-use crate::tools::jailer::VmId;
+use crate::safe::bin;
 use crate::tools::IsTool;
-use crate::util::safe_bin;
+use crate::vm::VmId;
 use clap::Args;
 use std::path::{Path, PathBuf};
 use std::process::Command as Proc;
@@ -38,7 +38,7 @@ pub enum Error {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] safe_bin::Error),
+    Bin(#[from] bin::Error),
     #[error("running ip {argv:?}: {source}")]
     Spawn {
         argv: Vec<String>,
@@ -51,7 +51,7 @@ pub enum Error {
 
 pub fn run(args: TeardownOrphanArgs) -> Result<serde_json::Value, crate::tools::Error> {
     TeardownOrphan::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(crate::tools::Error::tool)?
         .run()
 }
 

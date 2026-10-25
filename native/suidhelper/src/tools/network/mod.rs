@@ -27,7 +27,7 @@ pub use teardown::TeardownArgs;
 pub use teardown_orphan::TeardownOrphanArgs;
 
 /// `[network]` is absent from config, i.e. VM networking is disabled.
-#[derive(Debug, ThisError, PartialEq, Eq)]
+#[derive(Debug, ThisError)]
 #[error("VM networking is not configured ([network] absent from config)")]
 pub struct NetworkingDisabled;
 

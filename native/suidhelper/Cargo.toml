@@ -25,56 +25,44 @@ path = "src/main.rs"
 # auto-discovers test files at the top level of `tests/`, so each nested file
 # needs an explicit target pointing at its path.
 [[test]]
-name = "safe_path"
-path = "tests/util/safe_path.rs"
+name = "safe_fs_path"
+path = "tests/safe/fs/path.rs"
+
+[[test]]
+name = "safe_fs_confinement"
+path = "tests/safe/fs/confinement.rs"
+
+[[test]]
+name = "safe_bin"
+path = "tests/safe/bin.rs"
 
 [[test]]
 name = "safe_dev"
-path = "tests/util/safe_dev.rs"
+path = "tests/safe/dev.rs"
 
 [[test]]
 name = "security_gate"
 path = "tests/security_gate.rs"
 
 [[test]]
+name = "vm"
+path = "tests/vm.rs"
+
+[[test]]
 name = "config_seam"
-path = "tests/config_seam.rs"
+path = "tests/config/seam.rs"
 
 [[test]]
-name = "util_safe_bin"
-path = "tests/util/safe_bin.rs"
-
-[[test]]
-name = "tools_dmsetup_parsers"
-path = "tests/tools/dmsetup_parsers.rs"
+name = "config_network"
+path = "tests/config/network.rs"
 
 [[test]]
 name = "tools_blockcopy"
 path = "tests/tools/blockcopy.rs"
 
 [[test]]
-name = "tools_jailer"
-path = "tests/tools/jailer.rs"
-
-[[test]]
-name = "tools_network_addr"
-path = "tests/tools/network_addr.rs"
-
-[[test]]
-name = "tools_network_args"
-path = "tests/tools/network_args.rs"
-
-[[test]]
-name = "tools_host_init"
-path = "tests/tools/host_init.rs"
-
-[[test]]
-name = "util_confinement"
-path = "tests/util/confinement.rs"
-
-[[test]]
-name = "tools_chroot_jail_remove"
-path = "tests/tools/chroot_jail_remove.rs"
+name = "tools_chroot_jail_builder"
+path = "tests/tools/chroot_jail_builder.rs"
 
 [[test]]
 name = "tools_chroot_jail_grant_api"
@@ -85,28 +73,52 @@ name = "tools_chroot_jail_grant_vsock"
 path = "tests/tools/chroot_jail_grant_vsock.rs"
 
 [[test]]
-name = "util_chroot_jail"
-path = "tests/util/chroot_jail.rs"
+name = "tools_chroot_jail_remove"
+path = "tests/tools/chroot_jail_remove.rs"
 
 [[test]]
-name = "e2e_config"
-path = "tests/e2e/config.rs"
+name = "tools_dmsetup_parsers"
+path = "tests/tools/dmsetup_parsers.rs"
+
+[[test]]
+name = "tools_host_init"
+path = "tests/tools/host_init.rs"
+
+[[test]]
+name = "tools_jailer"
+path = "tests/tools/jailer.rs"
+
+[[test]]
+name = "tools_losetup_backing"
+path = "tests/tools/losetup_backing.rs"
+
+[[test]]
+name = "tools_network_addr"
+path = "tests/tools/network_addr.rs"
+
+[[test]]
+name = "tools_network_args"
+path = "tests/tools/network_args.rs"
+
+[[test]]
+name = "tools_thin_dump_document"
+path = "tests/tools/thin_dump_document.rs"
 
 [[test]]
 name = "e2e_argv"
 path = "tests/e2e/argv.rs"
 
 [[test]]
-name = "e2e_jailer"
-path = "tests/e2e/jailer.rs"
-
-[[test]]
 name = "e2e_chroot_jail"
 path = "tests/e2e/chroot_jail.rs"
 
 [[test]]
-name = "e2e_version"
-path = "tests/e2e/version.rs"
+name = "e2e_config"
+path = "tests/e2e/config.rs"
+
+[[test]]
+name = "e2e_jailer"
+path = "tests/e2e/jailer.rs"
 
 [[test]]
 name = "e2e_losetup"
@@ -117,20 +129,8 @@ name = "e2e_thin_dump"
 path = "tests/e2e/thin_dump.rs"
 
 [[test]]
-name = "config_uid_gid_range"
-path = "tests/config_uid_gid_range.rs"
-
-[[test]]
-name = "config_network"
-path = "tests/config_network.rs"
-
-[[test]]
-name = "util_linux_thin_dump"
-path = "tests/util/linux/thin_dump.rs"
-
-[[test]]
-name = "tools_losetup_backing"
-path = "tests/tools/losetup_backing.rs"
+name = "e2e_version"
+path = "tests/e2e/version.rs"
 
 [dependencies]
 bon = "3.9.3"
@@ -138,6 +138,7 @@ clap = { version = "4", features = ["derive"] }
 hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
+ref-cast = "1.0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"

@@ -8,8 +8,8 @@
 #![cfg(feature = "insecure_test_seams")]
 
 use hyper_suidhelper::config::{Config, LoadingError};
+use hyper_suidhelper::safe::fs::path::ValidationError;
 use hyper_suidhelper::security_gate;
-use hyper_suidhelper::util::safe_path::ValidationError;
 
 #[test]
 fn override_path_is_consulted_through_the_real_lexical_gate() {

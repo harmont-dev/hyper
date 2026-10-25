@@ -9,7 +9,7 @@
 //! operands at argument-parse time; borrow them as a `Path` via `AsRef`.
 //!
 //! Filesystem path safety (confinement, symlink-free walks, fd-relative ops)
-//! lives in `crate::util::{safe_path, safe_file, safe_dir}`, not here.
+//! lives in [`crate::safe::fs`], not here.
 
 use std::fmt;
 use std::path::{Path, PathBuf};

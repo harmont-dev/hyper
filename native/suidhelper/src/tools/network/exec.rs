@@ -5,7 +5,7 @@
 //! the whole privileged window for every network op — `prepare`, `teardown`,
 //! and `host_init` differ only in which commands they hand to [`run_all`].
 use super::args::{Command, Which};
-use crate::util::setuid_privileged::become_root_permanently;
+use crate::privilege::become_root_permanently;
 use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::Path;

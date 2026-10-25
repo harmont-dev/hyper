@@ -18,7 +18,7 @@
 //!     never change the result, and malformed XML is a parse error rather
 //!     than a silently wrong guess.
 
-use hyper_suidhelper::util::linux::thin_dump::{parse_mappings, Error, ThinMappings};
+use hyper_suidhelper::tools::thin_dump::document::{parse_mappings, Error};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -138,13 +138,9 @@ fn missing_superblock_is_an_error() {
 #[test]
 fn empty_self_closing_device_parses_to_no_ranges() {
     let xml = render(128, &[(3, vec![])]);
-    assert_eq!(
-        parse_mappings(&xml, 3).unwrap(),
-        ThinMappings {
-            block_sectors: 128,
-            ranges: vec![]
-        }
-    );
+    let got = parse_mappings(&xml, 3).unwrap();
+    assert_eq!(got.block_sectors, 128);
+    assert_eq!(got.ranges, vec![]);
 }
 
 #[test]
@@ -160,13 +156,9 @@ fn layout_variance_is_irrelevant() {
     // Same document as a single line with shuffled attribute order and an
     // escaped uuid — a layout the old line-scanner could not survive.
     let xml = "<superblock nr_data_blocks=\"16384\" data_block_size=\"128\" uuid=\"a&quot;b\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\"><device snap_time=\"1\" dev_id=\"3\" mapped_blocks=\"9\" transaction=\"0\" creation_time=\"0\"><range_mapping length=\"8\" origin_begin=\"0\" data_begin=\"100\" time=\"0\"/><single_mapping data_block=\"200\" origin_block=\"42\" time=\"0\"/></device></superblock>";
-    assert_eq!(
-        parse_mappings(xml, 3).unwrap(),
-        ThinMappings {
-            block_sectors: 128,
-            ranges: vec![(0, 8), (42, 1)]
-        }
-    );
+    let got = parse_mappings(xml, 3).unwrap();
+    assert_eq!(got.block_sectors, 128);
+    assert_eq!(got.ranges, vec![(0, 8), (42, 1)]);
 }
 
 #[test]

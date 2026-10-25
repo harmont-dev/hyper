@@ -2,7 +2,7 @@
 //! the privileged tools off arbitrary storage and blocks path tricks. Runs
 //! against the `hyper_suidhelper` library crate, not inline in source.
 
-use hyper_suidhelper::util::safe_dev::{BlockDev, DmName, LoopDev};
+use hyper_suidhelper::safe::dev::{BlockDev, DmName, LoopDev};
 use proptest::prelude::*;
 use std::path::Path;
 

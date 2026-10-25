@@ -1,7 +1,7 @@
 use super::IsTool;
-use crate::util::safe_dev::LoopDev;
-use crate::util::safe_file::{self, Any, IsRegularFile, SafeFile};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::safe::dev::LoopDev;
+use crate::safe::fs::file::{self, Any, IsRegularFile, SafeFile};
+use crate::safe::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
@@ -24,9 +24,9 @@ pub enum Error {
     #[error("backing file must be under {}: {path}", .base.display())]
     OutsideBase { base: &'static Path, path: PathBuf },
     #[error("backing path: {0}")]
-    BackingPath(#[from] safe_path::ValidationError),
+    BackingPath(#[from] path::ValidationError),
     #[error("backing file: {0}")]
-    Backing(#[from] safe_file::ValidationError),
+    Backing(#[from] file::ValidationError),
     #[error("duplicating backing fd {path}: {errno}")]
     OpenBacking { path: PathBuf, errno: Errno },
     #[error("running losetup: {0}")]
@@ -158,8 +158,8 @@ pub fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
     // absolute and component-strict. Open it as a verified regular-file handle
     // (O_PATH to identify; SafeFile fstats the held fd and O_NOFOLLOW refuses a
     // final-component swap raced in after the check).
-    let safe: SafePath<IsAbsolute, StrictComponents> = real.clone().try_into()?;
-    let file = SafeFile::<IsRegularFile, Any, Any>::open(&safe, OFlag::O_PATH)?;
+    let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
+    let file = SafeFile::<IsRegularFile, Any, Any>::open(safe, OFlag::O_PATH)?;
 
     // losetup runs as a child and reopens the *validated inode* via /proc/self/fd.
     // SafeFile's fd is O_CLOEXEC (it would vanish on exec), so dup an inheritable

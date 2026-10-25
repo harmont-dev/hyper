@@ -23,7 +23,7 @@ use super::addr::{self, Plan};
 /// and `nft` — so the setuid helper's whitelist never grows past what egress
 /// networking needs. In-netns `nft` operations still run as `ip netns exec <ns>
 /// nft ...`, so they are represented as [`Which::Ip`] commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Which {
     Ip,
     Nft,
@@ -35,7 +35,7 @@ pub enum Which {
 /// sequence — used only by the leading `nft delete table ip hyper` in
 /// [`host_init_commands`], since that command's whole purpose is to clear
 /// state that may not exist yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Command {
     pub bin: Which,
     pub argv: Vec<String>,

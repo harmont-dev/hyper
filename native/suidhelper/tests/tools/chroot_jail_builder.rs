@@ -1,4 +1,4 @@
-//! Contracts of the VM jail builder (`util::chroot_jail`), driven through the
+//! Contracts of the VM jail builder (`tools::chroot_jail::builder`), driven through the
 //! base-injected seams. Non-root, in a tempdir, the promises under test:
 //!   * confinement — `open_chroot_under` follows no symlinked component and
 //!     refuses a chroot that is not under the jail base;
@@ -8,22 +8,22 @@
 //!   * staging — a confined source is materialized as `vmlinux`, byte-identical,
 //!     and re-staging into an occupied slot is refused (O_EXCL / EEXIST).
 //!
-//! Root-gated (self-skip without root): a full `build_under` against a real loop
+//! Root-gated (self-skip without root): a full `build` against a real loop
 //! device stages the kernel AND creates the `rootfs` block node whose major:minor
 //! mirrors the source device, owned by the requested uid:gid.
 
-use hyper_suidhelper::util::chroot_jail::{
+use hyper_suidhelper::safe::dev::BlockDev;
+use hyper_suidhelper::safe::fs::dir::SafeDir;
+use hyper_suidhelper::safe::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
+use hyper_suidhelper::tools::chroot_jail::builder::{
     open_chroot_under, stage_kernel_under, ChrootJail, Error,
 };
-use hyper_suidhelper::util::safe_dev::BlockDev;
-use hyper_suidhelper::util::safe_dir::SafeDir;
-use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePath, StrictComponents, ValidationError};
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-type Strict = SafePath<IsAbsolute, StrictComponents>;
+type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
 fn safe(p: &Path) -> Strict {
     p.to_path_buf()
@@ -80,7 +80,7 @@ fn open_chroot_rejects_path_outside_base() {
         .err()
         .expect("expected an error for path outside base");
     assert!(
-        matches!(err, Error::Path(ValidationError::NotUnderBase)),
+        matches!(err, Error::Relative(RelativeError::NotUnderBase)),
         "got {err:?}",
     );
 }
@@ -199,9 +199,9 @@ fn teardown_loop(dev: &Path) {
 // A full build stages the kernel AND creates a `rootfs` block node mirroring the
 // loop device's major:minor, both owned by the requested uid:gid.
 #[test]
-fn build_under_stages_kernel_and_mirrors_device_as_root() {
+fn build_stages_kernel_and_mirrors_device_as_root() {
     if !is_root() {
-        eprintln!("SKIP build_under_stages_kernel_and_mirrors_device: needs root for mknod/chown");
+        eprintln!("SKIP build_stages_kernel_and_mirrors_device: needs root for mknod/chown");
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
@@ -213,7 +213,7 @@ fn build_under_stages_kernel_and_mirrors_device_as_root() {
     fs::write(&kernel_src, b"kernel image").unwrap();
 
     let Some(dev) = setup_loop(hyper_base) else {
-        eprintln!("SKIP build_under: losetup unavailable");
+        eprintln!("SKIP build: losetup unavailable");
         return;
     };
     let block: BlockDev = dev
@@ -226,11 +226,11 @@ fn build_under_stages_kernel_and_mirrors_device_as_root() {
     let res = ChrootJail::new(chroot_dir.clone(), uid, gid)
         .with_kernel(kernel_src.clone())
         .with_rootfs(block)
-        .build_under(&jail_base, hyper_base);
+        .build(&jail_base, hyper_base);
 
     let dev_rdev = fs::metadata(&dev).map(|m| m.rdev());
     teardown_loop(&dev);
-    res.expect("build_under must succeed as root against a real device");
+    res.expect("build must succeed as root against a real device");
 
     let vmlinux = chroot_dir.join("vmlinux");
     let rootfs = chroot_dir.join("rootfs");

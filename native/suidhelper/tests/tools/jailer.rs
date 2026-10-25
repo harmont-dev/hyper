@@ -1,69 +1,14 @@
-//! Refusal contracts for the jailer's pure validators — the security core. A
+//! Refusal contracts for the jailer's argument newtypes — the security core. A
 //! valid input must round-trip to its canonical form; an invalid one must
 //! *always* be rejected, never silently accepted. These properties are what stop
-//! a compromised BEAM from naming uid 0, a privileged path, a traversal, or a
-//! flag through the jailer subcommand.
+//! a compromised BEAM from naming a privileged path, a traversal, or a flag
+//! through the jailer subcommand. (VM id and uid/gid refusals: `tests/vm.rs`.)
 
-use hyper_suidhelper::tools::jailer::{validate_id_number, CgroupSetting, JailSock, VmId};
+use hyper_suidhelper::tools::jailer::{CgroupSetting, JailSock};
 use proptest::prelude::*;
 use std::str::FromStr;
 
 proptest! {
-    /// uid/gid 0 is rejected for EVERY range — a jailer run with uid 0 skips its
-    /// privilege drop and leaves firecracker running as root.
-    #[test]
-    fn id_zero_always_rejected(lo in any::<u32>(), span in any::<u32>()) {
-        let hi = lo.saturating_add(span);
-        prop_assert!(validate_id_number(0, (lo, hi)).is_err());
-    }
-
-    /// Any nonzero value inside the (nonempty) range is accepted unchanged.
-    #[test]
-    fn id_in_range_nonzero_accepted(
-        lo in 1u32..=1_000_000,
-        span in 0u32..=1_000_000,
-        off in 0u32..=1_000_000,
-    ) {
-        let hi = lo + span;
-        let n = lo + (off % (span + 1)); // off bounded into [0, span] => n in [lo, hi]
-        prop_assert_eq!(validate_id_number(n, (lo, hi)).ok(), Some(n));
-    }
-
-    /// Values just below `lo` (still nonzero) and just above `hi` are rejected.
-    #[test]
-    fn id_out_of_range_rejected(lo in 2u32..=1_000_000, span in 0u32..=1_000_000) {
-        let hi = lo + span;
-        prop_assert!(validate_id_number(lo - 1, (lo, hi)).is_err());
-        if hi < u32::MAX {
-            prop_assert!(validate_id_number(hi + 1, (lo, hi)).is_err());
-        }
-    }
-
-    /// Every string over the allowed charset/length with a non-dash leader parses
-    /// and renders back to itself.
-    #[test]
-    fn vmid_valid_round_trips(s in "[A-Za-z0-9_][A-Za-z0-9_-]{0,63}") {
-        prop_assert_eq!(VmId::from_str(&s).unwrap().to_string(), s);
-    }
-
-    /// A leading dash is always rejected (no flag injection via `--id`).
-    #[test]
-    fn vmid_leading_dash_rejected(s in "-[A-Za-z0-9_-]{0,63}") {
-        prop_assert!(VmId::from_str(&s).is_err());
-    }
-
-    /// Any embedded path separator is rejected (no chroot traversal via `--id`).
-    #[test]
-    fn vmid_slash_rejected(s in "[A-Za-z0-9_]{0,10}/[A-Za-z0-9_]{0,10}") {
-        prop_assert!(VmId::from_str(&s).is_err());
-    }
-
-    /// Over-length ids (>64) are rejected.
-    #[test]
-    fn vmid_too_long_rejected(s in "[A-Za-z][A-Za-z0-9_-]{64,90}") {
-        prop_assert!(VmId::from_str(&s).is_err());
-    }
-
     /// A valid `memory.max` setting re-renders to exactly `key=value`.
     #[test]
     fn cgroup_memory_round_trips(s in "memory[.]max=([0-9]{1,20}|max)") {
@@ -98,23 +43,6 @@ proptest! {
     ) {
         let s = format!("/{a}/{b}");
         prop_assert!(JailSock::from_str(&s).is_err());
-    }
-}
-
-#[test]
-fn vmid_rejects_known_bad_shapes() {
-    for bad in [
-        "",              // empty
-        "-leading",      // leading dash
-        "a/b",           // separator
-        "a.b",           // dot
-        "a b",           // whitespace
-        "a\tb",          // tab
-        "a\0b",          // NUL
-        "naïve",         // non-ascii
-        &"x".repeat(65), // too long
-    ] {
-        assert!(VmId::from_str(bad).is_err(), "VmId accepted {bad:?}");
     }
 }
 

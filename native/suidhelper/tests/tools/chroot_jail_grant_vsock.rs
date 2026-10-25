@@ -22,10 +22,10 @@
 //!     its parent `root` dir is opened for the caller's group to traverse
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
+use hyper_suidhelper::safe::fs::path::{RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_vsock::{
     grant_vsock_under, Error, GrantOut, VsockSocket,
 };
-use hyper_suidhelper::util::safe_path::ValidationError;
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::net::UnixListener;
@@ -93,7 +93,7 @@ fn socket_outside_jail_base_is_rejected() {
     let outside = tmp.path().join("elsewhere/exec/id/root/vsock.sock");
     let err = grant_vsock_under(&jail, &sock(&outside)).unwrap_err();
     assert!(
-        matches!(err, Error::SocketPath(ValidationError::NotUnderBase)),
+        matches!(err, Error::SocketBase(RelativeError::NotUnderBase)),
         "got {err:?}",
     );
 }
