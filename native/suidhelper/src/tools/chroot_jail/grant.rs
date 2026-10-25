@@ -13,12 +13,9 @@ use nix::errno::Errno;
 use nix::sys::stat::SFlag;
 use nix::unistd::{getgid, getuid};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::path::Path;
 use thiserror::Error as ThisError;
-
-/// Number of parent components between the jail base and the socket leaf:
-/// `<exec>/<id>/root/<leaf>` — three parents.
-pub const SOCKET_PARENT_DEPTH: usize = 3;
 
 /// Mode handed to the node: owner+group read/write, no world access.
 pub const SOCKET_MODE: u32 = 0o660;
@@ -64,14 +61,14 @@ pub enum GrantError {
 /// its own error type.
 pub fn walk_to(
     base: &SafePath<IsAbsolute, StrictComponents>,
-    parents: &[PathBuf],
+    parents: &[&OsStr],
 ) -> Result<Option<SafeDir>, safe_dir::Error> {
     let anchor = match SafeDir::open(base) {
         Ok(dir) => dir,
         Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
         Err(e) => return Err(e),
     };
-    match anchor.descend(parents) {
+    match anchor.descend(parents.iter().copied()) {
         Ok(dir) => Ok(Some(dir)),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
         Err(e) => Err(e),

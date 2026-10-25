@@ -158,8 +158,8 @@ pub fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
     // absolute and component-strict. Open it as a verified regular-file handle
     // (O_PATH to identify; SafeFile fstats the held fd and O_NOFOLLOW refuses a
     // final-component swap raced in after the check).
-    let safe: SafePath<IsAbsolute, StrictComponents> = real.clone().try_into()?;
-    let file = SafeFile::<IsRegularFile, Any, Any>::open(&safe, OFlag::O_PATH)?;
+    let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
+    let file = SafeFile::<IsRegularFile, Any, Any>::open(safe, OFlag::O_PATH)?;
 
     // losetup runs as a child and reopens the *validated inode* via /proc/self/fd.
     // SafeFile's fd is O_CLOEXEC (it would vanish on exec), so dup an inheritable

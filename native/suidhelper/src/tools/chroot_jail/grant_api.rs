@@ -34,7 +34,7 @@
 use super::grant::{self, GrantError};
 use crate::config::Config;
 use crate::tools::IsTool;
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::util::safe_path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use clap::Args;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,8 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 pub enum Error {
     #[error("--socket path: {0}")]
     SocketPath(#[source] safe_path::ValidationError),
+    #[error("--socket path: {0}")]
+    SocketBase(#[source] safe_path::RelativeError),
     #[error("--socket must be exactly <exec>/<id>/root/api.socket below JAIL_BASE: {0:?}")]
     SocketShape(PathBuf),
     #[error("--socket leaf must be {SOCKET_NAME:?}: {0:?}")]
@@ -92,13 +94,14 @@ impl From<GrantError> for Error {
 /// runtime `jail_base`, so it is *not* enforced here — `grant_api_under` checks
 /// it. Mirrors `jailer::JailSock`: the parse stays pure, reading no config.
 #[derive(Debug, Clone)]
-pub struct ApiSocket(LexicalPath);
+pub struct ApiSocket(SafePathBuf<IsAbsolute, StrictComponents>);
 
 impl FromStr for ApiSocket {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path: LexicalPath = PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
+        let path: SafePathBuf<IsAbsolute, StrictComponents> =
+            PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
         if path.as_ref().file_name() != Some(OsStr::new(SOCKET_NAME)) {
             return Err(Error::SocketName(PathBuf::from(s)));
         }
@@ -141,16 +144,13 @@ impl IsTool for GrantApi {
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
 pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, Error> {
-    let (parents, _leaf) = socket.0.relative_to(jail_base).map_err(Error::SocketPath)?;
-    if parents.len() != grant::SOCKET_PARENT_DEPTH {
+    let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
+    let [exec, id, root, _leaf] = rel.segments().collect::<Vec<_>>()[..] else {
         return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
-    }
+    };
 
-    let base_path: LexicalPath = jail_base
-        .to_path_buf()
-        .try_into()
-        .map_err(Error::SocketPath)?;
-    let Some(root) = grant::walk_to(&base_path, &parents).map_err(Error::Walk)? else {
+    let base_path: &LexicalPath = jail_base.try_into().map_err(Error::SocketPath)?;
+    let Some(root) = grant::walk_to(base_path, &[exec, id, root]).map_err(Error::Walk)? else {
         return Ok(GrantOut::Pending);
     };
 

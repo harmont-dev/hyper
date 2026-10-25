@@ -28,6 +28,8 @@ pub enum Error {
     #[error(transparent)]
     Path(#[from] safe_path::ValidationError),
     #[error(transparent)]
+    Relative(#[from] safe_path::RelativeError),
+    #[error(transparent)]
     Fs(#[from] safe_dir::Error),
     #[error(transparent)]
     Device(#[from] safe_file::ValidationError),
@@ -136,13 +138,10 @@ impl ChrootJail<Kernel, Rootfs> {
 /// Open the chroot directory by walking it from `jail_base` with `O_NOFOLLOW`, so
 /// a symlinked component cannot redirect outside the jail.
 pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Error> {
-    let path: SafePath<IsAbsolute, StrictComponents> = chroot.to_path_buf().try_into()?;
-    let (parents, leaf) = path.relative_to(jail_base)?;
-    let anchor: SafePath<IsAbsolute, StrictComponents> = jail_base.to_path_buf().try_into()?;
-
-    let mut components = parents;
-    components.push(leaf);
-    Ok(SafeDir::open(&anchor)?.descend(&components)?)
+    let path: &SafePath<IsAbsolute, StrictComponents> = chroot.try_into()?;
+    let rel = path.strip_base(jail_base)?;
+    let anchor: &SafePath<IsAbsolute, StrictComponents> = jail_base.try_into()?;
+    Ok(SafeDir::open(anchor)?.descend(rel.segments())?)
 }
 
 /// Stage host file `src` into `chroot` as `vmlinux`: confine the source under
@@ -214,8 +213,8 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
         path: device.as_ref().to_path_buf(),
         source,
     })?;
-    let dev_path: SafePath<IsAbsolute, StrictComponents> = real.try_into()?;
-    let dev = SafeFile::<IsBlockDevice, Any, Any>::open(&dev_path, OFlag::O_PATH)?;
+    let dev_path: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
+    let dev = SafeFile::<IsBlockDevice, Any, Any>::open(dev_path, OFlag::O_PATH)?;
     let rdev = dev.rdev()?;
     chroot.mknod_block(Path::new(ROOTFS_NAME), rdev, uid, gid)?;
     Ok(())

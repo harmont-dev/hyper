@@ -17,13 +17,13 @@ use hyper_suidhelper::util::chroot_jail::{
 };
 use hyper_suidhelper::util::safe_dev::BlockDev;
 use hyper_suidhelper::util::safe_dir::SafeDir;
-use hyper_suidhelper::util::safe_path::{IsAbsolute, SafePath, StrictComponents, ValidationError};
+use hyper_suidhelper::util::safe_path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-type Strict = SafePath<IsAbsolute, StrictComponents>;
+type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
 fn safe(p: &Path) -> Strict {
     p.to_path_buf()
@@ -80,7 +80,7 @@ fn open_chroot_rejects_path_outside_base() {
         .err()
         .expect("expected an error for path outside base");
     assert!(
-        matches!(err, Error::Path(ValidationError::NotUnderBase)),
+        matches!(err, Error::Relative(RelativeError::NotUnderBase)),
         "got {err:?}",
     );
 }

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Error)]
 pub enum LoadingError {
     #[error(transparent)]
     Path(#[from] safe_path::ValidationError),
@@ -345,10 +345,10 @@ impl Config {
     pub fn safe_load() -> Result<Self, LoadingError> {
         let path = config_path();
 
-        let safe_path: SafePath<IsAbsolute, StrictComponents> = path.clone().try_into()?;
+        let safe_path: &SafePath<IsAbsolute, StrictComponents> = path.as_path().try_into()?;
 
         let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-            match SafeFile::open(&safe_path, OFlag::O_RDONLY) {
+            match SafeFile::open(safe_path, OFlag::O_RDONLY) {
                 Ok(file) => file,
                 // A genuinely-absent file means "use the built-in defaults": those
                 // are compiled into this root-owned binary, so they are trusted. Any
