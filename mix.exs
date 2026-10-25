@@ -125,6 +125,7 @@ defmodule Hyper.MixProject do
         "docs/cookbook/architecture.md",
         "docs/grpc.md",
         "CONTRIBUTING.md",
+        "SECURITY.md",
         "LICENSE"
       ],
       groups_for_extras: [
