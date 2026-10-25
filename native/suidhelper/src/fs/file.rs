@@ -27,7 +27,7 @@ pub enum ValidationError {
     #[error("file is not owned by root:root")]
     NotRootOwned,
     #[error("file is writable by group or other")]
-    NonRootWritable,
+    GroupOrOtherWritable,
     #[error("fstat failed: {0}")]
     Fstat(#[source] nix::Error),
 }
@@ -35,18 +35,20 @@ pub enum ValidationError {
 /// The universal "axis off" marker: implements every axis trait as a no-op.
 pub struct Any;
 
-/// File-type axis: require a regular file.
+/// File must be a regular file.
 pub struct IsRegularFile;
-/// File-type axis: require a block device.
+/// File must be a block device.
 pub struct IsBlockDevice;
+/// File must be a char device.
 pub struct IsCharDevice;
+/// File must be a socket device.
 pub struct IsSocket;
-/// File-type axis: require a directory.
+/// File must be a directory.
 pub struct IsDirectory;
-/// Ownership axis: require `root:root` (uid 0, gid 0).
+/// Require `root:root` owner (uid 0, gid 0).
 pub struct RootOwner;
-/// Mode axis: require the file not be writable by group or other.
-pub struct OnlyRootWritable;
+/// Require the file not be writable by group or other.
+pub struct OnlyOwnerWritable;
 
 /// What's the type of the file?
 pub trait FileType {
@@ -145,12 +147,12 @@ impl Ownership for RootOwner {
     }
 }
 
-impl Writability for OnlyRootWritable {
+impl Writability for OwnerOnlyWritable {
     fn check(stat: &FileStat) -> Result<(), ValidationError> {
         if stat.st_mode & 0o022 == 0 {
             Ok(())
         } else {
-            Err(ValidationError::NonRootWritable)
+            Err(ValidationError::GroupOrOtherWritable)
         }
     }
 }

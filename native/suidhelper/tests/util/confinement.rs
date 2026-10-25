@@ -5,7 +5,7 @@
 
 use hyper_suidhelper::fs::dir::SafeDir;
 use hyper_suidhelper::fs::file::{
-    Any, IsBlockDevice, IsDirectory, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner,
+    Any, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner,
     SafeFile, ValidationError,
 };
 use hyper_suidhelper::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
@@ -130,7 +130,7 @@ fn safefile_owner_axis_rejects_non_root_file() {
     assert!(SafeFile::<IsRegularFile, RootOwner, Any>::open(&p, OpenFlags::PATH).is_err());
 }
 
-// SafeFile mode axis: a group/other-writable file fails OnlyRootWritable.
+// SafeFile mode axis: a group/other-writable file fails OwnerOnlyWritable.
 #[test]
 fn safefile_mode_axis_rejects_group_writable() {
     let tmp = tempfile::tempdir().unwrap();
@@ -138,10 +138,10 @@ fn safefile_mode_axis_rejects_group_writable() {
     fs::write(&f, b"data").unwrap();
     fs::set_permissions(&f, fs::Permissions::from_mode(0o666)).unwrap();
     let p = safe(&f);
-    assert!(SafeFile::<IsRegularFile, Any, OnlyRootWritable>::open(&p, OpenFlags::PATH).is_err());
+    assert!(SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&p, OpenFlags::PATH).is_err());
 
     fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
-    assert!(SafeFile::<IsRegularFile, Any, OnlyRootWritable>::open(&p, OpenFlags::PATH).is_ok());
+    assert!(SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&p, OpenFlags::PATH).is_ok());
 }
 
 #[test]

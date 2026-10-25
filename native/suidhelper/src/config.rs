@@ -8,7 +8,7 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
-use crate::fs::file::{self, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner, SafeFile};
+use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::util::safe_bin::{self, SafeBin};
 use serde::Deserialize;
@@ -347,7 +347,7 @@ impl Config {
 
         let safe_path: &SafePath<IsAbsolute, StrictComponents> = path.as_path().try_into()?;
 
-        let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
+        let file: SafeFile<IsRegularFile, RootOwner, OwnerOnlyWritable> =
             match SafeFile::open(safe_path, OpenFlags::RDONLY) {
                 Ok(file) => file,
                 // A genuinely-absent file means "use the built-in defaults": those
