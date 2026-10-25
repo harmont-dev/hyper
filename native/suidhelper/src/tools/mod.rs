@@ -22,6 +22,7 @@ pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
+use crate::util::caps::Caps;
 use crate::util::setuid_privileged::{self, Privileged};
 use clap::Subcommand;
 use serde::Serialize;
@@ -49,23 +50,28 @@ pub trait IsTool {
     type Output: Serialize;
     type RunT;
 
+    /// The only capabilities `run_privileged` holds, in-process and in any child
+    /// it spawns through the guard. Keep it minimal: anything else is `EPERM`.
+    const CAPS: Caps;
+
     /// Execute the privileged part of the tool - normally invoking `Command`.
-    /// This is the only code that runs as root (see `run`).
-    fn run_privileged(&self) -> Self::RunT;
+    /// This is the only code that runs as root (see `run`). Children must be
+    /// spawned via `privileged.command` so they exec confined to [`Self::CAPS`].
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT;
 
     /// Parse the result of `run_privileged` into the output data structure. At
     /// this point, the setuid has been demoted.
     fn parse(&self, res: Self::RunT) -> Result<Self::Output, Box<dyn std::error::Error>>;
 
-    /// The privilege boundary: `run_privileged` executes as root inside the
-    /// `Privileged` guard's scope; the guard drops privileges to the real uid
-    /// when it falls out of scope, so `parse` (and serialization) never run as
-    /// root. The root window is exactly the one `run_privileged` call. Serializes
+    /// The privilege boundary: `run_privileged` executes as root, holding only
+    /// [`Self::CAPS`], inside the `Privileged` guard's scope; the guard drops
+    /// privileges to the real uid when it falls out of scope, so `parse` (and
+    /// serialization) never run as root. The root window is exactly the one `run_privileged` call. Serializes
     /// the parsed output to a `Value` so every tool returns one common type.
     fn run(&self) -> Result<serde_json::Value, Error> {
         let res = {
-            let _privileged = Privileged::acquire()?;
-            self.run_privileged()
+            let privileged = Privileged::acquire(Self::CAPS)?;
+            self.run_privileged(&privileged)
         };
 
         let output = self.parse(res).map_err(Error::Tool)?;

@@ -20,10 +20,11 @@ use super::NetworkOut;
 use crate::config::Config;
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_bin;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use std::path::{Path, PathBuf};
-use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -76,8 +77,14 @@ impl IsTool for TeardownOrphan {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        run_idempotent(&args::teardown_orphan_commands(&self.netns), &self.ip)
+    const CAPS: Caps = super::NETNS_CAPS;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
+        run_idempotent(
+            privileged,
+            &args::teardown_orphan_commands(&self.netns),
+            &self.ip,
+        )
     }
 
     fn parse(&self, res: Self::RunT) -> Result<NetworkOut, Box<dyn std::error::Error>> {
@@ -91,9 +98,10 @@ impl IsTool for TeardownOrphan {
 /// `super::exec::run_all`, whose contract for `prepare`/`teardown` is that
 /// any non-`allow_failure` non-zero exit is a real error — this op's whole
 /// point is that a missing netns is *not* an error.
-fn run_idempotent(commands: &[Command], ip: &Path) -> Result<(), Error> {
+fn run_idempotent(privileged: &Privileged, commands: &[Command], ip: &Path) -> Result<(), Error> {
     for command in commands {
-        let output = Proc::new(ip)
+        let output = privileged
+            .command(ip)
             .args(&command.argv)
             .env_clear()
             .output()

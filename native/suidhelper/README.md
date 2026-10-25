@@ -63,6 +63,15 @@ elsewhere via dm-thin), so there is no read-write attach.
   inside a `Privileged` RAII guard that wraps exactly the `Command` spawn; the
   guard drops back on scope exit, so argument parsing and output parsing never
   run as root.
+- **Root is never the full capability set.** Each tool declares the minimal
+  capability mask it needs (`IsTool::CAPS`, e.g. `dmsetup` holds only
+  `CAP_SYS_ADMIN`, `blockdev` holds none). The guard narrows the effective set
+  to that mask, and a child the guard spawns has its bounding, permitted and
+  effective sets confined to the mask before `execve`. That confinement is what
+  limits the child: a uid-0 exec otherwise gets the whole bounding set,
+  whatever the parent's effective set was. The jailer handoff is confined the
+  same way (`util::jailer::CAPS`), so firecracker can never regain anything
+  outside it either.
 - **`--bin` is validated, not trusted.** It must be an absolute path whose
   basename matches the subcommand, and a **root-owned, non-symlink, not
   group/other-writable** regular file. An unprivileged caller therefore can't

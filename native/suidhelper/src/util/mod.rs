@@ -1,5 +1,6 @@
 //! Internal utilities shared across the helper.
 
+pub mod caps;
 pub mod chroot_jail;
 pub mod jailer;
 pub mod linux;

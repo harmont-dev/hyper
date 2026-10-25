@@ -18,7 +18,9 @@
 use super::grant::{self, GrantError};
 use crate::config::Config;
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -113,7 +115,9 @@ impl IsTool for GrantVsock {
     type Output = GrantOut;
     type RunT = Result<GrantOut, Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    const CAPS: Caps = grant::CAPS;
+
+    fn run_privileged(&self, _privileged: &Privileged) -> Self::RunT {
         grant_vsock_under(&Config::get().jail_base(), &self.args.socket)
     }
 

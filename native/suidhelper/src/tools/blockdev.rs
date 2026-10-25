@@ -1,11 +1,13 @@
 use super::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_dev::BlockDev;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use serde::Serialize;
 use std::io;
 use std::num::ParseIntError;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -52,8 +54,12 @@ impl IsTool for Blockdev {
     type Output = BlockdevOut;
     type RunT = io::Result<Output>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        Command::new(&self.bin)
+    // Block nodes are root-owned, so euid 0 opens them as owner, needing no caps.
+    const CAPS: Caps = Caps::empty();
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
+        privileged
+            .command(&self.bin)
             .arg("--getsz")
             .arg(&self.path)
             .env_clear()

@@ -5,13 +5,15 @@ mod thin;
 mod thin_pool;
 
 use super::IsTool;
+use crate::util::caps::Caps;
 use crate::util::safe_dev::{self, DmName};
+use crate::util::setuid_privileged::Privileged;
 use clap::{Args, Subcommand};
 pub use message::ThinMessage;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 pub use table::DmTable;
 use thiserror::Error as ThisError;
 
@@ -92,8 +94,11 @@ impl IsTool for Dmsetup {
     type Output = DmsetupOut;
     type RunT = io::Result<Output>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = Command::new(&self.bin);
+    // Every device-mapper ioctl is gated on CAP_SYS_ADMIN; nodes come from udev.
+    const CAPS: Caps = Caps::SYS_ADMIN;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
+        let mut cmd = privileged.command(&self.bin);
         match &self.op {
             DmOp::Create {
                 name,

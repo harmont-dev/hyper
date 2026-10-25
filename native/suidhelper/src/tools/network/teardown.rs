@@ -6,6 +6,8 @@ use super::prepare;
 use super::NetworkOut;
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
+use crate::util::caps::Caps;
+use crate::util::setuid_privileged::Privileged;
 use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
@@ -54,9 +56,11 @@ impl IsTool for Teardown {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    const CAPS: Caps = super::NETNS_CAPS;
+
+    fn run_privileged(&self, privileged: &Privileged) -> Self::RunT {
         let commands = args::teardown_commands(&self.plan);
-        exec::run_all(&commands, |which| match which {
+        exec::run_all(privileged, &commands, |which| match which {
             args::Which::Ip => self.ip.as_path(),
             args::Which::Nft => self.nft.as_path(),
         })?;
