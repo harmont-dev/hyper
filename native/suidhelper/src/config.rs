@@ -9,10 +9,12 @@
 //! absent). Operators narrowing the range must set **both**.
 
 use crate::util::safe_bin::{self, SafeBin};
-use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
+use crate::util::safe_file::{
+    self, IsRegularFile, OnlyRootWritable, OpenFlags, RootOwner, SafeFile,
+};
 use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
-use nix::fcntl::OFlag;
 use serde::Deserialize;
+use std::os::unix::io::OwnedFd;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -348,7 +350,7 @@ impl Config {
         let safe_path: &SafePath<IsAbsolute, StrictComponents> = path.as_path().try_into()?;
 
         let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-            match SafeFile::open(safe_path, OFlag::O_RDONLY) {
+            match SafeFile::open(safe_path, OpenFlags::RDONLY) {
                 Ok(file) => file,
                 // A genuinely-absent file means "use the built-in defaults": those
                 // are compiled into this root-owned binary, so they are trusted. Any
@@ -361,7 +363,7 @@ impl Config {
                 Err(e) => return Err(e.into()),
             };
 
-        let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
+        let body = std::io::read_to_string(std::fs::File::from(OwnedFd::from(file)))
             .map_err(|_| LoadingError::Unreadable(path.clone()))?;
         let config: Config =
             toml::from_str(&body).map_err(|_| LoadingError::Malformed(path.clone()))?;

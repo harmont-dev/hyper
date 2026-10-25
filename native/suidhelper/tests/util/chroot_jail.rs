@@ -12,12 +12,14 @@
 //! device stages the kernel AND creates the `rootfs` block node whose major:minor
 //! mirrors the source device, owned by the requested uid:gid.
 
+use hyper_suidhelper::fs::dir::SafeDir;
+use hyper_suidhelper::fs::file::OpenFlags;
 use hyper_suidhelper::util::chroot_jail::{
     open_chroot_under, stage_kernel_under, ChrootJail, Error,
 };
 use hyper_suidhelper::util::safe_dev::BlockDev;
-use hyper_suidhelper::util::safe_dir::SafeDir;
 use hyper_suidhelper::util::safe_path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
+use nix::errno::Errno;
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
@@ -95,7 +97,7 @@ fn stage_kernel_rejects_source_outside_base() {
     let outside = tmp.path().join("outside-kernel");
     fs::write(&outside, b"kernel").unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir)).unwrap();
+    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &outside, &hyper_base, uid, gid).unwrap_err();
     assert!(matches!(err, Error::OutsideBase { .. }), "got {err:?}");
@@ -116,7 +118,7 @@ fn stage_kernel_rejects_symlink_escaping_base() {
     let link = hyper_base.join("kernel-link"); // INSIDE hyper_base, escapes
     symlink(&real_target, &link).unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir)).unwrap();
+    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &link, &hyper_base, uid, gid).unwrap_err();
     assert!(
@@ -134,7 +136,7 @@ fn stage_kernel_missing_source_errors() {
     fs::create_dir_all(&chroot_dir).unwrap();
     let missing = hyper_base.join("nope");
 
-    let chroot = SafeDir::open(&safe(&chroot_dir)).unwrap();
+    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &missing, hyper_base, uid, gid).unwrap_err();
     assert!(matches!(err, Error::Source { .. }), "got {err:?}");
@@ -151,7 +153,7 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
     let src = hyper_base.join("vmlinux-src");
     fs::write(&src, b"\x7fELF fake kernel bytes").unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir)).unwrap();
+    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     stage_kernel_under(&chroot, &src, hyper_base, uid, gid).expect("first stage");
 
@@ -163,10 +165,10 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
     );
 
     // Re-staging must not silently clobber: the slot is occupied.
-    let chroot2 = SafeDir::open(&safe(&chroot_dir)).unwrap();
+    let chroot2 = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let err = stage_kernel_under(&chroot2, &src, hyper_base, uid, gid).unwrap_err();
     assert!(
-        matches!(err, Error::Fs(_)),
+        matches!(&err, Error::StageKernel(e) if e.errno() == Some(Errno::EEXIST)),
         "re-stage must be refused, got {err:?}"
     );
 }

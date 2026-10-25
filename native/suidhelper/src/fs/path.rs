@@ -104,8 +104,7 @@ impl<A> SafePath<A, StrictComponents> {
         if rest.as_os_str().is_empty() {
             return Err(RelativeError::EqualsBase);
         }
-        // `strip_prefix` matches components, so re-check the remainder's bytes
-        // rather than trust how it sliced them.
+        // `strip_prefix` matches components, so re-check the remainder .
         StrictComponents::check(rest).map_err(|_| RelativeError::NotUnderBase)?;
         Ok(SafePath::new_unchecked(rest))
     }
@@ -113,6 +112,7 @@ impl<A> SafePath<A, StrictComponents> {
 
 impl SafePath<IsRelative, StrictComponents> {
     /// Given `foo/bar/baz`, returns `[foo, bar, baz]`.
+    #[cfg(unix)]
     pub fn segments(&self) -> impl Iterator<Item = &OsStr> {
         self.path
             .as_os_str()
