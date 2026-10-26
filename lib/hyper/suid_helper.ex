@@ -56,8 +56,8 @@ defmodule Hyper.SuidHelper do
   exposes the device-mapper targets we need (`Dmsetup.test_system/0`, which also
   exercises the helper's configured `dmsetup` binary).
 
-  The `losetup`/`blockdev` binaries are validated by the helper the first time
-  each is used; their paths live in the helper's own config, not here.
+  The `losetup` binary is validated by the helper the first time it is used; its
+  path lives in the helper's own config, not here.
   """
   @spec test_system() :: :ok | {:error, term()}
   @decorate with_span("Hyper.SuidHelper.test_system")

@@ -123,7 +123,7 @@ pub struct Jails {
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
 ///
-/// The device tools (`dmsetup`, `losetup`, `blockdev`, `thin_dump`) carry
+/// The device tools (`dmsetup`, `losetup`, `thin_dump`) carry
 /// built-in defaults; `firecracker` and `jailer` have none and must be
 /// configured before any VM can launch — their absence surfaces as
 /// [`BinError::Unconfigured`] at use time, not at load. Every path is
