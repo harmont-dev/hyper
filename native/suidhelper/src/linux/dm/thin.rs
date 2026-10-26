@@ -22,6 +22,12 @@ impl ThinId {
     }
 }
 
+impl From<ThinId> for u64 {
+    fn from(id: ThinId) -> Self {
+        u64::from(id.0)
+    }
+}
+
 impl fmt::Display for ThinId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)

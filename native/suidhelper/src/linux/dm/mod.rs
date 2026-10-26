@@ -3,6 +3,7 @@
 mod device;
 mod table;
 mod thin;
+pub mod thin_dump;
 
 use crate::process::binary::RootSafeBin;
 pub use device::Device;

@@ -8,7 +8,7 @@ use nix::libc::{dev_t, AT_FDCWD};
 use nix::sys::stat::{
     fchmodat, fstat, major, makedev, minor, FchmodatFlags, FileStat, Mode, SFlag,
 };
-use nix::unistd::{fchownat, Gid, Uid};
+use nix::unistd::{dup, fchownat, Gid, Uid};
 use std::io;
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
@@ -190,6 +190,12 @@ pub struct SafeFile<T, R, O>(
 impl<T, R, O> SafeFile<T, R, O> {
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self(self.0.try_clone()?, PhantomData))
+    }
+
+    pub fn inheritable(&self) -> nix::Result<OwnedFd> {
+        let raw = dup(self.0.as_raw_fd())?;
+        // SAFETY: `dup` just returned this fd and nothing else owns it.
+        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
     }
 
     pub fn chmod(&self, mode: Mode) -> nix::Result<()> {

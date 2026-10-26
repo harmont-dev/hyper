@@ -129,10 +129,6 @@ name = "config_network"
 path = "tests/config_network.rs"
 
 [[test]]
-name = "util_linux_thin_dump"
-path = "tests/util/linux/thin_dump.rs"
-
-[[test]]
 name = "tools_losetup_backing"
 path = "tests/tools/losetup_backing.rs"
 

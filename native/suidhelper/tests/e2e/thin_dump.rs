@@ -32,6 +32,8 @@ printf '%s' "$(
   for a in "$@"; do printf '%s"%s"' "$sep" "$a"; sep=','; done
   printf ']'
 )" > '{record}'
+for last in "$@"; do :; done
+readlink "$last" > '{record}.target'
 printf '%s\n' '{XML}'
 "#,
         record = record.display(),
@@ -91,7 +93,16 @@ fn thin_dump_argv_and_ranges_json_as_root() {
     )
     .success();
 
-    assert_eq!(recorded_argv(&rec), vec!["--metadata-snap", "/dev/loop3"]);
+    let argv = recorded_argv(&rec);
+    assert_eq!(argv[..3], ["--metadata-snap", "--dev-id", "7"], "{argv:?}");
+    assert!(argv[3].starts_with("/proc/self/fd/"), "{argv:?}");
+    assert_eq!(
+        fs::read_to_string(rec.with_extension("json.target"))
+            .unwrap()
+            .trim(),
+        "/dev/loop3",
+        "thin_dump must be handed the validated metadata device",
+    );
 
     let json = stdout_json(&out);
     assert_eq!(json["block_sectors"], 128);
