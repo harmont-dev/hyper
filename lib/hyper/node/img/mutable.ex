@@ -1,25 +1,18 @@
 defmodule Hyper.Node.Img.Mutable do
   @moduledoc """
-  The per-VM mutable rootfs. On start it activates (or reuses) the image's
-  read-only `Img.Server`, takes a reference on it, reads the composed device's
-  size, and asks the node `ThinPool` for a thin volume with that device as a
-  read-only external origin. `blk_path/1` is the mutable host device the VM
-  boots from (staged into the jail by `mknod` from this path).
+  Module which manages the lifecycle of a single mutable filesystem layer. A mutable layer is a
+  layer on top of a dm-thin chain of immutable layers.
 
-  Mutable layers live in their own `DynamicSupervisor`, separate from the shared
-  read-only `Img.Server`s; the firecracker VM is handed this layer directly and
-  cannot be booted from a bare `Hyper.Img`.
+  For example, you can have a base immutable layer `ubuntu-20.04`, another immutable layer which
+  installs `curl`. When the user creates a new VM, Hyper will stack the `ubuntu-20.04` base, the
+  `curl` layer and a new _mutable_ layer which the user can edit (write to, effectively).
 
-  Monitor-refcounted like `Img.Server`/`Layer.Server`: the VM supervisor holds
-  it; when the last holder dies it idle-reaps, destroying its thin volume in
-  `terminate/2` and releasing the image (which, if it was the last holder, tears
-  down the RO chain in turn).
+  This is all copy-on-write.
   """
 
-  # `:temporary` is load-bearing: on idle this server destroys its per-VM thin
-  # volume in `terminate/2`, so a `:permanent` restart would resurrect the dm
-  # device it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper`
-  # for why coupling resource lifetime to process lifetime is a smell.
+  # `:temporary` is load-bearing: on idle this server destroys its per-VM thin volume in
+  # `terminate/2`, so a `:permanent` restart would resurrect the dm device it just tore down. See
+  # the reconciliation TODO in `Hyper.Node.Reaper`.
   use GenServer, restart: :temporary
 
   alias Hyper.Node.Img

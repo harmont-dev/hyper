@@ -78,7 +78,7 @@ defmodule Hyper.Vm do
 
   @doc false
   # Which fast_fork refusals mean "no room on the parent's node" — the errors
-  # try_run/Budget.admit emits, plus the scheduler's aggregate — as opposed to
+  # try_run/Budget.lease emits, plus the scheduler's aggregate — as opposed to
   # faults that re-placement cannot fix.
   @spec capacity_error?(term()) :: boolean()
   def capacity_error?(reason), do: reason in @capacity_errors
