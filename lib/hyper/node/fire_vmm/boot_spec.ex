@@ -1,11 +1,13 @@
 defmodule Hyper.Node.FireVMM.BootSpec do
   @moduledoc """
-  Resolves a `Hyper.Vm.source()` + instance `type` into a concrete, API-shaped
-  cold-boot spec the `:configuring` state issues: machine config (from the
-  instance type), a kernel boot source, and a root drive.
+  Resolves a `Hyper.Vm.source()` + instance `type` + `arch` into a concrete,
+  API-shaped cold-boot spec the `:configuring` state issues: machine config
+  (from the instance type), the guest CPU config, a kernel boot source, and a
+  root drive.
   """
 
-  alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration}
+  alias Hyper.Firecracker.Api.{BootSource, CpuConfig, Drive, MachineConfiguration}
+  alias Hyper.Node.FireVMM.GuestCpu
   alias Hyper.Vm.Instance
 
   # Default cmdline. No `console=`: serial printk is synchronous at 115200 baud
@@ -18,20 +20,24 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   @default_boot_args "reboot=k panic=1 pci=off init=/hyper-init"
 
   defmodule Cold do
-    @moduledoc "A resolved cold boot."
+    @moduledoc """
+    A resolved cold boot. `cpu_config` is `nil` where the guest boots with
+    Firecracker's default CPU config.
+    """
     @enforce_keys [:machine_config, :boot_source, :drives]
-    defstruct [:machine_config, :boot_source, drives: [], network_interfaces: []]
+    defstruct [:machine_config, :cpu_config, :boot_source, drives: [], network_interfaces: []]
 
     @type t :: %__MODULE__{
             machine_config: MachineConfiguration.t(),
+            cpu_config: CpuConfig.t() | nil,
             boot_source: BootSource.t(),
             drives: [Drive.t()],
             network_interfaces: [Hyper.Firecracker.Api.NetworkInterface.t()]
           }
   end
 
-  @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
-  def resolve(source, type) when is_map(source) do
+  @spec resolve(Hyper.Vm.source(), Instance.t(), Instance.arch()) :: Cold.t()
+  def resolve(source, type, arch) when is_map(source) do
     # Networking is mandatory: every VM gets a NIC on the uniform inner-world
     # address plus the kernel `ip=`/`hyper.resolver=` cmdline. A node that
     # reached here has already passed the startup network preflight.
@@ -45,6 +51,7 @@ defmodule Hyper.Node.FireVMM.BootSpec do
 
     %Cold{
       machine_config: Instance.Spec.machine_config(Instance.spec(type)),
+      cpu_config: GuestCpu.config(arch),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
         boot_args: boot_args
