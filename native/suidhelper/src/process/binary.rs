@@ -1,17 +1,4 @@
-//! A validated tool-binary path.
-//!
-//! The path of each device tool (`losetup`, `dmsetup`, `blockdev`) comes from
-//! the root-owned config file, never from the unprivileged caller. [`RootSafeBin`]
-//! is a newtype whose only constructor runs the safety checks, so holding one is
-//! proof the path was validated. The const string parameter `NAME` is the
-//! basename it was validated against - a `RootSafeBin<"losetup">` can never be
-//! passed where a `RootSafeBin<"dmsetup">` is wanted.
-//!
-//! These checks are what keep this from being arbitrary-root-execution: even a
-//! mistaken config entry cannot point us at a binary a non-root user controls
-//! (must be an absolute path, the exact basename, root-owned, not a symlink, not
-//! group/other-writable).
-
+//! Utilities for interacting with binaries.
 use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
