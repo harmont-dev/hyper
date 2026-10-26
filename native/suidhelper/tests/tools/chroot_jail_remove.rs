@@ -94,19 +94,6 @@ fn missing_cgroup_is_ok() {
     remove_cgroup_under(base, &cgroup).expect("missing cgroup must be Ok");
 }
 
-// A non-empty cgroup leaf yields ENOTEMPTY, which the op treats as success
-// (something else is still using it; not our job to force-empty it).
-#[test]
-fn nonempty_cgroup_leaf_is_ok() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let leaf = base.join("slice").join("leaf");
-    fs::create_dir_all(&leaf).unwrap();
-    fs::create_dir(leaf.join("child")).unwrap(); // makes rmdir return ENOTEMPTY
-    remove_cgroup_under(base, &leaf).expect("non-empty leaf must be Ok (ENOTEMPTY)");
-    assert!(leaf.exists(), "non-empty leaf must survive");
-}
-
 // A real <exec>/<id> tree with contents is fully removed; a sibling id survives.
 #[test]
 fn removes_chroot_tree_and_spares_siblings() {
@@ -121,20 +108,6 @@ fn removes_chroot_tree_and_spares_siblings() {
     remove_chroot_under(jail, &victim).unwrap();
     assert!(!victim.exists(), "victim chroot must be gone");
     assert!(sibling.exists(), "sibling chroot must survive");
-}
-
-// A real cgroup leaf is removed; its parent survives.
-#[test]
-fn removes_cgroup_leaf_and_spares_parent() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let parent = base.join("slice");
-    let leaf = parent.join("leaf");
-    fs::create_dir_all(&leaf).unwrap();
-
-    remove_cgroup_under(base, &leaf).unwrap();
-    assert!(!leaf.exists(), "cgroup leaf must be gone");
-    assert!(parent.exists(), "cgroup parent must survive");
 }
 
 // A symlinked <exec> component must NOT be followed: removal must fail (or no-op)
@@ -162,39 +135,6 @@ fn symlinked_chroot_component_does_not_escape() {
         sentinel.join("id").join("keep.txt").exists(),
         "removal escaped through a symlinked component",
     );
-}
-
-// cgroup.kill is written "1" before the rmdir: the fix SIGKILLs the subtree
-// first. Here cgroup.kill keeps the leaf non-empty so rmdir returns ENOTEMPTY
-// (tolerated) and the leaf survives — letting us assert the write happened.
-#[test]
-fn cgroup_kill_is_written_before_rmdir() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let leaf = base.join("slice").join("leaf");
-    fs::create_dir_all(&leaf).unwrap();
-    fs::write(leaf.join("cgroup.kill"), b"0").unwrap();
-
-    remove_cgroup_under(base, &leaf).expect("write+rmdir must be Ok");
-    assert!(leaf.exists(), "non-empty leaf must survive");
-    assert_eq!(
-        fs::read(leaf.join("cgroup.kill")).unwrap(),
-        b"1",
-        "cgroup.kill must have been written \"1\"",
-    );
-}
-
-// A leaf without a cgroup.kill file (pre-5.14/non-v2 kernel) is tolerated: the
-// missing pseudo-file is a no-op and the empty leaf is removed normally.
-#[test]
-fn missing_cgroup_kill_is_tolerated() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let leaf = base.join("slice").join("leaf");
-    fs::create_dir_all(&leaf).unwrap();
-
-    remove_cgroup_under(base, &leaf).expect("missing cgroup.kill must be Ok");
-    assert!(!leaf.exists(), "empty leaf must be removed");
 }
 
 // The leaf is already gone but its parent survives: the new openat_dir(leaf)

@@ -15,15 +15,14 @@
 
 use crate::config::Config;
 use crate::fs::dir::{self, SafeDir};
-use crate::fs::file::{self, Any, OpenFlags, SafeFile};
+use crate::fs::file::{self, OpenFlags};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::linux::cgroup::{self, Cgroup};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use serde::Serialize;
-use std::ffi::OsStr;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error as ThisError;
@@ -31,11 +30,7 @@ use thiserror::Error as ThisError;
 /// The cgroup virtual filesystem root.
 const CGROUP_BASE: &str = "/sys/fs/cgroup";
 
-/// How many times to retry the leaf `rmdir` while a killed cgroup drains, and the
-/// pause between tries: ~`ATTEMPTS * BACKOFF` total (a cgroup reaps in a few ms),
-/// after which a still-busy leaf is left for a later sweep rather than failing.
-const RMDIR_ATTEMPTS: u32 = 20;
-const RMDIR_BACKOFF_MS: u64 = 5;
+const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
@@ -59,10 +54,10 @@ pub enum Error {
     RemoveChroot(#[source] dir::Error),
     #[error("removing cgroup: {0}")]
     RemoveCgroup(#[source] Errno),
-    #[error("opening cgroup.kill: {0}")]
-    OpenCgroupKill(#[source] file::ValidationError),
+    #[error("opening cgroup: {0}")]
+    OpenCgroup(#[source] cgroup::OpenError),
     #[error("killing cgroup procs: {0}")]
-    KillCgroup(#[source] io::Error),
+    KillCgroup(#[source] cgroup::KillError),
 }
 
 #[derive(Args)]
@@ -137,72 +132,19 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error>
 pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
     let path: &LexicalPath = cgroup.try_into().map_err(Error::CgroupPath)?;
     let rel = path.strip_base(base).map_err(Error::CgroupBase)?;
-    let segments: Vec<&OsStr> = rel.segments().collect();
-    let Some((leaf, parents)) = segments.split_last().filter(|(_, p)| !p.is_empty()) else {
+    if rel.segments().count() < 2 {
         return Err(Error::CgroupDepth(cgroup.to_path_buf()));
-    };
-    let leaf = Path::new(leaf);
-
-    let Some(parent) = walk(base, &parents.iter().collect::<PathBuf>())? else {
-        return Ok(()); // an ancestor is already gone
-    };
+    }
 
     // Kill any process still in the leaf cgroup before removing it. Open the leaf
     // O_NOFOLLOW (one step past the parent walk) and write "1" to cgroup.kill.
-    match parent.openat(leaf, OpenFlags::RDONLY, Mode::empty()) {
-        Ok(leaf_dir) => kill_cgroup(&leaf_dir)?,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()), // leaf already gone
-        Err(e) => return Err(Error::Walk(e)),
-    }
-
-    rmdir_drained(&parent, leaf)
-}
-
-/// `rmdir` the killed cgroup leaf, retrying while it drains. `cgroup.kill` signals
-/// SIGKILL synchronously but the kernel reaps the processes and offlines the
-/// cgroup asynchronously, so the `rmdir` briefly returns `EBUSY`/`ENOTEMPTY`.
-/// Retry a bounded number of times; if it still has not drained, the processes are
-/// already dead (the kill is the load-bearing op) and a later sweep or the next
-/// relaunch clears the empty leaf, so a persistent busy is success — never fail
-/// the caller (a relaunch) over leftover-dir cleanup. `ENOENT` means already gone.
-fn rmdir_drained(parent: &SafeDir, leaf: &Path) -> Result<(), Error> {
-    for attempt in 0..RMDIR_ATTEMPTS {
-        match parent.rmdirat(leaf) {
-            Ok(()) | Err(Errno::ENOENT) => return Ok(()),
-            Err(Errno::EBUSY | Errno::ENOTEMPTY) => {
-                if attempt + 1 < RMDIR_ATTEMPTS {
-                    std::thread::sleep(Duration::from_millis(RMDIR_BACKOFF_MS));
-                }
-            }
-            Err(e) => return Err(Error::RemoveCgroup(e)),
-        }
-    }
-    Ok(())
-}
-
-/// Best-effort SIGKILL of every process in the v2 cgroup `leaf_dir`: write "1" to
-/// its `cgroup.kill` pseudo-file. A missing file (`ENOENT`: pre-5.14/non-v2
-/// kernel, or already-emptied leaf) or a cgroup torn down concurrently (`ENODEV`)
-/// is tolerated — killing must not hard-fail the remove.
-fn kill_cgroup(leaf_dir: &SafeDir) -> Result<(), Error> {
-    let mut kill: SafeFile<Any, Any, Any> =
-        match leaf_dir.openat(Path::new("cgroup.kill"), OpenFlags::WRONLY, Mode::empty()) {
-            Ok(kill) => kill,
-            Err(file::ValidationError::Open(Errno::ENOENT | Errno::ENODEV)) => return Ok(()),
-            Err(e) => return Err(Error::OpenCgroupKill(e)),
-        };
-    match kill.write_all(b"1") {
-        Ok(()) => Ok(()),
-        Err(e)
-            if matches!(
-                e.raw_os_error().map(Errno::from_raw),
-                Some(Errno::ENOENT | Errno::ENODEV)
-            ) =>
-        {
-            Ok(())
-        }
-        Err(e) => Err(Error::KillCgroup(e)),
-    }
+    let cgroup = match Cgroup::open(path) {
+        Ok(cgroup) => cgroup,
+        Err(cgroup::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => return Ok(()),
+        Err(e) => return Err(Error::OpenCgroup(e)),
+    };
+    cgroup.kill_procs(KILL_TIMEOUT).map_err(Error::KillCgroup)?;
+    cgroup.remove().map_err(Error::RemoveCgroup)
 }
 
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
