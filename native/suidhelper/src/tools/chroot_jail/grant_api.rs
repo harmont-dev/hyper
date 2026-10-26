@@ -33,10 +33,12 @@
 
 use super::grant;
 use crate::config::Config;
-use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
+use crate::fs::dir::SafeDir;
+use crate::fs::file::{self, OpenFlags};
+use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
 use crate::tools::IsTool;
 use clap::Args;
-use std::ffi::OsStr;
+use nix::errno::Errno;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
@@ -45,9 +47,7 @@ pub use super::grant::{GrantError, GrantOut};
 
 /// The fixed in-jail socket name firecracker opens (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_socket`).
-const SOCKET_NAME: &str = "api.socket";
-
-type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
+const SOCKET_NAME: &StrictComponent = StrictComponent::from_static("api.socket");
 
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -79,7 +79,7 @@ impl FromStr for ApiSocket {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let path: SafePathBuf<IsAbsolute, StrictComponents> =
             PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
-        if path.as_ref().file_name() != Some(OsStr::new(SOCKET_NAME)) {
+        if path.split_last().map(|(_, leaf)| leaf) != Some(SOCKET_NAME) {
             return Err(Error::SocketName(PathBuf::from(s)));
         }
         Ok(Self(path))
@@ -122,16 +122,15 @@ impl IsTool for GrantApi {
 /// `Pending` if any path component or the socket itself is not yet present.
 pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, Error> {
     let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
-    let [exec, id, root, _leaf] = rel.segments().collect::<Vec<_>>()[..] else {
+    let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
         return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
     };
 
-    let base_path: &LexicalPath = jail_base.try_into().map_err(Error::SocketPath)?;
-    let Some(root) = grant::walk_to(base_path, &[exec, id, root].iter().collect::<PathBuf>())
-        .map_err(Error::Walk)?
-    else {
-        return Ok(GrantOut::Pending);
+    let root = match SafeDir::open(root, OpenFlags::RDONLY) {
+        Ok(root) => root,
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
+        Err(e) => return Err(Error::Walk(e)),
     };
 
-    grant::grant_to_caller(root, Path::new(SOCKET_NAME)).map_err(Error::from)
+    grant::grant_to_caller(root, leaf).map_err(Error::from)
 }

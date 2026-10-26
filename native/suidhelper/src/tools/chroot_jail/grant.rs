@@ -9,12 +9,11 @@
 
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
-use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::StrictComponent;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};
 use serde::Serialize;
-use std::path::Path;
 use thiserror::Error as ThisError;
 
 /// Mode handed to the node: owner+group read/write, no world access.
@@ -53,34 +52,13 @@ pub enum GrantError {
     ChmodRoot(#[source] Errno),
 }
 
-/// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
-/// `Ok(None)` if `base` or any parent is not yet present (`ENOENT`), so the
-/// caller can treat a half-built jail as `Pending` rather than an error. On any
-/// other failure the raw `file::ValidationError` is returned for the caller to wrap in
-/// its own error type.
-pub fn walk_to(
-    base: &SafePath<IsAbsolute, StrictComponents>,
-    rel: &Path,
-) -> Result<Option<SafeDir>, file::ValidationError> {
-    let anchor = match SafeDir::open(base, OpenFlags::RDONLY) {
-        Ok(dir) => dir,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    match anchor.openat(rel, OpenFlags::RDONLY, Mode::empty()) {
-        Ok(dir) => Ok(Some(dir)),
-        Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 /// Stat `leaf` under `root` (`AT_SYMLINK_NOFOLLOW`), verify it is a real socket
 /// (`S_IFSOCK`; a symlink reports `S_IFLNK` and is refused), then chown it to
 /// the caller and chmod `0660`. Also open the parent `root` dir for the caller's
 /// group to traverse (chgrp'd to the caller, chmod'd `0710`) so the node can
 /// reach the socket even though the jailer left `root` at `0700`. Returns
 /// `Pending` if `leaf` is not yet present (`ENOENT`).
-pub fn grant_to_caller(root: SafeDir, leaf: &Path) -> Result<GrantOut, GrantError> {
+pub fn grant_to_caller(root: SafeDir, leaf: &StrictComponent) -> Result<GrantOut, GrantError> {
     let sock: SafeFile<IsSocket, Any, Any> = match root.openat(leaf, OpenFlags::PATH, Mode::empty())
     {
         Ok(sock) => sock,

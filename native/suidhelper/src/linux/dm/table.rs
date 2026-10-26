@@ -5,6 +5,7 @@ use std::path::PathBuf;
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
 #[derive(Debug, Clone, Display)]
 pub enum DmTable {
+    Linear(LinearTable),
     Snapshot(SnapshotTable),
     ThinPool(ThinPoolTable),
     Thin(ThinTable),
@@ -16,6 +17,13 @@ pub enum Persistence {
     Persistent,
     #[display("N")]
     Transient,
+}
+
+#[derive(Debug, Clone, Display)]
+#[display("0 {sectors} linear {} 0", origin.display())]
+pub struct LinearTable {
+    pub sectors: u64,
+    pub origin: PathBuf,
 }
 
 /// `dm-snapshot` table.

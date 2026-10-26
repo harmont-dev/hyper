@@ -32,9 +32,13 @@ fn install_fake(dir: &Path, basename: &str, record: &Path, stdout_line: &str) ->
 /// binaries, so the helper resolves each tool's path from config rather than a
 /// caller argument.
 fn write_root_config(dir: &Path, bins: &[(&str, &Path)]) -> PathBuf {
+    write_root_config_in(dir, Path::new("/srv/hyper"), bins)
+}
+
+fn write_root_config_in(dir: &Path, work_dir: &Path, bins: &[(&str, &Path)]) -> PathBuf {
     let p = dir.join("config.toml");
     // Every key here is a tool name, so they live under the `[tools]` table.
-    let mut body = String::from("work_dir = \"/srv/hyper\"\n[tools]\n");
+    let mut body = format!("work_dir = \"{}\"\n[tools]\n", work_dir.display());
     for (key, path) in bins {
         body.push_str(&format!("{key} = \"{}\"\n", path.display()));
     }
@@ -55,12 +59,19 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
-    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
+    let base = fs::canonicalize(tmp.path()).unwrap();
+    let rec = base.join("argv.json");
+    let bin = install_fake(&base, "dmsetup", &rec, "");
+    let cfg = write_root_config_in(&base, &base, &[("dmsetup", &bin)]);
+    let cow = base.join("cow.img");
+    fs::File::create(&cow)
+        .unwrap()
+        .set_len(1024 * 1024)
+        .unwrap();
 
     // Deliberately weird inner spacing; the helper must re-render canonically.
-    run(
+    let table = format!("0   100  snapshot  /dev/loop0   {} P 8", cow.display());
+    let out = run(
         &cfg,
         &[
             "dmsetup",
@@ -68,22 +79,28 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
             "hyper-vm1",
             "--readonly",
             "--table",
-            "0   100  snapshot  /dev/loop0   /dev/loop1 P 8",
+            &table,
         ],
     )
     .success();
+
+    let json = stdout_json(&out);
+    let cow_loop = json["loops"]["cow"]
+        .as_str()
+        .expect("helper must report the loop it attached for the cow file");
+    assert!(cow_loop.starts_with("/dev/loop"), "cow loop: {cow_loop}");
 
     let argv = recorded_argv(&rec);
     assert_eq!(
         argv,
         vec![
-            "create",
-            "hyper-vm1",
-            "--readonly",
-            "--table",
-            "0 100 snapshot /dev/loop0 /dev/loop1 P 8", // canonical single-spaced
+            "create".to_string(),
+            "hyper-vm1".to_string(),
+            "--readonly".to_string(),
+            "--table".to_string(),
+            format!("0 100 snapshot /dev/loop0 {cow_loop} P 8"),
         ],
-        "helper did not reconstruct the canonical table",
+        "helper did not substitute the attached loop into the canonical table",
     );
 }
 
@@ -171,41 +188,6 @@ fn dmsetup_ls_argv_and_parse_as_root() {
     let json = stdout_json(&out);
     assert_eq!(json["result"], "listed");
     assert_eq!(json["output"], "hyper-thinpool\nhyper-rw-abc\n");
-}
-
-#[test]
-fn losetup_list_argv_and_parse_as_root() {
-    if !is_root() {
-        eprintln!("SKIP losetup_list: needs root");
-        return;
-    }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake(
-        tmp.path(),
-        "losetup",
-        &rec,
-        "/dev/loop0 /srv/hyper/scratch/thinpool.meta",
-    );
-    let cfg = write_root_config(tmp.path(), &[("losetup", &bin)]);
-
-    let out = run(&cfg, &["losetup", "list"]).success();
-    assert_eq!(
-        recorded_argv(&rec),
-        vec![
-            "--list",
-            "--noheadings",
-            "--raw",
-            "--output",
-            "NAME,BACK-FILE"
-        ]
-    );
-    let json = stdout_json(&out);
-    assert_eq!(json["result"], "listed");
-    assert_eq!(
-        json["output"],
-        "/dev/loop0 /srv/hyper/scratch/thinpool.meta\n"
-    );
 }
 
 #[test]

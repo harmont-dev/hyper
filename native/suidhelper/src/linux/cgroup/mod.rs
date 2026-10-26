@@ -4,22 +4,26 @@ pub use events::{Events, EventsState, ReadError};
 
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, Any, IsDirectory, OpenFlags, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{
+    IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
+};
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::sys::statfs::{fstatfs, CGROUP2_SUPER_MAGIC};
-use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use thiserror::Error as ThisError;
+
+pub const ROOT: &str = "/sys/fs/cgroup";
+
+const KILL: &StrictComponent = StrictComponent::from_static("cgroup.kill");
+const EVENTS: &StrictComponent = StrictComponent::from_static("cgroup.events");
 
 #[derive(Debug, ThisError)]
 pub enum OpenError {
     #[error("cgroup path has no parent: {0:?}")]
     NoParent(PathBuf),
-    #[error("cgroup parent path: {0}")]
-    Path(#[from] path::ValidationError),
     #[error(transparent)]
     Open(#[from] file::ValidationError),
     #[error("statfs on cgroup: {0}")]
@@ -48,28 +52,25 @@ pub enum KillError {
 
 pub struct Cgroup {
     parent: SafeDir,
-    name: OsString,
+    name: StrictComponentBuf,
 }
 
 impl Cgroup {
     /// Open a handle to this cgroup.
     pub fn open(path: &SafePath<IsAbsolute, StrictComponents>) -> Result<Self, OpenError> {
-        let full: &Path = path.as_ref();
-        let (Some(parent), Some(name)) = (full.parent(), full.file_name()) else {
-            return Err(OpenError::NoParent(full.to_path_buf()));
+        let Some((parent, name)) = path.split_last() else {
+            return Err(OpenError::NoParent(path.as_ref().to_path_buf()));
         };
-
-        let parent: &SafePath<IsAbsolute, StrictComponents> = parent.try_into()?;
         let parent = SafeDir::open(parent, OpenFlags::RDONLY)?;
 
-        let leaf: SafeDir = parent.openat(Path::new(name), OpenFlags::RDONLY, Mode::empty())?;
+        let leaf: SafeDir = parent.openat(name, OpenFlags::RDONLY, Mode::empty())?;
         if fstatfs(&leaf).map_err(OpenError::Statfs)?.filesystem_type() != CGROUP2_SUPER_MAGIC {
-            return Err(OpenError::NotCgroup(full.to_path_buf()));
+            return Err(OpenError::NotCgroup(path.as_ref().to_path_buf()));
         }
 
         Ok(Self {
             parent,
-            name: name.to_os_string(),
+            name: name.to_owned(),
         })
     }
 
@@ -83,7 +84,7 @@ impl Cgroup {
             Err(e) => return Err(KillError::Events(e)),
         };
 
-        let kill_path = Path::new(&self.name).join("cgroup.kill");
+        let kill_path = self.name.as_path().join(KILL);
         let mut kill: SafeFile<Any, Any, Any> =
             match self
                 .parent
@@ -93,7 +94,7 @@ impl Cgroup {
                 Err(file::ValidationError::Open(Errno::ENODEV)) => return Ok(()),
                 Err(file::ValidationError::Open(Errno::ENOENT)) => {
                     return match self.parent.openat::<IsDirectory, Any, Any>(
-                        Path::new(&self.name),
+                        &*self.name,
                         OpenFlags::PATH,
                         Mode::empty(),
                     ) {
@@ -128,7 +129,7 @@ impl Cgroup {
     /// Fetch a handle to the events of this cgroup.
     pub fn events(&self) -> Result<Events<'_>, file::ValidationError> {
         let file = self.parent.openat(
-            &Path::new(&self.name).join("cgroup.events"),
+            self.name.as_path().join(EVENTS),
             OpenFlags::RDONLY,
             Mode::empty(),
         )?;
@@ -137,7 +138,7 @@ impl Cgroup {
 
     /// Remove the cgroup.
     pub fn remove(self) -> Result<(), Errno> {
-        match self.parent.rmdirat(Path::new(&self.name)) {
+        match self.parent.rmdirat(&self.name) {
             Ok(()) | Err(Errno::ENOENT) => Ok(()),
             Err(e) => Err(e),
         }

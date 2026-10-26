@@ -21,14 +21,10 @@ use crate::linux::cgroup::{self, Cgroup};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
-use nix::sys::stat::Mode;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error as ThisError;
-
-/// The cgroup virtual filesystem root.
-const CGROUP_BASE: &str = "/sys/fs/cgroup";
 
 const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -36,28 +32,40 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
+    #[error(transparent)]
+    Chroot(#[from] ChrootError),
+    #[error(transparent)]
+    Cgroup(#[from] CgroupError),
+}
+
+#[derive(Debug, ThisError)]
+pub enum ChrootError {
     #[error("--chroot path: {0}")]
-    ChrootPath(#[source] path::ValidationError),
+    Path(#[source] path::ValidationError),
     #[error("--chroot path: {0}")]
-    ChrootBase(#[source] path::RelativeError),
+    Base(#[source] path::RelativeError),
     #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
-    ChrootDepth(PathBuf),
-    #[error("--cgroup path: {0}")]
-    CgroupPath(#[source] path::ValidationError),
-    #[error("--cgroup path: {0}")]
-    CgroupBase(#[source] path::RelativeError),
-    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
-    CgroupDepth(PathBuf),
-    #[error("walking: {0}")]
-    Walk(#[source] file::ValidationError),
+    Depth(PathBuf),
+    #[error("opening chroot parent: {0}")]
+    Open(#[source] file::ValidationError),
     #[error("removing chroot: {0}")]
-    RemoveChroot(#[source] dir::Error),
-    #[error("removing cgroup: {0}")]
-    RemoveCgroup(#[source] Errno),
+    Remove(#[source] dir::Error),
+}
+
+#[derive(Debug, ThisError)]
+pub enum CgroupError {
+    #[error("--cgroup path: {0}")]
+    Path(#[source] path::ValidationError),
+    #[error("--cgroup path: {0}")]
+    Base(#[source] path::RelativeError),
+    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
+    Depth(PathBuf),
     #[error("opening cgroup: {0}")]
-    OpenCgroup(#[source] cgroup::OpenError),
+    Open(#[source] cgroup::OpenError),
     #[error("killing cgroup procs: {0}")]
-    KillCgroup(#[source] cgroup::KillError),
+    Kill(#[source] cgroup::KillError),
+    #[error("removing cgroup: {0}")]
+    Remove(#[source] Errno),
 }
 
 #[derive(Args)]
@@ -93,7 +101,7 @@ impl IsTool for Remove {
     fn run_privileged(&self) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
         // chroot teardown below is not yanking files out from under a live process.
-        remove_cgroup_under(Path::new(CGROUP_BASE), &self.args.cgroup)?;
+        remove_cgroup_under(Path::new(cgroup::ROOT), &self.args.cgroup)?;
         remove_chroot_under(&Config::get().jail_base(), &self.args.chroot)?;
         Ok(())
     }
@@ -107,20 +115,22 @@ impl IsTool for Remove {
 /// Recursively remove the per-VM chroot `<jail_base>/<exec>/<id>`, fd-relative
 /// after an `O_NOFOLLOW` walk from `jail_base`. Idempotent on a missing target.
 /// `--chroot` must be exactly `<exec>/<id>` (one parent component, one leaf).
-pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error> {
-    let path: &LexicalPath = chroot.try_into().map_err(Error::ChrootPath)?;
-    let rel = path.strip_base(jail_base).map_err(Error::ChrootBase)?;
-    let [exec, id] = rel.segments().collect::<Vec<_>>()[..] else {
-        return Err(Error::ChrootDepth(chroot.to_path_buf()));
+pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), ChrootError> {
+    let path: &LexicalPath = chroot.try_into().map_err(ChrootError::Path)?;
+    let rel = path.strip_base(jail_base).map_err(ChrootError::Base)?;
+    let (2, Some((parent, id))) = (rel.segments().count(), path.split_last()) else {
+        return Err(ChrootError::Depth(chroot.to_path_buf()));
     };
 
-    let Some(parent) = walk(jail_base, Path::new(exec))? else {
-        return Ok(()); // an ancestor is already gone
+    let parent = match SafeDir::open(parent, OpenFlags::RDONLY) {
+        Ok(parent) => parent,
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()),
+        Err(e) => return Err(ChrootError::Open(e)),
     };
-    match parent.rmdirat_recursive(Path::new(id)) {
+    match parent.rmdirat_recursive(id) {
         Ok(()) => Ok(()),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
-        Err(e) => Err(Error::RemoveChroot(e)),
+        Err(e) => Err(ChrootError::Remove(e)),
     }
 }
 
@@ -129,11 +139,11 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error>
 /// be at least two components below `base` (one or more parents, plus the leaf).
 /// Idempotent: a missing leaf is success, and a leaf that has not finished
 /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
-pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
-    let path: &LexicalPath = cgroup.try_into().map_err(Error::CgroupPath)?;
-    let rel = path.strip_base(base).map_err(Error::CgroupBase)?;
+pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), CgroupError> {
+    let path: &LexicalPath = cgroup.try_into().map_err(CgroupError::Path)?;
+    let rel = path.strip_base(base).map_err(CgroupError::Base)?;
     if rel.segments().count() < 2 {
-        return Err(Error::CgroupDepth(cgroup.to_path_buf()));
+        return Err(CgroupError::Depth(cgroup.to_path_buf()));
     }
 
     // Kill any process still in the leaf cgroup before removing it. Open the leaf
@@ -141,25 +151,8 @@ pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
     let cgroup = match Cgroup::open(path) {
         Ok(cgroup) => cgroup,
         Err(cgroup::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => return Ok(()),
-        Err(e) => return Err(Error::OpenCgroup(e)),
+        Err(e) => return Err(CgroupError::Open(e)),
     };
-    cgroup.kill_procs(KILL_TIMEOUT).map_err(Error::KillCgroup)?;
-    cgroup.remove().map_err(Error::RemoveCgroup)
-}
-
-/// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
-/// `Ok(None)` if `base` or any parent is already gone (`ENOENT`), so callers can
-/// treat removal as idempotent.
-fn walk(base: &Path, rel: &Path) -> Result<Option<SafeDir>, Error> {
-    let base_path: &LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
-    let anchor = match SafeDir::open(base_path, OpenFlags::RDONLY) {
-        Ok(dir) => dir,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(None),
-        Err(e) => return Err(Error::Walk(e)),
-    };
-    match anchor.openat(rel, OpenFlags::RDONLY, Mode::empty()) {
-        Ok(dir) => Ok(Some(dir)),
-        Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
-        Err(e) => Err(Error::Walk(e)),
-    }
+    cgroup.kill_procs(KILL_TIMEOUT).map_err(CgroupError::Kill)?;
+    cgroup.remove().map_err(CgroupError::Remove)
 }

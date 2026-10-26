@@ -1,4 +1,5 @@
-use super::{Access, Device, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
+use super::{Device, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
+use crate::linux::Access;
 use std::fmt;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;

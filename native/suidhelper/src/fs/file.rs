@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 //! Typesafer file descriptors.
 
+use super::dev::DeviceNumber;
 use super::path::{IsAbsolute, SafePath, StrictComponents};
 use derive_more::{BitOr, Into};
-use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
-use nix::libc::{dev_t, AT_FDCWD};
-use nix::sys::stat::{
-    fchmodat, fstat, major, makedev, minor, FchmodatFlags, FileStat, Mode, SFlag,
-};
+use nix::fcntl::{open, openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
+use nix::libc::AT_FDCWD;
+use nix::sys::stat::{fchmodat, fstat, FchmodatFlags, FileStat, Mode, SFlag};
 use nix::unistd::{dup, fchownat, Gid, Uid};
 use std::io;
 use std::marker::PhantomData;
@@ -215,13 +214,20 @@ impl<T, R, O> SafeFile<T, R, O> {
     }
 }
 
-impl<R, O> SafeFile<IsBlockDevice, R, O> {
-    /// The device's `rdev` (major:minor), ready for `mknod`.
-    pub fn rdev(&self) -> Result<dev_t, ValidationError> {
-        let stat = fstat(self.0.as_raw_fd()).map_err(ValidationError::Fstat)?;
-        Ok(makedev(major(stat.st_rdev), minor(stat.st_rdev)))
-    }
+pub trait DeviceType: FileType {}
 
+impl DeviceType for IsBlockDevice {}
+impl DeviceType for IsCharDevice {}
+
+impl<T: DeviceType, R, O> SafeFile<T, R, O> {
+    /// The device's `rdev` (major:minor), ready for `mknod`.
+    pub fn rdev(&self) -> Result<DeviceNumber, ValidationError> {
+        let stat = fstat(self.0.as_raw_fd()).map_err(ValidationError::Fstat)?;
+        Ok(DeviceNumber::from(stat.st_rdev))
+    }
+}
+
+impl<R, O> SafeFile<IsBlockDevice, R, O> {
     pub fn size(&self) -> nix::Result<u64> {
         let mut bytes = 0u64;
         // SAFETY: BLKGETSIZE64 writes exactly one u64 through the pointer.
@@ -250,6 +256,20 @@ where
             .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS);
         let raw = openat2(AT_FDCWD, path.as_ref(), how).map_err(ValidationError::Open)?;
         // SAFETY: `openat2` just handed us this fd; nobody else owns it.
+        let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+
+        Self::try_from(owned)
+    }
+
+    pub fn reopen(&self, flags: OpenFlags) -> Result<Self, ValidationError> {
+        let path = PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()));
+        let raw = open(
+            &path,
+            flags.0 | T::OPEN_FLAGS | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(ValidationError::Open)?;
+        // SAFETY: `open` just handed us this fd; nobody else owns it.
         let owned = unsafe { OwnedFd::from_raw_fd(raw) };
 
         Self::try_from(owned)

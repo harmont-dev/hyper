@@ -113,10 +113,6 @@ name = "e2e_version"
 path = "tests/e2e/version.rs"
 
 [[test]]
-name = "e2e_losetup"
-path = "tests/e2e/losetup.rs"
-
-[[test]]
 name = "e2e_thin_dump"
 path = "tests/e2e/thin_dump.rs"
 
@@ -129,8 +125,8 @@ name = "config_network"
 path = "tests/config_network.rs"
 
 [[test]]
-name = "tools_losetup_backing"
-path = "tests/tools/losetup_backing.rs"
+name = "tools_dmsetup_backing"
+path = "tests/tools/dmsetup_backing.rs"
 
 [dependencies]
 bon = "3.9.3"

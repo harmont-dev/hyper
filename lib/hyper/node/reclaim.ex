@@ -17,7 +17,7 @@ defmodule Hyper.Node.Reclaim do
   collides with its own previous instance's leftovers.
   """
 
-  alias Hyper.SuidHelper.{Dmsetup, Losetup}
+  alias Hyper.SuidHelper.Dmsetup
 
   require Logger
 
@@ -26,7 +26,6 @@ defmodule Hyper.Node.Reclaim do
   @spec run() :: :ok
   def run do
     reclaim_dm()
-    reclaim_loops()
     reclaim_sockets()
     :ok
   end
@@ -106,31 +105,5 @@ defmodule Hyper.Node.Reclaim do
       removed_any? -> remove_dm(failed)
       true -> Logger.error("reclaim: could not remove dm devices: #{inspect(failed)}")
     end
-  end
-
-  defp reclaim_loops do
-    case Losetup.list() do
-      {:ok, pairs} ->
-        for {dev, backing} <- pairs, under_data_dirs?(backing) do
-          case Losetup.detach(dev) do
-            :ok ->
-              :ok
-
-            {:error, reason} ->
-              Logger.warning("reclaim: could not detach #{dev} (#{backing}): #{inspect(reason)}")
-          end
-        end
-
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("reclaim: could not list loop devices: #{inspect(reason)}")
-    end
-  end
-
-  @spec under_data_dirs?(Path.t()) :: boolean()
-  defp under_data_dirs?(path) do
-    String.starts_with?(path, Hyper.Cfg.Dirs.scratch_dir() <> "/") or
-      String.starts_with?(path, Hyper.Cfg.Dirs.layer_dir() <> "/")
   end
 end

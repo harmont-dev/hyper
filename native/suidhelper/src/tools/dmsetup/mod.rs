@@ -1,15 +1,23 @@
+mod backing;
 mod message;
 mod table;
 
 use super::IsTool;
-use crate::linux::dm::{self, Access, DmTable, RemoveMode};
+use crate::linux::dm::{self, RemoveMode};
+use crate::linux::loopdev::LoopControl;
+use crate::linux::Access;
 use crate::process::binary::RootSafeBin;
 use crate::util::safe_dev::DmName;
+pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
 pub use message::{parse_message, MessageError, ThinMessage};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-pub use table::{parse_table, TableError};
+use std::time::Duration;
+pub use table::{parse_table, resolve_table, Slot, Source, TableError, TableSpec};
+
+const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Args)]
 pub struct DmsetupArgs {
@@ -23,8 +31,8 @@ enum DmOp {
         name: DmName,
         #[arg(long)]
         readonly: bool,
-        #[arg(long, value_parser = parse_table)]
-        table: DmTable,
+        #[arg(long, value_parser = resolve_table)]
+        table: TableSpec<BackingFile>,
     },
     Remove {
         #[arg(long)]
@@ -51,13 +59,20 @@ enum DmOp {
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum DmsetupOut {
-    Created { device: PathBuf },
+    Created {
+        device: PathBuf,
+        loops: BTreeMap<Slot, PathBuf>,
+    },
     Removed,
     Messaged,
     Suspended,
     Resumed,
-    Targets { output: String },
-    Listed { output: String },
+    Targets {
+        output: String,
+    },
+    Listed {
+        output: String,
+    },
 }
 
 pub struct Dmsetup {
@@ -92,8 +107,21 @@ impl IsTool for Dmsetup {
                 } else {
                     Access::ReadWrite
                 };
+                let control = LoopControl::open()?;
+                let mut loops = BTreeMap::new();
+                let attached = table.try_map(|backing, slot| {
+                    let slot_access = match slot {
+                        Slot::Origin => Access::ReadOnly,
+                        Slot::Cow => access,
+                        Slot::Metadata | Slot::Data => Access::ReadWrite,
+                    };
+                    let device = control.attach(backing.file(), slot_access, ATTACH_TIMEOUT)?;
+                    loops.insert(slot, device.path().as_ref().to_path_buf());
+                    Ok::<_, Box<dyn std::error::Error>>(device)
+                })?;
                 DmsetupOut::Created {
-                    device: dm.create(name.as_ref(), table, access)?.path(),
+                    device: dm.create(name.as_ref(), &attached.to_dm(), access)?.path(),
+                    loops,
                 }
             }
             DmOp::Remove { retry, name } => {

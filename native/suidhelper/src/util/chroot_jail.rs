@@ -2,12 +2,13 @@
 //! Declarative builder for a VM's chroot jail contents.
 
 use crate::config::Config;
+use crate::fs::dev::DeviceNumber;
 use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
 use crate::util::safe_dev::BlockDev;
 use nix::errno::Errno;
-use nix::sys::stat::{makedev, Mode, SFlag};
+use nix::sys::stat::{Mode, SFlag};
 use nix::unistd::{Gid, Uid};
 use std::fs::File;
 use std::io;
@@ -17,12 +18,14 @@ use thiserror::Error as ThisError;
 
 /// In-jail names — the contract the Elixir side (`Hyper.Node.FireVMM.ChrootJail`)
 /// mirrors.
-const KERNEL_NAME: &str = "vmlinux";
-const ROOTFS_NAME: &str = "rootfs";
+const KERNEL_NAME: &StrictComponent = StrictComponent::from_static("vmlinux");
+const ROOTFS_NAME: &StrictComponent = StrictComponent::from_static("rootfs");
+const DEV: &StrictComponent = StrictComponent::from_static("dev");
+const NET: &StrictComponent = StrictComponent::from_static("net");
+const TUN: &StrictComponent = StrictComponent::from_static("tun");
 
 /// `/dev/net/tun`'s well-known major:minor, per Linux's `Documentation/admin-guide/devices.txt`.
-const TUN_MAJOR: u64 = 10;
-const TUN_MINOR: u64 = 200;
+const TUN_DEVICE: DeviceNumber = DeviceNumber::new(10, 200);
 
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -146,11 +149,8 @@ impl ChrootJail<Kernel, Rootfs> {
 /// a symlinked component cannot redirect outside the jail.
 pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Error> {
     let path: &SafePath<IsAbsolute, StrictComponents> = chroot.try_into()?;
-    let rel = path.strip_base(jail_base)?;
-    let anchor: &SafePath<IsAbsolute, StrictComponents> = jail_base.try_into()?;
-    SafeDir::open(anchor, OpenFlags::RDONLY)
-        .and_then(|dir| dir.openat(rel.as_ref(), OpenFlags::RDONLY, Mode::empty()))
-        .map_err(Error::OpenChroot)
+    path.strip_base(jail_base)?;
+    SafeDir::open(path, OpenFlags::RDONLY).map_err(Error::OpenChroot)
 }
 
 /// Stage host file `src` into `chroot` as `vmlinux`: confine the source under
@@ -163,7 +163,6 @@ pub fn stage_kernel_under(
     uid: u32,
     gid: u32,
 ) -> Result<(), Error> {
-    let kernel = Path::new(KERNEL_NAME);
     let (uid, gid) = (Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)));
 
     let src_canon = std::fs::canonicalize(src).map_err(|source| Error::Source {
@@ -171,30 +170,27 @@ pub fn stage_kernel_under(
         source,
     })?;
     let src_path: &SafePath<IsAbsolute, StrictComponents> = src_canon.as_path().try_into()?;
-    let rel = src_path
+    src_path
         .strip_base(hyper_base)
         .map_err(|_| Error::OutsideBase {
             base: hyper_base.to_path_buf(),
             path: src_canon.clone(),
         })?;
 
-    let open_src = |source| Error::OpenSrc {
-        path: src_canon.clone(),
-        source,
-    };
-    let base: &SafePath<IsAbsolute, StrictComponents> = hyper_base.try_into()?;
-    let base_dir = SafeDir::open(base, OpenFlags::RDONLY).map_err(open_src)?;
-    let source: SafeFile<IsRegularFile, Any, Any> = base_dir
-        .openat(rel.as_ref(), OpenFlags::RDONLY, Mode::empty())
-        .map_err(open_src)?;
+    let source = SafeFile::<IsRegularFile, Any, Any>::open(src_path, OpenFlags::RDONLY).map_err(
+        |source| Error::OpenSrc {
+            path: src_canon.clone(),
+            source,
+        },
+    )?;
 
-    match chroot.linkat(&source, kernel) {
+    match chroot.linkat(&source, KERNEL_NAME) {
         Ok(()) => source
             .chown(uid, gid)
             .map_err(|e| Error::StageKernel(e.into())),
         Err(Errno::EXDEV) => {
             let mut dest = chroot
-                .mkfileat(kernel, Mode::from_bits_truncate(0o600))
+                .mkfileat(KERNEL_NAME, Mode::from_bits_truncate(0o600))
                 .map_err(|e| Error::StageKernel(e.into()))?;
             io::copy(&mut File::from(OwnedFd::from(source)), &mut dest).map_err(Error::Copy)?;
             dest.chown(uid, gid)
@@ -223,11 +219,15 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
     let dev = SafeFile::<IsBlockDevice, Any, Any>::open(dev_path, OpenFlags::PATH)
         .map_err(Error::Device)?;
     let rdev = dev.rdev().map_err(Error::Device)?;
-    let name = Path::new(ROOTFS_NAME);
     let make = || -> Result<(), dir::Error> {
-        chroot.mknodat(name, SFlag::S_IFBLK, Mode::from_bits_truncate(0o600), rdev)?;
+        chroot.mknodat(
+            ROOTFS_NAME,
+            SFlag::S_IFBLK,
+            Mode::from_bits_truncate(0o600),
+            rdev,
+        )?;
         let node: SafeFile<IsBlockDevice, Any, Any> =
-            chroot.openat(name, OpenFlags::PATH, Mode::empty())?;
+            chroot.openat(ROOTFS_NAME, OpenFlags::PATH, Mode::empty())?;
         Ok(node.chown(Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))?)
     };
     make().map_err(Error::MakeRootfs)
@@ -239,22 +239,23 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
 /// networking is enabled; a jail built without it has no `dev` tree at all
 /// today (see [`ChrootJail::build_under`]).
 fn make_tun_node(chroot: &SafeDir, uid: u32, gid: u32) -> Result<(), dir::Error> {
-    let dev = Path::new("dev");
-    chroot.mkdirat(dev, Mode::from_bits_truncate(0o755))?;
-    let dev_dir: SafeDir = chroot.openat(dev, OpenFlags::RDONLY, Mode::empty())?;
+    chroot.mkdirat(DEV, Mode::from_bits_truncate(0o755))?;
+    let dev_dir: SafeDir = chroot.openat(DEV, OpenFlags::RDONLY, Mode::empty())?;
 
-    let net = Path::new("net");
-    dev_dir.mkdirat(net, Mode::from_bits_truncate(0o755))?;
-    let net_dir: SafeDir = dev_dir.openat(net, OpenFlags::RDONLY, Mode::empty())?;
+    dev_dir.mkdirat(NET, Mode::from_bits_truncate(0o755))?;
+    let net_dir: SafeDir = dev_dir.openat(NET, OpenFlags::RDONLY, Mode::empty())?;
 
-    let tun = Path::new("tun");
-    let rdev = makedev(TUN_MAJOR, TUN_MINOR);
-    match net_dir.mknodat(tun, SFlag::S_IFCHR, Mode::from_bits_truncate(0o666), rdev) {
+    match net_dir.mknodat(
+        TUN,
+        SFlag::S_IFCHR,
+        Mode::from_bits_truncate(0o666),
+        TUN_DEVICE,
+    ) {
         Ok(()) | Err(Errno::EEXIST) => {}
         Err(errno) => return Err(errno.into()),
     }
     let node: SafeFile<IsCharDevice, Any, Any> =
-        net_dir.openat(tun, OpenFlags::PATH, Mode::empty())?;
+        net_dir.openat(TUN, OpenFlags::PATH, Mode::empty())?;
     node.chown(Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))?;
     Ok(node.chmod(Mode::from_bits_truncate(0o666))?)
 }

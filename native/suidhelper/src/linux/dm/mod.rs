@@ -5,11 +5,12 @@ mod table;
 mod thin;
 pub mod thin_dump;
 
+use super::Access;
 use crate::process::binary::RootSafeBin;
 pub use device::Device;
 use std::ffi::OsStr;
 use std::io;
-pub use table::{DmTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
+pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
 pub use thin::{
     Active, Inactive, SnapshotError, Thin, ThinId, ThinIdOutOfRange, ThinPool, ThinPoolError,
 };
@@ -35,12 +36,6 @@ pub enum TargetsError {
 pub struct Target {
     pub name: String,
     pub version: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Access {
-    ReadOnly,
-    ReadWrite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

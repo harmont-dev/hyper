@@ -11,9 +11,9 @@
 //!   * removal — a real `<exec>/<id>` tree is gone afterward, and its siblings
 //!     and the cgroup parent survive.
 
-use hyper_suidhelper::fs::path::ValidationError;
+use hyper_suidhelper::fs::path::{ComponentError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::remove::{
-    remove_cgroup_under, remove_chroot_under, Error,
+    remove_cgroup_under, remove_chroot_under, CgroupError, ChrootError,
 };
 use proptest::prelude::*;
 use std::fs;
@@ -28,7 +28,7 @@ fn chroot_too_shallow_is_depth_error() {
     let jail = tmp.path();
     let chroot = jail.join("only-one");
     let err = remove_chroot_under(jail, &chroot).unwrap_err();
-    assert!(matches!(err, Error::ChrootDepth(_)), "got {err:?}");
+    assert!(matches!(err, ChrootError::Depth(_)), "got {err:?}");
 }
 
 // Three components below the base is too deep.
@@ -38,7 +38,7 @@ fn chroot_too_deep_is_depth_error() {
     let jail = tmp.path();
     let chroot = jail.join("exec").join("id").join("extra");
     let err = remove_chroot_under(jail, &chroot).unwrap_err();
-    assert!(matches!(err, Error::ChrootDepth(_)), "got {err:?}");
+    assert!(matches!(err, ChrootError::Depth(_)), "got {err:?}");
 }
 
 // `--cgroup` must be at least two components below its base: a direct child is
@@ -49,7 +49,7 @@ fn cgroup_too_shallow_is_depth_error() {
     let base = tmp.path();
     let cgroup = base.join("leaf");
     let err = remove_cgroup_under(base, &cgroup).unwrap_err();
-    assert!(matches!(err, Error::CgroupDepth(_)), "got {err:?}");
+    assert!(matches!(err, CgroupError::Depth(_)), "got {err:?}");
 }
 
 // A `..` component is rejected by the real SafePath gate, before any FS access.
@@ -60,7 +60,10 @@ fn chroot_with_dotdot_is_rejected() {
     let chroot = PathBuf::from(format!("{}/exec/../escape", jail.display()));
     let err = remove_chroot_under(jail, &chroot).unwrap_err();
     assert!(
-        matches!(err, Error::ChrootPath(ValidationError::LooseComponents)),
+        matches!(
+            err,
+            ChrootError::Path(ValidationError::Component(ComponentError::ParentDir))
+        ),
         "got {err:?}",
     );
 }
@@ -71,7 +74,7 @@ fn relative_chroot_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let err = remove_chroot_under(tmp.path(), Path::new("exec/id")).unwrap_err();
     assert!(
-        matches!(err, Error::ChrootPath(ValidationError::NotAbsolute)),
+        matches!(err, ChrootError::Path(ValidationError::NotAbsolute)),
         "got {err:?}",
     );
 }
@@ -169,7 +172,7 @@ proptest! {
         if comps.len() == 2 {
             prop_assert!(res.is_ok(), "depth 2 must be Ok, got {res:?}");
         } else {
-            prop_assert!(matches!(res, Err(Error::ChrootDepth(_))), "got {res:?}");
+            prop_assert!(matches!(res, Err(ChrootError::Depth(_))), "got {res:?}");
         }
     }
 
@@ -187,7 +190,7 @@ proptest! {
         }
         let res = remove_cgroup_under(base, &cgroup);
         if comps.len() == 1 {
-            prop_assert!(matches!(res, Err(Error::CgroupDepth(_))), "got {res:?}");
+            prop_assert!(matches!(res, Err(CgroupError::Depth(_))), "got {res:?}");
         } else {
             prop_assert!(res.is_ok(), "depth >= 2 must be Ok, got {res:?}");
         }

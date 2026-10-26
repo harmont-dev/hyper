@@ -135,8 +135,6 @@ pub struct Jails {
 pub struct Tools {
     #[default("/usr/sbin/dmsetup".into())]
     dmsetup: PathBuf,
-    #[default("/usr/sbin/losetup".into())]
-    losetup: PathBuf,
     // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
     // is a symlink to the former, and RootSafeBin rejects symlinked tool
     // paths. iproute2's real binary lives at /usr/bin/ip.
@@ -218,11 +216,6 @@ impl Config {
     /// The validated `dmsetup` binary the helper will run.
     pub fn dmsetup(&self) -> Result<RootSafeBin<"dmsetup">, binary::Error> {
         RootSafeBin::open(&self.tools.dmsetup)
-    }
-
-    /// The validated `losetup` binary the helper will run.
-    pub fn losetup(&self) -> Result<RootSafeBin<"losetup">, binary::Error> {
-        RootSafeBin::open(&self.tools.losetup)
     }
 
     /// The validated `ip` (iproute2) binary the network tool runs.

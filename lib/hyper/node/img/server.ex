@@ -22,6 +22,7 @@ defmodule Hyper.Node.Img.Server do
   alias Hyper.Img.Db
   alias Hyper.Node.Layer
   alias Hyper.SuidHelper
+  alias Unit.Information
 
   use OpenTelemetryDecorator
 
@@ -81,8 +82,8 @@ defmodule Hyper.Node.Img.Server do
     Process.flag(:trap_exit, true)
     layer_ids = resolve_layers(img_id)
 
-    with {:ok, loop_paths} <- acquire_layers(layer_ids),
-         {:ok, %{blk_path: blk_path, dm_names: dm_names}} <- build_chain(img_id, loop_paths) do
+    with {:ok, layer_paths} <- acquire_layers(layer_ids),
+         {:ok, %{blk_path: blk_path, dm_names: dm_names}} <- build_chain(img_id, layer_paths) do
       state = %State{img_id: img_id, layers: layer_ids, dm_names: dm_names, blk_path: blk_path}
       {:ok, arm_idle(state)}
     else
@@ -171,7 +172,7 @@ defmodule Hyper.Node.Img.Server do
     |> Enum.reduce_while({:ok, []}, fn layer_id, {:ok, paths} ->
       with {:ok, pid} <- Layer.Server.for_layer(layer_id),
            :ok <- Layer.Server.acquire(pid) do
-        {:cont, {:ok, [Layer.Server.blk_path(pid) | paths]}}
+        {:cont, {:ok, [Layer.Server.path(pid) | paths]}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -193,29 +194,55 @@ defmodule Hyper.Node.Img.Server do
   defp build_chain(_img_id, []), do: {:error, :unknown_image}
 
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(base) do
-      deltas
-      |> Enum.with_index(1)
-      |> Enum.reduce_while({:ok, base, []}, fn {cow_dev, idx}, {:ok, origin, names} ->
-        name = dm_name(img_id, idx)
-
-        case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_dev, sectors) do
-          {:ok, dev} ->
-            {:cont, {:ok, dev, [name | names]}}
-
-          {:error, reason} ->
-            Enum.each(names, &remove_quietly/1)
-            {:halt, {:error, reason}}
-        end
-      end)
-      |> case do
-        {:ok, blk_path, names} -> {:ok, %{blk_path: blk_path, dm_names: Enum.reverse(names)}}
-        {:error, _} = err -> err
+    with {:ok, sectors} <- file_sectors(base) do
+      case deltas do
+        [] -> build_linear(img_id, base, sectors)
+        deltas -> build_snapshots(img_id, base, deltas, sectors)
       end
     end
   end
 
-  @spec dm_name(Hyper.Img.id(), pos_integer()) :: String.t()
+  @spec build_linear(Hyper.Img.id(), Path.t(), pos_integer()) ::
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+  defp build_linear(img_id, base, sectors) do
+    name = dm_name(img_id, 0)
+
+    with {:ok, dev} <- SuidHelper.Dmsetup.create_linear(name, base, sectors) do
+      {:ok, %{blk_path: dev, dm_names: [name]}}
+    end
+  end
+
+  @spec build_snapshots(Hyper.Img.id(), Path.t(), [Path.t()], pos_integer()) ::
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+  defp build_snapshots(img_id, base, deltas, sectors) do
+    deltas
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, base, []}, fn {cow_file, idx}, {:ok, origin, names} ->
+      name = dm_name(img_id, idx)
+
+      case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_file, sectors) do
+        {:ok, dev} ->
+          {:cont, {:ok, dev, [name | names]}}
+
+        {:error, reason} ->
+          Enum.each(names, &remove_quietly/1)
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, blk_path, names} -> {:ok, %{blk_path: blk_path, dm_names: Enum.reverse(names)}}
+      {:error, _} = err -> err
+    end
+  end
+
+  @spec file_sectors(Path.t()) :: {:ok, non_neg_integer()} | {:error, File.posix()}
+  defp file_sectors(path) do
+    with {:ok, %File.Stat{size: size}} <- File.stat(path) do
+      {:ok, size |> Information.bytes() |> Information.as_sectors()}
+    end
+  end
+
+  @spec dm_name(Hyper.Img.id(), non_neg_integer()) :: String.t()
   defp dm_name(img_id, idx), do: "hyper-img-#{sanitize(img_id)}-#{idx}"
 
   @spec sanitize(String.t()) :: String.t()

@@ -14,22 +14,20 @@ defmodule Hyper.Node.Layer.Server do
   # it just tore down. See the reconciliation TODO in `Hyper.Node.Reaper` for why
   # coupling resource lifetime to process lifetime is a smell.
   use GenServer, restart: :temporary
-  require Logger
 
   alias Hyper.Node.Layer
   alias Hyper.Node.Layer.Repo
-  alias Hyper.SuidHelper
 
   defmodule State do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            blk_path: Path.t(),
+            path: Path.t(),
             holders: %{pid() => reference()},
             idle_ref: reference() | nil
           }
 
-    defstruct [:blk_path, holders: %{}, idle_ref: nil]
+    defstruct [:path, holders: %{}, idle_ref: nil]
   end
 
   defmodule Opts do
@@ -62,9 +60,8 @@ defmodule Hyper.Node.Layer.Server do
   @spec release(GenServer.server()) :: :ok
   def release(server), do: GenServer.call(server, {:release, self()})
 
-  @doc "Get the block device path of the layer managed by `server`."
-  @spec blk_path(GenServer.server()) :: Path.t()
-  def blk_path(server), do: GenServer.call(server, :blk_path)
+  @spec path(GenServer.server()) :: Path.t()
+  def path(server), do: GenServer.call(server, :path)
 
   @doc "Create a new layer, mounting it as a block device."
   @spec start_link(Opts.t()) :: GenServer.on_start()
@@ -74,13 +71,9 @@ defmodule Hyper.Node.Layer.Server do
 
   @impl true
   def init(%Opts{layer_id: layer_id}) do
-    Process.flag(:trap_exit, true)
-
-    with {:ok, layer_path} <- Repo.find_layer(layer_id),
-         {:ok, blk_path} <- SuidHelper.Losetup.attach_ro(layer_path) do
+    case Repo.find_layer(layer_id) do
       # Start with no holders, so a mounted-but-unused layer reaps itself.
-      {:ok, arm_idle(%State{blk_path: blk_path})}
-    else
+      {:ok, path} -> {:ok, arm_idle(%State{path: path})}
       {:error, reason} -> {:stop, reason}
     end
   end
@@ -103,8 +96,8 @@ defmodule Hyper.Node.Layer.Server do
   end
 
   @impl true
-  def handle_call(:blk_path, _from, %State{blk_path: blk_path} = state) do
-    {:reply, blk_path, state}
+  def handle_call(:path, _from, %State{path: path} = state) do
+    {:reply, path, state}
   end
 
   @impl true
@@ -121,32 +114,6 @@ defmodule Hyper.Node.Layer.Server do
   def handle_info(:idle_timeout, state) do
     # Stale timer (a holder arrived after it was armed) - ignore.
     {:noreply, state}
-  end
-
-  @impl true
-  # Each privileged command runs through `System.cmd`, which links a transient
-  # port to this process and returns only once that command has finished. Because
-  # we trap exits (for `terminate/2` teardown), the now-defunct port's exit lands
-  # here afterwards -- stale by construction, whatever its reason -- so ignore it.
-  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
-
-  @impl true
-  # No process is deliberately linked here beyond those transient command ports,
-  # so a linked *process* EXIT is a genuine fault: propagate its reason (so
-  # terminate/2 still runs teardown) rather than crash opaquely on an unmatched
-  # message.
-  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
-
-  @impl true
-  def terminate(_reason, %State{blk_path: blk_path}) do
-    case SuidHelper.Losetup.detach(blk_path) do
-      :ok ->
-        :ok
-
-      {:error, {errc, out}} ->
-        Logger.error("Failed to unmount layer block device #{blk_path} (exit #{errc}): #{out}")
-        :ok
-    end
   end
 
   # Remove `pid` from the holder set (no-op if it isn't one) and re-arm the idle

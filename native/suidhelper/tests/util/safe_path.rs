@@ -5,7 +5,7 @@ use hyper_suidhelper::fs::path::{
     IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
 };
 use proptest::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // The fully-enforced flavor used at every real call site.
 type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
@@ -55,9 +55,10 @@ proptest! {
         // component collapses it to a bare separator, hiding the `//` we want to
         // test. Raw joining makes `.`, `..`, and empty (`//`) literally present.
         let path = PathBuf::from(format!("/{}", parts.join("/")));
+        prop_assume!(path != Path::new("/"));
         prop_assert!(matches!(
             Strict::try_from(path),
-            Err(ValidationError::LooseComponents)
+            Err(ValidationError::Component(_))
         ));
     }
 
@@ -88,7 +89,7 @@ proptest! {
             .strip_base(&base)
             .unwrap()
             .segments()
-            .map(|s| s.to_string_lossy().into_owned())
+            .map(|s| s.as_os_str().to_string_lossy().into_owned())
             .collect();
         prop_assert_eq!(&segments, &rel_parts);
 

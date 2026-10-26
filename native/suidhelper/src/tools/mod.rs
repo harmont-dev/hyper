@@ -9,7 +9,6 @@ mod blockdev;
 pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
-pub mod losetup;
 pub mod network;
 pub mod thin_dump;
 
@@ -17,9 +16,9 @@ pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{
-    parse_message, parse_table, Dmsetup, DmsetupArgs, MessageError, TableError, ThinMessage,
+    parse_message, parse_table, BackingError, BackingFile, Dmsetup, DmsetupArgs, MessageError,
+    Slot, Source, TableError, TableSpec, ThinMessage,
 };
-pub use losetup::{Losetup, LosetupArgs};
 pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
@@ -80,11 +79,6 @@ pub trait IsTool {
 /// argument - it comes from the root-owned config (see [`Config`]).
 #[derive(Subcommand)]
 pub enum Tool {
-    /// Attach/detach loop devices.
-    Losetup {
-        #[command(flatten)]
-        args: LosetupArgs,
-    },
     /// Create/remove device-mapper snapshot devices.
     Dmsetup {
         #[command(flatten)]
@@ -125,10 +119,6 @@ impl Tool {
     pub fn run(self) -> Result<serde_json::Value, Error> {
         let config = Config::get();
         match self {
-            Tool::Losetup { args } => {
-                let bin = config.losetup().map_err(|e| Error::Tool(Box::new(e)))?;
-                Losetup::new(bin, args).run()
-            }
             Tool::Dmsetup { args } => {
                 let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
                 Dmsetup::new(bin, args).run()
