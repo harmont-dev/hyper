@@ -223,20 +223,48 @@ fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
         .stderr(contains("basename must be"));
 }
 
+struct LoopDevice(String);
+
+impl LoopDevice {
+    fn attach(backing: &Path) -> Self {
+        let out = std::process::Command::new("losetup")
+            .args(["--find", "--show"])
+            .arg(backing)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Self(String::from_utf8(out.stdout).unwrap().trim().to_string())
+    }
+}
+
+impl Drop for LoopDevice {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("losetup")
+            .args(["--detach", &self.0])
+            .status();
+    }
+}
+
 #[test]
-fn blockdev_getsz_argv_and_parse_as_root() {
+fn blockdev_getsz_reports_a_loop_devices_size_as_root() {
     if !is_root() {
         eprintln!("SKIP blockdev: needs root");
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    // Fake prints "2048" as the sector count for the helper to parse.
-    let bin = install_fake(tmp.path(), "blockdev", &rec, "2048");
-    let cfg = write_root_config(tmp.path(), &[("blockdev", &bin)]);
+    let backing = tmp.path().join("backing");
+    fs::File::create(&backing)
+        .unwrap()
+        .set_len(3 * 1024 * 1024 + 512)
+        .unwrap();
+    let dev = LoopDevice::attach(&backing);
+    let cfg = write_root_config(tmp.path(), &[]);
 
-    let out = run(&cfg, &["blockdev", "--getsz", "/dev/loop0"]).success();
-    assert_eq!(recorded_argv(&rec), vec!["--getsz", "/dev/loop0"]);
+    let out = run(&cfg, &["blockdev", "--getsz", &dev.0]).success();
     let json = stdout_json(&out);
-    assert_eq!(json["sectors"], 2048);
+    assert_eq!(json["sectors"], 6145);
 }

@@ -141,7 +141,7 @@ bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "into", "add", "debug"] }
 hyper-suidhelper-meta = { path = "meta" }
-nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
+nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 ref-cast = "1.0.25"
 serde = { version = "1", features = ["derive"] }

@@ -133,10 +133,7 @@ impl Tool {
                 let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
                 Dmsetup::new(bin, args).run()
             }
-            Tool::Blockdev { args } => {
-                let bin = config.blockdev().map_err(|e| Error::Tool(Box::new(e)))?;
-                Blockdev::new(bin, args).run()
-            }
+            Tool::Blockdev { args } => Blockdev::new(args).run(),
             Tool::Blockcopy { args } => Blockcopy::new(args).run(),
             Tool::ChrootJail { op } => op.run(),
             Tool::Network { op } => op.run(),

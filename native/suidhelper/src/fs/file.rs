@@ -15,6 +15,16 @@ use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
+const SECTOR_BYTES: u64 = 512;
+
+mod ioctl {
+    nix::ioctl_read_bad!(
+        blkgetsize64,
+        nix::request_code_read!(0x12, 114, std::mem::size_of::<usize>()),
+        u64
+    );
+}
+
 /// The single error type shared by every `SafeFile` flavor. A given flavor only ever yields the
 /// variants for the axes it actually enforces.
 #[derive(Debug, Clone, Copy, ThisError)]
@@ -204,6 +214,17 @@ impl<R, O> SafeFile<IsBlockDevice, R, O> {
     pub fn rdev(&self) -> Result<dev_t, ValidationError> {
         let stat = fstat(self.0.as_raw_fd()).map_err(ValidationError::Fstat)?;
         Ok(makedev(major(stat.st_rdev), minor(stat.st_rdev)))
+    }
+
+    pub fn size(&self) -> nix::Result<u64> {
+        let mut bytes = 0u64;
+        // SAFETY: BLKGETSIZE64 writes exactly one u64 through the pointer.
+        unsafe { ioctl::blkgetsize64(self.0.as_raw_fd(), &mut bytes) }?;
+        Ok(bytes)
+    }
+
+    pub fn sectors(&self) -> nix::Result<u64> {
+        Ok(self.size()? / SECTOR_BYTES)
     }
 }
 
