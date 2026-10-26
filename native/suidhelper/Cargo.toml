@@ -135,16 +135,20 @@ path = "tests/tools/losetup_backing.rs"
 [dependencies]
 bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "into", "add", "debug"] }
 hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 ref-cast = "1.0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+smart-default = "0.7.1"
 thiserror = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
 proptest = "1"
 tempfile = "3"
 

@@ -2,16 +2,15 @@
 //! Typesafer file descriptors.
 
 use super::path::{IsAbsolute, SafePath, StrictComponents};
+use derive_more::{BitOr, Into};
 use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
 use nix::libc::{dev_t, AT_FDCWD};
 use nix::sys::stat::{
     fchmodat, fstat, major, makedev, minor, FchmodatFlags, FileStat, Mode, SFlag,
 };
 use nix::unistd::{fchownat, Gid, Uid};
-use std::fmt;
 use std::io;
 use std::marker::PhantomData;
-use std::ops::BitOr;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
@@ -157,7 +156,7 @@ impl Writability for OwnerOnlyWritable {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BitOr, Into)]
 pub struct OpenFlags(OFlag);
 
 impl OpenFlags {
@@ -169,28 +168,14 @@ impl OpenFlags {
     pub const CREATE_NEW: Self = Self(OFlag::O_CREAT.union(OFlag::O_EXCL));
 }
 
-impl BitOr for OpenFlags {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self {
-        Self(self.0 | rhs.0)
-    }
-}
-
-impl From<OpenFlags> for OFlag {
-    fn from(value: OpenFlags) -> Self {
-        value.0
-    }
-}
-
 /// An [`OwnedFd`] with compile-time refinements.
-pub struct SafeFile<T, R, O>(OwnedFd, PhantomData<(T, R, O)>);
-
-impl<T, R, O> fmt::Debug for SafeFile<T, R, O> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SafeFile").field(&self.0).finish()
-    }
-}
+#[derive(derive_more::Debug, Into)]
+pub struct SafeFile<T, R, O>(
+    OwnedFd,
+    #[debug(skip)]
+    #[into(skip)]
+    PhantomData<(T, R, O)>,
+);
 
 impl<T, R, O> SafeFile<T, R, O> {
     pub fn try_clone(&self) -> io::Result<Self> {
@@ -211,12 +196,6 @@ impl<T, R, O> SafeFile<T, R, O> {
             group,
             AtFlags::AT_EMPTY_PATH,
         )
-    }
-}
-
-impl<T, R, O> From<SafeFile<T, R, O>> for OwnedFd {
-    fn from(file: SafeFile<T, R, O>) -> Self {
-        file.0
     }
 }
 

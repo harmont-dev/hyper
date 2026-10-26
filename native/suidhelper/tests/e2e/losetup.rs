@@ -5,12 +5,13 @@
 //! BEFORE the tool binary ever runs.
 #![cfg(feature = "insecure_test_seams")]
 
+use predicates::str::contains;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, stdout_json};
 
 /// A root-owned fake `losetup` that records its argv (minus argv[0]) into
 /// `record` as a JSON array, resolves its LAST argument with readlink into
@@ -92,13 +93,7 @@ fn losetup_attach_passes_validated_fd_readonly_as_root() {
     fs::write(&backing, b"data").unwrap();
     let cfg = write_root_config(&base, &base, &bin);
 
-    let out = run(&cfg, &["losetup", "attach", backing.to_str().unwrap()]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["losetup", "attach", backing.to_str().unwrap()]).success();
 
     let argv = recorded_argv(&rec);
     assert_eq!(argv.len(), 4, "argv: {argv:?}");
@@ -114,7 +109,7 @@ fn losetup_attach_passes_validated_fd_readonly_as_root() {
         backing.to_str().unwrap(),
     );
 
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "attached");
     assert_eq!(json["device"], "/dev/loop9");
 }
@@ -134,16 +129,11 @@ fn losetup_attach_rw_omits_read_only_as_root() {
     fs::write(&backing, b"data").unwrap();
     let cfg = write_root_config(&base, &base, &bin);
 
-    let out = run(
+    run(
         &cfg,
         &["losetup", "attach", "--rw", backing.to_str().unwrap()],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    )
+    .success();
 
     let argv = recorded_argv(&rec);
     assert_eq!(
@@ -172,14 +162,9 @@ fn losetup_attach_refuses_out_of_base_before_running_tool_as_root() {
     let escapee = outside.path().join("escape.img");
     fs::write(&escapee, b"x").unwrap();
 
-    let out = run(&cfg, &["losetup", "attach", escapee.to_str().unwrap()]);
-    assert_ne!(
-        out.status.code(),
-        Some(0),
-        "out-of-base backing file accepted"
-    );
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("must be under"), "stderr: {err}");
+    run(&cfg, &["losetup", "attach", escapee.to_str().unwrap()])
+        .failure()
+        .stderr(contains("must be under"));
     // Validation precedes execution: the tool must never have run.
     assert!(!rec.exists(), "fake losetup ran despite refused operand");
 }
@@ -197,15 +182,9 @@ fn losetup_detach_argv_and_parse_as_root() {
     let bin = install_fake_losetup(&base, &rec, &resolved, "");
     let cfg = write_root_config(&base, &base, &bin);
 
-    let out = run(&cfg, &["losetup", "detach", "/dev/loop7"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["losetup", "detach", "/dev/loop7"]).success();
     assert_eq!(recorded_argv(&rec), vec!["-d", "/dev/loop7"]);
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "detached");
 }
 
@@ -225,8 +204,7 @@ fn losetup_detach_refuses_non_loop_operands_as_root() {
     // System storage and a path trick through a loop-looking prefix: both
     // must be refused at parse time, before the tool binary runs.
     for bad in ["/dev/sda", "/dev/loop0/../sda", "/dev/loop", "/dev/loopX"] {
-        let out = run(&cfg, &["losetup", "detach", bad]);
-        assert_ne!(out.status.code(), Some(0), "detach accepted {bad}");
+        run(&cfg, &["losetup", "detach", bad]).failure();
         assert!(!rec.exists(), "fake losetup ran for refused operand {bad}");
     }
 }
@@ -244,11 +222,7 @@ fn losetup_child_failure_surfaces_its_stderr_as_root() {
     fs::write(&backing, b"data").unwrap();
     let cfg = write_root_config(&base, &base, &bin);
 
-    let out = run(&cfg, &["losetup", "attach", backing.to_str().unwrap()]);
-    assert_ne!(out.status.code(), Some(0));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("losetup failed: boom: no free loop device"),
-        "stderr: {err}",
-    );
+    run(&cfg, &["losetup", "attach", backing.to_str().unwrap()])
+        .failure()
+        .stderr(contains("losetup failed: boom: no free loop device"));
 }

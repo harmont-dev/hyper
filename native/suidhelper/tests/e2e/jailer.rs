@@ -111,12 +111,7 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     );
 
     // The jailer's own exit status must propagate through the execve handoff.
-    assert_eq!(
-        out.status.code(),
-        Some(RECORDER_EXIT),
-        "exit status did not propagate; stderr: {}",
-        String::from_utf8_lossy(&out.stderr),
-    );
+    out.code(RECORDER_EXIT);
 
     let argv: Vec<String> =
         serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
@@ -201,12 +196,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
         ],
     );
 
-    assert_eq!(
-        out.status.code(),
-        Some(RECORDER_EXIT),
-        "exit status did not propagate; stderr: {}",
-        String::from_utf8_lossy(&out.stderr),
-    );
+    out.code(RECORDER_EXIT);
 
     let argv: Vec<String> =
         serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
@@ -239,7 +229,7 @@ fn refuses_uid_zero_without_exec_as_root() {
     let firecracker = install_firecracker(tmp.path());
     let cfg = write_root_config(tmp.path(), &jailer, &firecracker);
 
-    let out = run(
+    run(
         &cfg,
         &[
             "jailer",
@@ -252,10 +242,8 @@ fn refuses_uid_zero_without_exec_as_root() {
             "--api-sock",
             "/api.sock",
         ],
-    );
-
-    assert_ne!(out.status.code(), Some(0), "uid 0 must be refused");
-    assert_eq!(out.status.code(), Some(2), "validation failure exits 2");
+    )
+    .code(2);
     assert!(
         !argv_rec.exists(),
         "the jailer must never have been exec'd for uid 0",

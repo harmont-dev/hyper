@@ -15,7 +15,7 @@
 //! A missing socket (`ENOENT`, anywhere on the path) is `Pending`: firecracker has
 //! not configured vsock yet, so the controller keeps probing.
 
-use super::grant::{self, GrantError};
+use super::grant;
 use crate::config::Config;
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::tools::IsTool;
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
-pub use super::grant::GrantOut;
+pub use super::grant::{GrantError, GrantOut};
 
 /// The fixed in-jail socket name Firecracker opens for vsock (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_vsock`).
@@ -45,31 +45,8 @@ pub enum Error {
     SocketName(PathBuf),
     #[error("walking to the jail root: {0}")]
     Walk(#[source] crate::fs::file::ValidationError),
-    #[error("vsock socket is not a socket (or is a symlink); refusing to touch it")]
-    NotASocket,
-    #[error("statting the socket: {0}")]
-    Stat(#[source] crate::fs::file::ValidationError),
-    #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] nix::Error),
-    #[error("chmoding the socket: {0}")]
-    Chmod(#[source] nix::Error),
-    #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] nix::Error),
-    #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] nix::Error),
-}
-
-impl From<GrantError> for Error {
-    fn from(e: GrantError) -> Self {
-        match e {
-            GrantError::NotASocket => Error::NotASocket,
-            GrantError::Stat(e) => Error::Stat(e),
-            GrantError::Chown(e) => Error::Chown(e),
-            GrantError::Chmod(e) => Error::Chmod(e),
-            GrantError::ChgrpRoot(e) => Error::ChgrpRoot(e),
-            GrantError::ChmodRoot(e) => Error::ChmodRoot(e),
-        }
-    }
+    #[error(transparent)]
+    Grant(#[from] GrantError),
 }
 
 /// A `--socket` value validated at clap-parse time to be an absolute,

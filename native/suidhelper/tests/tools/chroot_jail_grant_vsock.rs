@@ -24,7 +24,7 @@
 
 use hyper_suidhelper::fs::path::{RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_vsock::{
-    grant_vsock_under, Error, GrantOut, VsockSocket,
+    grant_vsock_under, Error, GrantError, GrantOut, VsockSocket,
 };
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -181,7 +181,10 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
     fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
 
     let err = grant_vsock_under(jail, &sock(&imposter)).unwrap_err();
-    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert!(
+        matches!(err, Error::Grant(GrantError::NotASocket)),
+        "got {err:?}"
+    );
     assert_eq!(
         fs::symlink_metadata(&imposter).unwrap().mode() & 0o777,
         0o600,
@@ -201,7 +204,10 @@ fn symlink_at_leaf_is_refused() {
     symlink(&target, &link).unwrap();
 
     let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
-    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert!(
+        matches!(err, Error::Grant(GrantError::NotASocket)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -244,7 +250,10 @@ fn symlink_to_real_socket_at_leaf_is_refused_and_target_untouched() {
     symlink(&outside, &link).unwrap();
 
     let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
-    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert!(
+        matches!(err, Error::Grant(GrantError::NotASocket)),
+        "got {err:?}"
+    );
     assert_eq!(
         fs::symlink_metadata(&outside).unwrap().mode() & 0o777,
         0o700,

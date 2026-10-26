@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, stdout_json};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
 /// `work_dir`, 0644 so the OwnerOnlyWritable axis passes.
@@ -108,13 +108,7 @@ fn prepare_succeeds_and_builds_jail_as_root() {
     let dev_rdev = fs::metadata(&dev).map(|m| m.rdev());
     teardown_loop(&dev);
 
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout JSON");
+    let json = stdout_json(&out.success());
     assert_eq!(json["result"], "prepared");
     assert_eq!(fs::read(chroot.join("vmlinux")).unwrap(), b"kernel image");
     assert_eq!(
@@ -164,13 +158,7 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
         ],
     );
     teardown_loop(&dev);
-
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    out.success();
 
     let tun = chroot.join("dev").join("net").join("tun");
     let meta = fs::metadata(&tun).expect("dev/net/tun must exist");
@@ -190,7 +178,7 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
 fn prepare_rejects_system_device_operand() {
     let tmp = tempfile::tempdir().unwrap();
     let cfg = write_config(tmp.path(), tmp.path());
-    let out = run(
+    run(
         &cfg,
         &[
             "chroot-jail",
@@ -206,8 +194,8 @@ fn prepare_rejects_system_device_operand() {
             "--gid",
             "0",
         ],
-    );
-    assert_ne!(out.status.code(), Some(0), "must reject /dev/sda");
+    )
+    .failure();
 }
 
 // `chroot-jail remove` of a real chroot succeeds; the cgroup leaf is given as a
@@ -239,14 +227,9 @@ fn remove_succeeds_and_is_idempotent_as_root() {
             "--cgroup",
             missing_cgroup,
         ],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout JSON");
+    )
+    .success();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "removed");
     assert!(!chroot.exists(), "chroot must be gone");
 }

@@ -1,7 +1,6 @@
 use super::Error;
 use crate::util::safe_dev::{BlockDev, LoopDev};
-use std::fmt;
-use std::path::Path;
+use derive_more::Display;
 use std::str::FromStr;
 
 /// A dm-snapshot table line: `0 <sectors> snapshot <origin> <cow> P|N <chunk>`.
@@ -9,7 +8,8 @@ use std::str::FromStr;
 /// arbitrary devices - and origin/cow are anchored to loop / hyper-* devices by
 /// their types. Parsed from the caller's string, then rendered back via
 /// `Display` so dmsetup only ever sees a table we reconstructed ourselves.
-#[derive(Clone)]
+#[derive(Clone, Display)]
+#[display("0 {sectors} snapshot {origin} {cow} {} {chunk}", if *persistent { "P" } else { "N" })]
 pub struct SnapshotTable {
     sectors: u64,
     origin: BlockDev,
@@ -46,21 +46,5 @@ impl FromStr for SnapshotTable {
             persistent,
             chunk: chunk.parse().map_err(|_| Error::BadTable(s.to_string()))?,
         })
-    }
-}
-
-impl fmt::Display for SnapshotTable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let origin: &Path = self.origin.as_ref();
-        let cow: &Path = self.cow.as_ref();
-        write!(
-            f,
-            "0 {} snapshot {} {} {} {}",
-            self.sectors,
-            origin.display(),
-            cow.display(),
-            if self.persistent { "P" } else { "N" },
-            self.chunk,
-        )
     }
 }

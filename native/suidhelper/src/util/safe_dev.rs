@@ -11,7 +11,7 @@
 //! Filesystem path safety (confinement, symlink-free walks, fd-relative ops)
 //! lives in `crate::fs::{path, file, dir}`, not here.
 
-use std::fmt;
+use derive_more::{AsRef, Display, Into};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
@@ -50,7 +50,9 @@ fn is_hyper_name(name: &str) -> bool {
 }
 
 /// A loop device path, `/dev/loopN`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRef, Display)]
+#[as_ref(Path)]
+#[display("{}", _0.display())]
 pub struct LoopDev(PathBuf);
 
 impl FromStr for LoopDev {
@@ -65,15 +67,11 @@ impl FromStr for LoopDev {
     }
 }
 
-impl AsRef<Path> for LoopDev {
-    fn as_ref(&self) -> &Path {
-        &self.0
-    }
-}
-
 /// A block-device operand: a loop device or one of our own dm devices — never
 /// arbitrary system storage.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRef, Display, Into)]
+#[as_ref(Path)]
+#[display("{}", _0.display())]
 pub struct BlockDev(PathBuf);
 
 impl FromStr for BlockDev {
@@ -88,20 +86,8 @@ impl FromStr for BlockDev {
     }
 }
 
-impl AsRef<Path> for BlockDev {
-    fn as_ref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl From<BlockDev> for PathBuf {
-    fn from(dev: BlockDev) -> Self {
-        dev.0
-    }
-}
-
 /// A device-mapper device name we create/remove: a `hyper-*` name we own.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
 pub struct DmName(String);
 
 impl FromStr for DmName {
@@ -113,11 +99,5 @@ impl FromStr for DmName {
         } else {
             Err(Error::Name(s.to_string()))
         }
-    }
-}
-
-impl fmt::Display for DmName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }

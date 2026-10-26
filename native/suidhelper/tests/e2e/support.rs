@@ -12,8 +12,9 @@
 // target uses every item.
 #![allow(dead_code)]
 
+use assert_cmd::assert::Assert;
+use assert_cmd::Command;
 use std::path::Path;
-use std::process::{Command, Output};
 
 pub const BIN: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
 
@@ -23,7 +24,7 @@ pub fn is_root() -> bool {
 
 /// Run the helper with the security gate open and the config path redirected
 /// to a per-test file, so tests never touch the real host's /etc/hyper.
-pub fn run(config: &Path, args: &[&str]) -> Output {
+pub fn run(config: &Path, args: &[&str]) -> Assert {
     let mut cmd = Command::new(BIN);
     cmd.args(args)
         .env_clear()
@@ -32,5 +33,9 @@ pub fn run(config: &Path, args: &[&str]) -> Output {
     if let Ok(profile) = std::env::var("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", profile);
     }
-    cmd.output().expect("spawn helper")
+    cmd.assert()
+}
+
+pub fn stdout_json(assert: &Assert) -> serde_json::Value {
+    serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Typesafer filesystem paths.
 
+use derive_more::AsRef;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 use std::ffi::OsStr;
 use std::marker::PhantomData;
@@ -73,11 +74,12 @@ impl Components for StrictComponents {
 
 /// A [`Path`] which satisfies [`Absoluteness`] and [`Components`]
 /// constraints. The borrowed counterpart of [`SafePathBuf`].
-#[derive(Debug, RefCastCustom)]
+#[derive(Debug, RefCastCustom, AsRef)]
 #[repr(transparent)]
 pub struct SafePath<A, S> {
     #[trivial]
     axes: PhantomData<(A, S)>,
+    #[as_ref]
     path: Path,
 }
 
@@ -117,12 +119,6 @@ impl SafePath<IsRelative, StrictComponents> {
             .as_bytes()
             .split(|&b| b == b'/')
             .map(OsStr::from_bytes)
-    }
-}
-
-impl<A, S> AsRef<Path> for SafePath<A, S> {
-    fn as_ref(&self) -> &Path {
-        &self.path
     }
 }
 

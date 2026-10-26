@@ -1,14 +1,19 @@
 use super::Error;
-use std::fmt;
+use derive_more::Display;
 use std::str::FromStr;
 
 /// A thin-pool message we permit: provision, snapshot, or drop a thin device by id, or pin/unpin the pool's metadata snapshot.
-#[derive(Clone)]
+#[derive(Clone, Display)]
 pub enum ThinMessage {
+    #[display("create_thin {_0}")]
     CreateThin(u64),
+    #[display("create_snap {_0} {_1}")]
     CreateSnap(u64, u64),
+    #[display("delete {_0}")]
     Delete(u64),
+    #[display("reserve_metadata_snap")]
     ReserveMetadataSnap,
+    #[display("release_metadata_snap")]
     ReleaseMetadataSnap,
 }
 
@@ -23,18 +28,6 @@ impl FromStr for ThinMessage {
             ["reserve_metadata_snap"] => Ok(ThinMessage::ReserveMetadataSnap),
             ["release_metadata_snap"] => Ok(ThinMessage::ReleaseMetadataSnap),
             _ => Err(Error::BadTable(s.to_string())),
-        }
-    }
-}
-
-impl fmt::Display for ThinMessage {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ThinMessage::CreateThin(id) => write!(f, "create_thin {id}"),
-            ThinMessage::CreateSnap(new, orig) => write!(f, "create_snap {new} {orig}"),
-            ThinMessage::Delete(id) => write!(f, "delete {id}"),
-            ThinMessage::ReserveMetadataSnap => write!(f, "reserve_metadata_snap"),
-            ThinMessage::ReleaseMetadataSnap => write!(f, "release_metadata_snap"),
         }
     }
 }
