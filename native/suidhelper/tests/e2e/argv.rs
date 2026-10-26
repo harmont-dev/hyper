@@ -4,12 +4,13 @@
 //! JSON, then assert on the reconstructed command line.
 #![cfg(feature = "insecure_test_seams")]
 
+use predicates::str::contains;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, stdout_json};
 
 /// Install a root-owned fake tool named `basename` that records its argv (minus
 /// argv[0]) into `record` as a JSON array, then exits 0 with valid stdout for
@@ -59,7 +60,7 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
     // Deliberately weird inner spacing; the helper must re-render canonically.
-    let out = run(
+    run(
         &cfg,
         &[
             "dmsetup",
@@ -69,13 +70,8 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
             "--table",
             "0   100  snapshot  /dev/loop0   /dev/loop1 P 8",
         ],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    )
+    .success();
 
     let argv = recorded_argv(&rec);
     assert_eq!(
@@ -102,8 +98,7 @@ fn dmsetup_remove_retry_toggle_as_root() {
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
-    let out = run(&cfg, &["dmsetup", "remove", "--retry", "hyper-vm1"]);
-    assert_eq!(out.status.code(), Some(0));
+    run(&cfg, &["dmsetup", "remove", "--retry", "hyper-vm1"]).success();
     assert_eq!(recorded_argv(&rec), vec!["remove", "--retry", "hyper-vm1"]);
 }
 
@@ -118,7 +113,7 @@ fn dmsetup_message_create_thin_as_root() {
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
-    let out = run(
+    run(
         &cfg,
         &[
             "dmsetup",
@@ -127,8 +122,8 @@ fn dmsetup_message_create_thin_as_root() {
             "--message",
             "create_thin 7",
         ],
-    );
-    assert_eq!(out.status.code(), Some(0));
+    )
+    .success();
     // the helper passes the whole message as a single argv element (dmsetup re-joins remaining args)
     assert_eq!(
         recorded_argv(&rec),
@@ -148,15 +143,9 @@ fn dmsetup_targets_argv_and_parse_as_root() {
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "snapshot         v1.16.0");
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
-    let out = run(&cfg, &["dmsetup", "targets"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["dmsetup", "targets"]).success();
     assert_eq!(recorded_argv(&rec), vec!["targets"]);
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "targets");
     assert_eq!(json["output"], "snapshot         v1.16.0\n");
 }
@@ -172,15 +161,9 @@ fn dmsetup_ls_argv_and_parse_as_root() {
     let bin = install_fake(tmp.path(), "dmsetup", &rec, "hyper-thinpool\\nhyper-rw-abc");
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
-    let out = run(&cfg, &["dmsetup", "ls"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["dmsetup", "ls"]).success();
     assert_eq!(recorded_argv(&rec), vec!["ls"]);
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "listed");
     assert_eq!(json["output"], "hyper-thinpool\nhyper-rw-abc\n");
 }
@@ -201,13 +184,7 @@ fn losetup_list_argv_and_parse_as_root() {
     );
     let cfg = write_root_config(tmp.path(), &[("losetup", &bin)]);
 
-    let out = run(&cfg, &["losetup", "list"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["losetup", "list"]).success();
     assert_eq!(
         recorded_argv(&rec),
         vec![
@@ -218,7 +195,7 @@ fn losetup_list_argv_and_parse_as_root() {
             "NAME,BACK-FILE"
         ]
     );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["result"], "listed");
     assert_eq!(
         json["output"],
@@ -236,14 +213,9 @@ fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
     // A real, root-owned system file, but the wrong basename for `dmsetup`.
     let cfg = write_root_config(tmp.path(), &[("dmsetup", Path::new("/usr/bin/env"))]);
 
-    let out = run(&cfg, &["dmsetup", "targets"]);
-    assert_ne!(
-        out.status.code(),
-        Some(0),
-        "a configured binary with the wrong basename must be refused"
-    );
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("basename must be"), "stderr: {err}");
+    run(&cfg, &["dmsetup", "targets"])
+        .failure()
+        .stderr(contains("basename must be"));
 }
 
 #[test]
@@ -258,14 +230,8 @@ fn blockdev_getsz_argv_and_parse_as_root() {
     let bin = install_fake(tmp.path(), "blockdev", &rec, "2048");
     let cfg = write_root_config(tmp.path(), &[("blockdev", &bin)]);
 
-    let out = run(&cfg, &["blockdev", "--getsz", "/dev/loop0"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let out = run(&cfg, &["blockdev", "--getsz", "/dev/loop0"]).success();
     assert_eq!(recorded_argv(&rec), vec!["--getsz", "/dev/loop0"]);
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["sectors"], 2048);
 }

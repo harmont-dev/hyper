@@ -5,12 +5,13 @@
 //! mean "wrong dump".
 #![cfg(feature = "insecure_test_seams")]
 
+use predicates::str::contains;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, stdout_json};
 
 // One superblock, one device (dev_id=7, 4 mapped blocks: a 3-block range plus
 // a single). Extra attributes mirror real thin_dump output; the parser must
@@ -87,17 +88,12 @@ fn thin_dump_argv_and_ranges_json_as_root() {
     let out = run(
         &cfg,
         &["thin-dump", "--meta", "/dev/loop3", "--dev-id", "7"],
-    );
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    )
+    .success();
 
     assert_eq!(recorded_argv(&rec), vec!["--metadata-snap", "/dev/loop3"]);
 
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let json = stdout_json(&out);
     assert_eq!(json["block_sectors"], 128);
     assert_eq!(json["ranges"], serde_json::json!([[0, 3], [9, 1]]));
 }
@@ -113,17 +109,12 @@ fn thin_dump_wrong_dev_id_is_an_error_as_root() {
     let bin = install_fake_thin_dump(tmp.path(), &rec);
     let cfg = write_root_config(tmp.path(), &bin);
 
-    let out = run(
+    run(
         &cfg,
         &["thin-dump", "--meta", "/dev/loop3", "--dev-id", "9"],
-    );
-    assert_ne!(
-        out.status.code(),
-        Some(0),
-        "an absent dev_id must be an error, never an empty result",
-    );
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("thin device 9 not present"), "stderr: {err}");
+    )
+    .failure()
+    .stderr(contains("thin device 9 not present"));
 }
 
 #[test]
@@ -136,16 +127,12 @@ fn thin_dump_child_failure_surfaces_its_stderr_as_root() {
     let bin = install_failing_thin_dump(tmp.path());
     let cfg = write_root_config(tmp.path(), &bin);
 
-    let out = run(
+    run(
         &cfg,
         &["thin-dump", "--meta", "/dev/loop3", "--dev-id", "7"],
-    );
-    assert_ne!(out.status.code(), Some(0));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("thin_dump failed: metadata snap not reserved"),
-        "stderr: {err}",
-    );
+    )
+    .failure()
+    .stderr(contains("thin_dump failed: metadata snap not reserved"));
 }
 
 #[test]
@@ -160,8 +147,7 @@ fn thin_dump_refuses_non_loop_meta_as_root() {
     let cfg = write_root_config(tmp.path(), &bin);
 
     for bad in ["/dev/sda", "/dev/loop0/../sda", "/dev/mapper/hyper-pool"] {
-        let out = run(&cfg, &["thin-dump", "--meta", bad, "--dev-id", "7"]);
-        assert_ne!(out.status.code(), Some(0), "meta accepted {bad}");
+        run(&cfg, &["thin-dump", "--meta", bad, "--dev-id", "7"]).failure();
         assert!(
             !rec.exists(),
             "fake thin_dump ran for refused operand {bad}"

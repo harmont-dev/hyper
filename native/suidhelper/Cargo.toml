@@ -147,6 +147,8 @@ thiserror = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
 proptest = "1"
 tempfile = "3"
 

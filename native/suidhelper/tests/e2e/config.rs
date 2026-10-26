@@ -5,12 +5,14 @@
 
 use hyper_suidhelper::config::{BinError, Config};
 use hyper_suidhelper::process::binary;
+use predicates::boolean::PredicateBooleanExt;
+use predicates::str::contains;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, stdout_json};
 
 /// Write a config file owned root:root, 0644. Requires the test run as root.
 fn write_root_config(dir: &Path, body: &str) -> std::path::PathBuf {
@@ -33,14 +35,8 @@ fn missing_config_falls_back_to_defaults_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let missing = tmp.path().join("nope.toml");
-    let out = run(&missing, &["sys-test"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "absent config should use defaults; stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
+    let out = run(&missing, &["sys-test"]).success();
+    let json = stdout_json(&out);
     assert_eq!(json["sys_test"], "ok");
     assert_eq!(json["hyper_base"], "/srv/hyper");
 }
@@ -59,13 +55,9 @@ fn non_root_owned_config_is_rejected() {
         let nogrp = nix::unistd::Gid::from_raw(65534);
         nix::unistd::chown(&p, Some(nobody), Some(nogrp)).unwrap();
     }
-    let out = run(&p, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(2));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("root:root") || err.contains("not owned"),
-        "expected an ownership rejection, stderr: {err}",
-    );
+    run(&p, &["sys-test"])
+        .code(2)
+        .stderr(contains("root:root").or(contains("not owned")));
 }
 
 #[test]
@@ -76,9 +68,9 @@ fn malformed_config_exits_2_malformed_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "this is not = valid = toml ===");
-    let out = run(&p, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("not valid TOML"));
+    run(&p, &["sys-test"])
+        .code(2)
+        .stderr(contains("not valid TOML"));
 }
 
 #[test]
@@ -89,9 +81,9 @@ fn relative_work_dir_exits_2_relative_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "work_dir = \"relative/path\"\n");
-    let out = run(&p, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("must be an absolute path"));
+    run(&p, &["sys-test"])
+        .code(2)
+        .stderr(contains("must be an absolute path"));
 }
 
 #[test]
@@ -102,14 +94,8 @@ fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let p = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
-    let out = run(&p, &["sys-test"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
+    let out = run(&p, &["sys-test"]).success();
+    let json = stdout_json(&out);
     assert_eq!(json["sys_test"], "ok");
     assert_eq!(json["hyper_base"], "/srv/hyper");
 }
@@ -197,11 +183,7 @@ fn bad_uid_gid_range_exits_2_as_root() {
         tmp.path(),
         "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [0, 100]\n",
     );
-    let out = run(&p, &["sys-test"]);
-    assert_eq!(out.status.code(), Some(2));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("uid_gid_range"),
-        "expected a uid_gid_range error in stderr, got: {err}",
-    );
+    run(&p, &["sys-test"])
+        .code(2)
+        .stderr(contains("uid_gid_range"));
 }

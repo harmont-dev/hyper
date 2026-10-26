@@ -11,19 +11,14 @@
 use std::path::Path;
 
 mod support;
+use support::stdout_json;
 
 #[test]
 fn version_reports_pkg_version_and_hex_checksum() {
     // A nonexistent config path: `version` renders before config setup,
     // so it must succeed regardless. Needs no root.
-    let out = support::run(Path::new("/nonexistent/hyper-config.toml"), &["version"]);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
+    let out = support::run(Path::new("/nonexistent/hyper-config.toml"), &["version"]).success();
+    let json = stdout_json(&out);
     assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
     let sum = json["checksum_blake3"]
         .as_str()
