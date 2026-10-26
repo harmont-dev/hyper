@@ -53,6 +53,18 @@ printf 'dm_snapshot\ndm_thin_pool\nloop\n' \
 sudo dmsetup targets | grep -q thin-pool \
   || fail "thin-pool dm target missing after modprobe"
 
+info "KVM nested virtualization off (boot guard: Januscape/Zapscape)"
+printf 'options kvm_intel nested=0\noptions kvm_amd nested=0\n' \
+  | sudo tee /etc/modprobe.d/hyper-kvm.conf >/dev/null
+for m in kvm_intel kvm_amd; do
+  [ -e "/sys/module/$m/parameters/nested" ] || continue
+  case "$(cat "/sys/module/$m/parameters/nested")" in
+    N | 0) ;;
+    *) { sudo modprobe -r "$m" && sudo modprobe "$m"; } \
+      || fail "could not reload $m with nested=0 -- stop running VMs and retry" ;;
+  esac
+done
+
 info "IPv4 forwarding (required — host-init only asserts it, never sets it)"
 sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
 echo 'net.ipv4.ip_forward=1' \
