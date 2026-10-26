@@ -184,6 +184,18 @@ impl FromStr for JailSock {
     }
 }
 
+impl AsRef<str> for VmId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for JailSock {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A fully-resolved jailer invocation. The privileged fields (`jailer`,
 /// `firecracker`, `jail_base`, `parent_cgroup`) must come from trusted config;
 /// the caller-supplied fields (`vm`, `uid`, `gid`, `cgroups`, `api_sock`) must
@@ -211,10 +223,12 @@ impl Jailer<'_> {
     /// caller never names the jailer, the `--exec-file`, the chroot base, the
     /// cgroup version, or the parent cgroup — those come from trusted config.
     fn argv(&self) -> Result<Vec<CString>, Error> {
+        let vm: &str = self.vm.as_ref();
+        let api_sock: &str = self.api_sock.as_ref();
         let mut argv = vec![
             "jailer".to_cstring()?,
             "--id".to_cstring()?,
-            self.vm.to_string().to_cstring()?,
+            vm.to_cstring()?,
             "--exec-file".to_cstring()?,
             self.firecracker.as_path().to_cstring()?,
             "--uid".to_cstring()?,
@@ -241,7 +255,7 @@ impl Jailer<'_> {
 
         argv.push("--".to_cstring()?);
         argv.push("--api-sock".to_cstring()?);
-        argv.push(self.api_sock.to_string().to_cstring()?);
+        argv.push(api_sock.to_cstring()?);
 
         Ok(argv)
     }

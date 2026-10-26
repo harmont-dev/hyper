@@ -49,6 +49,10 @@ name = "tools_dmsetup_parsers"
 path = "tests/tools/dmsetup_parsers.rs"
 
 [[test]]
+name = "linux_dm"
+path = "tests/linux/dm.rs"
+
+[[test]]
 name = "tools_blockcopy"
 path = "tests/tools/blockcopy.rs"
 

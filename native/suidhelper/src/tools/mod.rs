@@ -16,7 +16,9 @@ pub mod thin_dump;
 pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
-pub use dmsetup::{DmTable, Dmsetup, DmsetupArgs, ThinMessage};
+pub use dmsetup::{
+    parse_message, parse_table, Dmsetup, DmsetupArgs, MessageError, TableError, ThinMessage,
+};
 pub use losetup::{Losetup, LosetupArgs};
 pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};

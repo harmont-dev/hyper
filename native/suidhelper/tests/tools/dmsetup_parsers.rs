@@ -5,7 +5,12 @@
 //! malformed arity. These are the contract that keeps dmsetup off arbitrary
 //! storage.
 
-use hyper_suidhelper::tools::{DmTable, ThinMessage};
+use hyper_suidhelper::linux::dm::ThinId;
+use hyper_suidhelper::tools::{parse_message, parse_table, ThinMessage};
+
+fn id(n: u32) -> ThinId {
+    ThinId::new(n).unwrap()
+}
 
 #[test]
 fn accepts_canonical_tables_and_round_trips() {
@@ -14,10 +19,9 @@ fn accepts_canonical_tables_and_round_trips() {
         "0 100 thin-pool /dev/loop0 /dev/loop1 128 1024",
         "0 100 thin /dev/mapper/hyper-pool 0",
         "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
+        "0 100 thin /dev/mapper/hyper-pool 16777215",
     ] {
-        let t = s
-            .parse::<DmTable>()
-            .unwrap_or_else(|_| panic!("rejected {s:?}"));
+        let t = parse_table(s).unwrap_or_else(|_| panic!("rejected {s:?}"));
         assert_eq!(t.to_string(), s, "round-trip changed {s:?}");
     }
 }
@@ -26,9 +30,7 @@ fn accepts_canonical_tables_and_round_trips() {
 fn normalizes_inner_whitespace_on_render() {
     let weird = "0   100  snapshot  /dev/loop0   /dev/loop1 P 8";
     let canonical = "0 100 snapshot /dev/loop0 /dev/loop1 P 8";
-    let t = weird
-        .parse::<DmTable>()
-        .expect("weird spacing must still parse");
+    let t = parse_table(weird).expect("weird spacing must still parse");
     assert_eq!(t.to_string(), canonical);
 }
 
@@ -44,29 +46,49 @@ fn rejects_non_whitelisted_targets_and_devices() {
         "0 100 snapshot /dev/loop0 /dev/loop1 P",       // too few fields
         "0 100 thin-pool /dev/sda /dev/loop1 128 1024", // meta = arbitrary
         "0 100 thin /dev/sda 0",                        // pool = arbitrary
+        "0 100 thin /dev/mapper/hyper-pool 16777216",   // id past 24 bits
+        "0 100 thin /dev/mapper/hyper-pool 0 /dev/sda", // origin = arbitrary
+        "0 100 thin /dev/mapper/hyper-pool 0 /dev/loop0 /dev/loop1", // two origins
         "",                                             // empty
         "garbage",                                      // junk
     ] {
-        assert!(bad.parse::<DmTable>().is_err(), "DmTable accepted {bad:?}");
+        assert!(parse_table(bad).is_err(), "parse_table accepted {bad:?}");
     }
 }
 
 #[test]
 fn thinmessage_accepts_whitelisted_and_normalizes() {
-    for (s, canon) in [
-        ("create_thin 7", "create_thin 7"),
-        ("create_thin   7", "create_thin 7"),
-        ("delete 3", "delete 3"),
-        ("create_snap 4 2", "create_snap 4 2"),
-        ("create_snap   4   2", "create_snap 4 2"),
-        ("reserve_metadata_snap", "reserve_metadata_snap"),
-        ("  reserve_metadata_snap  ", "reserve_metadata_snap"),
-        ("release_metadata_snap", "release_metadata_snap"),
+    for (s, want) in [
+        ("create_thin 7", ThinMessage::CreateThin(id(7))),
+        ("create_thin   7", ThinMessage::CreateThin(id(7))),
+        (
+            "create_thin 16777215",
+            ThinMessage::CreateThin(id(16777215)),
+        ),
+        ("delete 3", ThinMessage::Delete(id(3))),
+        (
+            "create_snap 4 2",
+            ThinMessage::CreateSnap {
+                id: id(4),
+                origin: id(2),
+            },
+        ),
+        (
+            "create_snap   4   2",
+            ThinMessage::CreateSnap {
+                id: id(4),
+                origin: id(2),
+            },
+        ),
+        ("reserve_metadata_snap", ThinMessage::ReserveMetadataSnap),
+        (
+            "  reserve_metadata_snap  ",
+            ThinMessage::ReserveMetadataSnap,
+        ),
+        ("release_metadata_snap", ThinMessage::ReleaseMetadataSnap),
     ] {
-        let m = s
-            .parse::<ThinMessage>()
-            .unwrap_or_else(|_| panic!("rejected {s:?}"));
-        assert_eq!(m.to_string(), canon, "round-trip changed {s:?}");
+        let got = parse_message(s).unwrap_or_else(|_| panic!("rejected {s:?}"));
+        assert_eq!(got, want, "{s:?}");
     }
 }
 
@@ -89,10 +111,13 @@ fn thinmessage_rejects_non_whitelisted() {
         "reserve_metadata_snap 1",
         "release_metadata_snap 1 2",
         "reserve_metadata",
+        "create_thin 16777216",
+        "delete 16777216",
+        "create_snap 1 16777216",
     ] {
         assert!(
-            bad.parse::<ThinMessage>().is_err(),
-            "ThinMessage accepted {bad:?}"
+            parse_message(bad).is_err(),
+            "parse_message accepted {bad:?}"
         );
     }
 }

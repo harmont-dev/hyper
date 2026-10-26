@@ -1,32 +1,15 @@
 mod message;
-mod snapshot;
 mod table;
-mod thin;
-mod thin_pool;
 
 use super::IsTool;
+use crate::linux::dm::{self, Access, DmTable, RemoveMode};
 use crate::process::binary::RootSafeBin;
-use crate::util::safe_dev::{self, DmName};
+use crate::util::safe_dev::DmName;
 use clap::{Args, Subcommand};
-pub use message::ThinMessage;
+pub use message::{parse_message, MessageError, ThinMessage};
 use serde::Serialize;
-use std::io;
 use std::path::PathBuf;
-use std::process::Output;
-pub use table::DmTable;
-use thiserror::Error as ThisError;
-
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("dmsetup table must be a snapshot target: {0}")]
-    BadTable(String),
-    #[error(transparent)]
-    Device(#[from] safe_dev::Error),
-    #[error("running dmsetup: {0}")]
-    Spawn(#[source] io::Error),
-    #[error("dmsetup failed: {0}")]
-    Failed(String),
-}
+pub use table::{parse_table, TableError};
 
 #[derive(Args)]
 pub struct DmsetupArgs {
@@ -40,7 +23,7 @@ enum DmOp {
         name: DmName,
         #[arg(long)]
         readonly: bool,
-        #[arg(long)]
+        #[arg(long, value_parser = parse_table)]
         table: DmTable,
     },
     Remove {
@@ -50,7 +33,7 @@ enum DmOp {
     },
     Message {
         name: DmName,
-        #[arg(long)]
+        #[arg(long, value_parser = parse_message)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
@@ -78,87 +61,81 @@ pub enum DmsetupOut {
 }
 
 pub struct Dmsetup {
-    bin: RootSafeBin<"dmsetup">,
+    dmsetup: dm::Dmsetup,
     op: DmOp,
 }
 
 impl Dmsetup {
     pub fn new(bin: RootSafeBin<"dmsetup">, args: DmsetupArgs) -> Self {
-        Self { bin, op: args.op }
+        Self {
+            dmsetup: dm::Dmsetup::new(bin),
+            op: args.op,
+        }
     }
 }
 
 impl IsTool for Dmsetup {
     type Args = DmsetupArgs;
     type Output = DmsetupOut;
-    type RunT = io::Result<Output>;
+    type RunT = Result<DmsetupOut, Box<dyn std::error::Error>>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = self.bin.command();
-        match &self.op {
+        let dm = &self.dmsetup;
+        Ok(match &self.op {
             DmOp::Create {
                 name,
                 readonly,
                 table,
             } => {
-                cmd.arg("create").arg(name.to_string());
-                if *readonly {
-                    cmd.arg("--readonly");
+                let access = if *readonly {
+                    Access::ReadOnly
+                } else {
+                    Access::ReadWrite
+                };
+                DmsetupOut::Created {
+                    device: dm.create(name.as_ref(), table, access)?.path(),
                 }
-                cmd.arg("--table").arg(table.to_string());
             }
             DmOp::Remove { retry, name } => {
-                cmd.arg("remove");
-                if *retry {
-                    cmd.arg("--retry");
-                }
-                cmd.arg(name.to_string());
+                let mode = if *retry {
+                    RemoveMode::Retry
+                } else {
+                    RemoveMode::Once
+                };
+                dm.device(name.as_ref()).remove(mode)?;
+                DmsetupOut::Removed
             }
             DmOp::Message { name, message } => {
-                cmd.arg("message")
-                    .arg(name.to_string())
-                    .arg("0")
-                    .arg(message.to_string());
+                let pool = dm.thin_pool(name.as_ref())?;
+                match *message {
+                    ThinMessage::CreateThin(id) => pool.create_thin(id).map(drop)?,
+                    ThinMessage::CreateSnap { id, origin } => pool.create_snap(id, origin)?,
+                    ThinMessage::Delete(id) => pool.delete_thin(id)?,
+                    ThinMessage::ReserveMetadataSnap => pool.reserve_metadata_snap()?,
+                    ThinMessage::ReleaseMetadataSnap => pool.release_metadata_snap()?,
+                }
+                DmsetupOut::Messaged
             }
             DmOp::Suspend { name } => {
-                cmd.arg("suspend").arg(name.to_string());
+                dm.device(name.as_ref()).suspend()?;
+                DmsetupOut::Suspended
             }
             DmOp::Resume { name } => {
-                cmd.arg("resume").arg(name.to_string());
+                dm.device(name.as_ref()).resume()?;
+                DmsetupOut::Resumed
             }
-            DmOp::Targets => {
-                cmd.arg("targets");
-            }
-            DmOp::Ls => {
-                cmd.arg("ls");
-            }
-        }
-
-        cmd.env_clear().output()
+            DmOp::Targets => DmsetupOut::Targets {
+                output: dm
+                    .targets()?
+                    .iter()
+                    .map(|target| format!("{} {}\n", target.name, target.version))
+                    .collect(),
+            },
+            DmOp::Ls => DmsetupOut::Listed { output: dm.list()? },
+        })
     }
 
     fn parse(&self, res: Self::RunT) -> Result<DmsetupOut, Box<dyn std::error::Error>> {
-        let out = res.map_err(Error::Spawn)?;
-        if !out.status.success() {
-            return Err(
-                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
-            );
-        }
-
-        Ok(match &self.op {
-            DmOp::Create { name, .. } => DmsetupOut::Created {
-                device: PathBuf::from(format!("/dev/mapper/{name}")),
-            },
-            DmOp::Remove { .. } => DmsetupOut::Removed,
-            DmOp::Message { .. } => DmsetupOut::Messaged,
-            DmOp::Suspend { .. } => DmsetupOut::Suspended,
-            DmOp::Resume { .. } => DmsetupOut::Resumed,
-            DmOp::Targets => DmsetupOut::Targets {
-                output: String::from_utf8_lossy(&out.stdout).into_owned(),
-            },
-            DmOp::Ls => DmsetupOut::Listed {
-                output: String::from_utf8_lossy(&out.stdout).into_owned(),
-            },
-        })
+        res
     }
 }

@@ -101,3 +101,9 @@ impl FromStr for DmName {
         }
     }
 }
+
+impl AsRef<str> for DmName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}

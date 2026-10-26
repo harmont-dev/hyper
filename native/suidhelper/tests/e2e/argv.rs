@@ -110,7 +110,12 @@ fn dmsetup_message_create_thin_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let rec = tmp.path().join("argv.json");
-    let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
+    let bin = install_fake(
+        tmp.path(),
+        "dmsetup",
+        &rec,
+        "0 100 thin-pool 7:0 7:1 128 0 0",
+    );
     let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
 
     run(
@@ -147,7 +152,7 @@ fn dmsetup_targets_argv_and_parse_as_root() {
     assert_eq!(recorded_argv(&rec), vec!["targets"]);
     let json = stdout_json(&out);
     assert_eq!(json["result"], "targets");
-    assert_eq!(json["output"], "snapshot         v1.16.0\n");
+    assert_eq!(json["output"], "snapshot v1.16.0\n");
 }
 
 #[test]
