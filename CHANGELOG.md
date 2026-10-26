@@ -14,6 +14,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value is now rejected with `INVALID_ARGUMENT`; `ListVms` is now paginated
   (`page_size` / `page_token` / `next_page_token`).
 
+### Removed
+- **Breaking:** VM networking (per-VM netns + veth + TAP + nftables NAT egress,
+  and the guest `/etc/resolv.conf` from `hyper.resolver=`) has been removed
+  pending a ground-up rewrite. VMs boot with no NIC, a node no longer requires
+  or reads a `[network]` config table (an existing one is ignored), and the
+  `Hyper.SuidHelper.Network`, `Hyper.Node.FireVMM.Net` and `Hyper.Cfg.Network`
+  modules and the setuid helper's `network` subcommands remain as interfaces
+  but return/raise unimplemented.
+
 ## [0.1.0]
 
 First public release: a distributed orchestrator for Firecracker microVMs on the

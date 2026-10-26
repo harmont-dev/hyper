@@ -123,6 +123,7 @@ defmodule Hyper.MixProject do
         "docs/cookbook/install.md",
         "docs/cookbook/config.md",
         "docs/cookbook/architecture.md",
+        "docs/cookbook/networking.md",
         "docs/grpc.md",
         "CONTRIBUTING.md",
         "SECURITY.md",
@@ -165,12 +166,43 @@ defmodule Hyper.MixProject do
         });
       });
 
+      // Diagrams are authored with light-theme colors from the ExDoc palette.
+      // Mermaid has no per-theme classDef, so on the dark theme each one is
+      // swapped for a lighter shade of the same hue and node text is forced light.
+      const mermaidDarkColors = {
+        "#1887dc": "#50abf1",
+        "#e68019": "#f59e47",
+        "#8c7ae6": "#b1a5ee",
+        "#90a3b6": "#b2c2d2",
+        "#637d97": "#90a3b6",
+        "#30a65b": "#47d17a",
+        "#e0b406": "#facd38",
+        "#e73a23": "#f66c5a"
+      };
+
+      function mermaidForDarkTheme(source) {
+        for (const [light, dark] of Object.entries(mermaidDarkColors)) {
+          source = source.split(light).join(dark);
+        }
+        return source
+          .split("stroke-width:1.5px")
+          .join("stroke-width:2px")
+          .split("\\n")
+          .map((line) => line.trimStart().startsWith("classDef ") ? line + ",color:#e2e8f0" : line)
+          .join("\\n");
+      }
+
       let mermaidInitialized = false;
       window.addEventListener("exdoc:loaded", () => {
+        const dark = document.body.className.includes("dark");
+
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
-            theme: document.body.className.includes("dark") ? "dark" : "default"
+            theme: dark ? "dark" : "neutral",
+            themeVariables: dark ? {edgeLabelBackground: "#1e293b", titleColor: "#f1f5f9"} : {},
+            // Room under subgraph titles so edges entering a box don't cross its label.
+            flowchart: {subGraphTitleMargin: {top: 4, bottom: 16}}
           });
           mermaidInitialized = true;
         }
@@ -179,7 +211,8 @@ defmodule Hyper.MixProject do
         for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
           const preEl = codeEl.parentElement;
           const graphEl = document.createElement("div");
-          mermaid.render("mermaid-graph-" + id++, codeEl.textContent).then(({svg, bindFunctions}) => {
+          const source = dark ? mermaidForDarkTheme(codeEl.textContent) : codeEl.textContent;
+          mermaid.render("mermaid-graph-" + id++, source).then(({svg, bindFunctions}) => {
             graphEl.innerHTML = svg;
             bindFunctions?.(graphEl);
             preEl.insertAdjacentElement("afterend", graphEl);
@@ -268,6 +301,39 @@ defmodule Hyper.MixProject do
     :ok
   end
 
+  # Needs `entr` and `npx` on PATH. The port runs the script in its own session,
+  # so Ctrl-C never reaches it: instead it watches its stdin (the port pipe) and
+  # `kill 0`s its whole group when mix exits. Only git-visible files are watched;
+  # the codegen compilers rewrite gitignored files under lib/ on every build,
+  # which would retrigger the watcher forever. New files need a restart.
+  defp docs_serve(args) do
+    {opts, _, _} = OptionParser.parse(args, strict: [host: :string, port: :integer])
+    host = Keyword.get_lazy(opts, :host, &docs_serve_default_host/0)
+    port = Keyword.get(opts, :port, 8000)
+
+    script = """
+    exec 3<&0
+    trap 'kill 0' EXIT
+    (cat <&3 >/dev/null; kill 0) &
+    git ls-files -co --exclude-standard docs README.md mix.exs lib | entr -n mix docs &
+    npx -y browser-sync@3.0.3 start --server doc --files 'doc/*.html' \\
+      --listen #{host} --port #{port} --no-open --no-ui --no-notify
+    """
+
+    {_, status} = System.cmd("sh", ["-c", script], into: IO.stream())
+    if status != 0, do: Mix.raise("docs.serve exited with status #{status}")
+  end
+
+  # The tailnet address keeps the docs off the public interface while still
+  # reachable from your own machines; plain localhost when Tailscale is down.
+  defp docs_serve_default_host do
+    case System.find_executable("tailscale") &&
+           System.cmd("tailscale", ["ip", "-4"], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split() |> hd()
+      _ -> "127.0.0.1"
+    end
+  end
+
   defp aliases do
     [
       check: [
@@ -283,6 +349,9 @@ defmodule Hyper.MixProject do
       # Alias them to the shell grammar before ExDoc runs (same VM, so the
       # registration is visible to the highlighter).
       docs: ["loadpaths", &register_doc_lexers/1, "docs"],
+      # Rebuild the docs on every save and live-reload the browser.
+      # `mix docs.serve [--host IP] [--port 8000]`; host defaults to the Tailscale IP.
+      "docs.serve": &docs_serve/1,
       # Force a regeneration of the Firecracker bindings (ignores staleness).
       "firecracker.gen": ["compile.firecracker_gen --force"],
       # Force a regeneration of the gRPC bindings (ignores staleness).

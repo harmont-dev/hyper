@@ -14,12 +14,17 @@ defmodule Hyper.Node do
 
     * `Hyper.Node.VMSupervisor` - a **local** `DynamicSupervisor` that starts one
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
-      this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
+      this machine's kernel/rootfs/cgroup and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
       VMs on a surviving node - cold-booting a ghost).
 
-    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
-      and group id.
+    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its
+      own user id and group id.
+
+    * `Hyper.Node.Net` - this node's VM networking: applies the host setup on
+      start, then hands out per-VM network leases bound to each VM's lifetime.
+      Started before the VM supervisor so the host is networked before any VM
+      boots.
 
     * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
       memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
@@ -65,6 +70,7 @@ defmodule Hyper.Node do
       # be up first.
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
+      Hyper.Node.Net,
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Img,
       # Last child: :one_for_one starts in order, so the VM supervisor and Img are
@@ -310,22 +316,8 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
          {:ok, base} <- Hyper.SuidHelper.sys_test(),
-         :ok <- check_helper_base(base),
-         :ok <- init_network() do
+         :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
-    end
-  end
-
-  # VM networking is mandatory: refuse to start unless `[network]` is
-  # configured, then idempotently reconcile the host-wide `hyper` nftables
-  # table. Runs after `Hyper.SuidHelper.test_system/0` so the helper is
-  # confirmed present first.
-  @spec init_network :: :ok | {:error, term()}
-  defp init_network do
-    if Hyper.Cfg.Network.configured?() do
-      Hyper.SuidHelper.Network.host_init()
-    else
-      {:error, :network_not_configured}
     end
   end
 
