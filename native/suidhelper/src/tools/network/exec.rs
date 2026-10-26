@@ -8,7 +8,6 @@ use super::args::{Command, Which};
 use crate::util::setuid_privileged::become_root_permanently;
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
 use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
@@ -31,12 +30,9 @@ pub enum Error {
     },
 }
 
-pub(super) fn run_all<'a>(
-    commands: &[Command],
-    resolve: impl Fn(Which) -> &'a Path,
-) -> Result<(), Error> {
+pub(super) fn run_all(commands: &[Command], resolve: impl Fn(Which) -> Proc) -> Result<(), Error> {
     for command in commands {
-        let mut proc = Proc::new(resolve(command.bin));
+        let mut proc = resolve(command.bin);
         proc.args(&command.argv).env_clear();
 
         // `ip` and `nft` refuse to run under `AT_SECURE` — the setuid-like state

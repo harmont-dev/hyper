@@ -1,7 +1,7 @@
 //! Property tests for the lexical confinement gate. These run against the
 //! `hyper_suidhelper` library crate (Task 6's lib split), not inline in source.
 
-use hyper_suidhelper::util::safe_path::{
+use hyper_suidhelper::fs::path::{
     IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
 };
 use proptest::prelude::*;

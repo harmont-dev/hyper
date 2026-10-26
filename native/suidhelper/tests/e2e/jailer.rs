@@ -44,7 +44,7 @@ fn install_recorder(dir: &Path, argv_rec: &Path, env_rec: &Path) -> PathBuf {
 }
 
 /// A root-owned plain file with basename `firecracker` — the `--exec-file`. It is
-/// never executed by us (the jailer would), only validated as a `SafeBin`.
+/// never executed by us (the jailer would), only validated as a `RootSafeBinPathBuf`.
 fn install_firecracker(dir: &Path) -> PathBuf {
     let path = dir.join("firecracker");
     fs::write(&path, b"#!/bin/true\n").unwrap();

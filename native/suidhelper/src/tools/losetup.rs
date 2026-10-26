@@ -1,10 +1,10 @@
 use super::IsTool;
+use crate::fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::process::binary::RootSafeBin;
 use crate::util::safe_dev::LoopDev;
-use crate::util::safe_file::{self, Any, IsRegularFile, SafeFile};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
-use nix::fcntl::OFlag;
 use nix::unistd::dup;
 use serde::Serialize;
 use std::io;
@@ -24,9 +24,9 @@ pub enum Error {
     #[error("backing file must be under {}: {path}", .base.display())]
     OutsideBase { base: &'static Path, path: PathBuf },
     #[error("backing path: {0}")]
-    BackingPath(#[from] safe_path::ValidationError),
+    BackingPath(#[from] path::ValidationError),
     #[error("backing file: {0}")]
-    Backing(#[from] safe_file::ValidationError),
+    Backing(#[from] file::ValidationError),
     #[error("duplicating backing fd {path}: {errno}")]
     OpenBacking { path: PathBuf, errno: Errno },
     #[error("running losetup: {0}")]
@@ -79,12 +79,12 @@ pub enum LosetupOut {
 }
 
 pub struct Losetup {
-    bin: PathBuf,
+    bin: RootSafeBin<"losetup">,
     op: LosetupOp,
 }
 
 impl Losetup {
-    pub fn new(bin: PathBuf, args: LosetupArgs) -> Self {
+    pub fn new(bin: RootSafeBin<"losetup">, args: LosetupArgs) -> Self {
         Self { bin, op: args.op }
     }
 }
@@ -95,7 +95,7 @@ impl IsTool for Losetup {
     type RunT = io::Result<Output>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = self.bin.command();
         match &self.op {
             LosetupOp::Attach(args) => {
                 args.enrich_command(&mut cmd);
@@ -156,10 +156,10 @@ pub fn ok_backing_file(p: &str) -> Result<PathBuf, Error> {
 
     // `canonicalize` already resolved every symlink and `..`, so the result is
     // absolute and component-strict. Open it as a verified regular-file handle
-    // (O_PATH to identify; SafeFile fstats the held fd and O_NOFOLLOW refuses a
-    // final-component swap raced in after the check).
+    // (O_PATH to identify; SafeFile fstats the held fd and refuses a symlink in
+    // any component, so a parent or final swap raced in after the check fails).
     let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
-    let file = SafeFile::<IsRegularFile, Any, Any>::open(safe, OFlag::O_PATH)?;
+    let file = SafeFile::<IsRegularFile, Any, Any>::open(safe, OpenFlags::PATH)?;
 
     // losetup runs as a child and reopens the *validated inode* via /proc/self/fd.
     // SafeFile's fd is O_CLOEXEC (it would vanish on exec), so dup an inheritable

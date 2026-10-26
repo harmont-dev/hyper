@@ -5,13 +5,14 @@ mod thin;
 mod thin_pool;
 
 use super::IsTool;
+use crate::process::binary::RootSafeBin;
 use crate::util::safe_dev::{self, DmName};
 use clap::{Args, Subcommand};
 pub use message::ThinMessage;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 pub use table::DmTable;
 use thiserror::Error as ThisError;
 
@@ -77,12 +78,12 @@ pub enum DmsetupOut {
 }
 
 pub struct Dmsetup {
-    bin: PathBuf,
+    bin: RootSafeBin<"dmsetup">,
     op: DmOp,
 }
 
 impl Dmsetup {
-    pub fn new(bin: PathBuf, args: DmsetupArgs) -> Self {
+    pub fn new(bin: RootSafeBin<"dmsetup">, args: DmsetupArgs) -> Self {
         Self { bin, op: args.op }
     }
 }
@@ -93,7 +94,7 @@ impl IsTool for Dmsetup {
     type RunT = io::Result<Output>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = self.bin.command();
         match &self.op {
             DmOp::Create {
                 name,

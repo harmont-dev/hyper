@@ -1,4 +1,4 @@
-// `&'static str` const generics (`SafeBin<"losetup">`) are nightly-only.
+// `&'static str` const generics (`RootSafeBin<"losetup">`) are nightly-only.
 #![feature(adt_const_params)]
 #![feature(unsized_const_params)]
 #![allow(incomplete_features)]
@@ -9,6 +9,10 @@
 
 pub mod checksum;
 pub mod config;
+// The filesystem utilities are only tested/designed for UNIX.
+#[cfg(unix)]
+pub mod fs;
+pub mod process;
 pub mod security_gate;
 pub mod tools;
 pub mod util;

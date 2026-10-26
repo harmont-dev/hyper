@@ -1,11 +1,12 @@
 use super::IsTool;
+use crate::process::binary::RootSafeBin;
 use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
 use std::io;
 use std::num::ParseIntError;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -32,12 +33,12 @@ pub struct BlockdevOut {
 }
 
 pub struct Blockdev {
-    bin: PathBuf,
+    bin: RootSafeBin<"blockdev">,
     path: PathBuf,
 }
 
 impl Blockdev {
-    pub fn new(bin: PathBuf, args: BlockdevArgs) -> Self {
+    pub fn new(bin: RootSafeBin<"blockdev">, args: BlockdevArgs) -> Self {
         // clap required --getsz; the path was validated as a BlockDev.
         let BlockdevArgs { getsz: _, path } = args;
         Self {
@@ -53,7 +54,8 @@ impl IsTool for Blockdev {
     type RunT = io::Result<Output>;
 
     fn run_privileged(&self) -> Self::RunT {
-        Command::new(&self.bin)
+        self.bin
+            .command()
             .arg("--getsz")
             .arg(&self.path)
             .env_clear()

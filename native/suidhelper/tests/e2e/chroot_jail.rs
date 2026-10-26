@@ -19,7 +19,7 @@ mod support;
 use support::{is_root, run};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
-/// `work_dir`, 0644 so the OnlyRootWritable axis passes.
+/// `work_dir`, 0644 so the OwnerOnlyWritable axis passes.
 fn write_config(dir: &Path, work_dir: &Path) -> PathBuf {
     let p = dir.join("config.toml");
     fs::write(&p, format!("work_dir = \"{}\"\n", work_dir.display())).unwrap();

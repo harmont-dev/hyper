@@ -18,12 +18,10 @@
 use super::args::{self, Command};
 use super::NetworkOut;
 use crate::config::Config;
+use crate::process::binary::{self, RootSafeBin};
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
-use crate::util::safe_bin;
 use clap::Args;
-use std::path::{Path, PathBuf};
-use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -38,7 +36,7 @@ pub enum Error {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] safe_bin::Error),
+    Bin(#[from] binary::Error),
     #[error("running ip {argv:?}: {source}")]
     Spawn {
         argv: Vec<String>,
@@ -57,7 +55,7 @@ pub fn run(args: TeardownOrphanArgs) -> Result<serde_json::Value, crate::tools::
 
 struct TeardownOrphan {
     netns: String,
-    ip: PathBuf,
+    ip: RootSafeBin<"ip">,
 }
 
 impl TeardownOrphan {
@@ -66,7 +64,7 @@ impl TeardownOrphan {
         super::resolve_network(config.network())?;
         Ok(Self {
             netns: args.vm_id.to_string(),
-            ip: config.ip()?.into(),
+            ip: config.ip()?,
         })
     }
 }
@@ -91,9 +89,10 @@ impl IsTool for TeardownOrphan {
 /// `super::exec::run_all`, whose contract for `prepare`/`teardown` is that
 /// any non-`allow_failure` non-zero exit is a real error — this op's whole
 /// point is that a missing netns is *not* an error.
-fn run_idempotent(commands: &[Command], ip: &Path) -> Result<(), Error> {
+fn run_idempotent(commands: &[Command], ip: &RootSafeBin<"ip">) -> Result<(), Error> {
     for command in commands {
-        let output = Proc::new(ip)
+        let output = ip
+            .command()
             .args(&command.argv)
             .env_clear()
             .output()

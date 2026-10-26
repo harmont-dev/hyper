@@ -55,7 +55,6 @@ pub struct IsRelative;
 #[derive(Debug, Clone)]
 pub struct StrictComponents;
 
-#[cfg(unix)]
 impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
         // This implementation cannot use Path::components because it
@@ -104,8 +103,7 @@ impl<A> SafePath<A, StrictComponents> {
         if rest.as_os_str().is_empty() {
             return Err(RelativeError::EqualsBase);
         }
-        // `strip_prefix` matches components, so re-check the remainder's bytes
-        // rather than trust how it sliced them.
+        // `strip_prefix` matches components, so re-check the remainder .
         StrictComponents::check(rest).map_err(|_| RelativeError::NotUnderBase)?;
         Ok(SafePath::new_unchecked(rest))
     }

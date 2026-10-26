@@ -10,11 +10,11 @@
 //! `crate::util::linux::thin_dump` for the document model.
 
 use std::io;
-use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
+use crate::process::binary::RootSafeBin;
 use crate::util::linux::thin_dump::{parse_mappings, Error as ParseError, ThinMappings};
 use crate::util::safe_dev::LoopDev;
 use clap::Args;
@@ -42,12 +42,12 @@ pub struct ThinDumpArgs {
 }
 
 pub struct ThinDump {
-    bin: PathBuf,
+    bin: RootSafeBin<"thin_dump">,
     args: ThinDumpArgs,
 }
 
 impl ThinDump {
-    pub fn new(bin: PathBuf, args: ThinDumpArgs) -> Self {
+    pub fn new(bin: RootSafeBin<"thin_dump">, args: ThinDumpArgs) -> Self {
         Self { bin, args }
     }
 }
@@ -60,7 +60,8 @@ impl IsTool for ThinDump {
     fn run_privileged(&self) -> Self::RunT {
         // --metadata-snap reads the caller-reserved metadata snapshot, the
         // only safe way to dump a live pool's metadata device.
-        Command::new(&self.bin)
+        self.bin
+            .command()
             .arg("--metadata-snap")
             .arg(self.args.meta.as_ref())
             .env_clear()

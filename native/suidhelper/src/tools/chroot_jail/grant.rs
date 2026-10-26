@@ -7,13 +7,13 @@
 //! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
 //! the logic block.
 
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_path::{IsAbsolute, SafePath, StrictComponents};
+use crate::fs::dir::SafeDir;
+use crate::fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
+use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
-use nix::sys::stat::SFlag;
+use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};
 use serde::Serialize;
-use std::ffi::OsStr;
 use std::path::Path;
 use thiserror::Error as ThisError;
 
@@ -43,34 +43,34 @@ pub enum GrantError {
     #[error("not a socket (or is a symlink); refusing to touch it")]
     NotASocket,
     #[error("statting the socket: {0}")]
-    Stat(#[source] safe_dir::Error),
+    Stat(#[source] file::ValidationError),
     #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] safe_dir::Error),
+    Chown(#[source] Errno),
     #[error("chmoding the socket: {0}")]
-    Chmod(#[source] safe_dir::Error),
+    Chmod(#[source] Errno),
     #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] safe_dir::Error),
+    ChgrpRoot(#[source] Errno),
     #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] safe_dir::Error),
+    ChmodRoot(#[source] Errno),
 }
 
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
 /// `Ok(None)` if `base` or any parent is not yet present (`ENOENT`), so the
 /// caller can treat a half-built jail as `Pending` rather than an error. On any
-/// other failure the raw `safe_dir::Error` is returned for the caller to wrap in
+/// other failure the raw `file::ValidationError` is returned for the caller to wrap in
 /// its own error type.
 pub fn walk_to(
     base: &SafePath<IsAbsolute, StrictComponents>,
-    parents: &[&OsStr],
-) -> Result<Option<SafeDir>, safe_dir::Error> {
-    let anchor = match SafeDir::open(base) {
+    rel: &Path,
+) -> Result<Option<SafeDir>, file::ValidationError> {
+    let anchor = match SafeDir::open(base, OpenFlags::RDONLY) {
         Ok(dir) => dir,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(None),
         Err(e) => return Err(e),
     };
-    match anchor.descend(parents.iter().copied()) {
+    match anchor.openat(rel, OpenFlags::RDONLY, Mode::empty()) {
         Ok(dir) => Ok(Some(dir)),
-        Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
+        Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -82,24 +82,22 @@ pub fn walk_to(
 /// reach the socket even though the jailer left `root` at `0700`. Returns
 /// `Pending` if `leaf` is not yet present (`ENOENT`).
 pub fn grant_to_caller(root: SafeDir, leaf: &Path) -> Result<GrantOut, GrantError> {
-    let stat = match root.stat(leaf) {
-        Ok(stat) => stat,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(GrantOut::Pending),
+    let sock: SafeFile<IsSocket, Any, Any> = match root.openat(leaf, OpenFlags::PATH, Mode::empty())
+    {
+        Ok(sock) => sock,
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
+        Err(file::ValidationError::Open(Errno::ELOOP) | file::ValidationError::WrongFileType) => {
+            return Err(GrantError::NotASocket)
+        }
         Err(e) => return Err(GrantError::Stat(e)),
     };
-    // `stat` used `AT_SYMLINK_NOFOLLOW`, so a symlink reports as `S_IFLNK`
-    // and fails this check — only a real socket is accepted, never a symlink.
-    if stat.st_mode & SFlag::S_IFMT.bits() != SFlag::S_IFSOCK.bits() {
-        return Err(GrantError::NotASocket);
-    }
-    root.chown(leaf, getuid().as_raw(), getgid().as_raw())
+    sock.chown(Some(getuid()), Some(getgid()))
         .map_err(GrantError::Chown)?;
-    root.chmod(leaf, SOCKET_MODE).map_err(GrantError::Chmod)?;
-    // Operate on the pinned `root` fd (opened `O_NOFOLLOW`), never by
-    // name — TOCTOU-safe on the directory itself.
-    root.chgrp_self(getgid().as_raw())
+    sock.chmod(Mode::from_bits_truncate(SOCKET_MODE))
+        .map_err(GrantError::Chmod)?;
+    root.chown(None, Some(getgid()))
         .map_err(GrantError::ChgrpRoot)?;
-    root.chmod_self(JAIL_ROOT_MODE)
+    root.chmod(Mode::from_bits_truncate(JAIL_ROOT_MODE))
         .map_err(GrantError::ChmodRoot)?;
     Ok(GrantOut::Granted)
 }

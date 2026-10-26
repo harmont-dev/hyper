@@ -33,8 +33,8 @@
 
 use super::grant::{self, GrantError};
 use crate::config::Config;
+use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::tools::IsTool;
-use crate::util::safe_path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use clap::Args;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -52,27 +52,27 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--socket path: {0}")]
-    SocketPath(#[source] safe_path::ValidationError),
+    SocketPath(#[source] path::ValidationError),
     #[error("--socket path: {0}")]
-    SocketBase(#[source] safe_path::RelativeError),
+    SocketBase(#[source] path::RelativeError),
     #[error("--socket must be exactly <exec>/<id>/root/api.socket below JAIL_BASE: {0:?}")]
     SocketShape(PathBuf),
     #[error("--socket leaf must be {SOCKET_NAME:?}: {0:?}")]
     SocketName(PathBuf),
     #[error("walking to the jail root: {0}")]
-    Walk(#[source] crate::util::safe_dir::Error),
+    Walk(#[source] crate::fs::file::ValidationError),
     #[error("api.socket is not a socket (or is a symlink); refusing to touch it")]
     NotASocket,
     #[error("statting the socket: {0}")]
-    Stat(#[source] crate::util::safe_dir::Error),
+    Stat(#[source] crate::fs::file::ValidationError),
     #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] crate::util::safe_dir::Error),
+    Chown(#[source] nix::Error),
     #[error("chmoding the socket: {0}")]
-    Chmod(#[source] crate::util::safe_dir::Error),
+    Chmod(#[source] nix::Error),
     #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] crate::util::safe_dir::Error),
+    ChgrpRoot(#[source] nix::Error),
     #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] crate::util::safe_dir::Error),
+    ChmodRoot(#[source] nix::Error),
 }
 
 impl From<GrantError> for Error {
@@ -150,7 +150,9 @@ pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut,
     };
 
     let base_path: &LexicalPath = jail_base.try_into().map_err(Error::SocketPath)?;
-    let Some(root) = grant::walk_to(base_path, &[exec, id, root]).map_err(Error::Walk)? else {
+    let Some(root) = grant::walk_to(base_path, &[exec, id, root].iter().collect::<PathBuf>())
+        .map_err(Error::Walk)?
+    else {
         return Ok(GrantOut::Pending);
     };
 

@@ -8,11 +8,11 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
-use crate::util::safe_bin::{self, SafeBin};
-use crate::util::safe_file::{self, IsRegularFile, OnlyRootWritable, RootOwner, SafeFile};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
-use nix::fcntl::OFlag;
+use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::Deserialize;
+use std::os::unix::io::OwnedFd;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -20,9 +20,9 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum LoadingError {
     #[error(transparent)]
-    Path(#[from] safe_path::ValidationError),
+    Path(#[from] path::ValidationError),
     #[error(transparent)]
-    File(#[from] safe_file::ValidationError),
+    File(#[from] file::ValidationError),
     #[error("{0:?} could not be read")]
     Unreadable(PathBuf),
     #[error("{0:?} is not valid TOML")]
@@ -39,7 +39,7 @@ pub enum BinError {
     #[error("required binary `{0}` is not configured in /etc/hyper/config.toml")]
     Unconfigured(&'static str),
     #[error(transparent)]
-    Bin(#[from] safe_bin::Error),
+    Bin(#[from] binary::Error),
 }
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
@@ -133,7 +133,7 @@ impl Default for Jails {
 /// built-in defaults; `firecracker` and `jailer` have none and must be
 /// configured before any VM can launch — their absence surfaces as
 /// [`BinError::Unconfigured`] at use time, not at load. Every path is
-/// validated as a root-owned, correctly-named [`SafeBin`] when accessed,
+/// validated as a root-owned, correctly-named [`RootSafeBin`] when accessed,
 /// never at parse time (the file is read unprivileged). A missing `[tools]`
 /// table, or any missing key within it, falls back to these defaults.
 #[derive(Debug, Clone, Deserialize)]
@@ -157,7 +157,7 @@ impl Default for Tools {
             losetup: "/usr/sbin/losetup".into(),
             blockdev: "/usr/sbin/blockdev".into(),
             // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
-            // is a symlink to the former, and SafeBin rejects symlinked tool
+            // is a symlink to the former, and RootSafeBin rejects symlinked tool
             // paths. iproute2's real binary lives at /usr/bin/ip.
             ip: "/usr/bin/ip".into(),
             nft: "/usr/sbin/nft".into(),
@@ -244,35 +244,35 @@ impl Config {
     }
 
     /// The validated `dmsetup` binary the helper will run.
-    pub fn dmsetup(&self) -> Result<SafeBin<"dmsetup">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.dmsetup)
+    pub fn dmsetup(&self) -> Result<RootSafeBin<"dmsetup">, binary::Error> {
+        RootSafeBin::open(&self.tools.dmsetup)
     }
 
     /// The validated `losetup` binary the helper will run.
-    pub fn losetup(&self) -> Result<SafeBin<"losetup">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.losetup)
+    pub fn losetup(&self) -> Result<RootSafeBin<"losetup">, binary::Error> {
+        RootSafeBin::open(&self.tools.losetup)
     }
 
     /// The validated `blockdev` binary the helper will run.
-    pub fn blockdev(&self) -> Result<SafeBin<"blockdev">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.blockdev)
+    pub fn blockdev(&self) -> Result<RootSafeBin<"blockdev">, binary::Error> {
+        RootSafeBin::open(&self.tools.blockdev)
     }
 
     /// The validated `ip` (iproute2) binary the network tool runs.
-    pub fn ip(&self) -> Result<SafeBin<"ip">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.ip)
+    pub fn ip(&self) -> Result<RootSafeBin<"ip">, binary::Error> {
+        RootSafeBin::open(&self.tools.ip)
     }
 
     /// The validated `nft` (nftables) binary the network tool runs.
-    pub fn nft(&self) -> Result<SafeBin<"nft">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.nft)
+    pub fn nft(&self) -> Result<RootSafeBin<"nft">, binary::Error> {
+        RootSafeBin::open(&self.tools.nft)
     }
 
     /// The `sysctl` binary, used to enable IPv4 forwarding inside a VM's netns
     /// (a fresh netns defaults `net.ipv4.ip_forward` to 0, independent of the
     /// host, so the netns would not route the guest's egress without it).
-    pub fn sysctl(&self) -> Result<SafeBin<"sysctl">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.sysctl)
+    pub fn sysctl(&self) -> Result<RootSafeBin<"sysctl">, binary::Error> {
+        RootSafeBin::open(&self.tools.sysctl)
     }
 
     /// The `[network]` table, or `None` when VM networking is disabled — either
@@ -297,30 +297,30 @@ impl Config {
 
     /// The validated `thin_dump` binary (thin-provisioning-tools) the helper
     /// will run.
-    pub fn thin_dump(&self) -> Result<SafeBin<"thin_dump">, safe_bin::Error> {
-        SafeBin::from_path(&self.tools.thin_dump)
+    pub fn thin_dump(&self) -> Result<RootSafeBin<"thin_dump">, binary::Error> {
+        RootSafeBin::open(&self.tools.thin_dump)
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] firecracker` before any VM can be launched.
-    pub fn firecracker(&self) -> Result<SafeBin<"firecracker">, BinError> {
+    pub fn firecracker(&self) -> Result<RootSafeBinPathBuf<"firecracker">, BinError> {
         self.tools
             .firecracker
             .as_deref()
             .ok_or(BinError::Unconfigured("firecracker"))
-            .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
+            .and_then(|p| RootSafeBinPathBuf::open(p).map_err(BinError::Bin))
     }
 
     /// The Firecracker jailer binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] jailer` before any VM can be launched.
-    pub fn jailer(&self) -> Result<SafeBin<"jailer">, BinError> {
+    pub fn jailer(&self) -> Result<RootSafeBin<"jailer">, BinError> {
         self.tools
             .jailer
             .as_deref()
             .ok_or(BinError::Unconfigured("jailer"))
-            .and_then(|p| SafeBin::from_path(p).map_err(BinError::Bin))
+            .and_then(|p| RootSafeBin::open(p).map_err(BinError::Bin))
     }
 
     /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to
@@ -347,21 +347,21 @@ impl Config {
 
         let safe_path: &SafePath<IsAbsolute, StrictComponents> = path.as_path().try_into()?;
 
-        let file: SafeFile<IsRegularFile, RootOwner, OnlyRootWritable> =
-            match SafeFile::open(safe_path, OFlag::O_RDONLY) {
+        let file: SafeFile<IsRegularFile, RootOwner, OwnerOnlyWritable> =
+            match SafeFile::open(safe_path, OpenFlags::RDONLY) {
                 Ok(file) => file,
                 // A genuinely-absent file means "use the built-in defaults": those
                 // are compiled into this root-owned binary, so they are trusted. Any
                 // OTHER failure — a present but wrong-owner/mode file, an I/O error —
                 // stays fatal, because it is a signal (someone put an untrusted file
                 // there), not an absence.
-                Err(safe_file::ValidationError::Open(nix::errno::Errno::ENOENT)) => {
+                Err(file::ValidationError::Open(nix::errno::Errno::ENOENT)) => {
                     return Ok(Self::default())
                 }
                 Err(e) => return Err(e.into()),
             };
 
-        let body = std::io::read_to_string(std::fs::File::from(file.into_owned_fd()))
+        let body = std::io::read_to_string(std::fs::File::from(OwnedFd::from(file)))
             .map_err(|_| LoadingError::Unreadable(path.clone()))?;
         let config: Config =
             toml::from_str(&body).map_err(|_| LoadingError::Malformed(path.clone()))?;

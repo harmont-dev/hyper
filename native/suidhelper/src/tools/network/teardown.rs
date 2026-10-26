@@ -4,10 +4,10 @@ use super::args;
 use super::exec;
 use super::prepare;
 use super::NetworkOut;
+use crate::process::binary::RootSafeBin;
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
-use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -36,8 +36,8 @@ pub fn run(args: TeardownArgs) -> Result<serde_json::Value, crate::tools::Error>
 
 struct Teardown {
     plan: super::addr::Plan,
-    ip: PathBuf,
-    nft: PathBuf,
+    ip: RootSafeBin<"ip">,
+    nft: RootSafeBin<"nft">,
 }
 
 impl Teardown {
@@ -57,8 +57,8 @@ impl IsTool for Teardown {
     fn run_privileged(&self) -> Self::RunT {
         let commands = args::teardown_commands(&self.plan);
         exec::run_all(&commands, |which| match which {
-            args::Which::Ip => self.ip.as_path(),
-            args::Which::Nft => self.nft.as_path(),
+            args::Which::Ip => self.ip.command(),
+            args::Which::Nft => self.nft.command(),
         })?;
         Ok(())
     }

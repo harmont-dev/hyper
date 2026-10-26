@@ -14,13 +14,16 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use crate::config::Config;
+use crate::fs::dir::{self, SafeDir};
+use crate::fs::file::{self, Any, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::tools::IsTool;
-use crate::util::safe_dir::{self, SafeDir};
-use crate::util::safe_path::{self, IsAbsolute, SafePath, StrictComponents};
 use clap::Args;
 use nix::errno::Errno;
+use nix::sys::stat::Mode;
 use serde::Serialize;
 use std::ffi::OsStr;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error as ThisError;
@@ -39,25 +42,27 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error("--chroot path: {0}")]
-    ChrootPath(#[source] safe_path::ValidationError),
+    ChrootPath(#[source] path::ValidationError),
     #[error("--chroot path: {0}")]
-    ChrootBase(#[source] safe_path::RelativeError),
+    ChrootBase(#[source] path::RelativeError),
     #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
     ChrootDepth(PathBuf),
     #[error("--cgroup path: {0}")]
-    CgroupPath(#[source] safe_path::ValidationError),
+    CgroupPath(#[source] path::ValidationError),
     #[error("--cgroup path: {0}")]
-    CgroupBase(#[source] safe_path::RelativeError),
+    CgroupBase(#[source] path::RelativeError),
     #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
     CgroupDepth(PathBuf),
     #[error("walking: {0}")]
-    Walk(#[source] safe_dir::Error),
+    Walk(#[source] file::ValidationError),
     #[error("removing chroot: {0}")]
-    RemoveChroot(#[source] safe_dir::Error),
+    RemoveChroot(#[source] dir::Error),
     #[error("removing cgroup: {0}")]
-    RemoveCgroup(#[source] safe_dir::Error),
+    RemoveCgroup(#[source] Errno),
+    #[error("opening cgroup.kill: {0}")]
+    OpenCgroupKill(#[source] file::ValidationError),
     #[error("killing cgroup procs: {0}")]
-    KillCgroup(#[source] safe_dir::Error),
+    KillCgroup(#[source] io::Error),
 }
 
 #[derive(Args)]
@@ -114,10 +119,10 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Error>
         return Err(Error::ChrootDepth(chroot.to_path_buf()));
     };
 
-    let Some(parent) = walk(jail_base, &[exec])? else {
+    let Some(parent) = walk(jail_base, Path::new(exec))? else {
         return Ok(()); // an ancestor is already gone
     };
-    match parent.remove_dir_all(Path::new(id)) {
+    match parent.rmdirat_recursive(Path::new(id)) {
         Ok(()) => Ok(()),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
         Err(e) => Err(Error::RemoveChroot(e)),
@@ -138,15 +143,15 @@ pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
     };
     let leaf = Path::new(leaf);
 
-    let Some(parent) = walk(base, parents)? else {
+    let Some(parent) = walk(base, &parents.iter().collect::<PathBuf>())? else {
         return Ok(()); // an ancestor is already gone
     };
 
     // Kill any process still in the leaf cgroup before removing it. Open the leaf
     // O_NOFOLLOW (one step past the parent walk) and write "1" to cgroup.kill.
-    match parent.openat_dir(leaf) {
+    match parent.openat(leaf, OpenFlags::RDONLY, Mode::empty()) {
         Ok(leaf_dir) => kill_cgroup(&leaf_dir)?,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(()), // leaf already gone
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()), // leaf already gone
         Err(e) => return Err(Error::Walk(e)),
     }
 
@@ -162,10 +167,9 @@ pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), Error> {
 /// the caller (a relaunch) over leftover-dir cleanup. `ENOENT` means already gone.
 fn rmdir_drained(parent: &SafeDir, leaf: &Path) -> Result<(), Error> {
     for attempt in 0..RMDIR_ATTEMPTS {
-        match parent.rmdir(leaf) {
-            Ok(()) => return Ok(()),
-            Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(()),
-            Err(e) if matches!(e.errno(), Some(Errno::EBUSY | Errno::ENOTEMPTY)) => {
+        match parent.rmdirat(leaf) {
+            Ok(()) | Err(Errno::ENOENT) => return Ok(()),
+            Err(Errno::EBUSY | Errno::ENOTEMPTY) => {
                 if attempt + 1 < RMDIR_ATTEMPTS {
                     std::thread::sleep(Duration::from_millis(RMDIR_BACKOFF_MS));
                 }
@@ -181,9 +185,22 @@ fn rmdir_drained(parent: &SafeDir, leaf: &Path) -> Result<(), Error> {
 /// kernel, or already-emptied leaf) or a cgroup torn down concurrently (`ENODEV`)
 /// is tolerated — killing must not hard-fail the remove.
 fn kill_cgroup(leaf_dir: &SafeDir) -> Result<(), Error> {
-    match leaf_dir.write_file(Path::new("cgroup.kill"), b"1") {
+    let mut kill: SafeFile<Any, Any, Any> =
+        match leaf_dir.openat(Path::new("cgroup.kill"), OpenFlags::WRONLY, Mode::empty()) {
+            Ok(kill) => kill,
+            Err(file::ValidationError::Open(Errno::ENOENT | Errno::ENODEV)) => return Ok(()),
+            Err(e) => return Err(Error::OpenCgroupKill(e)),
+        };
+    match kill.write_all(b"1") {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e.errno(), Some(Errno::ENOENT | Errno::ENODEV)) => Ok(()),
+        Err(e)
+            if matches!(
+                e.raw_os_error().map(Errno::from_raw),
+                Some(Errno::ENOENT | Errno::ENODEV)
+            ) =>
+        {
+            Ok(())
+        }
         Err(e) => Err(Error::KillCgroup(e)),
     }
 }
@@ -191,16 +208,16 @@ fn kill_cgroup(leaf_dir: &SafeDir) -> Result<(), Error> {
 /// Open `base` and walk `parents` from it (`O_NOFOLLOW` each step). Returns
 /// `Ok(None)` if `base` or any parent is already gone (`ENOENT`), so callers can
 /// treat removal as idempotent.
-fn walk(base: &Path, parents: &[&OsStr]) -> Result<Option<SafeDir>, Error> {
+fn walk(base: &Path, rel: &Path) -> Result<Option<SafeDir>, Error> {
     let base_path: &LexicalPath = base.try_into().map_err(Error::CgroupPath)?;
-    let anchor = match SafeDir::open(base_path) {
+    let anchor = match SafeDir::open(base_path, OpenFlags::RDONLY) {
         Ok(dir) => dir,
-        Err(e) if e.errno() == Some(Errno::ENOENT) => return Ok(None),
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(None),
         Err(e) => return Err(Error::Walk(e)),
     };
-    match anchor.descend(parents.iter().copied()) {
+    match anchor.openat(rel, OpenFlags::RDONLY, Mode::empty()) {
         Ok(dir) => Ok(Some(dir)),
-        Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(None),
+        Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
         Err(e) => Err(Error::Walk(e)),
     }
 }

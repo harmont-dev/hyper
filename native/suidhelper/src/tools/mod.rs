@@ -27,7 +27,7 @@ use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
-/// Errors of the dispatch layer: an invalid configured binary (`SafeBin`), the
+/// Errors of the dispatch layer: an invalid configured binary (`RootSafeBin`), the
 /// privilege guard, or the chosen tool's own failure on the way out. (Operand
 /// validation is handled by clap at parse time, so it never reaches here.)
 #[derive(Debug, ThisError)]
@@ -118,29 +118,29 @@ pub enum Tool {
 impl Tool {
     /// Dispatch to the selected tool's `run` (or, for `chroot-jail`, its nested
     /// op), returning its already-serialized `Value`. The binary path is taken
-    /// from the trusted config and validated (`SafeBin`) here, as the real uid,
+    /// from the trusted config and validated (`RootSafeBin`) here, as the real uid,
     /// before any privilege is acquired.
     pub fn run(self) -> Result<serde_json::Value, Error> {
         let config = Config::get();
         match self {
             Tool::Losetup { args } => {
                 let bin = config.losetup().map_err(|e| Error::Tool(Box::new(e)))?;
-                Losetup::new(bin.into(), args).run()
+                Losetup::new(bin, args).run()
             }
             Tool::Dmsetup { args } => {
                 let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
-                Dmsetup::new(bin.into(), args).run()
+                Dmsetup::new(bin, args).run()
             }
             Tool::Blockdev { args } => {
                 let bin = config.blockdev().map_err(|e| Error::Tool(Box::new(e)))?;
-                Blockdev::new(bin.into(), args).run()
+                Blockdev::new(bin, args).run()
             }
             Tool::Blockcopy { args } => Blockcopy::new(args).run(),
             Tool::ChrootJail { op } => op.run(),
             Tool::Network { op } => op.run(),
             Tool::ThinDump { args } => {
                 let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
-                ThinDump::new(bin.into(), args).run()
+                ThinDump::new(bin, args).run()
             }
         }
     }

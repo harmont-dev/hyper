@@ -4,7 +4,7 @@
 #![cfg(feature = "insecure_test_seams")]
 
 use hyper_suidhelper::config::{BinError, Config};
-use hyper_suidhelper::util::safe_bin;
+use hyper_suidhelper::process::binary;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -118,7 +118,7 @@ fn valid_config_and_setuid_yields_sys_test_ok_as_root() {
 fn firecracker_unconfigured_when_absent() {
     // Config::default() has firecracker == None; the accessor must signal this
     // distinctly so callers can report a missing-configuration error rather than
-    // a safe_bin validation error.
+    // a binary validation error.
     let err = Config::default()
         .firecracker()
         .expect_err("absent firecracker must return Unconfigured");
@@ -141,7 +141,7 @@ fn jailer_unconfigured_when_absent() {
 
 #[test]
 fn jailer_basename_mismatch_rejected() {
-    // The basename check in SafeBin::from_path precedes the stat, so we do not
+    // The basename check in RootSafeBin::open precedes the stat, so we do not
     // need a real file — any absolute path with the wrong leaf name is enough.
     let body = "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"/usr/local/bin/not-jailer\"\n";
     let config: Config = toml::from_str(body).unwrap();
@@ -149,7 +149,7 @@ fn jailer_basename_mismatch_rejected() {
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
     assert!(
-        matches!(err, BinError::Bin(safe_bin::Error::Name { .. })),
+        matches!(err, BinError::Bin(binary::Error::Name { .. })),
         "expected a Name error, got {err:?}",
     );
 }
@@ -163,7 +163,7 @@ fn firecracker_and_jailer_return_ok_when_root_owned_as_root() {
     let tmp = tempfile::tempdir().unwrap();
     let fc = tmp.path().join("firecracker");
     let jr = tmp.path().join("jailer");
-    // 0o755: root-owned, not group/other-writable — satisfies SafeBin's checks.
+    // 0o755: root-owned, not group/other-writable — satisfies RootSafeBin's checks.
     for p in [&fc, &jr] {
         fs::write(p, b"#!/bin/sh\n").unwrap();
         fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();

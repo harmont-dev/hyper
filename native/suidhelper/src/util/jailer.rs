@@ -21,13 +21,15 @@
 //! - [`JailSock`] accepts exactly `/` + one filename and rejects multi-component,
 //!   relative, `..`, and NUL/whitespace inputs.
 
-use crate::util::path::ToCStringExt;
+use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use crate::util::setuid_privileged;
 use bon::Builder;
 use nix::errno::Errno;
 use std::ffi::{CString, NulError};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::os::fd::{AsFd, AsRawFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
@@ -55,8 +57,8 @@ pub enum Error {
     Privilege(#[from] setuid_privileged::Error),
     #[error("argument contains an interior NUL byte")]
     NulArgument(#[from] NulError),
-    #[error("execve {path:?} failed: {errno}")]
-    Exec { path: PathBuf, errno: Errno },
+    #[error("execve jailer failed: {0}")]
+    Exec(Errno),
 }
 
 /// `n != 0 && lo <= n <= hi`. uid/gid 0 is rejected unconditionally: a jailer run
@@ -205,8 +207,8 @@ impl fmt::Display for JailSock {
 /// already have passed their newtype validation.
 #[derive(Builder)]
 pub struct Jailer<'a> {
-    jailer: &'a Path,
-    firecracker: &'a Path,
+    jailer: &'a RootSafeBin<"jailer">,
+    firecracker: &'a RootSafeBinPathBuf<"firecracker">,
     jail_base: &'a Path,
     parent_cgroup: &'a str,
     vm: &'a VmId,
@@ -227,11 +229,11 @@ impl Jailer<'_> {
     /// cgroup version, or the parent cgroup — those come from trusted config.
     fn argv(&self) -> Result<Vec<CString>, Error> {
         let mut argv = vec![
-            self.jailer.to_cstring()?,
+            "jailer".to_cstring()?,
             "--id".to_cstring()?,
             self.vm.to_string().to_cstring()?,
             "--exec-file".to_cstring()?,
-            self.firecracker.to_cstring()?,
+            self.firecracker.as_path().to_cstring()?,
             "--uid".to_cstring()?,
             self.uid.to_string().to_cstring()?,
             "--gid".to_cstring()?,
@@ -272,22 +274,20 @@ impl Jailer<'_> {
 
         // Resolve everything that can fail before any privilege is raised.
         let argv = self.argv()?;
-        let jailer_cstr = self.jailer.to_cstring()?;
 
         // Point of no return: from here we are permanently root and must execve.
         setuid_privileged::become_root_permanently()?;
-        close_inherited_fds();
+        close_inherited_fds(self.jailer.as_fd().as_raw_fd());
 
         // Empty envp: once ruid==0 the kernel clears AT_SECURE, so a smuggled
         // LD_PRELOAD/LD_LIBRARY_PATH would be honored by the dynamic loader and
         // hijack the root jailer. We pass nothing and let the jailer build its own.
         let empty_env: [CString; 0] = [];
-        let errno = nix::unistd::execve(&jailer_cstr, &argv, &empty_env)
+        let errno = self
+            .jailer
+            .exec(&argv, &empty_env)
             .expect_err("execve only returns on failure");
-        Err(Error::Exec {
-            path: self.jailer.to_path_buf(),
-            errno,
-        })
+        Err(Error::Exec(errno))
     }
 }
 
@@ -296,32 +296,56 @@ impl Jailer<'_> {
 /// through stdio, and stderr carries our exec-failure message. `close_range(2)`
 /// needs Linux 5.9+; on any failure (ENOSYS or otherwise) we fall back to
 /// closing each fd individually — fail closed before handing root to the jailer.
-fn close_inherited_fds() {
+fn close_inherited_fds(keep: RawFd) {
     const FIRST: u32 = 3;
+    let keep = keep as u32;
+    let ranges = [
+        (FIRST, keep.saturating_sub(1)),
+        (keep.saturating_add(1).max(FIRST), u32::MAX),
+    ];
     // Invoke `close_range(2)` as a raw syscall rather than through the
     // `libc::close_range` wrapper: the `libc` crate does not define that wrapper
     // for every target (it is absent on aarch64-musl), but `SYS_close_range` is
     // defined on all Linux arches. `syscall` returns 0 on success, -1 on error.
     // SAFETY: raw syscall with no memory operands; closing fds has no UB.
-    let rc = unsafe {
-        nix::libc::syscall(
-            nix::libc::SYS_close_range,
-            FIRST as nix::libc::c_uint,
-            u32::MAX as nix::libc::c_uint,
-            0 as nix::libc::c_uint,
-        )
-    };
-    if rc == 0 {
+    let closed = ranges.iter().filter(|(lo, hi)| lo <= hi).all(|&(lo, hi)| {
+        let rc = unsafe {
+            nix::libc::syscall(
+                nix::libc::SYS_close_range,
+                lo as nix::libc::c_uint,
+                hi as nix::libc::c_uint,
+                0 as nix::libc::c_uint,
+            )
+        };
+        rc == 0
+    });
+    if closed {
         return;
     }
 
     // SAFETY: sysconf is a pure query of a system limit.
     let max = unsafe { nix::libc::sysconf(nix::libc::_SC_OPEN_MAX) };
     let max = if max < 0 { 4096 } else { max as i32 };
-    for fd in (FIRST as i32)..max {
+    for fd in (FIRST as i32..max).filter(|&fd| fd as u32 != keep) {
         // SAFETY: closing an arbitrary fd is safe; EBADF for unused fds is ignored.
         unsafe {
             nix::libc::close(fd);
         }
+    }
+}
+
+trait ToCStringExt {
+    fn to_cstring(&self) -> Result<CString, NulError>;
+}
+
+impl ToCStringExt for Path {
+    fn to_cstring(&self) -> Result<CString, NulError> {
+        CString::new(self.as_os_str().as_bytes())
+    }
+}
+
+impl ToCStringExt for str {
+    fn to_cstring(&self) -> Result<CString, NulError> {
+        CString::new(self.as_bytes())
     }
 }
