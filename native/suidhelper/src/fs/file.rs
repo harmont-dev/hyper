@@ -48,7 +48,7 @@ pub struct IsDirectory;
 /// Require `root:root` owner (uid 0, gid 0).
 pub struct RootOwner;
 /// Require the file not be writable by group or other.
-pub struct OnlyOwnerWritable;
+pub struct OwnerOnlyWritable;
 
 /// What's the type of the file?
 pub trait FileType {

@@ -15,10 +15,9 @@ use super::args;
 use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
+use crate::process::binary::{self, RootSafeBin};
 use crate::tools::IsTool;
-use crate::util::safe_bin;
 use clap::Args;
-use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -32,7 +31,7 @@ pub enum Error {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] safe_bin::Error),
+    Bin(#[from] binary::Error),
     #[error(transparent)]
     Exec(#[from] exec::Error),
     #[error("failed to read {IP_FORWARD_PATH}: {0}")]
@@ -61,7 +60,7 @@ pub fn run(args: HostInitArgs) -> Result<serde_json::Value, crate::tools::Error>
 struct HostInit {
     uplink: String,
     clone_pool: String,
-    nft: PathBuf,
+    nft: RootSafeBin<"nft">,
 }
 
 impl HostInit {
@@ -77,7 +76,7 @@ impl HostInit {
                 .clone()
                 .expect("Config::network() guarantees uplink is set"),
             clone_pool: network.clone_pool.clone(),
-            nft: config.nft()?.into(),
+            nft: config.nft()?,
         })
     }
 }
@@ -95,7 +94,7 @@ impl IsTool for HostInit {
 
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
         // host_init_commands only ever issues `nft` commands (see args.rs).
-        exec::run_all(&commands, |_which| self.nft.as_path())?;
+        exec::run_all(&commands, |_which| self.nft.command())?;
         Ok(())
     }
 

@@ -12,93 +12,113 @@
 //! (must be an absolute path, the exact basename, root-owned, not a symlink, not
 //! group/other-writable).
 
-use std::ffi::OsStr;
-use std::fs;
-use std::io;
-use std::os::unix::fs::MetadataExt;
+use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use nix::errno::Errno;
+use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+use std::convert::Infallible;
+use std::ffi::{CStr, OsStr};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::process::Command;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("binary path must be absolute: {0}")]
-    NotAbsolute(PathBuf),
+    #[error("binary path {path}: {source}")]
+    Path {
+        path: PathBuf,
+        #[source]
+        source: path::ValidationError,
+    },
     #[error("binary basename must be `{expected}`: {got}")]
     Name {
         expected: &'static str,
         got: PathBuf,
     },
     #[error("binary {path}: {source}")]
-    Stat {
+    File {
         path: PathBuf,
         #[source]
-        source: io::Error,
+        source: file::ValidationError,
     },
-    #[error("{0} is a symlink")]
-    Symlink(PathBuf),
-    #[error("{0} is not owned by root")]
-    NotRoot(PathBuf),
-    #[error("{0} is group/other-writable")]
-    Writable(PathBuf),
+    #[error("binary {path}: clearing FD_CLOEXEC: {errno}")]
+    Inherit { path: PathBuf, errno: Errno },
 }
 
+type Executable = SafeFile<IsRegularFile, RootOwner, OwnerOnlyWritable>;
+
 /// A binary that's safe for the root user to use.
+#[derive(Debug)]
+pub struct RootSafeBin<const NAME: &'static str>(Executable);
+
 #[derive(Debug, Clone)]
-pub struct RootSafeBin<const NAME: &'static str>(PathBuf);
+pub struct RootSafeBinPathBuf<const NAME: &'static str>(PathBuf);
 
 impl<const NAME: &'static str> RootSafeBin<NAME> {
-    /// Validate `bin` as the `NAME` tool binary: an absolute path with basename
-    /// `NAME`, a real (non-symlink) regular file owned by root that no non-root
-    /// user could have written. These checks are the whole point of the type.
-    pub fn from_path(bin: &Path) -> Result<Self, Error> {
-        if !bin.is_absolute() {
-            return Err(Error::NotAbsolute(bin.to_path_buf()));
+    /// Validate that the given path is a safe binary, owned by root, non-symlink, not writable by
+    /// everyone and matches `NAME`.
+    pub fn open(bin: &Path) -> Result<Self, Error> {
+        let safe: &SafePath<IsAbsolute, StrictComponents> =
+            bin.try_into().map_err(|source| Error::Path {
+                path: bin.to_path_buf(),
+                source,
+            })?;
+
+        if bin.file_name() != Some(OsStr::new(NAME)) {
+            return Err(Error::Name {
+                expected: NAME,
+                got: bin.to_path_buf(),
+            });
         }
 
-        match bin.file_name().and_then(OsStr::to_str) {
-            Some(name) if name == NAME => {}
-            _ => {
-                return Err(Error::Name {
-                    expected: NAME,
-                    got: bin.to_path_buf(),
-                })
-            }
-        }
-
-        let meta = fs::symlink_metadata(bin).map_err(|source| Error::Stat {
+        let file = Executable::open(safe, OpenFlags::PATH).map_err(|source| Error::File {
             path: bin.to_path_buf(),
             source,
         })?;
+        fcntl(file.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).map_err(|errno| {
+            Error::Inherit {
+                path: bin.to_path_buf(),
+                errno,
+            }
+        })?;
 
-        if meta.file_type().is_symlink() {
-            return Err(Error::Symlink(bin.to_path_buf()));
-        }
-        if meta.uid() != 0 {
-            return Err(Error::NotRoot(bin.to_path_buf()));
-        }
-        if meta.mode() & 0o022 != 0 {
-            return Err(Error::Writable(bin.to_path_buf()));
-        }
+        Ok(Self(file))
+    }
 
+    pub fn fd_path(&self) -> PathBuf {
+        PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()))
+    }
+
+    pub fn command(&self) -> Command {
+        let mut cmd = Command::new(self.fd_path());
+        cmd.arg0(NAME);
+        cmd
+    }
+
+    pub fn exec<SA: AsRef<CStr>, SE: AsRef<CStr>>(
+        &self,
+        args: &[SA],
+        env: &[SE],
+    ) -> nix::Result<Infallible> {
+        nix::unistd::fexecve(self.0.as_raw_fd(), args, env)
+    }
+}
+
+impl<const NAME: &'static str> AsFd for RootSafeBin<NAME> {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl<const NAME: &'static str> RootSafeBinPathBuf<NAME> {
+    pub fn open(bin: &Path) -> Result<Self, Error> {
+        RootSafeBin::<NAME>::open(bin)?;
         Ok(Self(bin.to_path_buf()))
     }
-}
 
-// Lets a string parse straight into a validated `RootSafeBin<NAME>` (used by the
-// test suite); delegates to the single `from_path` constructor.
-impl<const NAME: &'static str> FromStr for RootSafeBin<NAME> {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_path(Path::new(s))
-    }
-}
-
-// Read the validated path back out; the "validated" guarantee stays attached to
-// the `RootSafeBin` type until this conversion.
-impl<const NAME: &'static str> From<RootSafeBin<NAME>> for PathBuf {
-    fn from(bin: RootSafeBin<NAME>) -> Self {
-        bin.0
+    pub fn as_path(&self) -> &Path {
+        &self.0
     }
 }

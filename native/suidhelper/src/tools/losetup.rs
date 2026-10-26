@@ -1,6 +1,7 @@
 use super::IsTool;
 use crate::fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::process::binary::RootSafeBin;
 use crate::util::safe_dev::LoopDev;
 use clap::{Args, Subcommand};
 use nix::errno::Errno;
@@ -78,12 +79,12 @@ pub enum LosetupOut {
 }
 
 pub struct Losetup {
-    bin: PathBuf,
+    bin: RootSafeBin<"losetup">,
     op: LosetupOp,
 }
 
 impl Losetup {
-    pub fn new(bin: PathBuf, args: LosetupArgs) -> Self {
+    pub fn new(bin: RootSafeBin<"losetup">, args: LosetupArgs) -> Self {
         Self { bin, op: args.op }
     }
 }
@@ -94,7 +95,7 @@ impl IsTool for Losetup {
     type RunT = io::Result<Output>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = self.bin.command();
         match &self.op {
             LosetupOp::Attach(args) => {
                 args.enrich_command(&mut cmd);

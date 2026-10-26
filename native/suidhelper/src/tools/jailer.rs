@@ -56,8 +56,8 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
     // raised: config accessors, binary validation, range, and arg validation.
-    let jailer: PathBuf = config.jailer()?.into();
-    let firecracker: PathBuf = config.firecracker()?.into();
+    let jailer = config.jailer()?;
+    let firecracker = config.firecracker()?;
     let jail_base = config.jail_base();
     let range = config.uid_gid_range();
 
