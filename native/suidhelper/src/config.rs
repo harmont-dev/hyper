@@ -12,6 +12,7 @@ use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwn
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::Deserialize;
+use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -94,8 +95,9 @@ fn config_path() -> PathBuf {
 }
 
 /// Hyper's /etc/hyper/config.toml file format.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, SmartDefault)]
 pub struct Config {
+    #[default(default_work_dir())]
     work_dir: PathBuf,
     #[serde(default)]
     tools: Tools,
@@ -111,20 +113,12 @@ pub struct Config {
 /// `"hyper"`). `uid_gid_range` is the `[min, max]` band of UIDs/GIDs the helper
 /// accepts from the BEAM; absent means the built-in default. A missing `[jails]`
 /// table, or any missing key within it, falls back to these defaults.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, SmartDefault)]
 #[serde(default)]
 pub struct Jails {
+    #[default(default_parent_cgroup())]
     cgroup: String,
     uid_gid_range: Option<UidGidRange>,
-}
-
-impl Default for Jails {
-    fn default() -> Self {
-        Self {
-            cgroup: default_parent_cgroup(),
-            uid_gid_range: None,
-        }
-    }
 }
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
@@ -136,37 +130,28 @@ impl Default for Jails {
 /// validated as a root-owned, correctly-named [`RootSafeBin`] when accessed,
 /// never at parse time (the file is read unprivileged). A missing `[tools]`
 /// table, or any missing key within it, falls back to these defaults.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, SmartDefault)]
 #[serde(default)]
 pub struct Tools {
+    #[default("/usr/sbin/dmsetup".into())]
     dmsetup: PathBuf,
+    #[default("/usr/sbin/losetup".into())]
     losetup: PathBuf,
+    #[default("/usr/sbin/blockdev".into())]
     blockdev: PathBuf,
+    // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
+    // is a symlink to the former, and RootSafeBin rejects symlinked tool
+    // paths. iproute2's real binary lives at /usr/bin/ip.
+    #[default("/usr/bin/ip".into())]
     ip: PathBuf,
+    #[default("/usr/sbin/nft".into())]
     nft: PathBuf,
+    #[default("/usr/sbin/sysctl".into())]
     sysctl: PathBuf,
+    #[default("/usr/sbin/thin_dump".into())]
     thin_dump: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
-}
-
-impl Default for Tools {
-    fn default() -> Self {
-        Self {
-            dmsetup: "/usr/sbin/dmsetup".into(),
-            losetup: "/usr/sbin/losetup".into(),
-            blockdev: "/usr/sbin/blockdev".into(),
-            // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
-            // is a symlink to the former, and RootSafeBin rejects symlinked tool
-            // paths. iproute2's real binary lives at /usr/bin/ip.
-            ip: "/usr/bin/ip".into(),
-            nft: "/usr/sbin/nft".into(),
-            sysctl: "/usr/sbin/sysctl".into(),
-            thin_dump: "/usr/sbin/thin_dump".into(),
-            firecracker: None,
-            jailer: None,
-        }
-    }
 }
 
 // The default data root. Must match the Elixir node's `@dev_work_dir`, which it
@@ -179,17 +164,6 @@ fn default_work_dir() -> PathBuf {
 fn default_parent_cgroup() -> String {
     // Must match Elixir node's `@parent_cgroup`; operators need to keep them in sync.
     "hyper".into()
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            work_dir: default_work_dir(),
-            tools: Tools::default(),
-            jails: Jails::default(),
-            network: None,
-        }
-    }
 }
 
 /// The `[network]` table: VM egress networking. Absent, or present without

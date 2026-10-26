@@ -24,9 +24,9 @@
 use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use crate::util::setuid_privileged;
 use bon::Builder;
+use derive_more::Display;
 use nix::errno::Errno;
 use std::ffi::{CString, NulError};
-use std::fmt;
 use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -75,7 +75,7 @@ pub fn validate_id_number(n: u32, range: (u32, u32)) -> Result<u32, Error> {
 /// A VM id used as a chroot subdirectory name: `[A-Za-z0-9_-]`, length `1..=64`,
 /// first character not `-` (so it can never be read as a flag). No `/`, `.`, NUL,
 /// or whitespace can appear, so it can never traverse out of the chroot base.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
 pub struct VmId(String);
 
 impl FromStr for VmId {
@@ -100,12 +100,6 @@ impl FromStr for VmId {
     }
 }
 
-impl fmt::Display for VmId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// `1..=20` ASCII digits — bounds a numeric cgroup limit without pulling in a
 /// regex engine. The upper bound comfortably exceeds `u64::MAX`'s 20 digits.
 fn is_digits_1_20(s: &str) -> bool {
@@ -117,7 +111,8 @@ fn is_digits_1_20(s: &str) -> bool {
 /// caller's raw bytes. Per-key value grammar:
 ///   - `memory.max` : `[0-9]{1,20}` or the literal `max`
 ///   - `cpu.max`    : `[0-9]{1,20} [0-9]{1,20}` or `max [0-9]{1,20}`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
+#[display("{key}={value}")]
 pub struct CgroupSetting {
     key: &'static str,
     value: String,
@@ -160,17 +155,11 @@ impl FromStr for CgroupSetting {
     }
 }
 
-impl fmt::Display for CgroupSetting {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}={}", self.key, self.value)
-    }
-}
-
 /// The firecracker API socket path: an absolute path that is exactly `/` plus one
 /// filename in `[A-Za-z0-9_.-]`. The charset excludes `/`, so the value is always
 /// a direct child of `/` with no extra components and no traversal; `.`/`..` as
 /// the whole filename are rejected explicitly.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
 pub struct JailSock(String);
 
 impl FromStr for JailSock {
@@ -192,12 +181,6 @@ impl FromStr for JailSock {
             return Err(reject());
         }
         Ok(Self(s.to_string()))
-    }
-}
-
-impl fmt::Display for JailSock {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }
 

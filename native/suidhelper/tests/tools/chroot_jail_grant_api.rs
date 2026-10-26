@@ -23,7 +23,7 @@
 
 use hyper_suidhelper::fs::path::{RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_api::{
-    grant_api_under, ApiSocket, Error, GrantOut,
+    grant_api_under, ApiSocket, Error, GrantError, GrantOut,
 };
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -175,7 +175,10 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
     fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
 
     let err = grant_api_under(jail, &sock(&imposter)).unwrap_err();
-    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert!(
+        matches!(err, Error::Grant(GrantError::NotASocket)),
+        "got {err:?}"
+    );
     assert_eq!(
         fs::symlink_metadata(&imposter).unwrap().mode() & 0o777,
         0o600,
@@ -196,7 +199,10 @@ fn symlink_at_leaf_is_refused() {
     symlink(&target, &link).unwrap();
 
     let err = grant_api_under(jail, &sock(&link)).unwrap_err();
-    assert!(matches!(err, Error::NotASocket), "got {err:?}");
+    assert!(
+        matches!(err, Error::Grant(GrantError::NotASocket)),
+        "got {err:?}"
+    );
 }
 
 // A symlinked path component must NOT be followed: the walk fails rather than
