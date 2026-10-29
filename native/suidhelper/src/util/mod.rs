@@ -2,4 +2,3 @@
 
 pub mod chroot_jail;
 pub mod jailer;
-pub mod safe_dev;

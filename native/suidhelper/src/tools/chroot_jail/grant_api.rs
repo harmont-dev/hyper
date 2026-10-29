@@ -80,7 +80,7 @@ impl FromStr for ApiSocket {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let path: SafePathBuf<IsAbsolute, StrictComponents> =
             PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
-        if path.split_last().map(|(_, leaf)| leaf) != Some(SOCKET_NAME) {
+        if path.file_name() != Some(SOCKET_NAME) {
             return Err(Error::SocketName(PathBuf::from(s)));
         }
         Ok(Self(path))

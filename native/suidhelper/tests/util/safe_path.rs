@@ -2,7 +2,8 @@
 //! `hyper_suidhelper` library crate (Task 6's lib split), not inline in source.
 
 use hyper_suidhelper::fs::path::{
-    IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
+    IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent, StrictComponents,
+    ValidationError,
 };
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};
@@ -118,6 +119,30 @@ proptest! {
     }
 
     #[test]
+    fn file_name_returns_the_joined_component(
+        parts in prop::collection::vec(safe_component(), 0..5),
+        name in safe_component(),
+    ) {
+        let parent = Strict::try_from(join_abs(&parts)).unwrap();
+        let name: &StrictComponent = name.as_str().try_into().unwrap();
+        let joined = parent.join(name);
+        prop_assert_eq!(joined.file_name(), Some(name));
+    }
+
+    #[test]
+    fn file_name_of_a_relative_path_is_its_last_segment(
+        base_parts in prop::collection::vec(safe_component(), 1..4),
+        rel_parts in prop::collection::vec(safe_component(), 1..5),
+    ) {
+        let base = join_abs(&base_parts);
+        let full_parts: Vec<String> =
+            base_parts.iter().chain(rel_parts.iter()).cloned().collect();
+        let safe = Strict::try_from(join_abs(&full_parts)).unwrap();
+        let rel = safe.strip_base(&base).unwrap();
+        prop_assert_eq!(rel.file_name(), rel.segments().last());
+    }
+
+    #[test]
     fn strip_base_refuses_the_base_itself(
         base_parts in prop::collection::vec(safe_component(), 1..4),
     ) {
@@ -128,4 +153,10 @@ proptest! {
             Err(RelativeError::EqualsBase)
         ));
     }
+}
+
+#[test]
+fn root_has_no_file_name() {
+    let root = SafePath::<IsAbsolute, StrictComponents>::from_static::<"/">();
+    assert_eq!(root.file_name(), None);
 }

@@ -285,6 +285,12 @@ impl<A> SafePath<A, StrictComponents> {
             StrictComponent::new_unchecked(name),
         ))
     }
+
+    pub fn file_name(&self) -> Option<&StrictComponent> {
+        let raw = self.path.as_os_str().as_bytes();
+        let name = raw.rsplit(|&b| b == b'/').next()?;
+        (!name.is_empty()).then(|| StrictComponent::new_unchecked(name))
+    }
 }
 
 impl SafePath<IsRelative, StrictComponents> {

@@ -6,8 +6,9 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
+use crate::linux::dm::DmName;
 use crate::process::privilege::Root;
-use crate::util::safe_dev::BlockDev;
+use crate::tools::parse_dm_device;
 use clap::Args;
 use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
@@ -37,11 +38,11 @@ fn range_spec_from_file(path: &str) -> Result<RangeSpec, String> {
 #[derive(Args)]
 pub struct BlockcopyArgs {
     /// Device to copy from (the fork's point-in-time snapshot).
-    #[arg(long)]
-    src: BlockDev,
+    #[arg(long, value_parser = parse_dm_device)]
+    src: DmName,
     /// Device to copy into (a writable dm-snapshot over the origin).
-    #[arg(long)]
-    dst: BlockDev,
+    #[arg(long, value_parser = parse_dm_device)]
+    dst: DmName,
     /// Copy only these block ranges (JSON file from `thin-dump`).
     #[arg(long, value_parser = range_spec_from_file)]
     ranges: RangeSpec,
@@ -126,8 +127,10 @@ impl IsTool for Blockcopy {
     type RunT = io::Result<CopyStats>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
-        let mut src = File::open(&self.args.src)?;
-        let mut dst = OpenOptions::new().write(true).open(&self.args.dst)?;
+        let mut src = File::open(self.args.src.path().as_path())?;
+        let mut dst = OpenOptions::new()
+            .write(true)
+            .open(self.args.dst.path().as_path())?;
         let chunk = self.args.chunk_bytes as usize;
 
         copy_ranges(&mut src, &mut dst, &self.args.ranges, chunk)

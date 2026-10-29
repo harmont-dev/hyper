@@ -12,7 +12,7 @@ use crate::process::privilege::Root;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
 pub use message::{parse_message, MessageError, ThinMessage};
-pub use name::{parse_dm_name, NameError};
+pub use name::{parse_dm_device, parse_dm_name, NameError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;

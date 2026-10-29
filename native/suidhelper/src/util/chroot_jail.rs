@@ -6,7 +6,7 @@ use crate::fs::dev::DeviceNumber;
 use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
-use crate::util::safe_dev::BlockDev;
+use crate::linux::dm::DmName;
 use nix::errno::Errno;
 use nix::sys::stat::{Mode, SFlag};
 use nix::unistd::{Gid, Uid};
@@ -72,7 +72,7 @@ pub struct Unset;
 /// The kernel slot, carrying its host source path.
 pub struct Kernel(PathBuf);
 /// The rootfs slot, carrying the block device to mirror.
-pub struct Rootfs(BlockDev);
+pub struct Rootfs(DmName);
 
 /// A description of a VM chroot's contents. Type parameters track which slots are
 /// filled; see the module docs.
@@ -113,7 +113,7 @@ impl<R> ChrootJail<Unset, R> {
 
 impl<K> ChrootJail<K, Unset> {
     /// Create the rootfs block node as `rootfs`, mirroring `device`.
-    pub fn with_rootfs(self, device: BlockDev) -> ChrootJail<K, Rootfs> {
+    pub fn with_rootfs(self, device: DmName) -> ChrootJail<K, Rootfs> {
         ChrootJail {
             chroot: self.chroot,
             uid: self.uid,
@@ -203,7 +203,7 @@ pub fn stage_kernel_under(
 /// Create the `rootfs` block node mirroring `device`'s major:minor, owned
 /// `uid:gid`. The device is opened as a verified `SafeFile<IsBlockDevice>`, so the
 /// number comes from a real device node, never a caller-supplied value.
-fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Result<(), Error> {
+fn make_rootfs(chroot: &SafeDir, device: &DmName, uid: u32, gid: u32) -> Result<(), Error> {
     // `device` is lexically validated as `/dev/loopN` or `/dev/mapper/hyper-*`.
     // The dm form is a symlink under `/dev/mapper` — a root-owned `0755` dir an
     // unprivileged caller cannot write — so resolving it to its real `/dev/dm-N`
@@ -211,8 +211,9 @@ fn make_rootfs(chroot: &SafeDir, device: &BlockDev, uid: u32, gid: u32) -> Resul
     // refuses any symlink in the path (it must never follow an attacker-supplied
     // one) and would otherwise reject the dm symlink itself. Loop nodes resolve to
     // themselves. The re-opened target is still verified `IsBlockDevice`.
-    let real = std::fs::canonicalize(device.as_ref()).map_err(|source| Error::ResolveDev {
-        path: device.as_ref().to_path_buf(),
+    let device = device.path();
+    let real = std::fs::canonicalize(device.as_path()).map_err(|source| Error::ResolveDev {
+        path: device.as_path().to_path_buf(),
         source,
     })?;
     let dev_path: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;

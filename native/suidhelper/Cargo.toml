@@ -34,10 +34,6 @@ name = "safe_path"
 path = "tests/util/safe_path.rs"
 
 [[test]]
-name = "safe_dev"
-path = "tests/util/safe_dev.rs"
-
-[[test]]
 name = "security_gate"
 path = "tests/security_gate.rs"
 

@@ -1,8 +1,9 @@
 use super::IsTool;
 use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::linux::dm::DmName;
 use crate::process::privilege::Root;
-use crate::util::safe_dev::BlockDev;
+use crate::tools::parse_dm_device;
 use clap::Args;
 use serde::Serialize;
 use std::io;
@@ -30,7 +31,8 @@ pub struct BlockdevArgs {
     /// Only the size query is permitted, so clap requires it.
     #[arg(long = "getsz", required = true)]
     getsz: bool,
-    path: BlockDev,
+    #[arg(value_parser = parse_dm_device)]
+    path: DmName,
 }
 
 #[derive(Serialize)]
@@ -39,7 +41,7 @@ pub struct BlockdevOut {
 }
 
 pub struct Blockdev {
-    path: BlockDev,
+    path: DmName,
 }
 
 impl Blockdev {
@@ -56,7 +58,8 @@ impl IsTool for Blockdev {
     type RunT = Result<BlockdevOut, Error>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
-        let dev: &std::path::Path = self.path.as_ref();
+        let dev = self.path.path();
+        let dev = dev.as_path();
         let real = std::fs::canonicalize(dev).map_err(|source| Error::Resolve {
             path: dev.to_path_buf(),
             source,

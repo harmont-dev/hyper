@@ -15,10 +15,10 @@
 use hyper_suidhelper::fs::dir::SafeDir;
 use hyper_suidhelper::fs::file::OpenFlags;
 use hyper_suidhelper::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
+use hyper_suidhelper::linux::dm::DmName;
 use hyper_suidhelper::util::chroot_jail::{
     open_chroot_under, stage_kernel_under, ChrootJail, Error,
 };
-use hyper_suidhelper::util::safe_dev::BlockDev;
 use nix::errno::Errno;
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
@@ -196,6 +196,27 @@ fn teardown_loop(dev: &Path) {
     let _ = Command::new("losetup").arg("-d").arg(dev).output();
 }
 
+fn setup_dm(loop_dev: &Path) -> Option<DmName> {
+    let name = format!("hyper-test-chroot-{}", std::process::id());
+    let table = format!("0 2048 linear {} 0", loop_dev.display());
+    let created = Command::new("dmsetup")
+        .args(["create", &name, "--table", &table])
+        .status()
+        .ok()?
+        .success();
+    if !created {
+        return None;
+    }
+    name.parse().ok()
+}
+
+fn teardown_dm(name: &DmName) {
+    let _ = Command::new("dmsetup")
+        .args(["remove", "--retry"])
+        .arg(name.as_os_str())
+        .output();
+}
+
 // A full build stages the kernel AND creates a `rootfs` block node mirroring the
 // loop device's major:minor, both owned by the requested uid:gid.
 #[test]
@@ -216,19 +237,21 @@ fn build_under_stages_kernel_and_mirrors_device_as_root() {
         eprintln!("SKIP build_under: losetup unavailable");
         return;
     };
-    let block: BlockDev = dev
-        .to_str()
-        .unwrap()
-        .parse()
-        .expect("loop dev is a valid BlockDev");
+    let Some(block) = setup_dm(&dev) else {
+        teardown_loop(&dev);
+        eprintln!("SKIP build_under: dmsetup unavailable");
+        return;
+    };
+    let block_path = block.path();
 
     let (uid, gid) = (12345u32, 12345u32);
     let res = ChrootJail::new(chroot_dir.clone(), uid, gid)
         .with_kernel(kernel_src.clone())
-        .with_rootfs(block)
+        .with_rootfs(block.clone())
         .build_under(&jail_base, hyper_base);
 
-    let dev_rdev = fs::metadata(&dev).map(|m| m.rdev());
+    let dev_rdev = fs::metadata(block_path.as_path()).map(|m| m.rdev());
+    teardown_dm(&block);
     teardown_loop(&dev);
     res.expect("build_under must succeed as root against a real device");
 

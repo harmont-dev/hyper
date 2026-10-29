@@ -1,9 +1,8 @@
 //! Utilities for interacting with binaries.
 use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
-use std::ffi::OsStr;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -52,7 +51,7 @@ impl<const NAME: &'static str> RootSafeBin<NAME> {
                 source,
             })?;
 
-        if bin.file_name() != Some(OsStr::new(NAME)) {
+        if safe.file_name() != Some(const { StrictComponent::from_static(NAME) }) {
             return Err(Error::Name {
                 expected: NAME,
                 got: bin.to_path_buf(),

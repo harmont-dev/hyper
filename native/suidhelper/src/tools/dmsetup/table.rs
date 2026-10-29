@@ -1,5 +1,5 @@
 use super::backing::{BackingError, BackingFile};
-use super::name::{parse_dm_name, NameError};
+use super::name::{parse_dm_device, NameError};
 use crate::config::Config;
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::linux::dm::{
@@ -7,7 +7,6 @@ use crate::linux::dm::{
     ThinPoolTable, ThinTable,
 };
 use crate::linux::loopdev::LoopDevice;
-use crate::util::safe_dev::{self, BlockDev};
 use serde::Serialize;
 use std::fmt;
 use std::path::PathBuf;
@@ -19,8 +18,6 @@ pub type FilePath = SafePathBuf<IsAbsolute, StrictComponents>;
 pub enum TableError {
     #[error("unsupported dm table: {0}")]
     Malformed(String),
-    #[error(transparent)]
-    Device(#[from] safe_dev::Error),
     #[error(transparent)]
     Name(#[from] NameError),
     #[error("expected a backing file, got a device: {0}")]
@@ -44,7 +41,7 @@ pub enum Slot {
 
 #[derive(Debug, Clone)]
 pub enum Source<F> {
-    Device(BlockDev),
+    Device(DmName),
     File(F),
 }
 
@@ -162,7 +159,7 @@ impl SlotPath for LoopDevice {
 impl<F: SlotPath> Source<F> {
     fn path(&self) -> FilePath {
         match self {
-            Source::Device(dev) => dev.path().to_owned(),
+            Source::Device(dev) => dev.path(),
             Source::File(file) => file.slot_path().to_owned(),
         }
     }
@@ -234,13 +231,9 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
             .try_into()
             .map_err(|e| TableError::FilePath(t.to_string(), e))
     };
-    let dm_device = |t: &str| -> Result<DmName, TableError> {
-        let name = t.strip_prefix("/dev/mapper/").ok_or_else(malformed)?;
-        Ok(parse_dm_name(name)?)
-    };
     let source = |t: &str| -> Result<Source<FilePath>, TableError> {
         if is_device(t) {
-            Ok(Source::Device(t.parse()?))
+            Ok(Source::Device(parse_dm_device(t)?))
         } else {
             Ok(Source::File(file(t)?))
         }
@@ -275,7 +268,7 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
         },
         ["0", sectors, "thin", pool, id, origin @ ..] if origin.len() <= 1 => TableSpec::Thin {
             sectors: number(sectors)?,
-            pool: dm_device(pool)?,
+            pool: parse_dm_device(pool)?,
             id: id.parse()?,
             origin: origin.first().map(|o| source(o)).transpose()?,
         },
