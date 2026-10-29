@@ -160,6 +160,9 @@ If a case needs its own assertions, it is a separate test, not a row.
 - **Tests live in `tests/`, never inline `#[cfg(test)]` in `src/`.** The crate
   is split into a lib (`src/lib.rs`, crate `hyper_suidhelper`) and a thin bin
   (`src/main.rs`) precisely so integration tests can reach the internals.
+  **Exception: `src/linux/`.** Tests for these utilities are colocated with
+  the code, in a `#[cfg(test)] mod tests` block at the bottom of the file
+  under test.
 - Each test file must be registered as a `[[test]]` target in `Cargo.toml`
   (`tests/` subdirectories are not auto-discovered) — copy an existing
   `[[test]]` block when adding one.
