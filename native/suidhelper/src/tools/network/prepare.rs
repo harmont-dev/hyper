@@ -11,6 +11,7 @@ use crate::tools::jailer::{self, VmId};
 use crate::tools::IsTool;
 use clap::Args;
 use std::net::Ipv4Addr;
+use std::os::unix::io::AsFd;
 use thiserror::Error as ThisError;
 
 #[derive(Args)]
@@ -139,7 +140,8 @@ impl IsTool for Prepare {
             &self.nft.fd_path().to_string_lossy(),
             &self.sysctl.fd_path().to_string_lossy(),
         );
-        exec::run_all(&commands, root, |which| match which {
+        let inherit = [self.nft.as_fd(), self.sysctl.as_fd()];
+        exec::run_all(&commands, root, &inherit, |which| match which {
             args::Which::Ip => self.ip.command(),
             args::Which::Nft => self.nft.command(),
         })?;

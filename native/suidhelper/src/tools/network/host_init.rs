@@ -98,7 +98,7 @@ impl IsTool for HostInit {
 
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
         // host_init_commands only ever issues `nft` commands (see args.rs).
-        exec::run_all(&commands, root, |_which| self.nft.command())?;
+        exec::run_all(&commands, root, &[], |_which| self.nft.command())?;
         Ok(())
     }
 

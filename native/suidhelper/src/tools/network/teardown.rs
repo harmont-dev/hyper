@@ -60,7 +60,7 @@ impl IsTool for Teardown {
 
     fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let commands = args::teardown_commands(&self.plan);
-        exec::run_all(&commands, root, |which| match which {
+        exec::run_all(&commands, root, &[], |which| match which {
             args::Which::Ip => self.ip.command(),
             args::Which::Nft => self.nft.command(),
         })?;

@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
   # dependency: there the crate lives under deps/hypervm/native/suidhelper, not
   # under the consumer project's root.
   @helper_dir Path.expand("../../../native/suidhelper", __DIR__)
-  @source Path.join(@helper_dir, "target/release/hyper-suidhelper")
+  @source Path.join(@helper_dir, "target/hyper-suidhelper")
   # Must match `Hyper.Cfg.Tools.suidhelper/0`'s default path and the xtask's
   # `INSTALL_PATH`: a `PATH` location the unprivileged node can exec.
   @install_path "/usr/local/bin/hyper-suidhelper"
@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
         Mix.raise("""
         `cargo xtask stamp` failed building the suidhelper.
 
-        Ensure `cargo` and the helper's toolchain (see #{@helper_dir}/rust-toolchain.toml)
+        Ensure `cargo`, the helper's toolchain and its musl target (see #{@helper_dir}/rust-toolchain.toml)
         are installed.
         """)
     end

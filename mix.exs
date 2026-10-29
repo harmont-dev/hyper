@@ -501,7 +501,7 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
   use Mix.Task.Compiler
 
   @helper_dir "native/suidhelper"
-  @binary "native/suidhelper/target/release/hyper-suidhelper"
+  @binary "native/suidhelper/target/hyper-suidhelper"
   @out "lib/hyper/suid_helper/expected.ex"
 
   @impl Mix.Task.Compiler
@@ -522,7 +522,7 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
         `cargo xtask stamp` failed (exit #{code}) building the suidhelper:
 
         #{output}
-        Ensure `cargo` and the helper's toolchain (see #{@helper_dir}/rust-toolchain.toml)
+        Ensure `cargo`, the helper's toolchain and its musl target (see #{@helper_dir}/rust-toolchain.toml)
         are installed.
         """)
     end

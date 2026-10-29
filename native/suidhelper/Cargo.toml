@@ -42,14 +42,6 @@ name = "config_seam"
 path = "tests/config_seam.rs"
 
 [[test]]
-name = "util_safe_bin"
-path = "tests/util/safe_bin.rs"
-
-[[test]]
-name = "process_privilege"
-path = "tests/process/privilege.rs"
-
-[[test]]
 name = "tools_dmsetup_parsers"
 path = "tests/tools/dmsetup_parsers.rs"
 

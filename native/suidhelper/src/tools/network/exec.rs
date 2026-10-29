@@ -6,6 +6,7 @@
 //! and `host_init` differ only in which commands they hand to [`run_all`].
 use super::args::{Command, Which};
 use crate::process::privilege::{Root, RootCommandExt};
+use std::os::unix::io::BorrowedFd;
 use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
@@ -31,6 +32,7 @@ pub enum Error {
 pub(super) fn run_all(
     commands: &[Command],
     root: &Root<'_>,
+    inherit: &[BorrowedFd<'_>],
     resolve: impl Fn(Which) -> Proc,
 ) -> Result<(), Error> {
     for command in commands {
@@ -44,7 +46,7 @@ pub(super) fn run_all(
         // same reason the jailer handoff uses `become_root_permanently`. This
         // runs in the forked child, so it never affects the parent's own
         // privilege window.
-        proc.args(&command.argv).spawn_as_root(root);
+        proc.args(&command.argv).spawn_as_root(root, inherit);
 
         let output = proc.output().map_err(|source| Error::Spawn {
             bin: command.bin,
