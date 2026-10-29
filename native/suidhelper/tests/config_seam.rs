@@ -8,7 +8,7 @@
 #![cfg(feature = "insecure_test_seams")]
 
 use hyper_suidhelper::config::{Config, LoadingError};
-use hyper_suidhelper::fs::path::ValidationError;
+use hyper_suidhelper::fs::path::{ComponentError, ValidationError};
 use hyper_suidhelper::security_gate;
 
 #[test]
@@ -20,7 +20,10 @@ fn override_path_is_consulted_through_the_real_lexical_gate() {
 
     let err = Config::safe_load().expect_err("override must be consulted");
     assert!(
-        matches!(err, LoadingError::Path(ValidationError::LooseComponents)),
+        matches!(
+            err,
+            LoadingError::Path(ValidationError::Component(ComponentError::ParentDir))
+        ),
         "expected the override path to hit the real lexical gate, got {err:?}",
     );
 }

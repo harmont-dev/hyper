@@ -7,7 +7,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
 
   @type err :: SuidHelper.err()
 
-  @required_targets ~w(snapshot thin thin-pool)
+  @required_targets ~w(linear snapshot thin thin-pool)
 
   @doc """
   Create a read-only dm-snapshot device named `name`, layering `cow_dev`
@@ -17,9 +17,16 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec create_snapshot(String.t(), Path.t(), Path.t(), pos_integer()) ::
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot", include: [:name])
-  def create_snapshot(name, origin_dev, cow_dev, sectors) do
-    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Cfg.Img.chunk_sectors())
-    create(name, table, ["--readonly"])
+  def create_snapshot(name, origin, cow_file, sectors) do
+    table = snapshot_table(origin, cow_file, sectors, Hyper.Cfg.Img.chunk_sectors())
+    with {:ok, dev, _loops} <- create(name, table, ["--readonly"]), do: {:ok, dev}
+  end
+
+  @spec create_linear(String.t(), Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Dmsetup.create_linear", include: [:name])
+  def create_linear(name, origin, sectors) do
+    with {:ok, dev, _loops} <- create(name, linear_table(origin, sectors), ["--readonly"]),
+         do: {:ok, dev}
   end
 
   @doc """
@@ -35,11 +42,13 @@ defmodule Hyper.SuidHelper.Dmsetup do
           pos_integer(),
           pos_integer(),
           non_neg_integer()
-        ) :: {:ok, Path.t()} | {:error, err()}
+        ) :: {:ok, Path.t(), Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_pool", include: [:name])
-  def create_thin_pool(name, meta_dev, data_dev, sectors, block_sectors, low_water) do
-    table = thin_pool_table(meta_dev, data_dev, sectors, block_sectors, low_water)
-    create(name, table, [])
+  def create_thin_pool(name, meta_file, data_file, sectors, block_sectors, low_water) do
+    table = thin_pool_table(meta_file, data_file, sectors, block_sectors, low_water)
+
+    with {:ok, dev, %{"metadata" => meta_loop}} <- create(name, table, []),
+         do: {:ok, dev, meta_loop}
   end
 
   @doc """
@@ -52,7 +61,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_external", include: [:name])
   def create_thin_external(name, pool_dev, dev_id, sectors, origin_dev) do
     table = thin_external_table(pool_dev, dev_id, sectors, origin_dev)
-    create(name, table, [])
+    with {:ok, dev, _loops} <- create(name, table, []), do: {:ok, dev}
   end
 
   @doc "Remove the dm device `name`."
@@ -94,9 +103,9 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec create_snapshot_rw(String.t(), Path.t(), Path.t(), pos_integer()) ::
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot_rw", include: [:name])
-  def create_snapshot_rw(name, origin_dev, cow_dev, sectors) do
-    table = snapshot_table(origin_dev, cow_dev, sectors, Hyper.Cfg.Img.chunk_sectors())
-    create(name, table, [])
+  def create_snapshot_rw(name, origin_dev, cow_file, sectors) do
+    table = snapshot_table(origin_dev, cow_file, sectors, Hyper.Cfg.Img.chunk_sectors())
+    with {:ok, dev, _loops} <- create(name, table, []), do: {:ok, dev}
   end
 
   @doc "Send a thin-pool `message` to dm device `name`."
@@ -168,16 +177,22 @@ defmodule Hyper.SuidHelper.Dmsetup do
   end
 
   @doc false
+  @spec linear_table(Path.t(), pos_integer()) :: String.t()
+  def linear_table(origin, sectors) do
+    "0 #{sectors} linear #{origin} 0"
+  end
+
+  @doc false
   @spec snapshot_table(Path.t(), Path.t(), pos_integer(), pos_integer()) :: String.t()
-  def snapshot_table(origin_dev, cow_dev, sectors, chunk_sectors) do
-    "0 #{sectors} snapshot #{origin_dev} #{cow_dev} P #{chunk_sectors}"
+  def snapshot_table(origin, cow_file, sectors, chunk_sectors) do
+    "0 #{sectors} snapshot #{origin} #{cow_file} P #{chunk_sectors}"
   end
 
   @doc false
   @spec thin_pool_table(Path.t(), Path.t(), pos_integer(), pos_integer(), non_neg_integer()) ::
           String.t()
-  def thin_pool_table(meta_dev, data_dev, sectors, block_sectors, low_water) do
-    "0 #{sectors} thin-pool #{meta_dev} #{data_dev} #{block_sectors} #{low_water}"
+  def thin_pool_table(meta_file, data_file, sectors, block_sectors, low_water) do
+    "0 #{sectors} thin-pool #{meta_file} #{data_file} #{block_sectors} #{low_water}"
   end
 
   @doc false
@@ -188,12 +203,13 @@ defmodule Hyper.SuidHelper.Dmsetup do
 
   # Create a dm device named `name` from a reconstructed `table`, with any extra
   # create flags (e.g. `--readonly`). Returns the `/dev/mapper/<name>` path.
-  @spec create(String.t(), String.t(), [String.t()]) :: {:ok, Path.t()} | {:error, err()}
+  @spec create(String.t(), String.t(), [String.t()]) ::
+          {:ok, Path.t(), %{String.t() => Path.t()}} | {:error, err()}
   defp create(name, table, flags) do
     argv = ["dmsetup", "create", name] ++ flags ++ ["--table", table]
 
     case SuidHelper.exec(argv) do
-      {:ok, %{"device" => dev}} -> {:ok, dev}
+      {:ok, %{"device" => dev, "loops" => loops}} -> {:ok, dev, loops}
       {:error, _} = err -> err
     end
   end

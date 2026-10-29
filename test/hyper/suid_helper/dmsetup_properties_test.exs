@@ -16,6 +16,16 @@ defmodule Hyper.SuidHelper.DmsetupPropertiesTest do
   defp pos, do: integer(1..1_000_000_000)
   defp nonneg, do: integer(0..1_000_000_000)
 
+  property "linear_table maps the whole origin from offset 0" do
+    check all(origin <- dev(), sectors <- pos()) do
+      table = Dmsetup.linear_table(origin, sectors)
+
+      assert ["0", s, "linear", o, "0"] = String.split(table)
+      assert s == "#{sectors}"
+      assert o == origin
+    end
+  end
+
   property "snapshot_table places origin, cow, persistent flag, and chunk in order" do
     check all(origin <- dev(), cow <- dev(), sectors <- pos(), chunk <- pos()) do
       table = Dmsetup.snapshot_table(origin, cow, sectors, chunk)

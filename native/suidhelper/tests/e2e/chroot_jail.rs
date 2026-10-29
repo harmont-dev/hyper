@@ -67,6 +67,41 @@ fn teardown_loop(dev: &Path) {
     let _ = Command::new("losetup").arg("-d").arg(dev).output();
 }
 
+struct MapperDev {
+    loop_dev: PathBuf,
+    name: String,
+}
+
+impl MapperDev {
+    fn setup(tmp: &Path, test: &str) -> Option<Self> {
+        let loop_dev = setup_loop(tmp)?;
+        let name = format!("hyper-e2e-{test}-{}", std::process::id());
+        let table = format!("0 2048 linear {} 0", loop_dev.display());
+        let created = Command::new("dmsetup")
+            .args(["create", &name, "--table", &table])
+            .status()
+            .is_ok_and(|status| status.success());
+        if !created {
+            teardown_loop(&loop_dev);
+            return None;
+        }
+        Some(Self { loop_dev, name })
+    }
+
+    fn path(&self) -> String {
+        format!("/dev/mapper/{}", self.name)
+    }
+}
+
+impl Drop for MapperDev {
+    fn drop(&mut self) {
+        let _ = Command::new("dmsetup")
+            .args(["remove", "--retry", &self.name])
+            .output();
+        teardown_loop(&self.loop_dev);
+    }
+}
+
 // `chroot-jail prepare` stages the kernel and creates the rootfs node, exiting 0
 // with {"result":"prepared"}.
 #[test]
@@ -83,8 +118,8 @@ fn prepare_succeeds_and_builds_jail_as_root() {
     fs::write(&kernel, b"kernel image").unwrap();
     let cfg = write_config(tmp.path(), &work);
 
-    let Some(dev) = setup_loop(tmp.path()) else {
-        eprintln!("SKIP prepare: losetup unavailable");
+    let Some(dev) = MapperDev::setup(tmp.path(), "prepare") else {
+        eprintln!("SKIP prepare: losetup/dmsetup unavailable");
         return;
     };
 
@@ -98,15 +133,15 @@ fn prepare_succeeds_and_builds_jail_as_root() {
             "--kernel",
             kernel.to_str().unwrap(),
             "--device",
-            dev.to_str().unwrap(),
+            &dev.path(),
             "--uid",
             "0",
             "--gid",
             "0",
         ],
     );
-    let dev_rdev = fs::metadata(&dev).map(|m| m.rdev());
-    teardown_loop(&dev);
+    let dev_rdev = fs::metadata(dev.path()).map(|m| m.rdev());
+    drop(dev);
 
     let json = stdout_json(&out.success());
     assert_eq!(json["result"], "prepared");
@@ -133,8 +168,8 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
     fs::write(&kernel, b"kernel image").unwrap();
     let cfg = write_config_with_network(tmp.path(), &work);
 
-    let Some(dev) = setup_loop(tmp.path()) else {
-        eprintln!("SKIP prepare_creates_tun_node: losetup unavailable");
+    let Some(dev) = MapperDev::setup(tmp.path(), "tun") else {
+        eprintln!("SKIP prepare_creates_tun_node: losetup/dmsetup unavailable");
         return;
     };
 
@@ -150,14 +185,14 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
             "--kernel",
             kernel.to_str().unwrap(),
             "--device",
-            dev.to_str().unwrap(),
+            &dev.path(),
             "--uid",
             &uid.to_string(),
             "--gid",
             &gid.to_string(),
         ],
     );
-    teardown_loop(&dev);
+    drop(dev);
     out.success();
 
     let tun = chroot.join("dev").join("net").join("tun");

@@ -25,8 +25,8 @@ defmodule Hyper.Node.Img.ThinPool do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:pool_dev, :meta_loop, :data_loop]
-    defstruct [:pool_dev, :meta_loop, :data_loop, next: 0, freed: []]
+    @enforce_keys [:pool_dev, :meta_loop]
+    defstruct [:pool_dev, :meta_loop, next: 0, freed: []]
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -94,19 +94,17 @@ defmodule Hyper.Node.Img.ThinPool do
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
          :ok <- reclaim_stale_pool(),
          :ok <- zero_metadata(meta),
-         {:ok, meta_loop} <- SuidHelper.Losetup.attach_rw(meta),
-         {:ok, data_loop} <- SuidHelper.Losetup.attach_rw(data),
          sectors = Information.as_sectors(ImgConfig.thin_pool_data_size()),
-         {:ok, pool_dev} <-
+         {:ok, pool_dev, meta_loop} <-
            SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,
-             meta_loop,
-             data_loop,
+             meta,
+             data,
              sectors,
              ImgConfig.thin_block_sectors(),
              0
            ) do
-      {:ok, %State{pool_dev: pool_dev, meta_loop: meta_loop, data_loop: data_loop}}
+      {:ok, %State{pool_dev: pool_dev, meta_loop: meta_loop}}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -196,10 +194,8 @@ defmodule Hyper.Node.Img.ThinPool do
   def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(_reason, _state) do
     _ = SuidHelper.Dmsetup.remove(@pool_name)
-    _ = SuidHelper.Losetup.detach(state.data_loop)
-    _ = SuidHelper.Losetup.detach(state.meta_loop)
     :ok
   end
 

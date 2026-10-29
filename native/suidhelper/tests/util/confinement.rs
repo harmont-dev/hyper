@@ -8,7 +8,7 @@ use hyper_suidhelper::fs::file::{
     Any, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner,
     SafeFile, ValidationError,
 };
-use hyper_suidhelper::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+use hyper_suidhelper::fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
 use nix::dir::Type;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
@@ -47,7 +47,9 @@ fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree() {
     symlink(&sentinel, tree.join("escape")).unwrap();
 
     let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-    anchor.rmdirat_recursive(Path::new("tree")).unwrap();
+    anchor
+        .rmdirat_recursive(StrictComponent::from_static("tree"))
+        .unwrap();
 
     assert!(!tree.exists(), "tree must be gone");
     assert!(sentinel.exists(), "sentinel dir must survive");
@@ -99,7 +101,9 @@ fn rmdirat_recursive_clears_nested_tree() {
     fs::write(tree.join("a/top.txt"), b"y").unwrap();
 
     let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-    anchor.rmdirat_recursive(Path::new("tree")).unwrap();
+    anchor
+        .rmdirat_recursive(StrictComponent::from_static("tree"))
+        .unwrap();
     assert!(!tree.exists());
 }
 
@@ -153,7 +157,12 @@ fn entries_reports_each_child_with_its_own_type() {
     let _sock = UnixListener::bind(tmp.path().join("sock")).unwrap();
 
     let dir = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-    let got: BTreeMap<OsString, Type> = dir.entries().unwrap().collect::<nix::Result<_>>().unwrap();
+    let got: BTreeMap<OsString, Type> = dir
+        .entries()
+        .unwrap()
+        .map(|entry| entry.map(|(name, ty)| (name.as_os_str().to_os_string(), ty)))
+        .collect::<nix::Result<_>>()
+        .unwrap();
 
     let want = BTreeMap::from([
         (OsString::from("dir"), Type::Directory),

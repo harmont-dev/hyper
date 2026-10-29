@@ -16,6 +16,7 @@ use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
 use crate::process::binary::{self, RootSafeBin};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use thiserror::Error as ThisError;
@@ -51,10 +52,13 @@ pub fn ip_forward_enabled(contents: &str) -> bool {
     contents.trim() == "1"
 }
 
-pub fn run(args: HostInitArgs) -> Result<serde_json::Value, crate::tools::Error> {
+pub fn run(
+    args: HostInitArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
     HostInit::new(args)
         .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
-        .run()
+        .run(token)
 }
 
 struct HostInit {
@@ -86,7 +90,7 @@ impl IsTool for HostInit {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let ip_forward = std::fs::read_to_string(IP_FORWARD_PATH).map_err(Error::IpForwardRead)?;
         if !ip_forward_enabled(&ip_forward) {
             return Err(Error::IpForwardDisabled);
@@ -94,7 +98,7 @@ impl IsTool for HostInit {
 
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);
         // host_init_commands only ever issues `nft` commands (see args.rs).
-        exec::run_all(&commands, |_which| self.nft.command())?;
+        exec::run_all(&commands, root, &[], |_which| self.nft.command())?;
         Ok(())
     }
 

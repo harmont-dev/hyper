@@ -1,10 +1,8 @@
 //! Utilities for interacting with binaries.
 use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
-use std::convert::Infallible;
-use std::ffi::{CStr, OsStr};
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -53,7 +51,7 @@ impl<const NAME: &'static str> RootSafeBin<NAME> {
                 source,
             })?;
 
-        if bin.file_name() != Some(OsStr::new(NAME)) {
+        if safe.file_name() != Some(const { StrictComponent::from_static(NAME) }) {
             return Err(Error::Name {
                 expected: NAME,
                 got: bin.to_path_buf(),
@@ -83,14 +81,6 @@ impl<const NAME: &'static str> RootSafeBin<NAME> {
         cmd.arg0(NAME);
         cmd
     }
-
-    pub fn exec<SA: AsRef<CStr>, SE: AsRef<CStr>>(
-        &self,
-        args: &[SA],
-        env: &[SE],
-    ) -> nix::Result<Infallible> {
-        nix::unistd::fexecve(self.0.as_raw_fd(), args, env)
-    }
 }
 
 impl<const NAME: &'static str> AsFd for RootSafeBin<NAME> {
@@ -107,5 +97,76 @@ impl<const NAME: &'static str> RootSafeBinPathBuf<NAME> {
 
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! `RootSafeBin<NAME>` is what stops a configured path from pointing the helper at
+    //! an attacker-controlled binary it would then run as root. The constructor demands
+    //! an absolute path, exact basename, a real (non-symlink) regular file owned by
+    //! root and not group/other-writable. These assert the refusal axes; the symlink
+    //! axis is root-independent, the owner axis is asserted both ways.
+
+    use super::RootSafeBin;
+    use std::fs;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::path::Path;
+
+    fn is_root() -> bool {
+        nix::unistd::geteuid().is_root()
+    }
+
+    #[test]
+    fn rejects_relative_path() {
+        assert!(RootSafeBin::<"dmsetup">::open(Path::new("dmsetup")).is_err());
+        assert!(RootSafeBin::<"dmsetup">::open(Path::new("./dmsetup")).is_err());
+    }
+
+    #[test]
+    fn rejects_wrong_basename() {
+        // An absolute, existing, root-owned system file with the WRONG basename fails.
+        assert!(RootSafeBin::<"dmsetup">::open(Path::new("/usr/bin/env")).is_err());
+    }
+
+    #[test]
+    fn rejects_symlink_with_correct_basename() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        fs::write(&target, b"x").unwrap();
+        let link = dir.path().join("dmsetup");
+        symlink(&target, &link).unwrap();
+        // Symlink is checked before ownership, so this holds regardless of who runs it.
+        assert!(RootSafeBin::<"dmsetup">::open(&link).is_err());
+    }
+
+    #[test]
+    fn owner_axis_root_owned_accepted_else_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("dmsetup");
+        fs::write(&f, b"#!/bin/true\n").unwrap();
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+        let got = RootSafeBin::<"dmsetup">::open(&f);
+        if is_root() {
+            // root-owned, 0755, absolute, correct basename, not a symlink → valid.
+            assert!(got.is_ok(), "root-owned valid bin rejected: {got:?}");
+        } else {
+            // We own it (uid != 0) → NotRoot.
+            assert!(got.is_err(), "non-root-owned bin accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_group_or_other_writable() {
+        if is_root() {
+            let dir = tempfile::tempdir().unwrap();
+            let f = dir.path().join("dmsetup");
+            fs::write(&f, b"x").unwrap();
+            // root-owned but group/other-writable → Writable rejection.
+            fs::set_permissions(&f, fs::Permissions::from_mode(0o757)).unwrap();
+            assert!(RootSafeBin::<"dmsetup">::open(&f).is_err());
+        } else {
+            eprintln!("SKIP rejects_group_or_other_writable: needs root to own a 0757 file");
+        }
     }
 }

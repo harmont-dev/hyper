@@ -7,76 +7,68 @@
 //! implementations (the original C++ and the `pdata_tools` Rust rewrite)
 //! whose formatting can drift (attribute order, whitespace, escaping) without
 //! changing meaning, and a grammar-level parser is immune to that drift. See
-//! `crate::util::linux::thin_dump` for the document model.
+//! `crate::linux::dm::thin_dump` for the document model.
 
-use std::io;
-use std::process::Output;
+use crate::process::privilege::Root;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
+use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
+use crate::fs::path;
+use crate::linux::dm::thin_dump::{self as dump, DumpError, MetadataDump, ThinMappings};
+use crate::linux::dm::ThinId;
+use crate::linux::loopdev::LoopDevNum;
 use crate::process::binary::RootSafeBin;
-use crate::util::linux::thin_dump::{parse_mappings, Error as ParseError, ThinMappings};
-use crate::util::safe_dev::LoopDev;
 use clap::Args;
 
-/// Errors of running the `thin_dump` binary itself; a bad parse of its
-/// output composes in via `Parse`.
 #[derive(Debug, ThisError)]
 pub enum ToolError {
-    #[error("running thin_dump: {0}")]
-    Spawn(#[source] io::Error),
-    #[error("thin_dump failed: {0}")]
-    Failed(String),
+    #[error("metadata device path: {0}")]
+    Path(#[from] path::ValidationError),
+    #[error("opening metadata device: {0}")]
+    Open(#[from] file::ValidationError),
     #[error(transparent)]
-    Parse(#[from] ParseError),
+    Dump(#[from] DumpError),
 }
 
 #[derive(Args)]
 pub struct ThinDumpArgs {
     /// The pool's metadata loop device.
     #[arg(long)]
-    meta: LoopDev,
+    meta: LoopDevNum,
     /// The thin device id whose provisioned ranges to extract.
     #[arg(long)]
-    dev_id: u64,
+    dev_id: ThinId,
 }
 
 pub struct ThinDump {
-    bin: RootSafeBin<"thin_dump">,
+    thin_dump: dump::ThinDump,
     args: ThinDumpArgs,
 }
 
 impl ThinDump {
     pub fn new(bin: RootSafeBin<"thin_dump">, args: ThinDumpArgs) -> Self {
-        Self { bin, args }
+        Self {
+            thin_dump: dump::ThinDump::new(bin),
+            args,
+        }
     }
 }
 
 impl IsTool for ThinDump {
     type Args = ThinDumpArgs;
     type Output = ThinMappings;
-    type RunT = io::Result<Output>;
+    type RunT = Result<MetadataDump, ToolError>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
+        let meta = self.args.meta.path()?;
+        let device = SafeFile::<IsBlockDevice, Any, Any>::open(&meta, OpenFlags::RDONLY)?;
         // --metadata-snap reads the caller-reserved metadata snapshot, the
         // only safe way to dump a live pool's metadata device.
-        self.bin
-            .command()
-            .arg("--metadata-snap")
-            .arg(self.args.meta.as_ref())
-            .env_clear()
-            .output()
+        Ok(self.thin_dump.dump(&device, self.args.dev_id)?)
     }
 
     fn parse(&self, res: Self::RunT) -> Result<ThinMappings, Box<dyn std::error::Error>> {
-        let out = res.map_err(ToolError::Spawn)?;
-        if !out.status.success() {
-            return Err(
-                ToolError::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
-            );
-        }
-
-        let xml = String::from_utf8_lossy(&out.stdout);
-        Ok(parse_mappings(&xml, self.args.dev_id).map_err(ToolError::from)?)
+        Ok(res?.parse()?.mappings(self.args.dev_id)?)
     }
 }

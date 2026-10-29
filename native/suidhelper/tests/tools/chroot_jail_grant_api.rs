@@ -21,7 +21,7 @@
 //!     its parent `root` dir is opened for the caller's group to traverse
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
-use hyper_suidhelper::fs::path::{RelativeError, ValidationError};
+use hyper_suidhelper::fs::path::{ComponentError, RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_api::{
     grant_api_under, ApiSocket, Error, GrantError, GrantOut,
 };
@@ -60,7 +60,10 @@ fn dotdot_traversal_is_rejected_at_parse() {
     let bad = format!("{}/exec/../id/root/api.socket", tmp.path().display());
     let err = ApiSocket::from_str(&bad).unwrap_err();
     assert!(
-        matches!(err, Error::SocketPath(ValidationError::LooseComponents)),
+        matches!(
+            err,
+            Error::SocketPath(ValidationError::Component(ComponentError::ParentDir))
+        ),
         "got {err:?}",
     );
 }

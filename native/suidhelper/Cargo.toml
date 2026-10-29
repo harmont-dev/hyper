@@ -21,6 +21,11 @@ insecure_test_seams = []
 name = "hyper-suidhelper"
 path = "src/main.rs"
 
+[[bin]]
+name = "fake-jailer"
+path = "tests/e2e/fake_jailer.rs"
+required-features = ["insecure_test_seams"]
+
 # Integration tests mirror the `src/` module tree under `tests/`. Cargo only
 # auto-discovers test files at the top level of `tests/`, so each nested file
 # needs an explicit target pointing at its path.
@@ -29,20 +34,12 @@ name = "safe_path"
 path = "tests/util/safe_path.rs"
 
 [[test]]
-name = "safe_dev"
-path = "tests/util/safe_dev.rs"
-
-[[test]]
 name = "security_gate"
 path = "tests/security_gate.rs"
 
 [[test]]
 name = "config_seam"
 path = "tests/config_seam.rs"
-
-[[test]]
-name = "util_safe_bin"
-path = "tests/util/safe_bin.rs"
 
 [[test]]
 name = "tools_dmsetup_parsers"
@@ -109,10 +106,6 @@ name = "e2e_version"
 path = "tests/e2e/version.rs"
 
 [[test]]
-name = "e2e_losetup"
-path = "tests/e2e/losetup.rs"
-
-[[test]]
 name = "e2e_thin_dump"
 path = "tests/e2e/thin_dump.rs"
 
@@ -125,19 +118,18 @@ name = "config_network"
 path = "tests/config_network.rs"
 
 [[test]]
-name = "util_linux_thin_dump"
-path = "tests/util/linux/thin_dump.rs"
+name = "tools_dmsetup_backing"
+path = "tests/tools/dmsetup_backing.rs"
 
-[[test]]
-name = "tools_losetup_backing"
-path = "tests/tools/losetup_backing.rs"
+[lints.clippy]
+redundant_field_names = "allow"
 
 [dependencies]
 bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["display", "as_ref", "into", "add", "debug"] }
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
 hyper-suidhelper-meta = { path = "meta" }
-nix = { version = "0.29", features = ["user", "fs", "dir", "process"] }
+nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 ref-cast = "1.0.25"
 serde = { version = "1", features = ["derive"] }

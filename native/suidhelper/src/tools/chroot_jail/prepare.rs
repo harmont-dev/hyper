@@ -2,9 +2,11 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
+use crate::linux::dm::DmName;
+use crate::process::privilege::{Root, Unprivileged};
+use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
 use crate::util::chroot_jail::{self, ChrootJail};
-use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -19,8 +21,8 @@ pub struct PrepareArgs {
     kernel: PathBuf,
     /// Host block device to mirror as <chroot>/rootfs (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
-    #[arg(long)]
-    device: BlockDev,
+    #[arg(long, value_parser = parse_dm_device)]
+    device: DmName,
     /// UID to own the staged files.
     #[arg(long)]
     uid: u32,
@@ -36,8 +38,11 @@ pub enum PrepareOut {
 }
 
 /// Run the `prepare` op in its own privileged scope (returns its serialized `Value`).
-pub fn run(args: PrepareArgs) -> Result<serde_json::Value, crate::tools::Error> {
-    Prepare { args }.run()
+pub fn run(
+    args: PrepareArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
+    Prepare { args }.run(token)
 }
 
 struct Prepare {
@@ -49,7 +54,7 @@ impl IsTool for Prepare {
     type Output = PrepareOut;
     type RunT = Result<(), chroot_jail::Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let args = &self.args;
         ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
             .with_kernel(args.kernel.clone())

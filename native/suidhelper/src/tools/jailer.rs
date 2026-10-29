@@ -12,6 +12,7 @@
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};
+use crate::process::privilege::Unprivileged;
 use crate::util::jailer::Jailer;
 use clap::Args;
 use std::path::PathBuf;
@@ -51,7 +52,7 @@ pub struct JailerArgs {
 /// On success this never returns (the process image is replaced); the `Ok` arm
 /// is therefore [`std::convert::Infallible`]. Every failure is returned as
 /// [`Error`] for the caller to print and exit non-zero.
-pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
+pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infallible, Error> {
     let config = Config::get();
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
@@ -84,6 +85,6 @@ pub fn run(args: JailerArgs) -> Result<std::convert::Infallible, Error> {
         .api_sock(&args.api_sock)
         .maybe_netns(netns.as_deref())
         .build()
-        .invoke()
+        .invoke(token)
         .map_err(Error::Jail)
 }

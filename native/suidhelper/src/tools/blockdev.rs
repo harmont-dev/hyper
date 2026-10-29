@@ -1,22 +1,29 @@
 use super::IsTool;
-use crate::process::binary::RootSafeBin;
-use crate::util::safe_dev::BlockDev;
+use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
+use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::linux::dm::DmName;
+use crate::process::privilege::Root;
+use crate::tools::parse_dm_device;
 use clap::Args;
 use serde::Serialize;
 use std::io;
-use std::num::ParseIntError;
 use std::path::PathBuf;
-use std::process::Output;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("running blockdev: {0}")]
-    Spawn(#[source] io::Error),
-    #[error("blockdev failed: {0}")]
-    Failed(String),
-    #[error("parsing size: {0}")]
-    ParseSize(#[from] ParseIntError),
+    #[error("resolving {path}: {source}")]
+    Resolve {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("device path: {0}")]
+    Path(#[from] path::ValidationError),
+    #[error("opening device: {0}")]
+    Open(#[from] file::ValidationError),
+    #[error("querying device size: {0}")]
+    Size(#[source] nix::Error),
 }
 
 #[derive(Args)]
@@ -24,7 +31,8 @@ pub struct BlockdevArgs {
     /// Only the size query is permitted, so clap requires it.
     #[arg(long = "getsz", required = true)]
     getsz: bool,
-    path: BlockDev,
+    #[arg(value_parser = parse_dm_device)]
+    path: DmName,
 }
 
 #[derive(Serialize)]
@@ -33,47 +41,36 @@ pub struct BlockdevOut {
 }
 
 pub struct Blockdev {
-    bin: RootSafeBin<"blockdev">,
-    path: PathBuf,
+    path: DmName,
 }
 
 impl Blockdev {
-    pub fn new(bin: RootSafeBin<"blockdev">, args: BlockdevArgs) -> Self {
+    pub fn new(args: BlockdevArgs) -> Self {
         // clap required --getsz; the path was validated as a BlockDev.
         let BlockdevArgs { getsz: _, path } = args;
-        Self {
-            bin,
-            path: path.into(),
-        }
+        Self { path }
     }
 }
 
 impl IsTool for Blockdev {
     type Args = BlockdevArgs;
     type Output = BlockdevOut;
-    type RunT = io::Result<Output>;
+    type RunT = Result<BlockdevOut, Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        self.bin
-            .command()
-            .arg("--getsz")
-            .arg(&self.path)
-            .env_clear()
-            .output()
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
+        let dev = self.path.path();
+        let dev = dev.as_path();
+        let real = std::fs::canonicalize(dev).map_err(|source| Error::Resolve {
+            path: dev.to_path_buf(),
+            source,
+        })?;
+        let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
+        let file = SafeFile::<IsBlockDevice, Any, Any>::open(safe, OpenFlags::RDONLY)?;
+        let sectors = file.sectors().map_err(Error::Size)?;
+        Ok(BlockdevOut { sectors })
     }
 
     fn parse(&self, res: Self::RunT) -> Result<BlockdevOut, Box<dyn std::error::Error>> {
-        let out = res.map_err(Error::Spawn)?;
-        if !out.status.success() {
-            return Err(
-                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
-            );
-        }
-
-        let sectors = String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse::<u64>()
-            .map_err(Error::ParseSize)?;
-        Ok(BlockdevOut { sectors })
+        Ok(res?)
     }
 }

@@ -1,19 +1,28 @@
 // SPDX-License-Identifier: MIT
 //! Typesafer file descriptors.
 
+use super::dev::DeviceNumber;
 use super::path::{IsAbsolute, SafePath, StrictComponents};
 use derive_more::{BitOr, Into};
-use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
-use nix::libc::{dev_t, AT_FDCWD};
-use nix::sys::stat::{
-    fchmodat, fstat, major, makedev, minor, FchmodatFlags, FileStat, Mode, SFlag,
-};
-use nix::unistd::{fchownat, Gid, Uid};
+use nix::fcntl::{open, openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
+use nix::libc::AT_FDCWD;
+use nix::sys::stat::{fchmodat, fstat, FchmodatFlags, FileStat, Mode, SFlag};
+use nix::unistd::{dup, fchownat, Gid, Uid};
 use std::io;
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
+
+const SECTOR_BYTES: u64 = 512;
+
+mod ioctl {
+    nix::ioctl_read_bad!(
+        blkgetsize64,
+        nix::request_code_read!(0x12, 114, std::mem::size_of::<usize>()),
+        u64
+    );
+}
 
 /// The single error type shared by every `SafeFile` flavor. A given flavor only ever yields the
 /// variants for the axes it actually enforces.
@@ -182,6 +191,12 @@ impl<T, R, O> SafeFile<T, R, O> {
         Ok(Self(self.0.try_clone()?, PhantomData))
     }
 
+    pub fn inheritable(&self) -> nix::Result<OwnedFd> {
+        let raw = dup(self.0.as_raw_fd())?;
+        // SAFETY: `dup` just returned this fd and nothing else owns it.
+        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+    }
+
     pub fn chmod(&self, mode: Mode) -> nix::Result<()> {
         let path = PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()));
         // The FollowSymlink here is necessary because glibc can't not follow symlinks
@@ -199,11 +214,29 @@ impl<T, R, O> SafeFile<T, R, O> {
     }
 }
 
-impl<R, O> SafeFile<IsBlockDevice, R, O> {
+pub trait DeviceType: FileType {}
+
+impl DeviceType for IsBlockDevice {}
+impl DeviceType for IsCharDevice {}
+
+impl<T: DeviceType, R, O> SafeFile<T, R, O> {
     /// The device's `rdev` (major:minor), ready for `mknod`.
-    pub fn rdev(&self) -> Result<dev_t, ValidationError> {
+    pub fn rdev(&self) -> Result<DeviceNumber, ValidationError> {
         let stat = fstat(self.0.as_raw_fd()).map_err(ValidationError::Fstat)?;
-        Ok(makedev(major(stat.st_rdev), minor(stat.st_rdev)))
+        Ok(DeviceNumber::from(stat.st_rdev))
+    }
+}
+
+impl<R, O> SafeFile<IsBlockDevice, R, O> {
+    pub fn size(&self) -> nix::Result<u64> {
+        let mut bytes = 0u64;
+        // SAFETY: BLKGETSIZE64 writes exactly one u64 through the pointer.
+        unsafe { ioctl::blkgetsize64(self.0.as_raw_fd(), &mut bytes) }?;
+        Ok(bytes)
+    }
+
+    pub fn sectors(&self) -> nix::Result<u64> {
+        Ok(self.size()? / SECTOR_BYTES)
     }
 }
 
@@ -223,6 +256,20 @@ where
             .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS);
         let raw = openat2(AT_FDCWD, path.as_ref(), how).map_err(ValidationError::Open)?;
         // SAFETY: `openat2` just handed us this fd; nobody else owns it.
+        let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+
+        Self::try_from(owned)
+    }
+
+    pub fn reopen(&self, flags: OpenFlags) -> Result<Self, ValidationError> {
+        let path = PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()));
+        let raw = open(
+            &path,
+            flags.0 | T::OPEN_FLAGS | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(ValidationError::Open)?;
+        // SAFETY: `open` just handed us this fd; nobody else owns it.
         let owned = unsafe { OwnedFd::from_raw_fd(raw) };
 
         Self::try_from(owned)

@@ -1,32 +1,25 @@
+mod backing;
 mod message;
-mod snapshot;
+mod name;
 mod table;
-mod thin;
-mod thin_pool;
 
 use super::IsTool;
+use crate::linux::dm::{self, DmName, RemoveMode};
+use crate::linux::loopdev::LoopControl;
+use crate::linux::Access;
 use crate::process::binary::RootSafeBin;
-use crate::util::safe_dev::{self, DmName};
+use crate::process::privilege::Root;
+pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
-pub use message::ThinMessage;
+pub use message::{parse_message, MessageError, ThinMessage};
+pub use name::{parse_dm_device, parse_dm_name, NameError};
 use serde::Serialize;
-use std::io;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Output;
-pub use table::DmTable;
-use thiserror::Error as ThisError;
+use std::time::Duration;
+pub use table::{parse_table, resolve_table, Slot, Source, TableError, TableSpec};
 
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("dmsetup table must be a snapshot target: {0}")]
-    BadTable(String),
-    #[error(transparent)]
-    Device(#[from] safe_dev::Error),
-    #[error("running dmsetup: {0}")]
-    Spawn(#[source] io::Error),
-    #[error("dmsetup failed: {0}")]
-    Failed(String),
-}
+const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Args)]
 pub struct DmsetupArgs {
@@ -37,27 +30,36 @@ pub struct DmsetupArgs {
 #[derive(Subcommand)]
 enum DmOp {
     Create {
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
         #[arg(long)]
         readonly: bool,
-        #[arg(long)]
-        table: DmTable,
+        #[arg(long, value_parser = resolve_table)]
+        table: TableSpec<BackingFile>,
     },
     Remove {
         #[arg(long)]
         retry: bool,
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
     },
     Message {
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
-        #[arg(long)]
+        #[arg(long, value_parser = parse_message)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
     /// of the device's thin id).
-    Suspend { name: DmName },
+    Suspend {
+        #[arg(value_parser = parse_dm_name)]
+        name: DmName,
+    },
     /// Resume a suspended dm device.
-    Resume { name: DmName },
+    Resume {
+        #[arg(value_parser = parse_dm_name)]
+        name: DmName,
+    },
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
@@ -68,97 +70,111 @@ enum DmOp {
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum DmsetupOut {
-    Created { device: PathBuf },
+    Created {
+        device: PathBuf,
+        loops: BTreeMap<Slot, PathBuf>,
+    },
     Removed,
     Messaged,
     Suspended,
     Resumed,
-    Targets { output: String },
-    Listed { output: String },
+    Targets {
+        output: String,
+    },
+    Listed {
+        output: String,
+    },
 }
 
 pub struct Dmsetup {
-    bin: RootSafeBin<"dmsetup">,
+    dmsetup: dm::Dmsetup,
     op: DmOp,
 }
 
 impl Dmsetup {
     pub fn new(bin: RootSafeBin<"dmsetup">, args: DmsetupArgs) -> Self {
-        Self { bin, op: args.op }
+        Self {
+            dmsetup: dm::Dmsetup::new(bin),
+            op: args.op,
+        }
     }
 }
 
 impl IsTool for Dmsetup {
     type Args = DmsetupArgs;
     type Output = DmsetupOut;
-    type RunT = io::Result<Output>;
+    type RunT = Result<DmsetupOut, Box<dyn std::error::Error>>;
 
-    fn run_privileged(&self) -> Self::RunT {
-        let mut cmd = self.bin.command();
-        match &self.op {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
+        let dm = &self.dmsetup;
+        Ok(match &self.op {
             DmOp::Create {
                 name,
                 readonly,
                 table,
             } => {
-                cmd.arg("create").arg(name.to_string());
-                if *readonly {
-                    cmd.arg("--readonly");
+                let access = if *readonly {
+                    Access::ReadOnly
+                } else {
+                    Access::ReadWrite
+                };
+                let control = LoopControl::open()?;
+                let mut loops = BTreeMap::new();
+                let attached = table.try_map(|backing, slot| {
+                    let slot_access = match slot {
+                        Slot::Origin => Access::ReadOnly,
+                        Slot::Cow => access,
+                        Slot::Metadata | Slot::Data => Access::ReadWrite,
+                    };
+                    let device = control.attach(backing.file(), slot_access, ATTACH_TIMEOUT)?;
+                    loops.insert(slot, device.path().as_ref().to_path_buf());
+                    Ok::<_, Box<dyn std::error::Error>>(device)
+                })?;
+                DmsetupOut::Created {
+                    device: dm.create(name, &attached.to_dm(), access)?.path().into(),
+                    loops,
                 }
-                cmd.arg("--table").arg(table.to_string());
             }
             DmOp::Remove { retry, name } => {
-                cmd.arg("remove");
-                if *retry {
-                    cmd.arg("--retry");
-                }
-                cmd.arg(name.to_string());
+                let mode = if *retry {
+                    RemoveMode::Retry
+                } else {
+                    RemoveMode::Once
+                };
+                dm.device(name).remove(mode)?;
+                DmsetupOut::Removed
             }
             DmOp::Message { name, message } => {
-                cmd.arg("message")
-                    .arg(name.to_string())
-                    .arg("0")
-                    .arg(message.to_string());
+                let pool = dm.thin_pool(name)?;
+                match *message {
+                    ThinMessage::CreateThin(id) => pool.create_thin(id).map(drop)?,
+                    ThinMessage::CreateSnap { id, origin } => pool.create_snap(id, origin)?,
+                    ThinMessage::Delete(id) => pool.delete_thin(id)?,
+                    ThinMessage::ReserveMetadataSnap => pool.reserve_metadata_snap()?,
+                    ThinMessage::ReleaseMetadataSnap => pool.release_metadata_snap()?,
+                }
+                DmsetupOut::Messaged
             }
             DmOp::Suspend { name } => {
-                cmd.arg("suspend").arg(name.to_string());
+                dm.device(name).suspend()?;
+                DmsetupOut::Suspended
             }
             DmOp::Resume { name } => {
-                cmd.arg("resume").arg(name.to_string());
+                dm.device(name).resume()?;
+                DmsetupOut::Resumed
             }
-            DmOp::Targets => {
-                cmd.arg("targets");
-            }
-            DmOp::Ls => {
-                cmd.arg("ls");
-            }
-        }
-
-        cmd.env_clear().output()
+            DmOp::Targets => DmsetupOut::Targets {
+                output: dm
+                    .targets()?
+                    .iter()
+                    .map(|target| format!("{} {}\n", target.name, target.version))
+                    .collect(),
+            },
+            DmOp::Ls => DmsetupOut::Listed { output: dm.list()? },
+        })
     }
 
     fn parse(&self, res: Self::RunT) -> Result<DmsetupOut, Box<dyn std::error::Error>> {
-        let out = res.map_err(Error::Spawn)?;
-        if !out.status.success() {
-            return Err(
-                Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()).into(),
-            );
-        }
-
-        Ok(match &self.op {
-            DmOp::Create { name, .. } => DmsetupOut::Created {
-                device: PathBuf::from(format!("/dev/mapper/{name}")),
-            },
-            DmOp::Remove { .. } => DmsetupOut::Removed,
-            DmOp::Message { .. } => DmsetupOut::Messaged,
-            DmOp::Suspend { .. } => DmsetupOut::Suspended,
-            DmOp::Resume { .. } => DmsetupOut::Resumed,
-            DmOp::Targets => DmsetupOut::Targets {
-                output: String::from_utf8_lossy(&out.stdout).into_owned(),
-            },
-            DmOp::Ls => DmsetupOut::Listed {
-                output: String::from_utf8_lossy(&out.stdout).into_owned(),
-            },
-        })
+        res
     }
 }

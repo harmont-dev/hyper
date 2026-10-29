@@ -2,10 +2,9 @@ defmodule Hyper.Cfg.Tools do
   @moduledoc """
   Paths to every external binary Hyper runs, read from the `[tools]` table.
 
-  The privileged tools (`firecracker`, `jailer`, `dmsetup`, `losetup`,
-  `blockdev`) are read **only** from `/etc/hyper/config.toml` — the file the
-  setuid helper also parses, so node and helper can never disagree on a
-  root-impacting path. The node-only tools (`skopeo`, `mke2fs`, `umoci`,
+  The privileged tools (`firecracker`, `jailer`, `dmsetup`, `losetup`) are read
+  **only** from `/etc/hyper/config.toml` — the file the setuid helper also
+  parses, so node and helper can never disagree on a root-impacting path. The node-only tools (`skopeo`, `mke2fs`, `umoci`,
   `suidhelper`) run unprivileged, so `/etc/hyper/config.exs` may override them
   (e.g. a path from a secrets manager), then `config.toml`, then the default.
   """

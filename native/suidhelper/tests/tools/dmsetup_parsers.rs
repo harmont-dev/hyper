@@ -1,72 +1,155 @@
 //! `DmTable`/`ThinMessage` are reconstructed from the caller's string and then
 //! re-rendered, so dmsetup only ever sees a table/message we rebuilt. The accept
 //! set must round-trip to a canonical single-spaced form; the reject set covers
-//! non-whitelisted targets, arbitrary (non loop / non hyper-) devices, and
-//! malformed arity. These are the contract that keeps dmsetup off arbitrary
-//! storage.
+//! non-whitelisted targets, arbitrary (non loop / non hyper-) devices, devices
+//! named where only a backing file may go, non-strict file paths, and malformed
+//! arity. These are the contract that keeps dmsetup off arbitrary storage.
 
-use hyper_suidhelper::tools::{DmTable, ThinMessage};
+use hyper_suidhelper::linux::dm::ThinId;
+use hyper_suidhelper::tools::{
+    parse_dm_device, parse_dm_name, parse_message, parse_table, NameError, ThinMessage,
+};
+use proptest::prelude::*;
+use std::path::Path;
+
+fn id(n: u32) -> ThinId {
+    ThinId::new(n).unwrap()
+}
 
 #[test]
 fn accepts_canonical_tables_and_round_trips() {
     for s in [
-        "0 100 snapshot /dev/loop0 /dev/loop1 P 8",
-        "0 100 thin-pool /dev/loop0 /dev/loop1 128 1024",
+        "0 100 linear /srv/hyper/layers/base.img 0",
+        "0 100 linear /dev/mapper/hyper-img 0",
+        "0 100 snapshot /srv/hyper/layers/base.img /srv/hyper/layers/delta.img P 8",
+        "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8",
+        "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024",
         "0 100 thin /dev/mapper/hyper-pool 0",
         "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
+        "0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img",
+        "0 100 thin /dev/mapper/hyper-pool 16777215",
     ] {
-        let t = s
-            .parse::<DmTable>()
-            .unwrap_or_else(|_| panic!("rejected {s:?}"));
+        let t = parse_table(s).unwrap_or_else(|_| panic!("rejected {s:?}"));
         assert_eq!(t.to_string(), s, "round-trip changed {s:?}");
     }
 }
 
 #[test]
 fn normalizes_inner_whitespace_on_render() {
-    let weird = "0   100  snapshot  /dev/loop0   /dev/loop1 P 8";
-    let canonical = "0 100 snapshot /dev/loop0 /dev/loop1 P 8";
-    let t = weird
-        .parse::<DmTable>()
-        .expect("weird spacing must still parse");
+    let weird = "0   100  snapshot  /dev/mapper/hyper-img   /srv/hyper/cow.img P 8";
+    let canonical = "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/cow.img P 8";
+    let t = parse_table(weird).expect("weird spacing must still parse");
     assert_eq!(t.to_string(), canonical);
 }
 
 #[test]
 fn rejects_non_whitelisted_targets_and_devices() {
     for bad in [
-        "0 100 linear /dev/loop0 0",                    // target not allowed
-        "0 100 crypt /dev/loop0 /dev/loop1",            // target not allowed
-        "0 100 snapshot /dev/sda /dev/loop1 P 8",       // origin = arbitrary storage
-        "0 100 snapshot /dev/loop0 /dev/sda P 8",       // cow = arbitrary storage
-        "0 100 snapshot /dev/loop0 /dev/loop1 X 8",     // bad persistence flag
-        "1 100 snapshot /dev/loop0 /dev/loop1 P 8",     // start != 0
-        "0 100 snapshot /dev/loop0 /dev/loop1 P",       // too few fields
-        "0 100 thin-pool /dev/sda /dev/loop1 128 1024", // meta = arbitrary
-        "0 100 thin /dev/sda 0",                        // pool = arbitrary
-        "",                                             // empty
-        "garbage",                                      // junk
+        "0 100 crypt /dev/loop0 /srv/hyper/a", // target not allowed
+        "0 100 linear /dev/sda 0",             // origin = arbitrary storage
+        "0 100 linear /srv/hyper/a 8",         // nonzero offset
+        "0 100 snapshot /dev/sda /srv/hyper/a P 8", // origin = arbitrary storage
+        "0 100 snapshot /dev/loop0 /dev/loop1 P 8", // cow = device, not a file
+        "0 100 snapshot /dev/loop0 srv/hyper/a P 8", // cow = relative path
+        "0 100 snapshot /dev/loop0 /srv/hyper/../a P 8", // cow = `..` component
+        "0 100 snapshot /dev/loop0 /srv/hyper/a X 8", // bad persistence flag
+        "1 100 snapshot /dev/loop0 /srv/hyper/a P 8", // start != 0
+        "0 100 snapshot /dev/loop0 /srv/hyper/a P", // too few fields
+        "0 100 thin-pool /dev/loop0 /srv/hyper/d 128 1024", // meta = device
+        "0 100 thin-pool /srv/hyper/m /dev/loop1 128 1024", // data = device
+        "0 100 thin /dev/sda 0",               // pool = arbitrary
+        "0 100 thin /srv/hyper/pool 0",        // pool = file
+        "0 100 thin /dev/loop0 0",             // pool = loop, not dm
+        "0 100 thin /dev/mapper/other 0",      // pool = non-hyper dm
+        "0 100 thin /dev/mapper/hyper-pool 16777216", // id past 24 bits
+        "0 100 thin /dev/mapper/hyper-pool 0 /dev/sda", // origin = arbitrary
+        "0 100 thin /dev/mapper/hyper-pool 0 /dev/loop0 /dev/loop1", // two origins
+        "",                                    // empty
+        "garbage",                             // junk
     ] {
-        assert!(bad.parse::<DmTable>().is_err(), "DmTable accepted {bad:?}");
+        assert!(parse_table(bad).is_err(), "parse_table accepted {bad:?}");
+    }
+}
+
+proptest! {
+    #[test]
+    fn dm_name_accepts_every_valid_hyper_name(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
+        let s = format!("hyper-{suffix}");
+        prop_assert_eq!(parse_dm_name(&s).unwrap().to_string(), s);
+    }
+
+    #[test]
+    fn dm_name_refuses_valid_names_we_do_not_own(s in "[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}") {
+        prop_assume!(!s.starts_with("hyper-") && !matches!(s.as_str(), "." | ".." | "control"));
+        prop_assert!(matches!(parse_dm_name(&s), Err(NameError::NotHyper(_))));
+    }
+
+    #[test]
+    fn dm_name_refuses_hyper_names_the_kernel_would_reject(pre in "[a-z]{0,8}", post in "[a-z]{0,8}") {
+        let s = format!("hyper-{pre}/{post}");
+        prop_assert!(matches!(parse_dm_name(&s), Err(NameError::Invalid(_))));
+    }
+
+    #[test]
+    fn dm_device_accepts_hyper_mapper_paths_and_preserves_them(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
+        let s = format!("/dev/mapper/hyper-{suffix}");
+        let path = parse_dm_device(&s).unwrap().path();
+        prop_assert_eq!(path.as_path(), Path::new(&s));
+    }
+
+    #[test]
+    fn dm_device_refuses_mapper_names_we_do_not_own(name in "[a-z][a-z0-9._-]{0,12}") {
+        prop_assume!(!name.starts_with("hyper-") && name != "control");
+        let s = format!("/dev/mapper/{name}");
+        prop_assert!(matches!(parse_dm_device(&s), Err(NameError::NotHyper(_))));
+    }
+
+    #[test]
+    fn a_device_is_never_accepted_as_a_backing_file(rest in "[A-Za-z0-9._/-]{1,32}") {
+        let dev = format!("/dev/{rest}");
+        for table in [
+            format!("0 8 snapshot /dev/mapper/hyper-img {dev} P 8"),
+            format!("0 8 thin-pool {dev} /srv/hyper/data 128 0"),
+            format!("0 8 thin-pool /srv/hyper/meta {dev} 128 0"),
+        ] {
+            prop_assert!(parse_table(&table).is_err(), "accepted {table:?}");
+        }
     }
 }
 
 #[test]
 fn thinmessage_accepts_whitelisted_and_normalizes() {
-    for (s, canon) in [
-        ("create_thin 7", "create_thin 7"),
-        ("create_thin   7", "create_thin 7"),
-        ("delete 3", "delete 3"),
-        ("create_snap 4 2", "create_snap 4 2"),
-        ("create_snap   4   2", "create_snap 4 2"),
-        ("reserve_metadata_snap", "reserve_metadata_snap"),
-        ("  reserve_metadata_snap  ", "reserve_metadata_snap"),
-        ("release_metadata_snap", "release_metadata_snap"),
+    for (s, want) in [
+        ("create_thin 7", ThinMessage::CreateThin(id(7))),
+        ("create_thin   7", ThinMessage::CreateThin(id(7))),
+        (
+            "create_thin 16777215",
+            ThinMessage::CreateThin(id(16777215)),
+        ),
+        ("delete 3", ThinMessage::Delete(id(3))),
+        (
+            "create_snap 4 2",
+            ThinMessage::CreateSnap {
+                id: id(4),
+                origin: id(2),
+            },
+        ),
+        (
+            "create_snap   4   2",
+            ThinMessage::CreateSnap {
+                id: id(4),
+                origin: id(2),
+            },
+        ),
+        ("reserve_metadata_snap", ThinMessage::ReserveMetadataSnap),
+        (
+            "  reserve_metadata_snap  ",
+            ThinMessage::ReserveMetadataSnap,
+        ),
+        ("release_metadata_snap", ThinMessage::ReleaseMetadataSnap),
     ] {
-        let m = s
-            .parse::<ThinMessage>()
-            .unwrap_or_else(|_| panic!("rejected {s:?}"));
-        assert_eq!(m.to_string(), canon, "round-trip changed {s:?}");
+        let got = parse_message(s).unwrap_or_else(|_| panic!("rejected {s:?}"));
+        assert_eq!(got, want, "{s:?}");
     }
 }
 
@@ -89,10 +172,36 @@ fn thinmessage_rejects_non_whitelisted() {
         "reserve_metadata_snap 1",
         "release_metadata_snap 1 2",
         "reserve_metadata",
+        "create_thin 16777216",
+        "delete 16777216",
+        "create_snap 1 16777216",
     ] {
         assert!(
-            bad.parse::<ThinMessage>().is_err(),
-            "ThinMessage accepted {bad:?}"
+            parse_message(bad).is_err(),
+            "parse_message accepted {bad:?}"
+        );
+    }
+}
+
+#[test]
+fn dm_device_rejects_known_attack_strings() {
+    for bad in [
+        "/dev/sda",
+        "/dev/loop0",
+        "/dev/loop0/../sda",
+        "/dev/mapper/hyper-x/../../sda",
+        "/dev/mapper/hyper-x/",
+        "/dev/mapper/cryptroot",
+        "/dev/mapper/control",
+        "/dev/mapper/",
+        "/dev/mapper",
+        "../dev/mapper/hyper-x",
+        "dev/mapper/hyper-x",
+        "hyper-x",
+    ] {
+        assert!(
+            parse_dm_device(bad).is_err(),
+            "parse_dm_device accepted {bad:?}"
         );
     }
 }

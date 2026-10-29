@@ -51,7 +51,6 @@ configurable:
 | `jailer`      | -             | `.jailer`      | -                                   | [Safe Path](#safe-path) |
 | `dmsetup`     | -             | `.dmsetup`     | `"/usr/sbin/dmsetup"`               | [Safe Path](#safe-path) |
 | `losetup`     | -             | `.losetup`     | `"/usr/sbin/losetup"`               | [Safe Path](#safe-path) |
-| `blockdev`    | -             | `.blockdev`    | `"/usr/sbin/blockdev"`              | [Safe Path](#safe-path) |
 | `thin_dump`   | -             | `.thin_dump`   | `"/usr/sbin/thin_dump"`             | [Safe Path](#safe-path). Reads thin snapshot metadata for fork publish; required for `Hyper.Vm.fork/1`'s cross-node path (same-node `fast_fork/1` is unaffected). |
 | `mke2fs`      | `.mke2fs`     | `.mke2fs`      | `$PATH["mke2fs"]`                   |  |
 | `skopeo`      | `.skopeo`     | `.skopeo`      | `$PATH["skopeo"]`                   |  |
@@ -80,7 +79,6 @@ firecracker = "/opt/firecracker/firecracker"
 jailer      = "/opt/firecracker/jailer"
 dmsetup     = "/usr/sbin/dmsetup"
 losetup     = "/usr/sbin/losetup"
-blockdev    = "/usr/sbin/blockdev"
 thin_dump   = "/usr/sbin/thin_dump"
 
 # Node tools -- may also be set in config.exs, which wins when both are set.

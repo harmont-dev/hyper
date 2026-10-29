@@ -5,6 +5,7 @@ use super::exec;
 use super::prepare;
 use super::NetworkOut;
 use crate::process::binary::RootSafeBin;
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
@@ -28,10 +29,13 @@ pub enum Error {
     Exec(#[from] exec::Error),
 }
 
-pub fn run(args: TeardownArgs) -> Result<serde_json::Value, crate::tools::Error> {
+pub fn run(
+    args: TeardownArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
     Teardown::new(args)
         .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
-        .run()
+        .run(token)
 }
 
 struct Teardown {
@@ -54,9 +58,9 @@ impl IsTool for Teardown {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let commands = args::teardown_commands(&self.plan);
-        exec::run_all(&commands, |which| match which {
+        exec::run_all(&commands, root, &[], |which| match which {
             args::Which::Ip => self.ip.command(),
             args::Which::Nft => self.nft.command(),
         })?;

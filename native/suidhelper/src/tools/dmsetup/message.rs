@@ -1,33 +1,34 @@
-use super::Error;
-use derive_more::Display;
-use std::str::FromStr;
+use crate::linux::dm::{ParseThinIdError, ThinId};
+use thiserror::Error as ThisError;
 
 /// A thin-pool message we permit: provision, snapshot, or drop a thin device by id, or pin/unpin the pool's metadata snapshot.
-#[derive(Clone, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThinMessage {
-    #[display("create_thin {_0}")]
-    CreateThin(u64),
-    #[display("create_snap {_0} {_1}")]
-    CreateSnap(u64, u64),
-    #[display("delete {_0}")]
-    Delete(u64),
-    #[display("reserve_metadata_snap")]
+    CreateThin(ThinId),
+    CreateSnap { id: ThinId, origin: ThinId },
+    Delete(ThinId),
     ReserveMetadataSnap,
-    #[display("release_metadata_snap")]
     ReleaseMetadataSnap,
 }
 
-impl FromStr for ThinMessage {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let id = |t: &str| t.parse().map_err(|_| Error::BadTable(s.to_string()));
-        match s.split_whitespace().collect::<Vec<_>>().as_slice() {
-            ["create_thin", i] => Ok(ThinMessage::CreateThin(id(i)?)),
-            ["create_snap", new, orig] => Ok(ThinMessage::CreateSnap(id(new)?, id(orig)?)),
-            ["delete", i] => Ok(ThinMessage::Delete(id(i)?)),
-            ["reserve_metadata_snap"] => Ok(ThinMessage::ReserveMetadataSnap),
-            ["release_metadata_snap"] => Ok(ThinMessage::ReleaseMetadataSnap),
-            _ => Err(Error::BadTable(s.to_string())),
-        }
+#[derive(Debug, ThisError)]
+pub enum MessageError {
+    #[error("unsupported thin-pool message: {0}")]
+    Malformed(String),
+    #[error(transparent)]
+    ThinId(#[from] ParseThinIdError),
+}
+
+pub fn parse_message(s: &str) -> Result<ThinMessage, MessageError> {
+    match s.split_whitespace().collect::<Vec<_>>().as_slice() {
+        ["create_thin", i] => Ok(ThinMessage::CreateThin(i.parse()?)),
+        ["create_snap", new, orig] => Ok(ThinMessage::CreateSnap {
+            id: new.parse()?,
+            origin: orig.parse()?,
+        }),
+        ["delete", i] => Ok(ThinMessage::Delete(i.parse()?)),
+        ["reserve_metadata_snap"] => Ok(ThinMessage::ReserveMetadataSnap),
+        ["release_metadata_snap"] => Ok(ThinMessage::ReleaseMetadataSnap),
+        _ => Err(MessageError::Malformed(s.to_string())),
     }
 }

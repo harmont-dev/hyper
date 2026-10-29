@@ -123,7 +123,7 @@ pub struct Jails {
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
 ///
-/// The device tools (`dmsetup`, `losetup`, `blockdev`, `thin_dump`) carry
+/// The device tools (`dmsetup`, `losetup`, `thin_dump`) carry
 /// built-in defaults; `firecracker` and `jailer` have none and must be
 /// configured before any VM can launch — their absence surfaces as
 /// [`BinError::Unconfigured`] at use time, not at load. Every path is
@@ -135,10 +135,6 @@ pub struct Jails {
 pub struct Tools {
     #[default("/usr/sbin/dmsetup".into())]
     dmsetup: PathBuf,
-    #[default("/usr/sbin/losetup".into())]
-    losetup: PathBuf,
-    #[default("/usr/sbin/blockdev".into())]
-    blockdev: PathBuf,
     // /usr/bin/ip, not /usr/sbin/ip: on merged-usr distros the latter
     // is a symlink to the former, and RootSafeBin rejects symlinked tool
     // paths. iproute2's real binary lives at /usr/bin/ip.
@@ -220,16 +216,6 @@ impl Config {
     /// The validated `dmsetup` binary the helper will run.
     pub fn dmsetup(&self) -> Result<RootSafeBin<"dmsetup">, binary::Error> {
         RootSafeBin::open(&self.tools.dmsetup)
-    }
-
-    /// The validated `losetup` binary the helper will run.
-    pub fn losetup(&self) -> Result<RootSafeBin<"losetup">, binary::Error> {
-        RootSafeBin::open(&self.tools.losetup)
-    }
-
-    /// The validated `blockdev` binary the helper will run.
-    pub fn blockdev(&self) -> Result<RootSafeBin<"blockdev">, binary::Error> {
-        RootSafeBin::open(&self.tools.blockdev)
     }
 
     /// The validated `ip` (iproute2) binary the network tool runs.

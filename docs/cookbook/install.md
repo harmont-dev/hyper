@@ -155,7 +155,7 @@ work_dir = "/srv/hyper"
 # Paths to every external binary hyper uses. All paths must be absolute.
 #
 # The privileged binaries the setuid helper runs (firecracker, jailer, dmsetup,
-# losetup, blockdev) must be root-owned and not group/world writable -- the
+# losetup) must be root-owned and not group/world writable -- the
 # helper refuses them otherwise. The node-run tools (skopeo, umoci, mke2fs) have
 # no such requirement.
 [tools]
@@ -168,7 +168,6 @@ jailer = "/opt/firecracker/jailer"
 # optional -- privileged device tools, default to /usr/sbin/<name>.
 # dmsetup  = "/usr/sbin/dmsetup"
 # losetup  = "/usr/sbin/losetup"
-# blockdev = "/usr/sbin/blockdev"
 
 # optional -- node-run tools. skopeo/mke2fs default to the name on PATH; omit
 # umoci to let hyper download and cache a pinned release.
