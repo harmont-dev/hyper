@@ -1,11 +1,12 @@
 use super::{Device, DmName, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
 use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use crate::linux::Access;
+use derive_more::{Display, Into};
 use std::ffi::OsStr;
-use std::fmt;
 use thiserror::Error as ThisError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Into)]
+#[into(u64)]
 pub struct ThinId(u32);
 
 #[derive(Debug, ThisError)]
@@ -21,18 +22,6 @@ impl ThinId {
         } else {
             Err(ThinIdOutOfRange(id))
         }
-    }
-}
-
-impl From<ThinId> for u64 {
-    fn from(id: ThinId) -> Self {
-        u64::from(id.0)
-    }
-}
-
-impl fmt::Display for ThinId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 

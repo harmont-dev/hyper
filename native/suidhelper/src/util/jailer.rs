@@ -24,7 +24,7 @@
 use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use crate::util::setuid_privileged;
 use bon::Builder;
-use derive_more::Display;
+use derive_more::{AsRef, Display};
 use nix::errno::Errno;
 use std::ffi::{CString, NulError};
 use std::os::fd::{AsFd, AsRawFd, RawFd};
@@ -75,7 +75,8 @@ pub fn validate_id_number(n: u32, range: (u32, u32)) -> Result<u32, Error> {
 /// A VM id used as a chroot subdirectory name: `[A-Za-z0-9_-]`, length `1..=64`,
 /// first character not `-` (so it can never be read as a flag). No `/`, `.`, NUL,
 /// or whitespace can appear, so it can never traverse out of the chroot base.
-#[derive(Debug, Clone, Display)]
+#[derive(Debug, Clone, Display, AsRef)]
+#[as_ref(str)]
 pub struct VmId(String);
 
 impl FromStr for VmId {
@@ -159,7 +160,8 @@ impl FromStr for CgroupSetting {
 /// filename in `[A-Za-z0-9_.-]`. The charset excludes `/`, so the value is always
 /// a direct child of `/` with no extra components and no traversal; `.`/`..` as
 /// the whole filename are rejected explicitly.
-#[derive(Debug, Clone, Display)]
+#[derive(Debug, Clone, Display, AsRef)]
+#[as_ref(str)]
 pub struct JailSock(String);
 
 impl FromStr for JailSock {
@@ -181,18 +183,6 @@ impl FromStr for JailSock {
             return Err(reject());
         }
         Ok(Self(s.to_string()))
-    }
-}
-
-impl AsRef<str> for VmId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl AsRef<str> for JailSock {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 

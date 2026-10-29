@@ -3,8 +3,8 @@ use super::Access;
 use crate::fs::dev::DeviceNumber;
 use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
+use derive_more::{Display, From};
 use nix::errno::Errno;
-use std::fmt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -80,7 +80,8 @@ impl Default for LoopInfo64 {
 #[error("expected /dev/loopN: {0:?}")]
 pub struct InvalidLoopDevNum(String);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, From)]
+#[display("{DEVICE_PREFIX}{_0}")]
 pub struct LoopDevNum(u32);
 
 impl LoopDevNum {
@@ -90,12 +91,6 @@ impl LoopDevNum {
 
     pub fn path(self) -> Result<SafePathBuf<IsAbsolute, StrictComponents>, path::ValidationError> {
         PathBuf::from(self.to_string()).try_into()
-    }
-}
-
-impl From<u32> for LoopDevNum {
-    fn from(number: u32) -> Self {
-        Self(number)
     }
 }
 
@@ -112,12 +107,6 @@ impl FromStr for LoopDevNum {
             return Err(invalid());
         }
         digits.parse().map(Self).map_err(|_| invalid())
-    }
-}
-
-impl fmt::Display for LoopDevNum {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{DEVICE_PREFIX}{}", self.0)
     }
 }
 

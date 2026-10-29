@@ -1,8 +1,8 @@
 use crate::fs::path::{
     IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
 };
+use derive_more::Display;
 use std::ffi::OsStr;
-use std::fmt;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
@@ -12,7 +12,8 @@ const DM_NAME_MAX: usize = 127;
 #[error("invalid dm device name: {0:?}")]
 pub struct InvalidDmName(String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{}", _0.as_os_str().to_string_lossy())]
 pub struct DmName(StrictComponentBuf);
 
 fn is_dm_name(name: &str) -> bool {
@@ -51,11 +52,5 @@ impl FromStr for DmName {
 impl AsRef<OsStr> for DmName {
     fn as_ref(&self) -> &OsStr {
         self.as_os_str()
-    }
-}
-
-impl fmt::Display for DmName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.as_os_str().to_string_lossy())
     }
 }

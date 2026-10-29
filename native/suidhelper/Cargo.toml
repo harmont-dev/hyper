@@ -139,7 +139,7 @@ path = "tests/tools/dmsetup_backing.rs"
 [dependencies]
 bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["display", "as_ref", "into", "add", "debug"] }
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "from", "into", "add", "debug"] }
 hyper-suidhelper-meta = { path = "meta" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }

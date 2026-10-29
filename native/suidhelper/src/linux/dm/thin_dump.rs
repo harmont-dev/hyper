@@ -2,6 +2,7 @@
 use super::ThinId;
 use crate::fs::file::{IsBlockDevice, SafeFile};
 use crate::process::binary::RootSafeBin;
+use derive_more::Into;
 use serde::Deserialize;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -114,17 +115,11 @@ pub struct ThinMappings {
     pub ranges: Vec<BlockRange>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Into)]
 #[serde(into = "(u64, u64)")]
 pub struct BlockRange {
     pub begin: u64,
     pub length: u64,
-}
-
-impl From<BlockRange> for (u64, u64) {
-    fn from(range: BlockRange) -> Self {
-        (range.begin, range.length)
-    }
 }
 
 #[derive(Debug, Deserialize)]
