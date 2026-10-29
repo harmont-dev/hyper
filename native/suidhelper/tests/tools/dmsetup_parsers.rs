@@ -6,8 +6,11 @@
 //! arity. These are the contract that keeps dmsetup off arbitrary storage.
 
 use hyper_suidhelper::linux::dm::ThinId;
-use hyper_suidhelper::tools::{parse_dm_name, parse_message, parse_table, NameError, ThinMessage};
+use hyper_suidhelper::tools::{
+    parse_dm_device, parse_dm_name, parse_message, parse_table, NameError, ThinMessage,
+};
 use proptest::prelude::*;
+use std::path::Path;
 
 fn id(n: u32) -> ThinId {
     ThinId::new(n).unwrap()
@@ -88,6 +91,20 @@ proptest! {
     }
 
     #[test]
+    fn dm_device_accepts_hyper_mapper_paths_and_preserves_them(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
+        let s = format!("/dev/mapper/hyper-{suffix}");
+        let path = parse_dm_device(&s).unwrap().path();
+        prop_assert_eq!(path.as_path(), Path::new(&s));
+    }
+
+    #[test]
+    fn dm_device_refuses_mapper_names_we_do_not_own(name in "[a-z][a-z0-9._-]{0,12}") {
+        prop_assume!(!name.starts_with("hyper-") && name != "control");
+        let s = format!("/dev/mapper/{name}");
+        prop_assert!(matches!(parse_dm_device(&s), Err(NameError::NotHyper(_))));
+    }
+
+    #[test]
     fn a_device_is_never_accepted_as_a_backing_file(rest in "[A-Za-z0-9._/-]{1,32}") {
         let dev = format!("/dev/{rest}");
         for table in [
@@ -162,6 +179,29 @@ fn thinmessage_rejects_non_whitelisted() {
         assert!(
             parse_message(bad).is_err(),
             "parse_message accepted {bad:?}"
+        );
+    }
+}
+
+#[test]
+fn dm_device_rejects_known_attack_strings() {
+    for bad in [
+        "/dev/sda",
+        "/dev/loop0",
+        "/dev/loop0/../sda",
+        "/dev/mapper/hyper-x/../../sda",
+        "/dev/mapper/hyper-x/",
+        "/dev/mapper/cryptroot",
+        "/dev/mapper/control",
+        "/dev/mapper/",
+        "/dev/mapper",
+        "../dev/mapper/hyper-x",
+        "dev/mapper/hyper-x",
+        "hyper-x",
+    ] {
+        assert!(
+            parse_dm_device(bad).is_err(),
+            "parse_dm_device accepted {bad:?}"
         );
     }
 }

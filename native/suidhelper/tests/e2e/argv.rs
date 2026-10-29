@@ -70,7 +70,10 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
         .unwrap();
 
     // Deliberately weird inner spacing; the helper must re-render canonically.
-    let table = format!("0   100  snapshot  /dev/loop0   {} P 8", cow.display());
+    let table = format!(
+        "0   100  snapshot  /dev/mapper/hyper-img   {} P 8",
+        cow.display()
+    );
     let out = run(
         &cfg,
         &[
@@ -98,7 +101,7 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
             "hyper-vm1".to_string(),
             "--readonly".to_string(),
             "--table".to_string(),
-            format!("0 100 snapshot /dev/loop0 {cow_loop} P 8"),
+            format!("0 100 snapshot /dev/mapper/hyper-img {cow_loop} P 8"),
         ],
         "helper did not substitute the attached loop into the canonical table",
     );
@@ -231,8 +234,45 @@ impl Drop for LoopDevice {
     }
 }
 
+struct MapperDevice {
+    name: String,
+    _loop_dev: LoopDevice,
+}
+
+impl MapperDevice {
+    fn linear(loop_dev: LoopDevice, sectors: u64) -> Self {
+        let name = format!("hyper-e2e-getsz-{}", std::process::id());
+        let table = format!("0 {sectors} linear {} 0", loop_dev.0);
+        let out = std::process::Command::new("dmsetup")
+            .args(["create", &name, "--table", &table])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Self {
+            name,
+            _loop_dev: loop_dev,
+        }
+    }
+
+    fn path(&self) -> String {
+        format!("/dev/mapper/{}", self.name)
+    }
+}
+
+impl Drop for MapperDevice {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("dmsetup")
+            .args(["remove", "--retry", &self.name])
+            .status();
+    }
+}
+
 #[test]
-fn blockdev_getsz_reports_a_loop_devices_size_as_root() {
+fn blockdev_getsz_reports_a_dm_devices_size_as_root() {
     if !is_root() {
         eprintln!("SKIP blockdev: needs root");
         return;
@@ -243,10 +283,10 @@ fn blockdev_getsz_reports_a_loop_devices_size_as_root() {
         .unwrap()
         .set_len(3 * 1024 * 1024 + 512)
         .unwrap();
-    let dev = LoopDevice::attach(&backing);
+    let dev = MapperDevice::linear(LoopDevice::attach(&backing), 6145);
     let cfg = write_root_config(tmp.path(), &[]);
 
-    let out = run(&cfg, &["blockdev", "--getsz", &dev.0]).success();
+    let out = run(&cfg, &["blockdev", "--getsz", &dev.path()]).success();
     let json = stdout_json(&out);
     assert_eq!(json["sectors"], 6145);
 }
