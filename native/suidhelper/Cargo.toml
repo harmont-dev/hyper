@@ -21,6 +21,11 @@ insecure_test_seams = []
 name = "hyper-suidhelper"
 path = "src/main.rs"
 
+[[bin]]
+name = "fake-jailer"
+path = "tests/e2e/fake_jailer.rs"
+required-features = ["insecure_test_seams"]
+
 # Integration tests mirror the `src/` module tree under `tests/`. Cargo only
 # auto-discovers test files at the top level of `tests/`, so each nested file
 # needs an explicit target pointing at its path.

@@ -22,12 +22,10 @@
 //!   relative, `..`, and NUL/whitespace inputs.
 
 use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
-use crate::util::setuid_privileged;
+use crate::process::privilege::{RootCommandExt, Unprivileged};
 use bon::Builder;
 use derive_more::{AsRef, Display};
-use nix::errno::Errno;
-use std::ffi::{CString, NulError};
-use std::os::fd::{AsFd, AsRawFd, RawFd};
+use std::ffi::{CString, NulError, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::str::FromStr;
@@ -53,12 +51,8 @@ pub enum Error {
     IdNumber { value: u32, lo: u32, hi: u32 },
     #[error("too many --cgroup settings: {0} (max {MAX_CGROUPS})")]
     TooManyCgroups(usize),
-    #[error(transparent)]
-    Privilege(#[from] setuid_privileged::Error),
     #[error("argument contains an interior NUL byte")]
     NulArgument(#[from] NulError),
-    #[error("execve jailer failed: {0}")]
-    Exec(Errno),
 }
 
 /// `n != 0 && lo <= n <= hi`. uid/gid 0 is rejected unconditionally: a jailer run
@@ -254,7 +248,7 @@ impl Jailer<'_> {
     /// this never returns (the process image is replaced); the `Ok` arm is
     /// therefore [`std::convert::Infallible`]. Every failure is returned as
     /// [`Error`] for the caller to print and exit non-zero.
-    pub fn invoke(self) -> Result<std::convert::Infallible, Error> {
+    pub fn invoke(self, token: Unprivileged) -> Result<std::convert::Infallible, Error> {
         if self.cgroups.len() > MAX_CGROUPS {
             return Err(Error::TooManyCgroups(self.cgroups.len()));
         }
@@ -262,62 +256,14 @@ impl Jailer<'_> {
         // Resolve everything that can fail before any privilege is raised.
         let argv = self.argv()?;
 
-        // Point of no return: from here we are permanently root and must execve.
-        setuid_privileged::become_root_permanently()?;
-        close_inherited_fds(self.jailer.as_fd().as_raw_fd());
-
-        // Empty envp: once ruid==0 the kernel clears AT_SECURE, so a smuggled
-        // LD_PRELOAD/LD_LIBRARY_PATH would be honored by the dynamic loader and
-        // hijack the root jailer. We pass nothing and let the jailer build its own.
-        let empty_env: [CString; 0] = [];
-        let errno = self
-            .jailer
-            .exec(&argv, &empty_env)
-            .expect_err("execve only returns on failure");
-        Err(Error::Exec(errno))
-    }
-}
-
-/// Close every inherited fd above stdio so a compromised BEAM cannot smuggle an
-/// open fd into the root jailer. Keep 0/1/2: MuonTrap supervises the jailer
-/// through stdio, and stderr carries our exec-failure message. `close_range(2)`
-/// needs Linux 5.9+; on any failure (ENOSYS or otherwise) we fall back to
-/// closing each fd individually — fail closed before handing root to the jailer.
-fn close_inherited_fds(keep: RawFd) {
-    const FIRST: u32 = 3;
-    let keep = keep as u32;
-    let ranges = [
-        (FIRST, keep.saturating_sub(1)),
-        (keep.saturating_add(1).max(FIRST), u32::MAX),
-    ];
-    // Invoke `close_range(2)` as a raw syscall rather than through the
-    // `libc::close_range` wrapper: the `libc` crate does not define that wrapper
-    // for every target (it is absent on aarch64-musl), but `SYS_close_range` is
-    // defined on all Linux arches. `syscall` returns 0 on success, -1 on error.
-    // SAFETY: raw syscall with no memory operands; closing fds has no UB.
-    let closed = ranges.iter().filter(|(lo, hi)| lo <= hi).all(|&(lo, hi)| {
-        let rc = unsafe {
-            nix::libc::syscall(
-                nix::libc::SYS_close_range,
-                lo as nix::libc::c_uint,
-                hi as nix::libc::c_uint,
-                0 as nix::libc::c_uint,
+        self.jailer
+            .command()
+            .args(
+                argv[1..]
+                    .iter()
+                    .map(|arg| OsStr::from_bytes(arg.as_bytes())),
             )
-        };
-        rc == 0
-    });
-    if closed {
-        return;
-    }
-
-    // SAFETY: sysconf is a pure query of a system limit.
-    let max = unsafe { nix::libc::sysconf(nix::libc::_SC_OPEN_MAX) };
-    let max = if max < 0 { 4096 } else { max as i32 };
-    for fd in (FIRST as i32..max).filter(|&fd| fd as u32 != keep) {
-        // SAFETY: closing an arbitrary fd is safe; EBADF for unused fds is ignored.
-        unsafe {
-            nix::libc::close(fd);
-        }
+            .exec_as_root(token)
     }
 }
 

@@ -23,7 +23,7 @@ pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
-use crate::util::setuid_privileged::{self, Privileged};
+use crate::process::privilege::{self, Root, Unprivileged};
 use clap::Subcommand;
 use serde::Serialize;
 use thiserror::Error as ThisError;
@@ -34,7 +34,7 @@ use thiserror::Error as ThisError;
 #[derive(Debug, ThisError)]
 pub enum Error {
     #[error(transparent)]
-    Privilege(#[from] setuid_privileged::Error),
+    Privilege(#[from] privilege::Error),
     /// A tool's own error (operand validation or execution), boxed so this layer
     /// stays decoupled from each tool's concrete error type.
     #[error(transparent)]
@@ -52,7 +52,7 @@ pub trait IsTool {
 
     /// Execute the privileged part of the tool - normally invoking `Command`.
     /// This is the only code that runs as root (see `run`).
-    fn run_privileged(&self) -> Self::RunT;
+    fn run_privileged(&self, root: &Root<'_>) -> Self::RunT;
 
     /// Parse the result of `run_privileged` into the output data structure. At
     /// this point, the setuid has been demoted.
@@ -63,10 +63,10 @@ pub trait IsTool {
     /// when it falls out of scope, so `parse` (and serialization) never run as
     /// root. The root window is exactly the one `run_privileged` call. Serializes
     /// the parsed output to a `Value` so every tool returns one common type.
-    fn run(&self) -> Result<serde_json::Value, Error> {
+    fn run(&self, token: &mut Unprivileged) -> Result<serde_json::Value, Error> {
         let res = {
-            let _privileged = Privileged::acquire()?;
-            self.run_privileged()
+            let root = token.elevate()?;
+            self.run_privileged(&root)
         };
 
         let output = self.parse(res).map_err(Error::Tool)?;
@@ -116,20 +116,20 @@ impl Tool {
     /// op), returning its already-serialized `Value`. The binary path is taken
     /// from the trusted config and validated (`RootSafeBin`) here, as the real uid,
     /// before any privilege is acquired.
-    pub fn run(self) -> Result<serde_json::Value, Error> {
+    pub fn run(self, token: &mut Unprivileged) -> Result<serde_json::Value, Error> {
         let config = Config::get();
         match self {
             Tool::Dmsetup { args } => {
                 let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
-                Dmsetup::new(bin, args).run()
+                Dmsetup::new(bin, args).run(token)
             }
-            Tool::Blockdev { args } => Blockdev::new(args).run(),
-            Tool::Blockcopy { args } => Blockcopy::new(args).run(),
-            Tool::ChrootJail { op } => op.run(),
-            Tool::Network { op } => op.run(),
+            Tool::Blockdev { args } => Blockdev::new(args).run(token),
+            Tool::Blockcopy { args } => Blockcopy::new(args).run(token),
+            Tool::ChrootJail { op } => op.run(token),
+            Tool::Network { op } => op.run(token),
             Tool::ThinDump { args } => {
                 let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
-                ThinDump::new(bin, args).run()
+                ThinDump::new(bin, args).run(token)
             }
         }
     }

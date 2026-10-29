@@ -9,6 +9,7 @@
 //! changing meaning, and a grammar-level parser is immune to that drift. See
 //! `crate::linux::dm::thin_dump` for the document model.
 
+use crate::process::privilege::Root;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
@@ -59,7 +60,7 @@ impl IsTool for ThinDump {
     type Output = ThinMappings;
     type RunT = Result<MetadataDump, ToolError>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let meta = self.args.meta.path()?;
         let device = SafeFile::<IsBlockDevice, Any, Any>::open(&meta, OpenFlags::RDONLY)?;
         // --metadata-snap reads the caller-reserved metadata snapshot, the

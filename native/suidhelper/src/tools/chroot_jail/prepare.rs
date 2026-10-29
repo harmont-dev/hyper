@@ -2,6 +2,7 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use crate::util::chroot_jail::{self, ChrootJail};
 use crate::util::safe_dev::BlockDev;
@@ -36,8 +37,11 @@ pub enum PrepareOut {
 }
 
 /// Run the `prepare` op in its own privileged scope (returns its serialized `Value`).
-pub fn run(args: PrepareArgs) -> Result<serde_json::Value, crate::tools::Error> {
-    Prepare { args }.run()
+pub fn run(
+    args: PrepareArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
+    Prepare { args }.run(token)
 }
 
 struct Prepare {
@@ -49,7 +53,7 @@ impl IsTool for Prepare {
     type Output = PrepareOut;
     type RunT = Result<(), chroot_jail::Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let args = &self.args;
         ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
             .with_kernel(args.kernel.clone())

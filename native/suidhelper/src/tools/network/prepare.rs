@@ -6,6 +6,7 @@ use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
 use crate::process::binary::{self, RootSafeBin};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::jailer::{self, VmId};
 use crate::tools::IsTool;
 use clap::Args;
@@ -99,10 +100,13 @@ pub(super) fn resolve(
     Ok((plan, config.ip()?, config.nft()?, config.sysctl()?))
 }
 
-pub fn run(args: PrepareArgs) -> Result<serde_json::Value, crate::tools::Error> {
+pub fn run(
+    args: PrepareArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
     Prepare::new(args)
         .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
-        .run()
+        .run(token)
 }
 
 struct Prepare {
@@ -129,13 +133,13 @@ impl IsTool for Prepare {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let commands = args::prepare_commands(
             &self.plan,
             &self.nft.fd_path().to_string_lossy(),
             &self.sysctl.fd_path().to_string_lossy(),
         );
-        exec::run_all(&commands, |which| match which {
+        exec::run_all(&commands, root, |which| match which {
             args::Which::Ip => self.ip.command(),
             args::Which::Nft => self.nft.command(),
         })?;

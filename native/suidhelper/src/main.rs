@@ -15,11 +15,13 @@
 
 use clap::{Parser, Subcommand};
 use hyper_suidhelper::config;
+use hyper_suidhelper::process::privilege::{self, Unprivileged};
 use hyper_suidhelper::tools::jailer::{self, JailerArgs};
 use hyper_suidhelper::tools::Tool;
-use hyper_suidhelper::util::setuid_privileged::{self, Privileged};
 use serde::Serialize;
 use std::path::PathBuf;
+
+hyper_suidhelper::setuid_main!(run);
 
 #[derive(Parser)]
 #[command(
@@ -77,8 +79,8 @@ struct SysTest {
 }
 
 impl SysTest {
-    fn perform() -> Result<Self, setuid_privileged::Error> {
-        Privileged::smoke_test()?;
+    fn perform(token: &mut Unprivileged) -> Result<Self, privilege::Error> {
+        drop(token.elevate()?);
         Ok(Self {
             sys_test: "ok",
             hyper_base: config::Config::get().hyper_base().to_path_buf(),
@@ -86,7 +88,7 @@ impl SysTest {
     }
 }
 
-fn main() {
+fn run(mut token: Unprivileged) {
     // The gate must resolve before clap parsing: some subcommands' value_parsers
     // (losetup attach's backing-file gate) consult the config while clap parses
     // argv, and the config consults this gate. Resolving the gate first ensures
@@ -112,12 +114,15 @@ fn main() {
     // in place, so on success it never returns and never emits JSON, and on
     // failure it reports to stderr and exits before reaching the JSON pipeline.
     let output = match command {
-        Command::Tool(tool) => tool.run().map(Output::Tool).map_err(|e| e.to_string()),
-        Command::SysTest => SysTest::perform()
+        Command::Tool(tool) => tool
+            .run(&mut token)
+            .map(Output::Tool)
+            .map_err(|e| e.to_string()),
+        Command::SysTest => SysTest::perform(&mut token)
             .map(Output::SysTest)
             .map_err(|e| e.to_string()),
         Command::Jailer(args) => {
-            let e = jailer::run(args).expect_err("jailer::run only returns on error");
+            let e = jailer::run(args, token).expect_err("jailer::run only returns on error");
             eprintln!("{e}");
             // _exit bypasses atexit handlers; safe because we are permanently root
             // at this point and must not run any cleanup registered before escalation.

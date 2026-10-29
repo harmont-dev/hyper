@@ -3,8 +3,7 @@ use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwn
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
-use std::convert::Infallible;
-use std::ffi::{CStr, OsStr};
+use std::ffi::OsStr;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -82,14 +81,6 @@ impl<const NAME: &'static str> RootSafeBin<NAME> {
         let mut cmd = Command::new(self.fd_path());
         cmd.arg0(NAME);
         cmd
-    }
-
-    pub fn exec<SA: AsRef<CStr>, SE: AsRef<CStr>>(
-        &self,
-        args: &[SA],
-        env: &[SE],
-    ) -> nix::Result<Infallible> {
-        nix::unistd::fexecve(self.0.as_raw_fd(), args, env)
     }
 }
 

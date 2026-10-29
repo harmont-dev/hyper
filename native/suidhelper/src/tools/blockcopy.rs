@@ -6,6 +6,7 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
+use crate::process::privilege::Root;
 use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use derive_more::Constructor;
@@ -124,7 +125,7 @@ impl IsTool for Blockcopy {
     type Output = CopyStats;
     type RunT = io::Result<CopyStats>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let mut src = File::open(&self.args.src)?;
         let mut dst = OpenOptions::new().write(true).open(&self.args.dst)?;
         let chunk = self.args.chunk_bytes as usize;

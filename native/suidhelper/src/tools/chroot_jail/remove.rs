@@ -18,6 +18,7 @@ use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, OpenFlags};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use crate::linux::cgroup::{self, Cgroup};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
@@ -85,8 +86,11 @@ pub enum RemoveOut {
 }
 
 /// Run the `remove` op in its own privileged scope (returns its serialized `Value`).
-pub fn run(args: RemoveArgs) -> Result<serde_json::Value, crate::tools::Error> {
-    Remove { args }.run()
+pub fn run(
+    args: RemoveArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
+    Remove { args }.run(token)
 }
 
 struct Remove {
@@ -98,7 +102,7 @@ impl IsTool for Remove {
     type Output = RemoveOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
         // chroot teardown below is not yanking files out from under a live process.
         remove_cgroup_under(Path::new(cgroup::ROOT), &self.args.cgroup)?;

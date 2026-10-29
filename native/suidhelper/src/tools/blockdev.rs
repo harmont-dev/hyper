@@ -1,6 +1,7 @@
 use super::IsTool;
 use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::process::privilege::Root;
 use crate::util::safe_dev::BlockDev;
 use clap::Args;
 use serde::Serialize;
@@ -54,7 +55,7 @@ impl IsTool for Blockdev {
     type Output = BlockdevOut;
     type RunT = Result<BlockdevOut, Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let dev: &std::path::Path = self.path.as_ref();
         let real = std::fs::canonicalize(dev).map_err(|source| Error::Resolve {
             path: dev.to_path_buf(),

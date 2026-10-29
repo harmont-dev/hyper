@@ -8,6 +8,7 @@ use crate::linux::dm::{self, DmName, RemoveMode};
 use crate::linux::loopdev::LoopControl;
 use crate::linux::Access;
 use crate::process::binary::RootSafeBin;
+use crate::process::privilege::Root;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
 pub use message::{parse_message, MessageError, ThinMessage};
@@ -104,7 +105,7 @@ impl IsTool for Dmsetup {
     type Output = DmsetupOut;
     type RunT = Result<DmsetupOut, Box<dyn std::error::Error>>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let dm = &self.dmsetup;
         Ok(match &self.op {
             DmOp::Create {

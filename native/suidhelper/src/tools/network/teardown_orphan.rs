@@ -19,6 +19,7 @@ use super::args::{self, Command};
 use super::NetworkOut;
 use crate::config::Config;
 use crate::process::binary::{self, RootSafeBin};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
@@ -47,10 +48,13 @@ pub enum Error {
     Failed { argv: Vec<String>, stderr: String },
 }
 
-pub fn run(args: TeardownOrphanArgs) -> Result<serde_json::Value, crate::tools::Error> {
+pub fn run(
+    args: TeardownOrphanArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
     TeardownOrphan::new(args)
         .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
-        .run()
+        .run(token)
 }
 
 struct TeardownOrphan {
@@ -74,7 +78,7 @@ impl IsTool for TeardownOrphan {
     type Output = NetworkOut;
     type RunT = Result<(), Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         run_idempotent(&args::teardown_orphan_commands(&self.netns), &self.ip)
     }
 

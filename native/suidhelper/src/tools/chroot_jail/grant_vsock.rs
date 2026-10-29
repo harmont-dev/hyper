@@ -20,6 +20,7 @@ use crate::config::Config;
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, OpenFlags};
 use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
@@ -80,8 +81,11 @@ pub struct GrantVsockArgs {
 }
 
 /// Run the `grant-vsock` op in its own privileged scope (returns its serialized `Value`).
-pub fn run(args: GrantVsockArgs) -> Result<serde_json::Value, crate::tools::Error> {
-    GrantVsock { args }.run()
+pub fn run(
+    args: GrantVsockArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
+    GrantVsock { args }.run(token)
 }
 
 struct GrantVsock {
@@ -93,7 +97,7 @@ impl IsTool for GrantVsock {
     type Output = GrantOut;
     type RunT = Result<GrantOut, Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         grant_vsock_under(&Config::get().jail_base(), &self.args.socket)
     }
 

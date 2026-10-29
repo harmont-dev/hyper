@@ -14,31 +14,9 @@ use support::{is_root, run};
 
 const RECORDER_EXIT: i32 = 7;
 
-fn cat_bin() -> &'static str {
-    ["/bin/cat", "/usr/bin/cat"]
-        .into_iter()
-        .find(|p| Path::new(p).exists())
-        .expect("a `cat` binary for the recorder")
-}
-
-/// Install a root-owned recorder named `jailer` that writes its argv (minus
-/// argv[0]) as a JSON array to `argv_rec` and copies its `/proc/self/environ` to
-/// `env_rec`, then exits `RECORDER_EXIT`. Paths are baked into the script text
-/// because the recorder runs with an empty environment and absolute `cat` so it
-/// needs no `PATH`. Returns the recorder's absolute path.
-fn install_recorder(dir: &Path, argv_rec: &Path, env_rec: &Path) -> PathBuf {
+fn install_recorder(dir: &Path) -> PathBuf {
     let path = dir.join("jailer");
-    let script = format!(
-        "#!/bin/sh\n\
-         (\n  printf '['\n  sep=''\n  for a in \"$@\"; do printf '%s\"%s\"' \"$sep\" \"$a\"; sep=','; done\n  printf ']'\n) > '{argv}'\n\
-         {cat} /proc/self/environ > '{env}'\n\
-         exit {code}\n",
-        argv = argv_rec.display(),
-        cat = cat_bin(),
-        env = env_rec.display(),
-        code = RECORDER_EXIT,
-    );
-    fs::write(&path, script).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_fake-jailer"), &path).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
 }
@@ -87,7 +65,7 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     let tmp = tempfile::tempdir().unwrap();
     let argv_rec = tmp.path().join("argv.json");
     let env_rec = tmp.path().join("environ.bin");
-    let jailer = install_recorder(tmp.path(), &argv_rec, &env_rec);
+    let jailer = install_recorder(tmp.path());
     let firecracker = install_firecracker(tmp.path());
     let cfg = write_root_config(tmp.path(), &jailer, &firecracker);
 
@@ -176,8 +154,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let argv_rec = tmp.path().join("argv.json");
-    let env_rec = tmp.path().join("environ.bin");
-    let jailer = install_recorder(tmp.path(), &argv_rec, &env_rec);
+    let jailer = install_recorder(tmp.path());
     let firecracker = install_firecracker(tmp.path());
     let cfg = write_root_config_with_network(tmp.path(), &jailer, &firecracker);
 
@@ -224,8 +201,7 @@ fn refuses_uid_zero_without_exec_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let argv_rec = tmp.path().join("argv.json");
-    let env_rec = tmp.path().join("environ.bin");
-    let jailer = install_recorder(tmp.path(), &argv_rec, &env_rec);
+    let jailer = install_recorder(tmp.path());
     let firecracker = install_firecracker(tmp.path());
     let cfg = write_root_config(tmp.path(), &jailer, &firecracker);
 

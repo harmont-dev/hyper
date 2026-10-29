@@ -5,9 +5,7 @@
 //! the whole privileged window for every network op — `prepare`, `teardown`,
 //! and `host_init` differ only in which commands they hand to [`run_all`].
 use super::args::{Command, Which};
-use crate::util::setuid_privileged::become_root_permanently;
-use std::io;
-use std::os::unix::process::CommandExt;
+use crate::process::privilege::{Root, RootCommandExt};
 use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
@@ -30,11 +28,13 @@ pub enum Error {
     },
 }
 
-pub(super) fn run_all(commands: &[Command], resolve: impl Fn(Which) -> Proc) -> Result<(), Error> {
+pub(super) fn run_all(
+    commands: &[Command],
+    root: &Root<'_>,
+    resolve: impl Fn(Which) -> Proc,
+) -> Result<(), Error> {
     for command in commands {
         let mut proc = resolve(command.bin);
-        proc.args(&command.argv).env_clear();
-
         // `ip` and `nft` refuse to run under `AT_SECURE` — the setuid-like state
         // the kernel flags when a child is exec'd with `ruid != euid`. Our
         // privilege guard (`Privileged::acquire`) raises only euid to 0, leaving
@@ -44,13 +44,7 @@ pub(super) fn run_all(commands: &[Command], resolve: impl Fn(Which) -> Proc) -> 
         // same reason the jailer handoff uses `become_root_permanently`. This
         // runs in the forked child, so it never affects the parent's own
         // privilege window.
-        //
-        // SAFETY: `become_root_permanently` calls only async-signal-safe
-        // setresuid/setresgid/setgroups syscalls and allocates nothing, which is
-        // the contract `pre_exec` requires of the post-fork, pre-exec child.
-        unsafe {
-            proc.pre_exec(|| become_root_permanently().map_err(io::Error::other));
-        }
+        proc.args(&command.argv).spawn_as_root(root);
 
         let output = proc.output().map_err(|source| Error::Spawn {
             bin: command.bin,

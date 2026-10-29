@@ -36,6 +36,7 @@ use crate::config::Config;
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, OpenFlags};
 use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
@@ -95,8 +96,11 @@ pub struct GrantApiArgs {
 }
 
 /// Run the `grant-api` op in its own privileged scope (returns its serialized `Value`).
-pub fn run(args: GrantApiArgs) -> Result<serde_json::Value, crate::tools::Error> {
-    GrantApi { args }.run()
+pub fn run(
+    args: GrantApiArgs,
+    token: &mut Unprivileged,
+) -> Result<serde_json::Value, crate::tools::Error> {
+    GrantApi { args }.run(token)
 }
 
 struct GrantApi {
@@ -108,7 +112,7 @@ impl IsTool for GrantApi {
     type Output = GrantOut;
     type RunT = Result<GrantOut, Error>;
 
-    fn run_privileged(&self) -> Self::RunT {
+    fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         grant_api_under(&Config::get().jail_base(), &self.args.socket)
     }
 

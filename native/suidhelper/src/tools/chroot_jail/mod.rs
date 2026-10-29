@@ -12,6 +12,7 @@ pub use grant_vsock::GrantVsockArgs;
 pub use prepare::PrepareArgs;
 pub use remove::RemoveArgs;
 
+use crate::process::privilege::Unprivileged;
 use clap::Subcommand;
 
 #[derive(Subcommand)]
@@ -30,12 +31,12 @@ impl ChrootJailOp {
     /// Route to the selected nested tool. `chroot-jail` itself carries no
     /// behaviour; each op runs in its own privileged scope and returns its own
     /// serialized `Value`.
-    pub fn run(self) -> Result<serde_json::Value, crate::tools::Error> {
+    pub fn run(self, token: &mut Unprivileged) -> Result<serde_json::Value, crate::tools::Error> {
         match self {
-            ChrootJailOp::Prepare(args) => prepare::run(args),
-            ChrootJailOp::Remove(args) => remove::run(args),
-            ChrootJailOp::GrantApi(args) => grant_api::run(args),
-            ChrootJailOp::GrantVsock(args) => grant_vsock::run(args),
+            ChrootJailOp::Prepare(args) => prepare::run(args, token),
+            ChrootJailOp::Remove(args) => remove::run(args, token),
+            ChrootJailOp::GrantApi(args) => grant_api::run(args, token),
+            ChrootJailOp::GrantVsock(args) => grant_vsock::run(args, token),
         }
     }
 }
