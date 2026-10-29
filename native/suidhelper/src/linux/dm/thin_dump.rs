@@ -176,3 +176,213 @@ impl Mapping {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{BlockRange, MappingsError, MetadataDump, ParseError, ThinId, ThinMappings};
+    use proptest::prelude::*;
+
+    #[derive(Debug, Clone)]
+    enum M {
+        Range { begin: u64, len: u64 },
+        Single { block: u64 },
+    }
+
+    impl M {
+        fn len(&self) -> u64 {
+            match *self {
+                M::Range { len, .. } => len,
+                M::Single { .. } => 1,
+            }
+        }
+
+        fn range(&self) -> BlockRange {
+            match *self {
+                M::Range { begin, len } => BlockRange { begin, length: len },
+                M::Single { block } => BlockRange {
+                    begin: block,
+                    length: 1,
+                },
+            }
+        }
+    }
+
+    fn mapping() -> impl Strategy<Value = M> {
+        prop_oneof![
+            (0u64..1 << 20, 1u64..512).prop_map(|(begin, len)| M::Range { begin, len }),
+            (0u64..1 << 20).prop_map(|block| M::Single { block }),
+        ]
+    }
+
+    fn mapped_blocks(maps: &[M]) -> u64 {
+        maps.iter().map(M::len).sum()
+    }
+
+    fn render_device(dev_id: u32, mapped: u64, maps: &[M]) -> String {
+        let open = format!(
+            "  <device dev_id=\"{dev_id}\" mapped_blocks=\"{mapped}\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\""
+        );
+        if maps.is_empty() {
+            return format!("{open}/>\n");
+        }
+
+        let mut s = format!("{open}>\n");
+        for m in maps {
+            s.push_str(&match *m {
+                M::Range { begin, len } => format!(
+                    "    <range_mapping origin_begin=\"{begin}\" data_begin=\"7\" length=\"{len}\" time=\"0\"/>\n"
+                ),
+                M::Single { block } => format!(
+                    "    <single_mapping origin_block=\"{block}\" data_block=\"9\" time=\"0\"/>\n"
+                ),
+            });
+        }
+        s.push_str("  </device>\n");
+        s
+    }
+
+    fn render(block_sectors: u64, devices: &[(u32, u64, Vec<M>)]) -> String {
+        let mut s = format!(
+            "<superblock uuid=\"\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\" data_block_size=\"{block_sectors}\" nr_data_blocks=\"16384\">\n"
+        );
+        for (id, mapped, maps) in devices {
+            s.push_str(&render_device(*id, *mapped, maps));
+        }
+        s.push_str("</superblock>\n");
+        s
+    }
+
+    fn device(id: u32, maps: Vec<M>) -> (u32, u64, Vec<M>) {
+        (id, mapped_blocks(&maps), maps)
+    }
+
+    fn id(n: u32) -> ThinId {
+        ThinId::new(n).unwrap()
+    }
+
+    fn dump(xml: impl Into<Vec<u8>>) -> MetadataDump {
+        MetadataDump { xml: xml.into() }
+    }
+
+    fn mappings(xml: &str, n: u32) -> Result<ThinMappings, MappingsError> {
+        dump(xml).parse().unwrap().mappings(id(n))
+    }
+
+    proptest! {
+        #[test]
+        fn extracts_exactly_the_target_devices_ranges(
+            block_sectors in 1u64..4096,
+            target in proptest::collection::vec(mapping(), 0..64),
+            sibling in proptest::collection::vec(mapping(), 0..64),
+        ) {
+            let xml = render(
+                block_sectors,
+                &[device(1, sibling.clone()), device(3, target.clone()), device(5, sibling)],
+            );
+
+            let got = mappings(&xml, 3).unwrap();
+
+            prop_assert_eq!(got.block_sectors, block_sectors);
+            prop_assert_eq!(got.ranges, target.iter().map(M::range).collect::<Vec<_>>());
+        }
+
+        #[test]
+        fn absent_device_is_an_error_not_empty(
+            maps in proptest::collection::vec(mapping(), 0..16),
+        ) {
+            let xml = render(128, &[device(1, maps)]);
+            prop_assert!(matches!(mappings(&xml, 99), Err(MappingsError::DeviceNotFound(got)) if got == id(99)));
+        }
+
+        #[test]
+        fn mapped_blocks_disagreeing_with_the_mappings_is_an_error(
+            target in proptest::collection::vec(mapping(), 0..64),
+            skew in prop_oneof![1i64..64, -64i64..0],
+        ) {
+            let actual = mapped_blocks(&target);
+            let claimed = actual.saturating_add_signed(skew);
+            prop_assume!(claimed != actual);
+            let xml = render(128, &[(3, claimed, target)]);
+
+            let got = mappings(&xml, 3);
+
+            let is_truncated = matches!(
+                got,
+                Err(MappingsError::Truncated { expected, got }) if expected == claimed && got == actual
+            );
+            prop_assert!(is_truncated);
+        }
+    }
+
+    #[test]
+    fn missing_superblock_is_an_error() {
+        let got = dump("<device dev_id=\"3\" mapped_blocks=\"0\"></device>").parse();
+        assert!(matches!(got, Err(ParseError::Xml(_))), "{got:?}");
+    }
+
+    #[test]
+    fn non_utf8_output_is_an_error() {
+        let mut xml = render(128, &[device(3, vec![])]).into_bytes();
+        xml.insert(1, 0xff);
+        let got = dump(xml).parse();
+        assert!(matches!(got, Err(ParseError::Utf8(_))), "{got:?}");
+    }
+
+    #[test]
+    fn empty_self_closing_device_parses_to_no_ranges() {
+        let xml = render(128, &[device(3, vec![])]);
+        assert_eq!(
+            mappings(&xml, 3).unwrap(),
+            ThinMappings {
+                block_sectors: 128,
+                ranges: vec![]
+            }
+        );
+    }
+
+    #[test]
+    fn attribute_lookup_is_by_exact_name() {
+        let xml = "<superblock uuid=\"\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\" data_block_size=\"128\" nr_data_blocks=\"1\">\n  <device snap_dev_id=\"9\" dev_id=\"3\" mapped_blocks=\"1\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n    <range_mapping origin_begin=\"0\" data_begin=\"0\" length=\"1\" time=\"0\"/>\n  </device>\n</superblock>\n";
+        assert_eq!(
+            mappings(xml, 3).unwrap().ranges,
+            [BlockRange {
+                begin: 0,
+                length: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn layout_variance_is_irrelevant() {
+        let xml = "<superblock nr_data_blocks=\"16384\" data_block_size=\"128\" uuid=\"a&quot;b\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\"><device snap_time=\"1\" dev_id=\"3\" mapped_blocks=\"9\" transaction=\"0\" creation_time=\"0\"><range_mapping length=\"8\" origin_begin=\"0\" data_begin=\"100\" time=\"0\"/><single_mapping data_block=\"200\" origin_block=\"42\" time=\"0\"/></device></superblock>";
+        assert_eq!(
+            mappings(xml, 3).unwrap(),
+            ThinMappings {
+                block_sectors: 128,
+                ranges: vec![
+                    BlockRange {
+                        begin: 0,
+                        length: 8
+                    },
+                    BlockRange {
+                        begin: 42,
+                        length: 1
+                    },
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_or_cut_xml_is_an_error_not_a_guess() {
+        let whole = render(128, &[device(3, vec![M::Range { begin: 0, len: 8 }])]);
+        let cut: String = whole.lines().take(3).map(|l| format!("{l}\n")).collect();
+        for xml in [
+            "<superblock data_block_size=\"128\"><device dev_id=\"3\"",
+            cut.as_str(),
+        ] {
+            let got = dump(xml).parse();
+            assert!(matches!(got, Err(ParseError::Xml(_))), "{xml:?}: {got:?}");
+        }
+    }
+}

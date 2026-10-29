@@ -144,3 +144,107 @@ impl Cgroup {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Cgroup, OpenError, ROOT};
+    use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
+    use nix::errno::Errno;
+    use nix::libc::SIGKILL;
+    use std::fs;
+    use std::os::unix::process::ExitStatusExt;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command};
+    use std::time::Duration;
+
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    fn open(path: &Path) -> Result<Cgroup, OpenError> {
+        let path: &SafePath<IsAbsolute, StrictComponents> = path.try_into().unwrap();
+        Cgroup::open(path)
+    }
+
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(test: &str) -> Option<Self> {
+            if !nix::unistd::geteuid().is_root() {
+                eprintln!("SKIP {test}: needs root to create a cgroup");
+                return None;
+            }
+            let path = Path::new(ROOT).join(format!("hyper-test-{}-{test}", std::process::id()));
+            match fs::create_dir(&path) {
+                Ok(()) => Some(Self(path)),
+                Err(e) => {
+                    eprintln!("SKIP {test}: creating {path:?}: {e}");
+                    None
+                }
+            }
+        }
+
+        fn spawn_member(&self) -> Child {
+            let child = Command::new("sleep").arg("600").spawn().unwrap();
+            fs::write(self.0.join("cgroup.procs"), child.id().to_string()).unwrap();
+            child
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::write(self.0.join("cgroup.kill"), "1");
+            for _ in 0..50 {
+                if fs::remove_dir(&self.0).is_ok() || !self.0.exists() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+
+    #[test]
+    fn open_refuses_a_directory_that_is_not_on_cgroup2() {
+        let dir = tempfile::tempdir().unwrap();
+        let leaf = dir.path().join("leaf");
+        fs::create_dir(&leaf).unwrap();
+
+        let got = open(&leaf);
+
+        assert!(
+            matches!(got, Err(OpenError::NotCgroup(ref p)) if *p == leaf),
+            "{:?}",
+            got.err()
+        );
+    }
+
+    #[test]
+    fn a_populated_cgroup_is_only_removable_after_kill_procs_as_root() {
+        let Some(scratch) = Scratch::new("kill-then-remove") else {
+            return;
+        };
+        let mut members = [scratch.spawn_member(), scratch.spawn_member()];
+
+        assert_eq!(open(&scratch.0).unwrap().remove(), Err(Errno::EBUSY));
+
+        let cgroup = open(&scratch.0).unwrap();
+        cgroup.kill_procs(TIMEOUT).unwrap();
+        assert!(!cgroup.events().unwrap().read().unwrap().populated);
+        cgroup.remove().unwrap();
+
+        assert!(!scratch.0.exists());
+        for member in &mut members {
+            assert_eq!(member.wait().unwrap().signal(), Some(SIGKILL));
+        }
+    }
+
+    #[test]
+    fn kill_procs_and_remove_succeed_once_the_cgroup_is_gone_as_root() {
+        let Some(scratch) = Scratch::new("vanished") else {
+            return;
+        };
+        let cgroup = open(&scratch.0).unwrap();
+        fs::remove_dir(&scratch.0).unwrap();
+
+        cgroup.kill_procs(TIMEOUT).unwrap();
+        cgroup.remove().unwrap();
+    }
+}
