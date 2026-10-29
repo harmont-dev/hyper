@@ -1,7 +1,8 @@
-use super::{Device, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
+use super::{Device, DmName, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
+use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use crate::linux::Access;
+use std::ffi::OsStr;
 use std::fmt;
-use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,7 @@ pub enum ThinPoolError {
     #[error(transparent)]
     Run(#[from] RunError),
     #[error("{name} is not a thin-pool device: {table:?}")]
-    NotAThinPool { name: String, table: String },
+    NotAThinPool { name: DmName, table: String },
 }
 
 #[derive(Debug, ThisError)]
@@ -72,14 +73,14 @@ pub struct Thin<'a, S> {
 }
 
 impl<'a> ThinPool<'a> {
-    pub(super) fn open(dmsetup: &'a Dmsetup, name: &str) -> Result<Self, ThinPoolError> {
-        let table = dmsetup.run(["table", name])?;
+    pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
+        let table = dmsetup.run([OsStr::new("table"), name.as_os_str()])?;
         match table.lines().collect::<Vec<_>>().as_slice() {
             [line] if line.split_whitespace().nth(2) == Some("thin-pool") => Ok(Self {
                 device: dmsetup.device(name),
             }),
             _ => Err(ThinPoolError::NotAThinPool {
-                name: name.to_string(),
+                name: name.clone(),
                 table,
             }),
         }
@@ -117,7 +118,12 @@ impl<'a> ThinPool<'a> {
     fn message(&self, message: &str) -> Result<(), RunError> {
         self.device
             .dmsetup
-            .run(["message", self.device.name(), "0", message])
+            .run([
+                OsStr::new("message"),
+                self.device.name().as_os_str(),
+                OsStr::new("0"),
+                OsStr::new(message),
+            ])
             .map(drop)
     }
 }
@@ -131,13 +137,13 @@ impl<S> Thin<'_, S> {
 impl<'a> Thin<'a, Inactive> {
     pub fn activate(
         self,
-        name: &str,
+        name: &DmName,
         sectors: u64,
-        origin: Option<PathBuf>,
+        origin: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
     ) -> Result<Thin<'a, Active<'a>>, RunError> {
         let table = DmTable::Thin(ThinTable {
             sectors,
-            pool: self.pool.device.path(),
+            pool: self.pool.device.name().clone(),
             id: self.id,
             origin,
         });

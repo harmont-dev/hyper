@@ -1,6 +1,6 @@
-use super::ThinId;
+use super::{DmName, ThinId};
+use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use derive_more::Display;
-use std::path::PathBuf;
 
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
 #[derive(Debug, Clone, Display)]
@@ -20,19 +20,19 @@ pub enum Persistence {
 }
 
 #[derive(Debug, Clone, Display)]
-#[display("0 {sectors} linear {} 0", origin.display())]
+#[display("0 {sectors} linear {} 0", origin.as_path().display())]
 pub struct LinearTable {
     pub sectors: u64,
-    pub origin: PathBuf,
+    pub origin: SafePathBuf<IsAbsolute, StrictComponents>,
 }
 
 /// `dm-snapshot` table.
 #[derive(Debug, Clone, Display)]
-#[display("0 {sectors} snapshot {} {} {persistence} {chunk}", origin.display(), cow.display())]
+#[display("0 {sectors} snapshot {} {} {persistence} {chunk}", origin.as_path().display(), cow.as_path().display())]
 pub struct SnapshotTable {
     pub sectors: u64,
-    pub origin: PathBuf,
-    pub cow: PathBuf,
+    pub origin: SafePathBuf<IsAbsolute, StrictComponents>,
+    pub cow: SafePathBuf<IsAbsolute, StrictComponents>,
     pub persistence: Persistence,
     pub chunk: u64,
 }
@@ -41,13 +41,13 @@ pub struct SnapshotTable {
 #[derive(Debug, Clone, Display)]
 #[display(
     "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
-    metadata.display(),
-    data.display()
+    metadata.as_path().display(),
+    data.as_path().display()
 )]
 pub struct ThinPoolTable {
     pub sectors: u64,
-    pub metadata: PathBuf,
-    pub data: PathBuf,
+    pub metadata: SafePathBuf<IsAbsolute, StrictComponents>,
+    pub data: SafePathBuf<IsAbsolute, StrictComponents>,
     pub block_sectors: u64,
     pub low_water: u64,
 }
@@ -56,12 +56,12 @@ pub struct ThinPoolTable {
 #[derive(Debug, Clone, Display)]
 #[display(
     "0 {sectors} thin {} {id}{}",
-    pool.display(),
-    origin.as_ref().map(|o| format!(" {}", o.display())).unwrap_or_default()
+    pool.path().as_path().display(),
+    origin.as_ref().map(|o| format!(" {}", o.as_path().display())).unwrap_or_default()
 )]
 pub struct ThinTable {
     pub sectors: u64,
-    pub pool: PathBuf,
+    pub pool: DmName,
     pub id: ThinId,
-    pub origin: Option<PathBuf>,
+    pub origin: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
 }

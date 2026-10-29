@@ -1,16 +1,17 @@
 mod backing;
 mod message;
+mod name;
 mod table;
 
 use super::IsTool;
-use crate::linux::dm::{self, RemoveMode};
+use crate::linux::dm::{self, DmName, RemoveMode};
 use crate::linux::loopdev::LoopControl;
 use crate::linux::Access;
 use crate::process::binary::RootSafeBin;
-use crate::util::safe_dev::DmName;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
 pub use message::{parse_message, MessageError, ThinMessage};
+pub use name::{parse_dm_name, NameError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ pub struct DmsetupArgs {
 #[derive(Subcommand)]
 enum DmOp {
     Create {
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
         #[arg(long)]
         readonly: bool,
@@ -37,18 +39,26 @@ enum DmOp {
     Remove {
         #[arg(long)]
         retry: bool,
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
     },
     Message {
+        #[arg(value_parser = parse_dm_name)]
         name: DmName,
         #[arg(long, value_parser = parse_message)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
     /// of the device's thin id).
-    Suspend { name: DmName },
+    Suspend {
+        #[arg(value_parser = parse_dm_name)]
+        name: DmName,
+    },
     /// Resume a suspended dm device.
-    Resume { name: DmName },
+    Resume {
+        #[arg(value_parser = parse_dm_name)]
+        name: DmName,
+    },
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
@@ -120,7 +130,7 @@ impl IsTool for Dmsetup {
                     Ok::<_, Box<dyn std::error::Error>>(device)
                 })?;
                 DmsetupOut::Created {
-                    device: dm.create(name.as_ref(), &attached.to_dm(), access)?.path(),
+                    device: dm.create(name, &attached.to_dm(), access)?.path().into(),
                     loops,
                 }
             }
@@ -130,11 +140,11 @@ impl IsTool for Dmsetup {
                 } else {
                     RemoveMode::Once
                 };
-                dm.device(name.as_ref()).remove(mode)?;
+                dm.device(name).remove(mode)?;
                 DmsetupOut::Removed
             }
             DmOp::Message { name, message } => {
-                let pool = dm.thin_pool(name.as_ref())?;
+                let pool = dm.thin_pool(name)?;
                 match *message {
                     ThinMessage::CreateThin(id) => pool.create_thin(id).map(drop)?,
                     ThinMessage::CreateSnap { id, origin } => pool.create_snap(id, origin)?,
@@ -145,11 +155,11 @@ impl IsTool for Dmsetup {
                 DmsetupOut::Messaged
             }
             DmOp::Suspend { name } => {
-                dm.device(name.as_ref()).suspend()?;
+                dm.device(name).suspend()?;
                 DmsetupOut::Suspended
             }
             DmOp::Resume { name } => {
-                dm.device(name.as_ref()).resume()?;
+                dm.device(name).resume()?;
                 DmsetupOut::Resumed
             }
             DmOp::Targets => DmsetupOut::Targets {

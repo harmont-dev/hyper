@@ -45,12 +45,20 @@ name = "util_safe_bin"
 path = "tests/util/safe_bin.rs"
 
 [[test]]
+name = "process_privilege"
+path = "tests/process/privilege.rs"
+
+[[test]]
 name = "tools_dmsetup_parsers"
 path = "tests/tools/dmsetup_parsers.rs"
 
 [[test]]
 name = "linux_dm"
 path = "tests/linux/dm.rs"
+
+[[test]]
+name = "linux_loopdev"
+path = "tests/linux/loopdev.rs"
 
 [[test]]
 name = "tools_blockcopy"

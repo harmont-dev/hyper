@@ -4,12 +4,15 @@ use crate::fs::dev::DeviceNumber;
 use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use nix::errno::Errno;
+use std::fmt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 use thiserror::Error as ThisError;
 
 const CONTROL_PATH: &str = "/dev/loop-control";
+const DEVICE_PREFIX: &str = "/dev/loop";
 const LOOP_CONTROL: DeviceNumber = DeviceNumber::new(10, 237);
 const LOOP_MAJOR: u64 = 7;
 const ATTACH_BACKOFF: Duration = Duration::from_millis(5);
@@ -70,6 +73,51 @@ impl Default for LoopInfo64 {
             lo_encrypt_key: [0; 32],
             lo_init: [0; 2],
         }
+    }
+}
+
+#[derive(Debug, ThisError)]
+#[error("expected /dev/loopN: {0:?}")]
+pub struct InvalidLoopDevNum(String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoopDevNum(u32);
+
+impl LoopDevNum {
+    pub fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn path(self) -> Result<SafePathBuf<IsAbsolute, StrictComponents>, path::ValidationError> {
+        PathBuf::from(self.to_string()).try_into()
+    }
+}
+
+impl From<u32> for LoopDevNum {
+    fn from(number: u32) -> Self {
+        Self(number)
+    }
+}
+
+impl FromStr for LoopDevNum {
+    type Err = InvalidLoopDevNum;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || InvalidLoopDevNum(s.to_string());
+        let digits = s.strip_prefix(DEVICE_PREFIX).ok_or_else(invalid)?;
+        let canonical = digits == "0"
+            || (digits.starts_with(|c: char| c.is_ascii_digit() && c != '0')
+                && digits.bytes().all(|b| b.is_ascii_digit()));
+        if !canonical {
+            return Err(invalid());
+        }
+        digits.parse().map(Self).map_err(|_| invalid())
+    }
+}
+
+impl fmt::Display for LoopDevNum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{DEVICE_PREFIX}{}", self.0)
     }
 }
 
@@ -147,7 +195,7 @@ impl LoopControl {
             let raw =
                 unsafe { ioctl::ctl_get_free(self.0.as_raw_fd()) }.map_err(AttachError::GetFree)?;
             let number = u32::try_from(raw).map_err(|_| AttachError::Number(raw))?;
-            let device = LoopDevice::open(number).map_err(AttachError::Open)?;
+            let device = LoopDevice::open(number.into()).map_err(AttachError::Open)?;
             // SAFETY: `config` is a fully initialised `struct loop_config`.
             match unsafe { ioctl::configure(device.file.as_raw_fd(), &config) } {
                 Ok(_) => return Ok(device),
@@ -164,15 +212,14 @@ impl LoopControl {
 }
 
 pub struct LoopDevice {
-    number: u32,
+    number: LoopDevNum,
     path: SafePathBuf<IsAbsolute, StrictComponents>,
     file: SafeFile<IsBlockDevice, Any, Any>,
 }
 
 impl LoopDevice {
-    pub fn open(number: u32) -> Result<Self, OpenError> {
-        let path: SafePathBuf<IsAbsolute, StrictComponents> =
-            PathBuf::from(format!("/dev/loop{number}")).try_into()?;
+    pub fn open(number: LoopDevNum) -> Result<Self, OpenError> {
+        let path = number.path()?;
         let file: SafeFile<IsBlockDevice, Any, Any> = SafeFile::open(&path, OpenFlags::RDWR)?;
         let device = file.rdev()?;
 
@@ -186,7 +233,7 @@ impl LoopDevice {
         Ok(Self { number, path, file })
     }
 
-    pub fn number(&self) -> u32 {
+    pub fn number(&self) -> LoopDevNum {
         self.number
     }
 

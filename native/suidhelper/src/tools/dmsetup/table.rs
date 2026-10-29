@@ -1,15 +1,16 @@
 use super::backing::{BackingError, BackingFile};
+use super::name::{parse_dm_name, NameError};
 use crate::config::Config;
-use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponents};
+use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::linux::dm::{
-    DmTable, LinearTable, Persistence, SnapshotTable, ThinId, ThinIdOutOfRange, ThinPoolTable,
-    ThinTable,
+    DmName, DmTable, LinearTable, Persistence, SnapshotTable, ThinId, ThinIdOutOfRange,
+    ThinPoolTable, ThinTable,
 };
 use crate::linux::loopdev::LoopDevice;
 use crate::util::safe_dev::{self, BlockDev};
 use serde::Serialize;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 pub type FilePath = SafePathBuf<IsAbsolute, StrictComponents>;
@@ -20,6 +21,8 @@ pub enum TableError {
     Malformed(String),
     #[error(transparent)]
     Device(#[from] safe_dev::Error),
+    #[error(transparent)]
+    Name(#[from] NameError),
     #[error("expected a backing file, got a device: {0}")]
     NotAFile(String),
     #[error("backing file path {0:?}: {1}")]
@@ -67,7 +70,7 @@ pub enum TableSpec<F> {
     },
     Thin {
         sectors: u64,
-        pool: BlockDev,
+        pool: DmName,
         id: ThinId,
         origin: Option<Source<F>>,
     },
@@ -141,26 +144,26 @@ impl<F> TableSpec<F> {
 }
 
 pub trait SlotPath {
-    fn slot_path(&self) -> &Path;
+    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents>;
 }
 
 impl SlotPath for FilePath {
-    fn slot_path(&self) -> &Path {
-        (**self).as_ref()
+    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+        self
     }
 }
 
 impl SlotPath for LoopDevice {
-    fn slot_path(&self) -> &Path {
-        self.path().as_ref()
+    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+        self.path()
     }
 }
 
 impl<F: SlotPath> Source<F> {
-    fn path(&self) -> PathBuf {
+    fn path(&self) -> FilePath {
         match self {
-            Source::Device(dev) => AsRef::<Path>::as_ref(dev).to_path_buf(),
-            Source::File(file) => file.slot_path().to_path_buf(),
+            Source::Device(dev) => dev.path().to_owned(),
+            Source::File(file) => file.slot_path().to_owned(),
         }
     }
 }
@@ -181,7 +184,7 @@ impl<F: SlotPath> TableSpec<F> {
             } => DmTable::Snapshot(SnapshotTable {
                 sectors: *sectors,
                 origin: origin.path(),
-                cow: cow.slot_path().to_path_buf(),
+                cow: cow.slot_path().to_owned(),
                 persistence: *persistence,
                 chunk: *chunk,
             }),
@@ -193,8 +196,8 @@ impl<F: SlotPath> TableSpec<F> {
                 low_water,
             } => DmTable::ThinPool(ThinPoolTable {
                 sectors: *sectors,
-                metadata: metadata.slot_path().to_path_buf(),
-                data: data.slot_path().to_path_buf(),
+                metadata: metadata.slot_path().to_owned(),
+                data: data.slot_path().to_owned(),
                 block_sectors: *block_sectors,
                 low_water: *low_water,
             }),
@@ -205,7 +208,7 @@ impl<F: SlotPath> TableSpec<F> {
                 origin,
             } => DmTable::Thin(ThinTable {
                 sectors: *sectors,
-                pool: AsRef::<Path>::as_ref(pool).to_path_buf(),
+                pool: pool.clone(),
                 id: *id,
                 origin: origin.as_ref().map(Source::path),
             }),
@@ -233,6 +236,10 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
         PathBuf::from(t)
             .try_into()
             .map_err(|e| TableError::FilePath(t.to_string(), e))
+    };
+    let dm_device = |t: &str| -> Result<DmName, TableError> {
+        let name = t.strip_prefix("/dev/mapper/").ok_or_else(malformed)?;
+        Ok(parse_dm_name(name)?)
     };
     let source = |t: &str| -> Result<Source<FilePath>, TableError> {
         if is_device(t) {
@@ -271,7 +278,7 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
         },
         ["0", sectors, "thin", pool, id, origin @ ..] if origin.len() <= 1 => TableSpec::Thin {
             sectors: number(sectors)?,
-            pool: pool.parse()?,
+            pool: dm_device(pool)?,
             id: thin_id(id)?,
             origin: origin.first().map(|o| source(o)).transpose()?,
         },
@@ -281,5 +288,5 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
 
 pub fn resolve_table(s: &str) -> Result<TableSpec<BackingFile>, TableError> {
     let base = Config::get().hyper_base();
-    Ok(parse_table(s)?.try_map(|path, _| BackingFile::open(path.slot_path(), base))?)
+    Ok(parse_table(s)?.try_map(|path, _| BackingFile::open(path.slot_path().as_path(), base))?)
 }

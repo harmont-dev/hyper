@@ -13,11 +13,11 @@ use thiserror::Error as ThisError;
 
 use super::IsTool;
 use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path;
 use crate::linux::dm::thin_dump::{self as dump, DumpError, MetadataDump, ThinMappings};
 use crate::linux::dm::ThinId;
+use crate::linux::loopdev::LoopDevNum;
 use crate::process::binary::RootSafeBin;
-use crate::util::safe_dev::LoopDev;
 use clap::Args;
 
 #[derive(Debug, ThisError)]
@@ -34,7 +34,7 @@ pub enum ToolError {
 pub struct ThinDumpArgs {
     /// The pool's metadata loop device.
     #[arg(long)]
-    meta: LoopDev,
+    meta: LoopDevNum,
     /// The thin device id whose provisioned ranges to extract.
     #[arg(long, value_parser = parse_thin_id)]
     dev_id: ThinId,
@@ -67,8 +67,8 @@ impl IsTool for ThinDump {
     type RunT = Result<MetadataDump, ToolError>;
 
     fn run_privileged(&self) -> Self::RunT {
-        let meta: &SafePath<IsAbsolute, StrictComponents> = self.args.meta.as_ref().try_into()?;
-        let device = SafeFile::<IsBlockDevice, Any, Any>::open(meta, OpenFlags::RDONLY)?;
+        let meta = self.args.meta.path()?;
+        let device = SafeFile::<IsBlockDevice, Any, Any>::open(&meta, OpenFlags::RDONLY)?;
         // --metadata-snap reads the caller-reserved metadata snapshot, the
         // only safe way to dump a live pool's metadata device.
         Ok(self.thin_dump.dump(&device, self.args.dev_id)?)

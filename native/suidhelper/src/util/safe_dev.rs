@@ -11,99 +11,50 @@
 //! Filesystem path safety (confinement, symlink-free walks, fd-relative ops)
 //! lives in `crate::fs::{path, file, dir}`, not here.
 
-use derive_more::{AsRef, Display, Into};
+use crate::fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
+use crate::linux::loopdev::LoopDevNum;
+use crate::tools::parse_dm_name;
+use derive_more::{Display, Into};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("expected /dev/loopN: {0}")]
-    Loop(String),
     #[error("expected a loop or hyper-* dm device: {0}")]
     Block(String),
-    #[error("dm device name must be a safe hyper-* name: {0}")]
-    Name(String),
 }
 
-// `/dev/loop` followed by its number and nothing else. Matching the digit suffix
-// (not just the prefix) rejects path tricks like `/dev/loop0/../sda`.
-fn is_loop(p: &str) -> bool {
-    p.strip_prefix("/dev/loop")
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-}
-
-// `/dev/mapper/` plus a `hyper-*` name with no path separators, so the device
-// is always a direct child of `/dev/mapper` (the charset excludes `/`, so no
-// traversal).
 fn is_hyper_dm(p: &str) -> bool {
-    p.strip_prefix("/dev/mapper/").is_some_and(is_hyper_name)
+    p.strip_prefix("/dev/mapper/")
+        .is_some_and(|name| parse_dm_name(name).is_ok())
 }
 
-// A device-mapper name we own: `hyper-*`, restricted to a charset with no path
-// separators. Shared by `is_hyper_dm` and [`DmName`] so the two never drift.
-fn is_hyper_name(name: &str) -> bool {
-    name.starts_with("hyper-")
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
-}
+#[derive(Debug, Clone, Display, Into)]
+#[display("{}", _0.as_path().display())]
+#[into(PathBuf)]
+pub struct BlockDev(SafePathBuf<IsAbsolute, StrictComponents>);
 
-/// A loop device path, `/dev/loopN`.
-#[derive(Debug, Clone, AsRef, Display)]
-#[as_ref(Path)]
-#[display("{}", _0.display())]
-pub struct LoopDev(PathBuf);
-
-impl FromStr for LoopDev {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if is_loop(s) {
-            Ok(Self(PathBuf::from(s)))
-        } else {
-            Err(Error::Loop(s.to_string()))
-        }
+impl BlockDev {
+    pub fn path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+        &self.0
     }
 }
-
-/// A block-device operand: a loop device or one of our own dm devices — never
-/// arbitrary system storage.
-#[derive(Debug, Clone, AsRef, Display, Into)]
-#[as_ref(Path)]
-#[display("{}", _0.display())]
-pub struct BlockDev(PathBuf);
 
 impl FromStr for BlockDev {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if is_loop(s) || is_hyper_dm(s) {
-            Ok(Self(PathBuf::from(s)))
-        } else {
-            Err(Error::Block(s.to_string()))
+        let invalid = || Error::Block(s.to_string());
+        if s.parse::<LoopDevNum>().is_err() && !is_hyper_dm(s) {
+            return Err(invalid());
         }
+        PathBuf::from(s).try_into().map(Self).map_err(|_| invalid())
     }
 }
 
-/// A device-mapper device name we create/remove: a `hyper-*` name we own.
-#[derive(Debug, Clone, Display)]
-pub struct DmName(String);
-
-impl FromStr for DmName {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if is_hyper_name(s) {
-            Ok(Self(s.to_string()))
-        } else {
-            Err(Error::Name(s.to_string()))
-        }
-    }
-}
-
-impl AsRef<str> for DmName {
-    fn as_ref(&self) -> &str {
-        &self.0
+impl AsRef<Path> for BlockDev {
+    fn as_ref(&self) -> &Path {
+        self.0.as_path()
     }
 }

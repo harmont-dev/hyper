@@ -194,16 +194,34 @@ impl Components for StrictComponents {
     fn check(path: &Path) -> Result<(), ValidationError> {
         // This implementation cannot use Path::components because it
         // normalizes path elements.
-        let raw = path.as_os_str().as_bytes();
-        if raw == b"/" {
-            return Ok(());
-        }
-        let body = raw.strip_prefix(b"/").unwrap_or(raw);
-        for segment in body.split(|&b| b == b'/') {
-            StrictComponent::check(segment)?;
-        }
-        Ok(())
+        Ok(check_strict_components(path.as_os_str().as_bytes())?)
     }
+}
+
+const fn check_strict_components(raw: &[u8]) -> Result<(), ComponentError> {
+    let mut rest = match raw {
+        [b'/'] => return Ok(()),
+        [b'/', body @ ..] => body,
+        _ => raw,
+    };
+    loop {
+        let mut end = 0;
+        while end < rest.len() && rest[end] != b'/' {
+            end += 1;
+        }
+        let (segment, tail) = rest.split_at(end);
+        if let Err(e) = StrictComponent::check(segment) {
+            return Err(e);
+        }
+        match tail {
+            [] => return Ok(()),
+            [_, next @ ..] => rest = next,
+        }
+    }
+}
+
+const fn is_strict_absolute(raw: &[u8]) -> bool {
+    matches!(raw, [b'/', ..]) && check_strict_components(raw).is_ok()
 }
 
 /// A [`Path`] which satisfies [`Absoluteness`] and [`Components`]
@@ -224,9 +242,30 @@ pub struct SafePathBuf<A, S>(PathBuf, PhantomData<(A, S)>);
 impl<A, S> SafePath<A, S> {
     #[ref_cast_custom]
     fn new_unchecked(path: &Path) -> &Self;
+
+    pub fn as_path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl SafePath<IsAbsolute, StrictComponents> {
+    pub fn from_static<const PATH: &'static str>() -> &'static Self {
+        const {
+            assert!(
+                is_strict_absolute(PATH.as_bytes()),
+                "not a strict absolute path"
+            )
+        };
+        Self::new_unchecked(Path::new(PATH))
+    }
 }
 
 impl<A> SafePath<A, StrictComponents> {
+    /// Join a component to create a new [`SafePathBuf`].
+    pub fn join(&self, name: &StrictComponent) -> SafePathBuf<A, StrictComponents> {
+        SafePathBuf(self.path.join(name.as_path()), PhantomData)
+    }
+
     /// Given `/b/x/y`, base `/b`, returns `x/y`.
     pub fn strip_base(
         &self,
@@ -287,6 +326,25 @@ impl<A, S> Deref for SafePathBuf<A, S> {
     type Target = SafePath<A, S>;
     fn deref(&self) -> &SafePath<A, S> {
         SafePath::new_unchecked(&self.0)
+    }
+}
+
+impl<A, S> Borrow<SafePath<A, S>> for SafePathBuf<A, S> {
+    fn borrow(&self) -> &SafePath<A, S> {
+        self
+    }
+}
+
+impl<A, S> ToOwned for SafePath<A, S> {
+    type Owned = SafePathBuf<A, S>;
+    fn to_owned(&self) -> SafePathBuf<A, S> {
+        SafePathBuf(self.path.to_path_buf(), PhantomData)
+    }
+}
+
+impl<A, S> From<SafePathBuf<A, S>> for PathBuf {
+    fn from(path: SafePathBuf<A, S>) -> Self {
+        path.0
     }
 }
 

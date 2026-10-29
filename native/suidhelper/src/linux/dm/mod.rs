@@ -1,6 +1,7 @@
 //! Utilities for operating on linux `dsetup`.
 
 mod device;
+mod name;
 mod table;
 mod thin;
 pub mod thin_dump;
@@ -8,6 +9,7 @@ pub mod thin_dump;
 use super::Access;
 use crate::process::binary::RootSafeBin;
 pub use device::Device;
+pub use name::{DmName, InvalidDmName};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
@@ -57,28 +59,28 @@ impl Dmsetup {
 
     pub fn create(
         &self,
-        name: &str,
+        name: &DmName,
         table: &DmTable,
         access: Access,
     ) -> Result<Device<'_>, RunError> {
         let table = table.to_string();
-        let mut args = vec!["create", name];
+        let mut args = vec![OsStr::new("create"), name.as_os_str()];
         if access == Access::ReadOnly {
-            args.push("--readonly");
+            args.push(OsStr::new("--readonly"));
         }
-        args.extend(["--table", table.as_str()]);
+        args.extend([OsStr::new("--table"), OsStr::new(&table)]);
         self.run(args)?;
         Ok(self.device(name))
     }
 
-    pub fn device(&self, name: &str) -> Device<'_> {
+    pub fn device(&self, name: &DmName) -> Device<'_> {
         Device {
             dmsetup: self,
-            name: name.to_string(),
+            name: name.clone(),
         }
     }
 
-    pub fn thin_pool(&self, name: &str) -> Result<ThinPool<'_>, ThinPoolError> {
+    pub fn thin_pool(&self, name: &DmName) -> Result<ThinPool<'_>, ThinPoolError> {
         ThinPool::open(self, name)
     }
 

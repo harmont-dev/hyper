@@ -6,7 +6,7 @@
 //! arity. These are the contract that keeps dmsetup off arbitrary storage.
 
 use hyper_suidhelper::linux::dm::ThinId;
-use hyper_suidhelper::tools::{parse_message, parse_table, ThinMessage};
+use hyper_suidhelper::tools::{parse_dm_name, parse_message, parse_table, NameError, ThinMessage};
 use proptest::prelude::*;
 
 fn id(n: u32) -> ThinId {
@@ -56,6 +56,8 @@ fn rejects_non_whitelisted_targets_and_devices() {
         "0 100 thin-pool /srv/hyper/m /dev/loop1 128 1024", // data = device
         "0 100 thin /dev/sda 0",               // pool = arbitrary
         "0 100 thin /srv/hyper/pool 0",        // pool = file
+        "0 100 thin /dev/loop0 0",             // pool = loop, not dm
+        "0 100 thin /dev/mapper/other 0",      // pool = non-hyper dm
         "0 100 thin /dev/mapper/hyper-pool 16777216", // id past 24 bits
         "0 100 thin /dev/mapper/hyper-pool 0 /dev/sda", // origin = arbitrary
         "0 100 thin /dev/mapper/hyper-pool 0 /dev/loop0 /dev/loop1", // two origins
@@ -67,6 +69,24 @@ fn rejects_non_whitelisted_targets_and_devices() {
 }
 
 proptest! {
+    #[test]
+    fn dm_name_accepts_every_valid_hyper_name(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
+        let s = format!("hyper-{suffix}");
+        prop_assert_eq!(parse_dm_name(&s).unwrap().to_string(), s);
+    }
+
+    #[test]
+    fn dm_name_refuses_valid_names_we_do_not_own(s in "[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}") {
+        prop_assume!(!s.starts_with("hyper-") && !matches!(s.as_str(), "." | ".." | "control"));
+        prop_assert!(matches!(parse_dm_name(&s), Err(NameError::NotHyper(_))));
+    }
+
+    #[test]
+    fn dm_name_refuses_hyper_names_the_kernel_would_reject(pre in "[a-z]{0,8}", post in "[a-z]{0,8}") {
+        let s = format!("hyper-{pre}/{post}");
+        prop_assert!(matches!(parse_dm_name(&s), Err(NameError::Invalid(_))));
+    }
+
     #[test]
     fn a_device_is_never_accepted_as_a_backing_file(rest in "[A-Za-z0-9._/-]{1,32}") {
         let dev = format!("/dev/{rest}");
