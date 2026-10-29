@@ -34,8 +34,14 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs iproute2 libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux \
-  "linux-modules-extra-$(uname -r)"
+  coreutils e2fsprogs iproute2 libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux
+
+modules_extra="linux-modules-extra-$(uname -r)"
+if apt-cache show "${modules_extra}" >/dev/null 2>&1; then
+  sudo apt-get install -y "${modules_extra}"
+else
+  echo "${modules_extra} is not available; relying on the kernel's base modules"
+fi
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
 # PARAMETERS of the first, and the load fails.
