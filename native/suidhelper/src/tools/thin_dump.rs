@@ -36,15 +36,8 @@ pub struct ThinDumpArgs {
     #[arg(long)]
     meta: LoopDevNum,
     /// The thin device id whose provisioned ranges to extract.
-    #[arg(long, value_parser = parse_thin_id)]
+    #[arg(long)]
     dev_id: ThinId,
-}
-
-fn parse_thin_id(s: &str) -> Result<ThinId, String> {
-    let raw: u32 = s
-        .parse()
-        .map_err(|e: std::num::ParseIntError| e.to_string())?;
-    ThinId::new(raw).map_err(|e| e.to_string())
 }
 
 pub struct ThinDump {

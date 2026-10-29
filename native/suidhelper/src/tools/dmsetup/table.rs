@@ -3,7 +3,7 @@ use super::name::{parse_dm_name, NameError};
 use crate::config::Config;
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::linux::dm::{
-    DmName, DmTable, LinearTable, Persistence, SnapshotTable, ThinId, ThinIdOutOfRange,
+    DmName, DmTable, LinearTable, ParseThinIdError, Persistence, SnapshotTable, ThinId,
     ThinPoolTable, ThinTable,
 };
 use crate::linux::loopdev::LoopDevice;
@@ -30,7 +30,7 @@ pub enum TableError {
     #[error(transparent)]
     Backing(#[from] BackingError),
     #[error(transparent)]
-    ThinId(#[from] ThinIdOutOfRange),
+    ThinId(#[from] ParseThinIdError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -225,9 +225,6 @@ impl<F: SlotPath> fmt::Display for TableSpec<F> {
 pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
     let malformed = || TableError::Malformed(s.to_string());
     let number = |t: &str| t.parse::<u64>().map_err(|_| malformed());
-    let thin_id = |t: &str| -> Result<ThinId, TableError> {
-        Ok(ThinId::new(t.parse().map_err(|_| malformed())?)?)
-    };
     let is_device = |t: &str| t.starts_with("/dev/");
     let file = |t: &str| -> Result<FilePath, TableError> {
         if is_device(t) {
@@ -279,7 +276,7 @@ pub fn parse_table(s: &str) -> Result<TableSpec<FilePath>, TableError> {
         ["0", sectors, "thin", pool, id, origin @ ..] if origin.len() <= 1 => TableSpec::Thin {
             sectors: number(sectors)?,
             pool: dm_device(pool)?,
-            id: thin_id(id)?,
+            id: id.parse()?,
             origin: origin.first().map(|o| source(o)).transpose()?,
         },
         _ => return Err(malformed()),

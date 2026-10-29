@@ -8,13 +8,15 @@ pub mod thin_dump;
 
 use super::Access;
 use crate::process::binary::RootSafeBin;
+use derive_more::Constructor;
 pub use device::Device;
 pub use name::{DmName, InvalidDmName};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
 pub use thin::{
-    Active, Inactive, SnapshotError, Thin, ThinId, ThinIdOutOfRange, ThinPool, ThinPoolError,
+    Active, Inactive, ParseThinIdError, SnapshotError, Thin, ThinId, ThinIdOutOfRange, ThinPool,
+    ThinPoolError,
 };
 use thiserror::Error;
 
@@ -47,16 +49,12 @@ pub enum RemoveMode {
 }
 
 /// Type-safe interface to `dmsetup`.
-#[derive(Debug)]
+#[derive(Debug, Constructor)]
 pub struct Dmsetup {
     bin: RootSafeBin<"dmsetup">,
 }
 
 impl Dmsetup {
-    pub fn new(bin: RootSafeBin<"dmsetup">) -> Self {
-        Self { bin }
-    }
-
     pub fn create(
         &self,
         name: &DmName,

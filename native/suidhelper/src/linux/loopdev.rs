@@ -5,6 +5,7 @@ use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, Ope
 use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use derive_more::{Display, From};
 use nix::errno::Errno;
+use smart_default::SmartDefault;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -27,6 +28,7 @@ mod ioctl {
     nix::ioctl_write_ptr_bad!(configure, 0x4C0A, LoopConfig);
 }
 
+#[derive(SmartDefault)]
 #[repr(C)]
 struct LoopInfo64 {
     lo_device: u64,
@@ -38,7 +40,9 @@ struct LoopInfo64 {
     lo_encrypt_type: u32,
     lo_encrypt_key_size: u32,
     lo_flags: u32,
+    #[default([0; 64])]
     lo_file_name: [u8; 64],
+    #[default([0; 64])]
     lo_crypt_name: [u8; 64],
     lo_encrypt_key: [u8; 32],
     lo_init: [u64; 2],
@@ -55,26 +59,6 @@ struct LoopConfig {
 
 const _: () = assert!(std::mem::size_of::<LoopInfo64>() == 232);
 const _: () = assert!(std::mem::size_of::<LoopConfig>() == 304);
-
-impl Default for LoopInfo64 {
-    fn default() -> Self {
-        Self {
-            lo_device: 0,
-            lo_inode: 0,
-            lo_rdevice: 0,
-            lo_offset: 0,
-            lo_sizelimit: 0,
-            lo_number: 0,
-            lo_encrypt_type: 0,
-            lo_encrypt_key_size: 0,
-            lo_flags: 0,
-            lo_file_name: [0; 64],
-            lo_crypt_name: [0; 64],
-            lo_encrypt_key: [0; 32],
-            lo_init: [0; 2],
-        }
-    }
-}
 
 #[derive(Debug, ThisError)]
 #[error("expected /dev/loopN: {0:?}")]

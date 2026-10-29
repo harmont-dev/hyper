@@ -5,7 +5,6 @@ use derive_more::AsRef;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 use std::borrow::Borrow;
 use std::ffi::OsStr;
-use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::os::unix::ffi::OsStrExt;
@@ -39,11 +38,13 @@ pub enum ComponentError {
 }
 
 /// A path component that isn't `.`, nor `..`, nor `/`.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
 #[repr(transparent)]
 pub struct StrictComponent([u8]);
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
 pub struct StrictComponentBuf(Box<[u8]>);
 
 impl StrictComponent {
@@ -114,12 +115,6 @@ impl AsRef<Path> for StrictComponent {
     }
 }
 
-impl fmt::Debug for StrictComponent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.as_os_str().fmt(f)
-    }
-}
-
 impl ToOwned for StrictComponent {
     type Owned = StrictComponentBuf;
     fn to_owned(&self) -> StrictComponentBuf {
@@ -143,12 +138,6 @@ impl Borrow<StrictComponent> for StrictComponentBuf {
 impl AsRef<Path> for StrictComponentBuf {
     fn as_ref(&self) -> &Path {
         self.as_path()
-    }
-}
-
-impl fmt::Debug for StrictComponentBuf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (**self).fmt(f)
     }
 }
 

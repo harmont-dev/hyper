@@ -61,9 +61,18 @@ proptest! {
             Ok(id) => {
                 prop_assert!(n <= ThinId::MAX);
                 prop_assert_eq!(id.to_string(), n.to_string());
+                prop_assert_eq!(n.to_string().parse::<ThinId>().unwrap(), id);
             }
-            Err(_) => prop_assert!(n > ThinId::MAX),
+            Err(_) => {
+                prop_assert!(n > ThinId::MAX);
+                prop_assert!(n.to_string().parse::<ThinId>().is_err());
+            }
         }
+    }
+
+    #[test]
+    fn thin_id_parse_rejects_non_integers(s in "[^0-9+]*|[0-9]+[^0-9]+[0-9]*") {
+        prop_assert!(s.parse::<ThinId>().is_err());
     }
 }
 

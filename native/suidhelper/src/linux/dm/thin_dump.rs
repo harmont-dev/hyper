@@ -2,7 +2,7 @@
 use super::ThinId;
 use crate::fs::file::{IsBlockDevice, SafeFile};
 use crate::process::binary::RootSafeBin;
-use derive_more::Into;
+use derive_more::{Constructor, Into};
 use serde::Deserialize;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -36,15 +36,12 @@ pub enum MappingsError {
     Truncated { expected: u64, got: u64 },
 }
 
+#[derive(Constructor)]
 pub struct ThinDump {
     bin: RootSafeBin<"thin_dump">,
 }
 
 impl ThinDump {
-    pub fn new(bin: RootSafeBin<"thin_dump">) -> Self {
-        Self { bin }
-    }
-
     pub fn dump<R, O>(
         &self,
         metadata: &SafeFile<IsBlockDevice, R, O>,

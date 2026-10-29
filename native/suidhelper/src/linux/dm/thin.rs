@@ -3,6 +3,8 @@ use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use crate::linux::Access;
 use derive_more::{Display, Into};
 use std::ffi::OsStr;
+use std::num::ParseIntError;
+use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Into)]
@@ -13,6 +15,14 @@ pub struct ThinId(u32);
 #[error("thin device id {0} exceeds the 24-bit limit")]
 pub struct ThinIdOutOfRange(u32);
 
+#[derive(Debug, ThisError)]
+pub enum ParseThinIdError {
+    #[error("thin device id is not an integer: {0}")]
+    Int(#[from] ParseIntError),
+    #[error(transparent)]
+    OutOfRange(#[from] ThinIdOutOfRange),
+}
+
 impl ThinId {
     pub const MAX: u32 = (1 << 24) - 1;
 
@@ -22,6 +32,14 @@ impl ThinId {
         } else {
             Err(ThinIdOutOfRange(id))
         }
+    }
+}
+
+impl FromStr for ThinId {
+    type Err = ParseThinIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.parse()?)?)
     }
 }
 

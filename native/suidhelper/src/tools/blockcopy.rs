@@ -8,6 +8,7 @@
 use super::IsTool;
 use crate::util::safe_dev::BlockDev;
 use clap::Args;
+use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -113,14 +114,9 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     Ok(filled)
 }
 
+#[derive(Constructor)]
 pub struct Blockcopy {
     args: BlockcopyArgs,
-}
-
-impl Blockcopy {
-    pub fn new(args: BlockcopyArgs) -> Self {
-        Self { args }
-    }
 }
 
 impl IsTool for Blockcopy {

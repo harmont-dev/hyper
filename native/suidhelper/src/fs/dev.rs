@@ -1,8 +1,8 @@
-use derive_more::Display;
+use derive_more::{Constructor, Display};
 use nix::libc::dev_t;
 use nix::sys::stat::{major, makedev, minor};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, Constructor)]
 #[display("{major}:{minor}")]
 pub struct DeviceNumber {
     major: u64,
@@ -10,10 +10,6 @@ pub struct DeviceNumber {
 }
 
 impl DeviceNumber {
-    pub const fn new(major: u64, minor: u64) -> Self {
-        Self { major, minor }
-    }
-
     pub fn major(self) -> u64 {
         self.major
     }
