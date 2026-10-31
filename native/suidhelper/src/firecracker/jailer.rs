@@ -1,19 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! Typed invocation of the firecracker jailer: the validated argument newtypes
-//! and the `execve` mechanics behind the `jailer` subcommand.
-//!
-//! Threat model: the BEAM is untrusted. It supplies only the VM id, uid/gid,
-//! cgroup settings, and the API socket path — each guarded by a newtype below.
-//! Every privileged path (the jailer binary, the firecracker `--exec-file`, the
-//! chroot base, the parent cgroup) comes from the root-owned config, never the
-//! caller. The refusal contracts on these newtypes are the security core: a
-//! compromised BEAM must not be able to name a privileged path, request uid 0,
-//! traverse out of the chroot base, inject a flag, or smuggle an
-//! environment/fd into root.
-//!
-//! ## Validator laws (property-tested in `tests/tools/jailer.rs`)
-//! - [`VmId`] round-trips exactly the allowed charset/length and rejects any
-//!   separator, dot, NUL, whitespace, leading dash, empty, or over-long input.
+//! API into the Firecracker jailer.
 
 use crate::firecracker::id::{JailGid, JailUid};
 use crate::fs::path::{
