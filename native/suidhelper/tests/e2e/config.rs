@@ -1,7 +1,7 @@
 //! L5: the binary's startup config contract, observed end to end (exit code +
 //! stderr + stdout JSON). Uses the config-path seam to point at a per-test
 //! tempfile instead of /etc/hyper, so tests never touch the real host.
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use hyper_suidhelper::config::{BinError, Config};
 use hyper_suidhelper::process::binary;

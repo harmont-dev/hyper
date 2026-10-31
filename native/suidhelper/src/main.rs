@@ -89,13 +89,6 @@ impl SysTest {
 }
 
 fn run(mut token: Unprivileged) {
-    // The gate must resolve before clap parsing: some subcommands' value_parsers
-    // (losetup attach's backing-file gate) consult the config while clap parses
-    // argv, and the config consults this gate. Resolving the gate first ensures
-    // that first config load — wherever it happens — sees the right gate state.
-    // In release this is a no-op: the gate stays secure.
-    hyper_suidhelper::security_gate::init();
-
     let command = Cli::parse().command;
 
     // `version` is a pure self-report: it touches neither config nor privileges,
