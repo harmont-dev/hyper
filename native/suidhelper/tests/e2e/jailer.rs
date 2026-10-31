@@ -3,7 +3,7 @@
 //! propagates. We point the config's `jailer` at a root-owned recorder that
 //! writes its argv and its `/proc/self/environ` to files, then exits with a known
 //! code. Root-only: `become_root_permanently` requires we are already root.
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

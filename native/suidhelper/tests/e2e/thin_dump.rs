@@ -3,7 +3,7 @@
 //! operands at parse time, translate the XML to the ranges JSON, and surface
 //! both tool failure and a wrong dev_id as errors — an empty result must never
 //! mean "wrong dump".
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use predicates::str::contains;
 use std::fs;

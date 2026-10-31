@@ -6,7 +6,7 @@
 //! Contract under test: exit 0 with a single JSON object on stdout where
 //! `version` == the crate version and `checksum_blake3` is 32 bytes of
 //! lowercase hex (all-zero on an unstamped dev build -- shape, not value).
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use std::path::Path;
 

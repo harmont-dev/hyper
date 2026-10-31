@@ -2,7 +2,7 @@
 //! the one thing the design deliberately hides from the caller. We point the
 //! tool's config path at a root-owned fake that writes its argv+env to a file as
 //! JSON, then assert on the reconstructed command line.
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use predicates::str::contains;
 use std::fs;

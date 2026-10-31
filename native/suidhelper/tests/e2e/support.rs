@@ -22,7 +22,7 @@ pub fn is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-/// Run the helper with the security gate open and the config path redirected
+/// Run the helper with insecure mode open and the config path redirected
 /// to a per-test file, so tests never touch the real host's /etc/hyper.
 pub fn run(config: &Path, args: &[&str]) -> Assert {
     let mut cmd = Command::new(BIN);

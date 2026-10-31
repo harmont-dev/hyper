@@ -302,7 +302,7 @@ jobs:
       - name: Gated tests as root + coverage
         run: |
           sudo -E env "PATH=$PATH" \
-            cargo llvm-cov nextest --features insecure_test_seams \
+            cargo llvm-cov nextest --features insecure_mode \
             -E 'test(/_as_root$/)' --lcov --output-path lcov-privileged.info
 
       - name: Upload coverage to Codecov

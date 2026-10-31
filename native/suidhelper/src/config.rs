@@ -84,7 +84,7 @@ pub fn validate_uid_gid_range(r: &UidGidRange) -> Result<(), LoadingError> {
 /// Only in INSECURE TEST MODE (both gates open) may an env var redirect it — the
 /// secure arm is always the hardcoded path, so a release build cannot be steered.
 fn config_path() -> PathBuf {
-    crate::security_gate::split(
+    crate::insecure_mode::select(
         || PathBuf::from(CONFIG_PATHSTR),
         || {
             std::env::var(INSECURE_CONFIG_PATH_ENV)

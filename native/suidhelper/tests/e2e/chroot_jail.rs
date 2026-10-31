@@ -8,7 +8,7 @@
 //! likewise privileged `mknod` — no unit-level substitute exists; it is proven
 //! only here, root-gated, with the insecure config seam supplying a `[network]`
 //! table.
-#![cfg(feature = "insecure_test_seams")]
+#![cfg(feature = "insecure_mode")]
 
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};

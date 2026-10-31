@@ -47,8 +47,8 @@ run in CI's `integration` job, which provisions the GitHub-hosted runner via
   `lib/hyper/redist/` — **pure cores**: units algebra, strict number parsing,
   EWMA/rate controls, `/proc` parsers, hashing.
   No processes, no I/O. These are where property tests pay off most.
-- `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests in
-  `tests/` (see Rust rules below).
+- `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests
+  inline in `src/` or in `tests/` (see Rust rules below).
 - Generated, do not hand-edit: `lib/hyper/firecracker/api/{operations,schemas}`
   (regen `mix firecracker.gen`) and `lib/hyper/grpc/v1/hyper.pb.ex`
   (regen `mix grpc.gen`). Both are gitignored and rebuilt by a Mix compiler.
@@ -157,13 +157,14 @@ If a case needs its own assertions, it is a separate test, not a row.
 
 ### Rust specifics (`native/suidhelper/`)
 
-- **Tests live in `tests/`, never inline `#[cfg(test)]` in `src/`.** The crate
-  is split into a lib (`src/lib.rs`, crate `hyper_suidhelper`) and a thin bin
-  (`src/main.rs`) precisely so integration tests can reach the internals.
-  **Exception: `src/linux/`.** Tests for these utilities are colocated with
-  the code, in a `#[cfg(test)] mod tests` block at the bottom of the file
-  under test.
-- Each test file must be registered as a `[[test]]` target in `Cargo.toml`
+- **We are migrating tests inline.** New tests for a module go in a
+  `#[cfg(test)] mod tests` block at the bottom of the file under test, not in
+  `tests/`. Many existing tests still live in `tests/` (`src/linux/` and
+  `src/insecure_mode.rs` are already migrated); when you substantially change a
+  module whose tests are still in `tests/`, move them inline as part of the
+  change. `tests/` remains the home for tests that drive the built binary or
+  span modules (`tests/e2e/`, `tests/config_seam.rs`).
+- Each file in `tests/` must be registered as a `[[test]]` target in `Cargo.toml`
   (`tests/` subdirectories are not auto-discovered) — copy an existing
   `[[test]]` block when adding one.
 - `proptest` is the dev-dependency; use `proptest!{ #[test] fn ... }` with

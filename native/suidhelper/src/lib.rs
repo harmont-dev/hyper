@@ -10,8 +10,8 @@
 pub mod checksum;
 pub mod config;
 pub mod fs;
+pub mod insecure_mode;
 pub mod linux;
 pub mod process;
-pub mod security_gate;
 pub mod tools;
 pub mod util;
