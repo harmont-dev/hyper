@@ -42,14 +42,14 @@ jobs:
           # manifest. `0,/re/` rewrites only the first match, which for each
           # Cargo.toml is its own `[package] version` (xtask is intentionally
           # left at 0.0.0 — it is publish = false).
-          for m in native/suidhelper/Cargo.toml native/suidhelper/meta/Cargo.toml native/guest-agent/Cargo.toml; do
+          for m in native/suidhelper/Cargo.toml native/hyperrs-elfsum/Cargo.toml native/guest-agent/Cargo.toml; do
             sed -i -E "0,/^version = \"[^\"]*\"/s//version = \"${version}\"/" "$m"
           done
           sed -i -E "0,/version: \"[^\"]*\"/s//version: \"${version}\"/" mix.exs
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add native/suidhelper/Cargo.toml native/suidhelper/meta/Cargo.toml native/guest-agent/Cargo.toml mix.exs
+          git add native/suidhelper/Cargo.toml native/hyperrs-elfsum/Cargo.toml native/guest-agent/Cargo.toml mix.exs
 
           # Idempotent: a re-run after the bump already landed has nothing to commit.
           if git diff --cached --quiet; then
@@ -80,14 +80,14 @@ jobs:
         with:
           ref: ${{ needs.prepare-release.outputs.sha }}
 
-      # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
+      # rustup reads native/rust-toolchain.toml on the first cargo
       # call and installs the pinned nightly + both musl targets.
       - name: Show toolchain
         run: rustup show
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native/suidhelper
+          workspaces: native
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -97,7 +97,7 @@ jobs:
           v="${{ needs.prepare-release.outputs.version }}"
           out="hyper-suidhelper-${v}-${{ matrix.target }}"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/hyper-suidhelper" "dist/${out}"
+          cp "../target/${{ matrix.target }}/release/hyper-suidhelper" "dist/${out}"
 
       - uses: actions/upload-artifact@v7
         with:

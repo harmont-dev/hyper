@@ -37,10 +37,3 @@ path = "tests/exec.rs"
 [[test]]
 name = "init"
 path = "tests/init.rs"
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true

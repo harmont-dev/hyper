@@ -218,14 +218,14 @@ defmodule Hyper.MixProject do
       files: ~w(
         lib priv/firecracker priv/repo priv/vmlinux proto config mix.exs
         README.md LICENSE
+        native/Cargo.toml native/Cargo.lock native/rust-toolchain.toml native/.config
         native/guest-agent/src native/guest-agent/tests native/guest-agent/build.rs
-        native/guest-agent/Cargo.toml native/guest-agent/Cargo.lock
-        native/guest-agent/.cargo
-        native/suidhelper/src native/suidhelper/tests native/suidhelper/elfsum
+        native/guest-agent/Cargo.toml native/guest-agent/.cargo
+        native/hyperrs-elfsum/src native/hyperrs-elfsum/Cargo.toml
+        native/suidhelper/src native/suidhelper/tests
         native/suidhelper/xtask native/suidhelper/build.rs
-        native/suidhelper/Cargo.toml native/suidhelper/Cargo.lock
-        native/suidhelper/rust-toolchain.toml native/suidhelper/README.md
-        native/suidhelper/.cargo native/suidhelper/.config
+        native/suidhelper/Cargo.toml native/suidhelper/README.md
+        native/suidhelper/.cargo
       ),
       # `lib` is included wholesale, so on a dev box the gitignored generated
       # outputs (bindings, expected.ex) exist on disk and would leak into the
@@ -501,7 +501,7 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
   use Mix.Task.Compiler
 
   @helper_dir "native/suidhelper"
-  @binary "native/suidhelper/target/hyper-suidhelper"
+  @binary "native/target/hyper-suidhelper"
   @out "lib/hyper/suid_helper/expected.ex"
 
   @impl Mix.Task.Compiler
@@ -522,7 +522,7 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
         `cargo xtask stamp` failed (exit #{code}) building the suidhelper:
 
         #{output}
-        Ensure `cargo`, the helper's toolchain and its musl target (see #{@helper_dir}/rust-toolchain.toml)
+        Ensure `cargo`, the helper's toolchain and its musl target (see native/rust-toolchain.toml)
         are installed.
         """)
     end
@@ -619,7 +619,7 @@ defmodule Mix.Tasks.Compile.GuestAgentBuild do
   end
 
   defp build!(arch, triple, required: required?) do
-    case System.cmd("cargo", ["build", "--release", "--target", triple],
+    case System.cmd("cargo", ["build", "--profile", "release-guest", "--target", triple],
            cd: @agent_dir,
            stderr_to_stdout: true
          ) do
@@ -644,7 +644,7 @@ defmodule Mix.Tasks.Compile.GuestAgentBuild do
   end
 
   defp install(arch, triple) do
-    src = Path.join(@agent_dir, "target/#{triple}/release/hyper-guest-agent")
+    src = Path.join("native/target", "#{triple}/release-guest/hyper-guest-agent")
     dest = Path.join(@out_dir, "hyper-guest-agent-#{arch}")
     File.cp!(src, dest)
     File.chmod!(dest, 0o755)
@@ -665,7 +665,10 @@ defmodule Mix.Tasks.Compile.GuestAgentBuild do
   end
 
   defp installed_targets do
-    case System.cmd("rustup", ["target", "list", "--installed"], stderr_to_stdout: true) do
+    case System.cmd("rustup", ["target", "list", "--installed"],
+           cd: @agent_dir,
+           stderr_to_stdout: true
+         ) do
       {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
       # No rustup / unknown: build only the host arch (never attempt a cross build).
       _ -> []

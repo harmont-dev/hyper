@@ -78,17 +78,10 @@ jobs:
       - name: Install protoc-gen-elixir
         run: mix escript.install hex protobuf 0.17.0 --force
 
-      # The `:guest_agent_build` Mix compiler builds the static musl guest agent
-      # (native/guest-agent) into priv/ on every `mix compile`; the host-arch
-      # build is a hard requirement, so the runner's default toolchain needs the
-      # musl std. Cross arches are best-effort and stay skipped here.
-      - name: Install musl target for the guest-agent build
-        run: rustup target add x86_64-unknown-linux-musl
-
-      - name: Cache guest-agent cargo build
+      - name: Cache native cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native/guest-agent
+          workspaces: native
 
       - name: Compile (warnings as errors)
         # --force matches the `mix check` alias: re-surfaces warnings even on a
@@ -173,54 +166,37 @@ jobs:
       - name: ShellCheck
         run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
-  # The guest agent is otherwise only built by the `:guest_agent_build` Mix
-  # compiler, where cargo warnings scroll past without failing the build.
-  guest-agent:
-    name: Rust (guest-agent)
+  # One job for the whole native/ workspace: guest-agent, hyperrs-elfsum,
+  # suidhelper and xtask. The guest agent and xtask are otherwise only built by
+  # Mix compilers, where cargo warnings scroll past without failing the build.
+  rust:
+    name: Rust (native workspace)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: native/guest-agent
+        working-directory: native
     steps:
       - uses: actions/checkout@v7
 
-      # build.rs compiles agent.proto with prost-build, which shells out to protoc.
+      # rustup reads native/rust-toolchain.toml on the first cargo call and
+      # installs the pinned nightly toolchain, components, and targets.
+      - name: Show toolchain
+        run: rustup show
+
+      # guest-agent's build.rs compiles agent.proto with prost-build, which
+      # shells out to protoc.
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native/guest-agent
+          workspaces: native
 
       - name: rustfmt
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-  rust:
-    name: Rust (suidhelper)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: native/suidhelper
-    steps:
-      - uses: actions/checkout@v7
-
-      # rustup reads native/suidhelper/rust-toolchain.toml on the first cargo
-      # call and installs the pinned nightly toolchain, components, and targets.
-      - name: Show toolchain
-        run: rustup show
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native/suidhelper
-
-      - name: rustfmt
-        run: cargo fmt --check
-
-      - name: clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Install cargo-llvm-cov and nextest
         uses: taiki-e/install-action@v2
@@ -231,7 +207,7 @@ jobs:
         # `nextest` runs the suite while llvm-cov collects coverage AND nextest
         # writes target/nextest/ci/junit.xml (see .config/nextest.toml). One run,
         # two artifacts: lcov.info for coverage, junit.xml for Test Analytics.
-        run: cargo llvm-cov nextest --profile ci --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --profile ci --all-features --lcov --output-path lcov.info
 
       # !cancelled() uploads on pass OR fail (see elixir job). The action runs at
       # repo root, so the path is fully qualified -- working-directory only
@@ -242,25 +218,25 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: native/suidhelper/target/nextest/ci/junit.xml
+          files: native/target/nextest/ci/junit.xml
           flags: rust
           report_type: test_results
 
       # Repo-relative path: upload-artifact is an action, so the rust job's
-      # `working-directory: native/suidhelper` default does NOT apply.
+      # `working-directory: native` default does NOT apply.
       - name: Upload Rust test results artifact
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: rust-test-results
-          path: native/suidhelper/target/nextest/ci/junit.xml
+          path: native/target/nextest/ci/junit.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           # working-directory only applies to `run:` steps, not actions.
-          files: native/suidhelper/lcov.info
+          files: native/lcov.info
           flags: rust
           fail_ci_if_error: true
 
@@ -273,14 +249,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # rustup reads native/suidhelper/rust-toolchain.toml and installs the pinned
+      # rustup reads native/rust-toolchain.toml and installs the pinned
       # nightly on the first cargo call.
       - name: Show toolchain
         run: rustup show
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native/suidhelper
+          workspaces: native
 
       - name: Install cargo-llvm-cov and nextest
         uses: taiki-e/install-action@v2
@@ -401,15 +377,10 @@ jobs:
       - name: Install protoc-gen-elixir
         run: mix escript.install hex protobuf 0.17.0 --force
 
-      - name: Install musl target for the guest-agent build
-        run: rustup target add x86_64-unknown-linux-musl
-
       - name: Cache rust builds
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            native/guest-agent
-            native/suidhelper
+          workspaces: native
 
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
@@ -528,7 +499,7 @@ jobs:
             -o suidhelper.profdata
           "$TOOLS/llvm-cov" export --format=lcov \
             --instr-profile=suidhelper.profdata \
-            target/hyper-suidhelper \
+            ../target/hyper-suidhelper \
             "$GITHUB_WORKSPACE/native/suidhelper/src" \
             > lcov-e2e.info
           sed -i "s|^SF:$GITHUB_WORKSPACE/|SF:|" lcov-e2e.info

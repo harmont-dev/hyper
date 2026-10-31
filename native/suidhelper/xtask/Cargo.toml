@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-hyperrs-elfsum = { path = "../elfsum", features = ["stamp"] }
+hyperrs-elfsum = { path = "../../hyperrs-elfsum", features = ["stamp"] }
 object = "0.36"
