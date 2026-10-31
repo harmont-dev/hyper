@@ -2,11 +2,13 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
+use crate::config::Config;
+use crate::firecracker::chroot_jail::{self, ChrootJail};
+use crate::firecracker::id::{JailGid, JailUid};
 use crate::linux::dm::DmName;
 use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
-use crate::util::chroot_jail::{self, ChrootJail};
 use clap::Args;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -42,11 +44,20 @@ pub fn run(
     args: PrepareArgs,
     token: &mut Unprivileged,
 ) -> Result<serde_json::Value, crate::tools::Error> {
-    Prepare { args }.run(token)
+    let range = Config::get().uid_gid_range();
+    let uid = range
+        .uid(args.uid)
+        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?;
+    let gid = range
+        .gid(args.gid)
+        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?;
+    Prepare { args, uid, gid }.run(token)
 }
 
 struct Prepare {
     args: PrepareArgs,
+    uid: JailUid,
+    gid: JailGid,
 }
 
 impl IsTool for Prepare {
@@ -56,7 +67,7 @@ impl IsTool for Prepare {
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let args = &self.args;
-        ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
+        ChrootJail::new(args.chroot.clone(), self.uid, self.gid)
             .with_kernel(args.kernel.clone())
             .with_rootfs(args.device.clone())
             .build()

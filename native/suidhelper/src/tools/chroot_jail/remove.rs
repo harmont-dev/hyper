@@ -14,6 +14,7 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use crate::config::Config;
+use crate::firecracker::jailer::{self, VmId};
 use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, OpenFlags};
 use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
@@ -24,6 +25,7 @@ use clap::Args;
 use nix::errno::Errno;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error as ThisError;
 
@@ -59,8 +61,10 @@ pub enum CgroupError {
     Path(#[source] path::ValidationError),
     #[error("--cgroup path: {0}")]
     Base(#[source] path::RelativeError),
-    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
-    Depth(PathBuf),
+    #[error("--cgroup must be exactly <parent cgroup>/<vm id>: {0:?}")]
+    Shape(PathBuf),
+    #[error("--cgroup leaf: {0}")]
+    Leaf(#[source] jailer::Error),
     #[error("opening cgroup: {0}")]
     Open(#[source] cgroup::OpenError),
     #[error("killing cgroup procs: {0}")]
@@ -105,7 +109,7 @@ impl IsTool for Remove {
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
         // chroot teardown below is not yanking files out from under a live process.
-        remove_cgroup_under(Path::new(cgroup::ROOT), &self.args.cgroup)?;
+        remove_cgroup_under(&Config::get().parent_cgroup_dir(), &self.args.cgroup)?;
         remove_chroot_under(&Config::get().jail_base(), &self.args.chroot)?;
         Ok(())
     }
@@ -119,7 +123,7 @@ impl IsTool for Remove {
 /// Recursively remove the per-VM chroot `<jail_base>/<exec>/<id>`, fd-relative
 /// after an `O_NOFOLLOW` walk from `jail_base`. Idempotent on a missing target.
 /// `--chroot` must be exactly `<exec>/<id>` (one parent component, one leaf).
-pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), ChrootError> {
+pub fn remove_chroot_under(jail_base: &LexicalPath, chroot: &Path) -> Result<(), ChrootError> {
     let path: &LexicalPath = chroot.try_into().map_err(ChrootError::Path)?;
     let rel = path.strip_base(jail_base).map_err(ChrootError::Base)?;
     let (2, Some((parent, id))) = (rel.segments().count(), path.split_last()) else {
@@ -143,12 +147,18 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Chroot
 /// be at least two components below `base` (one or more parents, plus the leaf).
 /// Idempotent: a missing leaf is success, and a leaf that has not finished
 /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
-pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), CgroupError> {
+pub fn remove_cgroup_under(parent: &LexicalPath, cgroup: &Path) -> Result<(), CgroupError> {
     let path: &LexicalPath = cgroup.try_into().map_err(CgroupError::Path)?;
-    let rel = path.strip_base(base).map_err(CgroupError::Base)?;
-    if rel.segments().count() < 2 {
-        return Err(CgroupError::Depth(cgroup.to_path_buf()));
-    }
+    let rel = path.strip_base(parent).map_err(CgroupError::Base)?;
+    let mut segments = rel.segments();
+    let (Some(leaf), None) = (segments.next(), segments.next()) else {
+        return Err(CgroupError::Shape(cgroup.to_path_buf()));
+    };
+    let leaf = leaf
+        .as_os_str()
+        .to_str()
+        .ok_or_else(|| CgroupError::Shape(cgroup.to_path_buf()))?;
+    VmId::from_str(leaf).map_err(CgroupError::Leaf)?;
 
     // Kill any process still in the leaf cgroup before removing it. Open the leaf
     // O_NOFOLLOW (one step past the parent walk) and write "1" to cgroup.kill.

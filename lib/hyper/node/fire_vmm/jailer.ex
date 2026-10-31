@@ -147,9 +147,14 @@ defmodule Hyper.Node.FireVMM.Jailer do
     type
     |> Instance.spec()
     |> Instance.Spec.cgroup_v2()
-    |> Sys.Linux.Cgroup.V2.Config.as_linux()
-    |> Enum.flat_map(fn {file, value} -> ["--cgroup", "#{file}=#{value}"] end)
+    |> Enum.flat_map(&cgroup_flag/1)
   end
+
+  @spec cgroup_flag({atom(), term()}) :: [String.t()]
+  defp cgroup_flag({:memory_max, bytes}), do: ["--memory-max", to_string(bytes)]
+
+  defp cgroup_flag({:cpu_max, %{quota_us: quota, period_us: period}}),
+    do: ["--cpu-quota-us", to_string(quota), "--cpu-period-us", to_string(period)]
 
   @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
   @spec chroot_dir(Hyper.Vm.Id.t()) :: Path.t()

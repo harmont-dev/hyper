@@ -3,12 +3,14 @@
 
 use derive_more::AsRef;
 use ref_cast::{ref_cast_custom, RefCastCustom};
+use serde::{Deserialize, Deserializer};
 use std::borrow::Borrow;
 use std::ffi::OsStr;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 pub const NAME_MAX: usize = 255;
@@ -258,11 +260,11 @@ impl<A> SafePath<A, StrictComponents> {
     /// Given `/b/x/y`, base `/b`, returns `x/y`.
     pub fn strip_base(
         &self,
-        base: &Path,
+        base: &SafePath<IsAbsolute, StrictComponents>,
     ) -> Result<&SafePath<IsRelative, StrictComponents>, RelativeError> {
         let rest = self
             .path
-            .strip_prefix(base)
+            .strip_prefix(base.as_path())
             .map_err(|_| RelativeError::NotUnderBase)?;
         if rest.as_os_str().is_empty() {
             return Err(RelativeError::EqualsBase);
@@ -343,6 +345,17 @@ impl<A, S> From<SafePathBuf<A, S>> for PathBuf {
     }
 }
 
+impl<A, S> FromStr for SafePathBuf<A, S>
+where
+    A: Absoluteness,
+    S: Components,
+{
+    type Err = ValidationError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PathBuf::from(s).try_into()
+    }
+}
+
 impl<A, S> TryFrom<PathBuf> for SafePathBuf<A, S>
 where
     A: Absoluteness,
@@ -353,5 +366,26 @@ where
         A::check(&path)?;
         S::check(&path)?;
         Ok(Self(path, PhantomData))
+    }
+}
+
+impl<'de, A, S> Deserialize<'de> for SafePathBuf<A, S>
+where
+    A: Absoluteness,
+    S: Components,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        PathBuf::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for StrictComponentBuf {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        let component: &StrictComponent =
+            raw.as_str().try_into().map_err(serde::de::Error::custom)?;
+        Ok(component.to_owned())
     }
 }

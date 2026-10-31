@@ -83,7 +83,7 @@ fn relative_work_dir_exits_2_relative_as_root() {
     let p = write_root_config(tmp.path(), "work_dir = \"relative/path\"\n");
     run(&p, &["sys-test"])
         .code(2)
-        .stderr(contains("must be an absolute path"));
+        .stderr(contains("path is not absolute"));
 }
 
 #[test]

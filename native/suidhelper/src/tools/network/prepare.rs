@@ -5,9 +5,10 @@ use super::args;
 use super::exec;
 use super::NetworkOut;
 use crate::config::Config;
+use crate::firecracker::id::{IdError, UidGidRange};
+use crate::firecracker::jailer::VmId;
 use crate::process::binary::{self, RootSafeBin};
 use crate::process::privilege::{Root, Unprivileged};
-use crate::tools::jailer::{self, VmId};
 use crate::tools::IsTool;
 use clap::Args;
 use std::net::Ipv4Addr;
@@ -31,7 +32,7 @@ pub enum Error {
     #[error("clone_pool {0:?} is not a valid IPv4 CIDR")]
     InvalidClonePool(String),
     #[error(transparent)]
-    Uid(#[from] crate::util::jailer::Error),
+    Uid(#[from] IdError),
     #[error(transparent)]
     Addr(#[from] AddrError),
     #[error(transparent)]
@@ -41,17 +42,17 @@ pub enum Error {
 }
 
 /// Derive the [`Plan`] for `uid`, refusing before any command is ever run.
-/// `uid` must satisfy [`jailer::validate_id_number`] against `range` — the
+/// `uid` must satisfy [`UidGidRange::uid`] against `range` — the
 /// same check the jailer itself applies to `--uid`, so a uid the jailer would
 /// refuse is refused here too — and `clone_pool_str` must be a parseable IPv4
 /// CIDR.
 pub fn plan_from(
     uid: u32,
-    range: (u32, u32),
+    range: UidGidRange,
     clone_pool_str: &str,
     vm_id: &VmId,
 ) -> Result<Plan, Error> {
-    jailer::validate_id_number(uid, range)?;
+    let uid = range.uid(uid)?;
     let clone_pool = parse_cidr_base(clone_pool_str)?;
     Ok(Plan::derive(uid, range, clone_pool, vm_id)?)
 }

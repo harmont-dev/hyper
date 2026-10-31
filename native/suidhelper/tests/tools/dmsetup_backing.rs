@@ -8,13 +8,18 @@
 //!   * an in-base regular file is accepted as a handle to exactly that inode;
 //!   * anything in-base that is not a regular file is refused.
 
+use hyper_suidhelper::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyper_suidhelper::tools::{BackingError, BackingFile};
 use nix::sys::stat::fstat;
 use proptest::prelude::*;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+fn strict(p: impl AsRef<Path>) -> SafePathBuf<IsAbsolute, StrictComponents> {
+    p.as_ref().to_path_buf().try_into().unwrap()
+}
 
 fn real_tempdir() -> (TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
@@ -32,7 +37,7 @@ proptest! {
         let p = outside.join(&name);
         std::fs::write(&p, b"x").unwrap();
 
-        let err = BackingFile::open(&p, &base).expect_err("out-of-base backing file accepted");
+        let err = BackingFile::open(&p, &strict(&base)).expect_err("out-of-base backing file accepted");
         prop_assert!(matches!(err, BackingError::OutsideBase { .. }), "got {err:?}");
     }
 }
@@ -41,7 +46,8 @@ proptest! {
 fn absent_path_is_refused_as_canonicalize() {
     let (_base_dir, base) = real_tempdir();
 
-    let err = BackingFile::open(&base.join("nope.img"), &base).expect_err("absent file accepted");
+    let err = BackingFile::open(&base.join("nope.img"), &strict(&base))
+        .expect_err("absent file accepted");
     assert!(
         matches!(err, BackingError::Canonicalize { .. }),
         "got {err:?}"
@@ -66,7 +72,8 @@ fn refusal_is_decided_on_the_resolved_path() {
         .join("target.img");
 
     for spelling in [outer_link, inner_link, dotdot] {
-        let err = BackingFile::open(&spelling, &base).expect_err("out-of-base spelling accepted");
+        let err = BackingFile::open(&spelling, &strict(&base))
+            .expect_err("out-of-base spelling accepted");
         assert!(
             matches!(err, BackingError::OutsideBase { .. }),
             "{}: got {err:?}",
@@ -81,7 +88,7 @@ fn in_base_file_is_accepted_as_that_inode() {
     let backing = base.join("disk.img");
     std::fs::write(&backing, b"data").unwrap();
 
-    let got = BackingFile::open(&backing, &base).expect("in-base regular file refused");
+    let got = BackingFile::open(&backing, &strict(&base)).expect("in-base regular file refused");
 
     let held = fstat(got.file().as_raw_fd()).unwrap();
     let on_disk = std::fs::metadata(&backing).unwrap();
@@ -94,6 +101,7 @@ fn directory_under_base_is_refused() {
     let dir = base.join("subdir");
     std::fs::create_dir(&dir).unwrap();
 
-    let err = BackingFile::open(&dir, &base).expect_err("directory accepted as backing file");
+    let err =
+        BackingFile::open(&dir, &strict(&base)).expect_err("directory accepted as backing file");
     assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
 }

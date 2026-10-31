@@ -35,12 +35,12 @@ use super::grant;
 use crate::config::Config;
 use crate::fs::dir::SafeDir;
 use crate::fs::file::{self, OpenFlags};
-use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
 use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
@@ -124,7 +124,10 @@ impl IsTool for GrantApi {
 /// Hand `socket` (`<jail_base>/<exec>/<id>/root/api.socket`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, Error> {
+pub fn grant_api_under(
+    jail_base: &SafePath<IsAbsolute, StrictComponents>,
+    socket: &ApiSocket,
+) -> Result<GrantOut, Error> {
     let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
     let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
         return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));

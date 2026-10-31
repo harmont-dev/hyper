@@ -4,41 +4,33 @@
 //! a compromised BEAM from naming uid 0, a privileged path, a traversal, or a
 //! flag through the jailer subcommand.
 
-use hyper_suidhelper::tools::jailer::{validate_id_number, CgroupSetting, JailSock, VmId};
+use clap::{Args, FromArgMatches};
+use hyper_suidhelper::firecracker::jailer::VmId;
+use hyper_suidhelper::tools::jailer::JailerArgs;
 use proptest::prelude::*;
 use std::str::FromStr;
 
+fn parse(limits: &[&str]) -> Result<JailerArgs, clap::Error> {
+    parse_with_sock("/api.sock", limits)
+}
+
+fn parse_with_sock(api_sock: &str, limits: &[&str]) -> Result<JailerArgs, clap::Error> {
+    let base = [
+        "--id",
+        "vm1",
+        "--uid",
+        "900001",
+        "--gid",
+        "900001",
+        "--api-sock",
+        api_sock,
+    ];
+    let matches = JailerArgs::augment_args(clap::Command::new("jailer").no_binary_name(true))
+        .try_get_matches_from(base.iter().chain(limits))?;
+    JailerArgs::from_arg_matches(&matches)
+}
+
 proptest! {
-    /// uid/gid 0 is rejected for EVERY range — a jailer run with uid 0 skips its
-    /// privilege drop and leaves firecracker running as root.
-    #[test]
-    fn id_zero_always_rejected(lo in any::<u32>(), span in any::<u32>()) {
-        let hi = lo.saturating_add(span);
-        prop_assert!(validate_id_number(0, (lo, hi)).is_err());
-    }
-
-    /// Any nonzero value inside the (nonempty) range is accepted unchanged.
-    #[test]
-    fn id_in_range_nonzero_accepted(
-        lo in 1u32..=1_000_000,
-        span in 0u32..=1_000_000,
-        off in 0u32..=1_000_000,
-    ) {
-        let hi = lo + span;
-        let n = lo + (off % (span + 1)); // off bounded into [0, span] => n in [lo, hi]
-        prop_assert_eq!(validate_id_number(n, (lo, hi)).ok(), Some(n));
-    }
-
-    /// Values just below `lo` (still nonzero) and just above `hi` are rejected.
-    #[test]
-    fn id_out_of_range_rejected(lo in 2u32..=1_000_000, span in 0u32..=1_000_000) {
-        let hi = lo + span;
-        prop_assert!(validate_id_number(lo - 1, (lo, hi)).is_err());
-        if hi < u32::MAX {
-            prop_assert!(validate_id_number(hi + 1, (lo, hi)).is_err());
-        }
-    }
-
     /// Every string over the allowed charset/length with a non-dash leader parses
     /// and renders back to itself.
     #[test]
@@ -64,41 +56,6 @@ proptest! {
         prop_assert!(VmId::from_str(&s).is_err());
     }
 
-    /// A valid `memory.max` setting re-renders to exactly `key=value`.
-    #[test]
-    fn cgroup_memory_round_trips(s in "memory[.]max=([0-9]{1,20}|max)") {
-        prop_assert_eq!(CgroupSetting::from_str(&s).unwrap().to_string(), s);
-    }
-
-    /// A valid `cpu.max` setting re-renders to exactly `key=value`.
-    #[test]
-    fn cgroup_cpu_round_trips(s in "cpu[.]max=([0-9]{1,20} [0-9]{1,20}|max [0-9]{1,20})") {
-        prop_assert_eq!(CgroupSetting::from_str(&s).unwrap().to_string(), s);
-    }
-
-    /// A single-filename absolute socket path round-trips; `.`/`..` filenames are
-    /// rejected even though they are within the charset.
-    #[test]
-    fn jailsock_single_filename(name in "[A-Za-z0-9_.-]{1,40}") {
-        let s = format!("/{name}");
-        let res = JailSock::from_str(&s);
-        if name == "." || name == ".." {
-            prop_assert!(res.is_err());
-        } else {
-            prop_assert_eq!(res.unwrap().to_string(), s);
-        }
-    }
-
-    /// A second path component is always rejected (the socket must be a direct
-    /// child of `/`).
-    #[test]
-    fn jailsock_multi_component_rejected(
-        a in "[A-Za-z0-9_]{1,10}",
-        b in "[A-Za-z0-9_]{1,10}",
-    ) {
-        let s = format!("/{a}/{b}");
-        prop_assert!(JailSock::from_str(&s).is_err());
-    }
 }
 
 #[test]
@@ -119,44 +76,57 @@ fn vmid_rejects_known_bad_shapes() {
 }
 
 #[test]
-fn cgroup_rejects_known_bad_shapes() {
-    for bad in [
-        "linear=10",               // unknown key
-        "memory.high=10",          // unknown key
-        "memory.max=",             // empty value
-        "memory.max=12x",          // non-digit
-        "memory.max=1=2",          // second '='
-        "memory.max",              // no '='
-        "cpu.max=100000",          // missing period field
-        "cpu.max=100000 100000 5", // extra field
-        "cpu.max=x 100000",        // bad quota
-        "cpu.max=max max",         // bad period
-        "cpu.max=max",             // missing period
+fn cgroup_limits_accepted() {
+    for limits in [
+        &[][..],
+        &["--memory-max", "1048576"],
+        &["--cpu-quota-us", "50000", "--cpu-period-us", "100000"],
+        &[
+            "--memory-max",
+            "1",
+            "--cpu-quota-us",
+            "1",
+            "--cpu-period-us",
+            "1",
+        ],
     ] {
-        assert!(
-            CgroupSetting::from_str(bad).is_err(),
-            "CgroupSetting accepted {bad:?}"
-        );
+        assert!(parse(limits).is_ok(), "{limits:?} refused");
     }
 }
 
 #[test]
-fn jailsock_rejects_known_bad_shapes() {
-    for bad in [
-        "",         // empty
-        "relative", // not absolute
-        "/",        // no filename
-        "/a/b",     // multi-component
-        "/../etc",  // traversal
-        "/..",      // traversal as whole filename
-        "/.",       // current dir
-        "/a b",     // whitespace
-        "/a\0b",    // NUL
-        "//x",      // empty leading component
+fn cgroup_limits_refused() {
+    for limits in [
+        &["--memory-max", "0"][..],
+        &["--memory-max", "max"],
+        &["--memory-max", "-1"],
+        &["--memory-max", "12x"],
+        &["--memory-max", "18446744073709551616"],
+        &["--memory-max", "1", "--memory-max", "2"],
+        &["--cpu-quota-us", "50000"],
+        &["--cpu-period-us", "100000"],
+        &["--cpu-quota-us", "0", "--cpu-period-us", "100000"],
+        &["--cpu-quota-us", "50000", "--cpu-period-us", "0"],
+        &[
+            "--cpu-quota-us",
+            "1",
+            "--cpu-quota-us",
+            "2",
+            "--cpu-period-us",
+            "1",
+        ],
+        &["--cgroup", "memory.max=1"],
     ] {
-        assert!(
-            JailSock::from_str(bad).is_err(),
-            "JailSock accepted {bad:?}"
-        );
+        assert!(parse(limits).is_err(), "{limits:?} accepted");
+    }
+}
+
+#[test]
+fn api_sock_must_be_a_strict_absolute_path() {
+    for ok in ["/api.socket", "/run/fc/api.socket", "/-dash", "/a b"] {
+        assert!(parse_with_sock(ok, &[]).is_ok(), "{ok:?} refused");
+    }
+    for bad in ["", "api.socket", "/../etc/x", "/a/./b", "//x", "/a/"] {
+        assert!(parse_with_sock(bad, &[]).is_err(), "{bad:?} accepted");
     }
 }

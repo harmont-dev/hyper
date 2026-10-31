@@ -2,6 +2,7 @@
 //! Declarative builder for a VM's chroot jail contents.
 
 use crate::config::Config;
+use crate::firecracker::id::{JailGid, JailUid};
 use crate::fs::dev::DeviceNumber;
 use crate::fs::dir::{self, SafeDir};
 use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
@@ -78,8 +79,8 @@ pub struct Rootfs(DmName);
 /// filled; see the module docs.
 pub struct ChrootJail<K, R> {
     chroot: PathBuf,
-    uid: u32,
-    gid: u32,
+    uid: Uid,
+    gid: Gid,
     kernel: K,
     rootfs: R,
 }
@@ -87,11 +88,11 @@ pub struct ChrootJail<K, R> {
 impl ChrootJail<Unset, Unset> {
     /// A jail at `chroot` (shape `<JAIL_BASE>/<exec>/<id>`), everything owned by
     /// `uid:gid`.
-    pub fn new(chroot: impl Into<PathBuf>, uid: u32, gid: u32) -> Self {
+    pub fn new(chroot: impl Into<PathBuf>, uid: JailUid, gid: JailGid) -> Self {
         Self {
             chroot: chroot.into(),
-            uid,
-            gid,
+            uid: uid.into(),
+            gid: gid.into(),
             kernel: Unset,
             rootfs: Unset,
         }
@@ -134,7 +135,11 @@ impl ChrootJail<Kernel, Rootfs> {
     /// Realize the jail relative to explicit base directories: confined walk to
     /// the chroot dir, then stage the kernel and create the rootfs node relative
     /// to that fd. The public [`build`](Self::build) wires `Config` into this.
-    pub fn build_under(self, jail_base: &Path, hyper_base: &Path) -> Result<(), Error> {
+    pub fn build_under(
+        self,
+        jail_base: &SafePath<IsAbsolute, StrictComponents>,
+        hyper_base: &SafePath<IsAbsolute, StrictComponents>,
+    ) -> Result<(), Error> {
         let chroot = open_chroot_under(jail_base, &self.chroot)?;
         stage_kernel_under(&chroot, &self.kernel.0, hyper_base, self.uid, self.gid)?;
         make_rootfs(&chroot, &self.rootfs.0, self.uid, self.gid)?;
@@ -147,7 +152,10 @@ impl ChrootJail<Kernel, Rootfs> {
 
 /// Open the chroot directory by walking it from `jail_base` with `O_NOFOLLOW`, so
 /// a symlinked component cannot redirect outside the jail.
-pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Error> {
+pub fn open_chroot_under(
+    jail_base: &SafePath<IsAbsolute, StrictComponents>,
+    chroot: &Path,
+) -> Result<SafeDir, Error> {
     let path: &SafePath<IsAbsolute, StrictComponents> = chroot.try_into()?;
     path.strip_base(jail_base)?;
     SafeDir::open(path, OpenFlags::RDONLY).map_err(Error::OpenChroot)
@@ -159,11 +167,11 @@ pub fn open_chroot_under(jail_base: &Path, chroot: &Path) -> Result<SafeDir, Err
 pub fn stage_kernel_under(
     chroot: &SafeDir,
     src: &Path,
-    hyper_base: &Path,
-    uid: u32,
-    gid: u32,
+    hyper_base: &SafePath<IsAbsolute, StrictComponents>,
+    uid: Uid,
+    gid: Gid,
 ) -> Result<(), Error> {
-    let (uid, gid) = (Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)));
+    let (uid, gid) = (Some(uid), Some(gid));
 
     let src_canon = std::fs::canonicalize(src).map_err(|source| Error::Source {
         path: src.to_path_buf(),
@@ -173,7 +181,7 @@ pub fn stage_kernel_under(
     src_path
         .strip_base(hyper_base)
         .map_err(|_| Error::OutsideBase {
-            base: hyper_base.to_path_buf(),
+            base: hyper_base.as_path().to_path_buf(),
             path: src_canon.clone(),
         })?;
 
@@ -203,7 +211,7 @@ pub fn stage_kernel_under(
 /// Create the `rootfs` block node mirroring `device`'s major:minor, owned
 /// `uid:gid`. The device is opened as a verified `SafeFile<IsBlockDevice>`, so the
 /// number comes from a real device node, never a caller-supplied value.
-fn make_rootfs(chroot: &SafeDir, device: &DmName, uid: u32, gid: u32) -> Result<(), Error> {
+fn make_rootfs(chroot: &SafeDir, device: &DmName, uid: Uid, gid: Gid) -> Result<(), Error> {
     // `device` is lexically validated as `/dev/loopN` or `/dev/mapper/hyper-*`.
     // The dm form is a symlink under `/dev/mapper` — a root-owned `0755` dir an
     // unprivileged caller cannot write — so resolving it to its real `/dev/dm-N`
@@ -229,7 +237,7 @@ fn make_rootfs(chroot: &SafeDir, device: &DmName, uid: u32, gid: u32) -> Result<
         )?;
         let node: SafeFile<IsBlockDevice, Any, Any> =
             chroot.openat(ROOTFS_NAME, OpenFlags::PATH, Mode::empty())?;
-        Ok(node.chown(Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))?)
+        Ok(node.chown(Some(uid), Some(gid))?)
     };
     make().map_err(Error::MakeRootfs)
 }
@@ -239,7 +247,7 @@ fn make_rootfs(chroot: &SafeDir, device: &DmName, uid: u32, gid: u32) -> Result<
 /// `TUNSETIFF` onto the tap device waiting in its netns. Only called when VM
 /// networking is enabled; a jail built without it has no `dev` tree at all
 /// today (see [`ChrootJail::build_under`]).
-fn make_tun_node(chroot: &SafeDir, uid: u32, gid: u32) -> Result<(), dir::Error> {
+fn make_tun_node(chroot: &SafeDir, uid: Uid, gid: Gid) -> Result<(), dir::Error> {
     chroot.mkdirat(DEV, Mode::from_bits_truncate(0o755))?;
     let dev_dir: SafeDir = chroot.openat(DEV, OpenFlags::RDONLY, Mode::empty())?;
 
@@ -257,6 +265,6 @@ fn make_tun_node(chroot: &SafeDir, uid: u32, gid: u32) -> Result<(), dir::Error>
     }
     let node: SafeFile<IsCharDevice, Any, Any> =
         net_dir.openat(TUN, OpenFlags::PATH, Mode::empty())?;
-    node.chown(Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))?;
+    node.chown(Some(uid), Some(gid))?;
     Ok(node.chmod(Mode::from_bits_truncate(0o666))?)
 }

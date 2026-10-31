@@ -18,9 +18,9 @@
 use super::args::{self, Command};
 use super::NetworkOut;
 use crate::config::Config;
+use crate::firecracker::jailer::VmId;
 use crate::process::binary::{self, RootSafeBin};
 use crate::process::privilege::{Root, Unprivileged};
-use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
 use thiserror::Error as ThisError;

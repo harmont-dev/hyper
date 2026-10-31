@@ -1,4 +1,4 @@
-//! Contracts of the VM jail builder (`util::chroot_jail`), driven through the
+//! Contracts of the VM jail builder (`firecracker::chroot_jail`), driven through the
 //! base-injected seams. Non-root, in a tempdir, the promises under test:
 //!   * confinement — `open_chroot_under` follows no symlinked component and
 //!     refuses a chroot that is not under the jail base;
@@ -12,20 +12,26 @@
 //! device stages the kernel AND creates the `rootfs` block node whose major:minor
 //! mirrors the source device, owned by the requested uid:gid.
 
+use hyper_suidhelper::firecracker::chroot_jail::{
+    open_chroot_under, stage_kernel_under, ChrootJail, Error,
+};
+use hyper_suidhelper::firecracker::id::UidGidRange;
 use hyper_suidhelper::fs::dir::SafeDir;
 use hyper_suidhelper::fs::file::OpenFlags;
 use hyper_suidhelper::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use hyper_suidhelper::linux::dm::DmName;
-use hyper_suidhelper::util::chroot_jail::{
-    open_chroot_under, stage_kernel_under, ChrootJail, Error,
-};
 use nix::errno::Errno;
+use nix::unistd::{Gid, Uid};
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
+
+fn strict(p: impl AsRef<Path>) -> Strict {
+    p.as_ref().to_path_buf().try_into().unwrap()
+}
 
 fn safe(p: &Path) -> Strict {
     p.to_path_buf()
@@ -37,11 +43,8 @@ fn is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-fn own_ids() -> (u32, u32) {
-    (
-        nix::unistd::getuid().as_raw(),
-        nix::unistd::getgid().as_raw(),
-    )
+fn own_ids() -> (Uid, Gid) {
+    (nix::unistd::getuid(), nix::unistd::getgid())
 }
 
 // A valid <exec>/<id> tree under the jail base opens successfully.
@@ -51,7 +54,7 @@ fn open_chroot_descends_valid_tree() {
     let jail = tmp.path();
     let chroot = jail.join("exec").join("id");
     fs::create_dir_all(&chroot).unwrap();
-    assert!(open_chroot_under(jail, &chroot).is_ok());
+    assert!(open_chroot_under(&strict(jail), &chroot).is_ok());
 }
 
 // A symlinked component is not followed (O_NOFOLLOW): open must fail.
@@ -65,7 +68,7 @@ fn open_chroot_rejects_symlinked_component() {
 
     let chroot = jail.join("exec").join("id");
     assert!(
-        open_chroot_under(jail, &chroot).is_err(),
+        open_chroot_under(&strict(jail), &chroot).is_err(),
         "open_chroot followed a symlinked component",
     );
 }
@@ -77,7 +80,7 @@ fn open_chroot_rejects_path_outside_base() {
     let jail = tmp.path().join("jail");
     fs::create_dir(&jail).unwrap();
     let outside = tmp.path().join("elsewhere").join("id");
-    let result = open_chroot_under(&jail, &outside);
+    let result = open_chroot_under(&strict(&jail), &outside);
     let err = result.expect_err("expected an error for path outside base");
     assert!(
         matches!(err, Error::Relative(RelativeError::NotUnderBase)),
@@ -97,7 +100,7 @@ fn stage_kernel_rejects_source_outside_base() {
 
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &outside, &hyper_base, uid, gid).unwrap_err();
+    let err = stage_kernel_under(&chroot, &outside, &strict(&hyper_base), uid, gid).unwrap_err();
     assert!(matches!(err, Error::OutsideBase { .. }), "got {err:?}");
 }
 
@@ -118,7 +121,7 @@ fn stage_kernel_rejects_symlink_escaping_base() {
 
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &link, &hyper_base, uid, gid).unwrap_err();
+    let err = stage_kernel_under(&chroot, &link, &strict(&hyper_base), uid, gid).unwrap_err();
     assert!(
         matches!(err, Error::OutsideBase { .. }),
         "symlink escaping the base must be refused, got {err:?}",
@@ -136,7 +139,7 @@ fn stage_kernel_missing_source_errors() {
 
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &missing, hyper_base, uid, gid).unwrap_err();
+    let err = stage_kernel_under(&chroot, &missing, &strict(hyper_base), uid, gid).unwrap_err();
     assert!(matches!(err, Error::Source { .. }), "got {err:?}");
 }
 
@@ -153,7 +156,7 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
 
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
-    stage_kernel_under(&chroot, &src, hyper_base, uid, gid).expect("first stage");
+    stage_kernel_under(&chroot, &src, &strict(hyper_base), uid, gid).expect("first stage");
 
     let staged = chroot_dir.join("vmlinux");
     assert_eq!(
@@ -164,7 +167,7 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
 
     // Re-staging must not silently clobber: the slot is occupied.
     let chroot2 = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let err = stage_kernel_under(&chroot2, &src, hyper_base, uid, gid).unwrap_err();
+    let err = stage_kernel_under(&chroot2, &src, &strict(hyper_base), uid, gid).unwrap_err();
     assert!(
         matches!(&err, Error::StageKernel(e) if e.errno() == Some(Errno::EEXIST)),
         "re-stage must be refused, got {err:?}"
@@ -245,10 +248,15 @@ fn build_under_stages_kernel_and_mirrors_device_as_root() {
     let block_path = block.path();
 
     let (uid, gid) = (12345u32, 12345u32);
-    let res = ChrootJail::new(chroot_dir.clone(), uid, gid)
-        .with_kernel(kernel_src.clone())
-        .with_rootfs(block.clone())
-        .build_under(&jail_base, hyper_base);
+    let range = UidGidRange::try_from([uid, gid]).unwrap();
+    let res = ChrootJail::new(
+        chroot_dir.clone(),
+        range.uid(uid).unwrap(),
+        range.gid(gid).unwrap(),
+    )
+    .with_kernel(kernel_src.clone())
+    .with_rootfs(block.clone())
+    .build_under(&strict(&jail_base), &strict(hyper_base));
 
     let dev_rdev = fs::metadata(block_path.as_path()).map(|m| m.rdev());
     teardown_dm(&block);

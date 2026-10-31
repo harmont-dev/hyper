@@ -83,7 +83,7 @@ impl SysTest {
         drop(token.elevate()?);
         Ok(Self {
             sys_test: "ok",
-            hyper_base: config::Config::get().hyper_base().to_path_buf(),
+            hyper_base: config::Config::get().hyper_base().as_path().to_path_buf(),
         })
     }
 }
@@ -121,13 +121,7 @@ fn run(mut token: Unprivileged) {
         Command::SysTest => SysTest::perform(&mut token)
             .map(Output::SysTest)
             .map_err(|e| e.to_string()),
-        Command::Jailer(args) => {
-            let e = jailer::run(args, token).expect_err("jailer::run only returns on error");
-            eprintln!("{e}");
-            // _exit bypasses atexit handlers; safe because we are permanently root
-            // at this point and must not run any cleanup registered before escalation.
-            unsafe { nix::libc::_exit(2) }
-        }
+        Command::Jailer(args) => jailer::run(args, token),
         Command::Version => unreachable!("handled above"),
     };
 

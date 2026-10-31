@@ -25,14 +25,17 @@ pub enum BackingError {
 pub struct BackingFile(Arc<SafeFile<IsRegularFile, Any, Any>>);
 
 impl BackingFile {
-    pub fn open(path: &Path, base: &Path) -> Result<Self, BackingError> {
+    pub fn open(
+        path: &Path,
+        base: &SafePath<IsAbsolute, StrictComponents>,
+    ) -> Result<Self, BackingError> {
         let real = std::fs::canonicalize(path).map_err(|source| BackingError::Canonicalize {
             path: path.to_path_buf(),
             source,
         })?;
-        if !real.starts_with(base) {
+        if !real.starts_with(base.as_path()) {
             return Err(BackingError::OutsideBase {
-                base: base.to_path_buf(),
+                base: base.as_path().to_path_buf(),
                 path: real,
             });
         }
