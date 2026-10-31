@@ -31,16 +31,13 @@ impl<B: AsRef<[u8]>> Elf<B> {
         Ok(Self { bytes, slot })
     }
 
-    pub fn verify(&self) -> bool {
-        self.digest() == *self.stored()
-    }
-
     fn parts(&self) -> (&[u8], &Digest, &[u8]) {
         let (before, rest) = self.bytes.as_ref().split_at(self.slot);
         let (slot, after) = rest.split_first_chunk().expect("parse validated the slot");
         (before, slot, after)
     }
 
+    #[cfg(test)]
     pub(crate) fn stored(&self) -> &Digest {
         self.parts().1
     }
@@ -111,11 +108,11 @@ mod tests {
 
     proptest! {
         #[test]
-        fn stamped_image_verifies(bytes in any_image()) {
+        fn stamp_stores_the_digest_of_the_stamped_image(bytes in any_image()) {
             let mut elf = Elf::parse(bytes).unwrap();
             let digest = elf.stamp();
             prop_assert_eq!(*elf.stored(), digest);
-            prop_assert!(elf.verify());
+            prop_assert_eq!(elf.digest(), digest);
         }
 
         #[test]
@@ -148,7 +145,7 @@ mod tests {
         }
 
         #[test]
-        fn tampering_outside_the_slot_never_verifies(
+        fn tampering_outside_the_slot_breaks_the_stamp(
             bytes in any_image(),
             at in any::<Index>(),
             flip in 1..=u8::MAX,
@@ -161,7 +158,8 @@ mod tests {
                 i += LEN;
             }
             bytes[i] ^= flip;
-            prop_assert!(!matches!(Elf::parse(&bytes[..]).map(|elf| elf.verify()), Ok(true)));
+            let still_matches = Elf::parse(&bytes[..]).map(|elf| elf.digest() == *elf.stored());
+            prop_assert!(!matches!(still_matches, Ok(true)));
         }
 
         #[test]
