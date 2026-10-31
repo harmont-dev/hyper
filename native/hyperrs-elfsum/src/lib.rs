@@ -34,12 +34,13 @@ pub fn hex(digest: &Digest) -> String {
 }
 
 #[macro_export]
-macro_rules! slot {
-    ($vis:vis $name:ident) => {
+macro_rules! checksum {
+    () => {{
         #[link_section = ".note.sum"]
         #[used]
-        $vis static $name: $crate::Slot = $crate::Slot::zeroed();
-    };
+        static SLOT: $crate::Slot = $crate::Slot::zeroed();
+        &SLOT
+    }};
 }
 
 #[cfg(test)]
@@ -63,12 +64,12 @@ mod tests {
 
     #[cfg(all(target_os = "linux", feature = "stamp"))]
     #[test]
-    fn slot_macro_lands_in_the_stamped_section() {
-        crate::slot!(SLOT);
+    fn checksum_macro_lands_in_the_stamped_section() {
+        let slot: &'static Slot = crate::checksum!();
 
         let exe = std::fs::read("/proc/self/exe").unwrap();
         let range = section_range(&exe).expect("macro must emit SECTION with LEN bytes");
-        assert_eq!(stored(&exe).unwrap(), SLOT.get());
+        assert_eq!(stored(&exe).unwrap(), slot.get());
         assert_eq!(range.len(), LEN);
     }
 }
