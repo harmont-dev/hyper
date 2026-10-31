@@ -24,12 +24,8 @@ impl Slot {
     }
 
     pub fn hex(&self) -> String {
-        hex(&self.get())
+        self.get().iter().map(|b| format!("{b:02x}")).collect()
     }
-}
-
-fn hex(digest: &Digest) -> String {
-    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[macro_export]
@@ -50,7 +46,7 @@ mod tests {
     proptest! {
         #[test]
         fn hex_round_trips_to_lowercase(digest in any::<Digest>()) {
-            let rendered = hex(&digest);
+            let rendered = Slot(digest).hex();
             prop_assert_eq!(rendered.len(), 2 * LEN);
             prop_assert!(rendered.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
 
