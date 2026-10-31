@@ -47,7 +47,7 @@ pub fn run() -> PathBuf {
         built.display()
     );
 
-    hyperrs_elfsum::Elf::parse(&mut bytes[..])
+    hyperrs_elfsum::Elf::read(&mut bytes[..])
         .unwrap_or_else(|err| panic!("cannot stamp {}: {err}", built.display()))
         .stamp();
 

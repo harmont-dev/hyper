@@ -67,7 +67,7 @@ mod tests {
         let slot: &'static Slot = crate::checksum!();
 
         let exe = std::fs::read("/proc/self/exe").unwrap();
-        let elf = Elf::parse(exe).expect("macro must emit SECTION with LEN bytes");
+        let elf = Elf::read(exe).expect("macro must emit SECTION with LEN bytes");
         assert_eq!(*elf.stored(), slot.get());
     }
 }

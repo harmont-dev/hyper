@@ -26,14 +26,14 @@ pub struct Elf<B> {
 }
 
 impl<B: AsRef<[u8]>> Elf<B> {
-    pub fn parse(bytes: B) -> Result<Self, Error> {
+    pub fn read(bytes: B) -> Result<Self, Error> {
         let slot = slot_offset(bytes.as_ref())?;
         Ok(Self { bytes, slot })
     }
 
     fn parts(&self) -> (&[u8], &Digest, &[u8]) {
         let (before, rest) = self.bytes.as_ref().split_at(self.slot);
-        let (slot, after) = rest.split_first_chunk().expect("parse validated the slot");
+        let (slot, after) = rest.split_first_chunk().expect("read validated the slot");
         (before, slot, after)
     }
 
@@ -109,7 +109,7 @@ mod tests {
     proptest! {
         #[test]
         fn stamp_stores_the_digest_of_the_stamped_image(bytes in any_image()) {
-            let mut elf = Elf::parse(bytes).unwrap();
+            let mut elf = Elf::read(bytes).unwrap();
             let digest = elf.stamp();
             prop_assert_eq!(*elf.stored(), digest);
             prop_assert_eq!(elf.digest(), digest);
@@ -117,7 +117,7 @@ mod tests {
 
         #[test]
         fn stamp_is_idempotent(bytes in any_image()) {
-            let mut elf = Elf::parse(bytes).unwrap();
+            let mut elf = Elf::read(bytes).unwrap();
             elf.stamp();
             let once = elf.bytes.clone();
             elf.stamp();
@@ -126,7 +126,7 @@ mod tests {
 
         #[test]
         fn digest_equals_hash_of_zeroed_image(bytes in any_image()) {
-            let elf = Elf::parse(&bytes[..]).unwrap();
+            let elf = Elf::read(&bytes[..]).unwrap();
             let mut zeroed = bytes.clone();
             zeroed[elf.slot..elf.slot + LEN].fill(0);
             prop_assert_eq!(elf.digest(), *blake3::hash(&zeroed).as_bytes());
@@ -139,8 +139,8 @@ mod tests {
             a in any::<Digest>(),
             b in any::<Digest>(),
         ) {
-            let a = Elf::parse(image(&before, &a, &after)).unwrap();
-            let b = Elf::parse(image(&before, &b, &after)).unwrap();
+            let a = Elf::read(image(&before, &a, &after)).unwrap();
+            let b = Elf::read(image(&before, &b, &after)).unwrap();
             prop_assert_eq!(a.digest(), b.digest());
         }
 
@@ -150,7 +150,7 @@ mod tests {
             at in any::<Index>(),
             flip in 1..=u8::MAX,
         ) {
-            let mut elf = Elf::parse(bytes).unwrap();
+            let mut elf = Elf::read(bytes).unwrap();
             elf.stamp();
             let (slot, mut bytes) = (elf.slot, elf.bytes);
             let mut i = at.index(bytes.len() - LEN);
@@ -158,14 +158,14 @@ mod tests {
                 i += LEN;
             }
             bytes[i] ^= flip;
-            let still_matches = Elf::parse(&bytes[..]).map(|elf| elf.digest() == *elf.stored());
+            let still_matches = Elf::read(&bytes[..]).map(|elf| elf.digest() == *elf.stored());
             prop_assert!(!matches!(still_matches, Ok(true)));
         }
 
         #[test]
         fn rejects_any_slot_that_is_not_digest_sized(len in (0..128usize).prop_filter("not LEN", |&n| n != LEN)) {
             let bytes = image(b"before", &vec![0; len], b"after");
-            prop_assert!(matches!(Elf::parse(bytes), Err(Error::WrongSize(n)) if n == len as u64));
+            prop_assert!(matches!(Elf::read(bytes), Err(Error::WrongSize(n)) if n == len as u64));
         }
     }
 
@@ -176,13 +176,13 @@ mod tests {
         obj.append_section_data(id, b"payload", 1);
 
         assert!(matches!(
-            Elf::parse(obj.write().unwrap()),
+            Elf::read(obj.write().unwrap()),
             Err(Error::MissingSection)
         ));
     }
 
     #[test]
     fn rejects_bytes_that_are_not_an_object_file() {
-        assert!(matches!(Elf::parse(b"not an elf"), Err(Error::Parse(_))));
+        assert!(matches!(Elf::read(b"not an elf"), Err(Error::Parse(_))));
     }
 }
