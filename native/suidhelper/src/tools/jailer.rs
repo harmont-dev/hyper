@@ -14,12 +14,11 @@
 use crate::config::{BinError, Config};
 use crate::firecracker::id::IdError;
 use crate::firecracker::jailer::{CgroupLimits, CpuMax, Jailer, VmId};
-use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+use crate::fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::process::privilege::Unprivileged;
 use clap::Args;
 use std::convert::Infallible;
 use std::num::NonZeroU64;
-use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -80,9 +79,9 @@ fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, Error> {
     // networking is enabled) and the already-validated `--id` — the caller
     // cannot name it. Must match the `ip netns add <id>` path the network tool
     // creates. Networking is mandatory, so in practice this is always `Some`.
-    let netns: Option<PathBuf> = config
+    let netns = config
         .network()
-        .map(|_| PathBuf::from(format!("/var/run/netns/{}", args.id)));
+        .map(|_| SafePath::from_static::<"/var/run/netns">().join(&args.id));
 
     Jailer::builder()
         .jailer(&jailer)

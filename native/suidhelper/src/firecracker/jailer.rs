@@ -16,49 +16,59 @@
 //!   separator, dot, NUL, whitespace, leading dash, empty, or over-long input.
 
 use crate::firecracker::id::{JailGid, JailUid};
-use crate::fs::path::{IsAbsolute, SafePath, StrictComponent, StrictComponents};
+use crate::fs::path::{
+    IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
+};
 use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use crate::process::privilege::{RootCommandExt, Unprivileged};
 use bon::Builder;
-use derive_more::{AsRef, Display};
+use std::fmt;
 use std::num::NonZeroU64;
-use std::path::Path;
+use std::ops::Deref;
 use std::process::Command;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("invalid --id {0:?}: must be 1..=64 chars of [A-Za-z0-9_-], not starting with '-'")]
+    #[error("invalid --id {0:?}: must be 1..=64 chars of [A-Za-z0-9-], not starting with '-'")]
     VmId(String),
 }
 
-/// A VM id used as a chroot subdirectory name: `[A-Za-z0-9_-]`, length `1..=64`,
-/// first character not `-` (so it can never be read as a flag). No `/`, `.`, NUL,
-/// or whitespace can appear, so it can never traverse out of the chroot base.
-#[derive(Debug, Clone, Display, AsRef)]
-#[as_ref(str)]
-pub struct VmId(String);
+/// A VM name that can be accepted by Firecracker.
+#[derive(Debug, Clone)]
+pub struct VmId(
+    // This needs to be a path because jailer will expect to chroot into a directory of this name.
+    StrictComponentBuf,
+);
 
 impl FromStr for VmId {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let reject = || Error::VmId(s.to_string());
-        let bytes = s.as_bytes();
-        if !(1..=64).contains(&bytes.len()) {
-            return Err(reject());
+        let jailer_grammar = (1..=64).contains(&s.len())
+            && !s.starts_with('-')
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+
+        if !jailer_grammar {
+            return Err(Error::VmId(s.to_string()));
         }
-        if bytes[0] == b'-' {
-            return Err(reject());
-        }
-        if !bytes
-            .iter()
-            .all(|&b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        {
-            return Err(reject());
-        }
-        Ok(Self(s.to_string()))
+
+        let component: &StrictComponent = s.try_into().map_err(Error::VmId)?;
+        Ok(Self(component.to_owned()))
+    }
+}
+
+impl Deref for VmId {
+    type Target = StrictComponent;
+    fn deref(&self) -> &StrictComponent {
+        &self.0
+    }
+}
+
+impl fmt::Display for VmId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.as_os_str().to_string_lossy())
     }
 }
 
@@ -105,14 +115,14 @@ pub struct Jailer<'a> {
     /// The path to the Firecracker API socket.
     api_sock: &'a SafePath<IsAbsolute, StrictComponents>,
     /// The netns the jailer must enter (`--netns`).
-    netns: Option<&'a Path>,
+    netns: Option<&'a SafePath<IsAbsolute, StrictComponents>>,
 }
 
 impl Jailer<'_> {
     fn command(&self) -> Command {
         let mut cmd = self.jailer.command();
         cmd.arg("--id")
-            .arg::<&str>(self.vm.as_ref())
+            .arg(self.vm.as_os_str())
             .arg("--exec-file")
             .arg(self.firecracker.as_path())
             .arg("--uid")
@@ -140,7 +150,7 @@ impl Jailer<'_> {
         }
 
         if let Some(netns) = self.netns {
-            cmd.arg("--netns").arg(netns);
+            cmd.arg("--netns").arg(netns.as_path());
         }
 
         cmd.arg("--").arg("--api-sock").arg(self.api_sock.as_path());

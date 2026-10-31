@@ -34,13 +34,13 @@ proptest! {
     /// Every string over the allowed charset/length with a non-dash leader parses
     /// and renders back to itself.
     #[test]
-    fn vmid_valid_round_trips(s in "[A-Za-z0-9_][A-Za-z0-9_-]{0,63}") {
+    fn vmid_valid_round_trips(s in "[A-Za-z0-9][A-Za-z0-9-]{0,63}") {
         prop_assert_eq!(VmId::from_str(&s).unwrap().to_string(), s);
     }
 
     /// A leading dash is always rejected (no flag injection via `--id`).
     #[test]
-    fn vmid_leading_dash_rejected(s in "-[A-Za-z0-9_-]{0,63}") {
+    fn vmid_leading_dash_rejected(s in "-[A-Za-z0-9-]{0,63}") {
         prop_assert!(VmId::from_str(&s).is_err());
     }
 
@@ -52,7 +52,7 @@ proptest! {
 
     /// Over-length ids (>64) are rejected.
     #[test]
-    fn vmid_too_long_rejected(s in "[A-Za-z][A-Za-z0-9_-]{64,90}") {
+    fn vmid_too_long_rejected(s in "[A-Za-z][A-Za-z0-9-]{64,90}") {
         prop_assert!(VmId::from_str(&s).is_err());
     }
 
@@ -65,6 +65,9 @@ fn vmid_rejects_known_bad_shapes() {
         "-leading",      // leading dash
         "a/b",           // separator
         "a.b",           // dot
+        ".",             // current dir
+        "..",            // parent dir
+        "a_b",           // underscore (firecracker rejects it)
         "a b",           // whitespace
         "a\tb",          // tab
         "a\0b",          // NUL
