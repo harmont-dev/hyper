@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-use std::ops::Range;
-
 use object::{Object, ObjectSection};
 
-use crate::{Digest, LEN, SECTION};
+use crate::{Digest, LEN};
+
+const SECTION: &str = ".note.sum";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -20,55 +20,62 @@ pub enum Error {
     OutOfBounds,
 }
 
-pub fn section_range(elf: &[u8]) -> Result<Range<usize>, Error> {
+pub struct Elf<B> {
+    bytes: B,
+    slot: usize,
+}
+
+impl<B: AsRef<[u8]>> Elf<B> {
+    pub fn parse(bytes: B) -> Result<Self, Error> {
+        let slot = slot_offset(bytes.as_ref())?;
+        Ok(Self { bytes, slot })
+    }
+
+    pub fn verify(&self) -> bool {
+        self.digest() == *self.stored()
+    }
+
+    fn parts(&self) -> (&[u8], &Digest, &[u8]) {
+        let (before, rest) = self.bytes.as_ref().split_at(self.slot);
+        let (slot, after) = rest.split_first_chunk().expect("parse validated the slot");
+        (before, slot, after)
+    }
+
+    pub(crate) fn stored(&self) -> &Digest {
+        self.parts().1
+    }
+
+    fn digest(&self) -> Digest {
+        let (before, _, after) = self.parts();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(before);
+        hasher.update(&[0; LEN]);
+        hasher.update(after);
+        *hasher.finalize().as_bytes()
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> Elf<B> {
+    pub fn stamp(&mut self) -> Digest {
+        let digest = self.digest();
+        let slot = self.slot;
+        self.bytes.as_mut()[slot..slot + LEN].copy_from_slice(&digest);
+        digest
+    }
+}
+
+fn slot_offset(elf: &[u8]) -> Result<usize, Error> {
     let file = object::File::parse(elf)?;
     let section = file.section_by_name(SECTION).ok_or(Error::MissingSection)?;
     let (offset, size) = section.file_range().ok_or(Error::NoFileRange)?;
     if size != LEN as u64 {
         return Err(Error::WrongSize(size));
     }
-    let start = usize::try_from(offset).map_err(|_| Error::OutOfBounds)?;
-    let end = start
-        .checked_add(LEN)
-        .filter(|&end| end <= elf.len())
+    let offset = usize::try_from(offset).map_err(|_| Error::OutOfBounds)?;
+    elf.get(offset..)
+        .and_then(<[u8]>::first_chunk::<LEN>)
         .ok_or(Error::OutOfBounds)?;
-    Ok(start..end)
-}
-
-pub fn digest(elf: &[u8]) -> Result<Digest, Error> {
-    let slot = section_range(elf)?;
-    Ok(digest_around(elf, &slot))
-}
-
-pub fn stored(elf: &[u8]) -> Result<Digest, Error> {
-    let slot = section_range(elf)?;
-    Ok(read_slot(elf, slot))
-}
-
-pub fn stamp(elf: &mut [u8]) -> Result<Digest, Error> {
-    let slot = section_range(elf)?;
-    let digest = digest_around(elf, &slot);
-    elf[slot].copy_from_slice(&digest);
-    Ok(digest)
-}
-
-pub fn verify(elf: &[u8]) -> Result<bool, Error> {
-    let slot = section_range(elf)?;
-    Ok(digest_around(elf, &slot) == read_slot(elf, slot))
-}
-
-fn digest_around(elf: &[u8], slot: &Range<usize>) -> Digest {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&elf[..slot.start]);
-    hasher.update(&[0; LEN]);
-    hasher.update(&elf[slot.end..]);
-    *hasher.finalize().as_bytes()
-}
-
-fn read_slot(elf: &[u8], slot: Range<usize>) -> Digest {
-    let mut digest = [0; LEN];
-    digest.copy_from_slice(&elf[slot]);
-    digest
+    Ok(offset)
 }
 
 #[cfg(test)]
@@ -104,26 +111,28 @@ mod tests {
 
     proptest! {
         #[test]
-        fn stamped_image_verifies(mut elf in any_image()) {
-            let digest = stamp(&mut elf).unwrap();
-            prop_assert_eq!(stored(&elf).unwrap(), digest);
-            prop_assert!(verify(&elf).unwrap());
+        fn stamped_image_verifies(bytes in any_image()) {
+            let mut elf = Elf::parse(bytes).unwrap();
+            let digest = elf.stamp();
+            prop_assert_eq!(*elf.stored(), digest);
+            prop_assert!(elf.verify());
         }
 
         #[test]
-        fn stamp_is_idempotent(mut elf in any_image()) {
-            stamp(&mut elf).unwrap();
-            let once = elf.clone();
-            stamp(&mut elf).unwrap();
-            prop_assert_eq!(elf, once);
+        fn stamp_is_idempotent(bytes in any_image()) {
+            let mut elf = Elf::parse(bytes).unwrap();
+            elf.stamp();
+            let once = elf.bytes.clone();
+            elf.stamp();
+            prop_assert_eq!(elf.bytes, once);
         }
 
         #[test]
-        fn digest_equals_hash_of_zeroed_image(elf in any_image()) {
-            let mut zeroed = elf.clone();
-            let slot = section_range(&elf).unwrap();
-            zeroed[slot].fill(0);
-            prop_assert_eq!(digest(&elf).unwrap(), *blake3::hash(&zeroed).as_bytes());
+        fn digest_equals_hash_of_zeroed_image(bytes in any_image()) {
+            let elf = Elf::parse(&bytes[..]).unwrap();
+            let mut zeroed = bytes.clone();
+            zeroed[elf.slot..elf.slot + LEN].fill(0);
+            prop_assert_eq!(elf.digest(), *blake3::hash(&zeroed).as_bytes());
         }
 
         #[test]
@@ -133,32 +142,32 @@ mod tests {
             a in any::<Digest>(),
             b in any::<Digest>(),
         ) {
-            prop_assert_eq!(
-                digest(&image(&before, &a, &after)).unwrap(),
-                digest(&image(&before, &b, &after)).unwrap()
-            );
+            let a = Elf::parse(image(&before, &a, &after)).unwrap();
+            let b = Elf::parse(image(&before, &b, &after)).unwrap();
+            prop_assert_eq!(a.digest(), b.digest());
         }
 
         #[test]
         fn tampering_outside_the_slot_never_verifies(
-            mut elf in any_image(),
+            bytes in any_image(),
             at in any::<Index>(),
             flip in 1..=u8::MAX,
         ) {
-            stamp(&mut elf).unwrap();
-            let slot = section_range(&elf).unwrap();
-            let mut i = at.index(elf.len() - LEN);
-            if i >= slot.start {
+            let mut elf = Elf::parse(bytes).unwrap();
+            elf.stamp();
+            let (slot, mut bytes) = (elf.slot, elf.bytes);
+            let mut i = at.index(bytes.len() - LEN);
+            if i >= slot {
                 i += LEN;
             }
-            elf[i] ^= flip;
-            prop_assert!(!matches!(verify(&elf), Ok(true)));
+            bytes[i] ^= flip;
+            prop_assert!(!matches!(Elf::parse(&bytes[..]).map(|elf| elf.verify()), Ok(true)));
         }
 
         #[test]
         fn rejects_any_slot_that_is_not_digest_sized(len in (0..128usize).prop_filter("not LEN", |&n| n != LEN)) {
-            let elf = image(b"before", &vec![0; len], b"after");
-            prop_assert!(matches!(digest(&elf), Err(Error::WrongSize(n)) if n == len as u64));
+            let bytes = image(b"before", &vec![0; len], b"after");
+            prop_assert!(matches!(Elf::parse(bytes), Err(Error::WrongSize(n)) if n == len as u64));
         }
     }
 
@@ -167,13 +176,15 @@ mod tests {
         let mut obj = Builder::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         let id = obj.add_section(Vec::new(), b".data".to_vec(), SectionKind::Data);
         obj.append_section_data(id, b"payload", 1);
-        let elf = obj.write().unwrap();
 
-        assert!(matches!(digest(&elf), Err(Error::MissingSection)));
+        assert!(matches!(
+            Elf::parse(obj.write().unwrap()),
+            Err(Error::MissingSection)
+        ));
     }
 
     #[test]
     fn rejects_bytes_that_are_not_an_object_file() {
-        assert!(matches!(verify(b"not an elf"), Err(Error::Parse(_))));
+        assert!(matches!(Elf::parse(b"not an elf"), Err(Error::Parse(_))));
     }
 }
