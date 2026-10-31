@@ -221,7 +221,7 @@ defmodule Hyper.MixProject do
         native/guest-agent/src native/guest-agent/tests native/guest-agent/build.rs
         native/guest-agent/Cargo.toml native/guest-agent/Cargo.lock
         native/guest-agent/.cargo
-        native/suidhelper/src native/suidhelper/tests native/suidhelper/meta
+        native/suidhelper/src native/suidhelper/tests native/suidhelper/elfsum
         native/suidhelper/xtask native/suidhelper/build.rs
         native/suidhelper/Cargo.toml native/suidhelper/Cargo.lock
         native/suidhelper/rust-toolchain.toml native/suidhelper/README.md

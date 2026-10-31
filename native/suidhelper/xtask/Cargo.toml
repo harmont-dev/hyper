@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-blake3 = "1"
 clap = { version = "4", features = ["derive"] }
-hyper-suidhelper-meta = { path = "../meta" }
+hyperrs-elfsum = { path = "../elfsum", features = ["stamp"] }
 object = "0.36"

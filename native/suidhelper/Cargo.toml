@@ -1,8 +1,8 @@
 [workspace]
-members = ["meta", "xtask"]
+members = ["elfsum", "xtask"]
 # Plain `cargo build`/`cargo test` only touch the helper itself; xtask is a
 # build tool, built on demand via the `cargo xtask` alias.
-default-members = ["."]
+default-members = [".", "elfsum"]
 
 [package]
 name = "hyper-suidhelper"
@@ -124,7 +124,7 @@ redundant_field_names = "allow"
 bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
-hyper-suidhelper-meta = { path = "meta" }
+hyperrs-elfsum = { path = "elfsum" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 ref-cast = "1.0.25"

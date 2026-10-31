@@ -23,6 +23,8 @@ use std::path::PathBuf;
 
 hyper_suidhelper::setuid_main!(run);
 
+hyperrs_elfsum::slot!(CHECKSUM);
+
 #[derive(Parser)]
 #[command(
     name = "hyper-suidhelper",
@@ -67,7 +69,7 @@ impl Version {
     fn render() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION"),
-            checksum_blake3: hyper_suidhelper::checksum::hex(),
+            checksum_blake3: CHECKSUM.hex(),
         }
     }
 }

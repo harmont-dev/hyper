@@ -1,8 +1,0 @@
-[package]
-name = "hyper-suidhelper-meta"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "Shared constants for the hyper-suidhelper checksum section (binary + xtask)."
-
-[dependencies]
