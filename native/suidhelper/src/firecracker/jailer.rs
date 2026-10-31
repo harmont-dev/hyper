@@ -3,7 +3,7 @@
 
 use crate::firecracker::id::{JailGid, JailUid};
 use crate::fs::path::{
-    IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
+    ComponentError, IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use crate::process::privilege::{RootCommandExt, Unprivileged};
@@ -19,6 +19,8 @@ use thiserror::Error as ThisError;
 pub enum Error {
     #[error("invalid --id {0:?}: must be 1..=64 chars of [A-Za-z0-9-], not starting with '-'")]
     VmId(String),
+    #[error(transparent)]
+    Component(#[from] ComponentError),
 }
 
 /// A VM name that can be accepted by Firecracker.
@@ -40,7 +42,7 @@ impl FromStr for VmId {
             return Err(Error::VmId(s.to_string()));
         }
 
-        let component: &StrictComponent = s.try_into().map_err(|_| Error::VmId(s.to_string()))?;
+        let component: &StrictComponent = s.try_into()?;
         Ok(Self(component.to_owned()))
     }
 }
