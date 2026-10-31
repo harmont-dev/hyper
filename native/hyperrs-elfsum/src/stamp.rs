@@ -16,8 +16,6 @@ pub enum Error {
     NoFileRange,
     #[error("{SECTION} section is {0} bytes, expected {LEN}")]
     WrongSize(u64),
-    #[error("{SECTION} section lies outside the file")]
-    OutOfBounds,
 }
 
 pub struct Elf<B> {
@@ -64,15 +62,9 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Elf<B> {
 fn slot_offset(elf: &[u8]) -> Result<usize, Error> {
     let file = object::File::parse(elf)?;
     let section = file.section_by_name(SECTION).ok_or(Error::MissingSection)?;
-    let (offset, size) = section.file_range().ok_or(Error::NoFileRange)?;
-    if size != LEN as u64 {
-        return Err(Error::WrongSize(size));
-    }
-    let offset = usize::try_from(offset).map_err(|_| Error::OutOfBounds)?;
-    elf.get(offset..)
-        .and_then(<[u8]>::first_chunk::<LEN>)
-        .ok_or(Error::OutOfBounds)?;
-    Ok(offset)
+    <&Digest>::try_from(section.data()?).map_err(|_| Error::WrongSize(section.size()))?;
+    let (offset, _) = section.file_range().ok_or(Error::NoFileRange)?;
+    Ok(usize::try_from(offset).expect("data() bounds-checked the section against the file"))
 }
 
 #[cfg(test)]
