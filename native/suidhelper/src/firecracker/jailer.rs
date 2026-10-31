@@ -40,7 +40,7 @@ impl FromStr for VmId {
             return Err(Error::VmId(s.to_string()));
         }
 
-        let component: &StrictComponent = s.try_into().map_err(Error::VmId)?;
+        let component: &StrictComponent = s.try_into().map_err(|_| Error::VmId(s.to_string()))?;
         Ok(Self(component.to_owned()))
     }
 }
