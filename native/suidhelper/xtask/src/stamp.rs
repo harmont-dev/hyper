@@ -47,17 +47,12 @@ pub fn run() -> PathBuf {
         built.display()
     );
 
-    let digest = hyperrs_elfsum::stamp(&mut bytes)
+    hyperrs_elfsum::stamp(&mut bytes)
         .unwrap_or_else(|err| panic!("cannot stamp {}: {err}", built.display()));
 
     let path = target_dir().join(BIN);
     std::fs::copy(&built, &path).expect("failed to copy release binary");
     std::fs::write(&path, &bytes).expect("failed to write stamped binary");
-    println!(
-        "stamped {} -> {}",
-        path.display(),
-        hyperrs_elfsum::hex(&digest)
-    );
     path
 }
 
