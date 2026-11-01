@@ -8,8 +8,12 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
+use crate::firecracker::id::UidGidRange;
 use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use crate::fs::path::{
+    self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
+};
+use crate::linux::cgroup;
 use crate::process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::Deserialize;
 use smart_default::SmartDefault;
@@ -26,12 +30,8 @@ pub enum LoadingError {
     File(#[from] file::ValidationError),
     #[error("{0:?} could not be read")]
     Unreadable(PathBuf),
-    #[error("{0:?} is not valid TOML")]
-    Malformed(PathBuf),
-    #[error("work_dir in {0:?} must be an absolute path")]
-    Relative(PathBuf),
-    #[error("uid_gid_range.min must be >= 1 and <= max (got min={min}, max={max})")]
-    BadUidGidRange { min: u32, max: u32 },
+    #[error("{0:?} is not valid TOML: {1}")]
+    Malformed(PathBuf, #[source] toml::de::Error),
 }
 
 /// Error returned by config accessors for tool binaries derived from config.
@@ -45,40 +45,6 @@ pub enum BinError {
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
 const INSECURE_CONFIG_PATH_ENV: &str = "HYPER_SETUIDHELPER_CONFIG_PATH";
-
-/// UID/GID allocation band, read from `[jails] uid_gid_range` in config.toml as
-/// a two-element `[min, max]` array. Controls which UIDs the helper *accepts*
-/// from the BEAM — see module docs.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(from = "[u32; 2]")]
-pub struct UidGidRange {
-    pub min: u32,
-    pub max: u32,
-}
-
-impl From<[u32; 2]> for UidGidRange {
-    fn from([min, max]: [u32; 2]) -> Self {
-        Self { min, max }
-    }
-}
-
-// Band defaults match Elixir's `compile_env` allocation defaults so that an
-// unconfigured helper and an unconfigured node agree out of the box.
-const DEFAULT_UID_GID: (u32, u32) = (900_000, 999_999);
-
-/// Validate a uid_gid_range value. A present range where min==0 or min>max is
-/// treated as a config trust violation — fatal at load, consistent with the
-/// "present but untrusted" model. Exposed so tests can verify the contract
-/// without touching the file system.
-pub fn validate_uid_gid_range(r: &UidGidRange) -> Result<(), LoadingError> {
-    if r.min == 0 || r.min > r.max {
-        return Err(LoadingError::BadUidGidRange {
-            min: r.min,
-            max: r.max,
-        });
-    }
-    Ok(())
-}
 
 /// The config file path. In production this is the fixed `/etc/hyper/config.toml`.
 /// Only in INSECURE TEST MODE (both gates open) may an env var redirect it — the
@@ -98,7 +64,7 @@ fn config_path() -> PathBuf {
 #[derive(Debug, Clone, Deserialize, SmartDefault)]
 pub struct Config {
     #[default(default_work_dir())]
-    work_dir: PathBuf,
+    work_dir: SafePathBuf<IsAbsolute, StrictComponents>,
     #[serde(default)]
     tools: Tools,
     #[serde(default)]
@@ -117,8 +83,8 @@ pub struct Config {
 #[serde(default)]
 pub struct Jails {
     #[default(default_parent_cgroup())]
-    cgroup: String,
-    uid_gid_range: Option<UidGidRange>,
+    cgroup: StrictComponentBuf,
+    uid_gid_range: UidGidRange,
 }
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.
@@ -153,13 +119,15 @@ pub struct Tools {
 // The default data root. Must match the Elixir node's `@dev_work_dir`, which it
 // uses when the same config file is absent, so both sides agree (see
 // `Hyper.Node.check_helper_base`).
-fn default_work_dir() -> PathBuf {
-    PathBuf::from("/srv/hyper")
+fn default_work_dir() -> SafePathBuf<IsAbsolute, StrictComponents> {
+    SafePath::from_static::<"/srv/hyper">().to_owned()
 }
 
-fn default_parent_cgroup() -> String {
+const JAILS: &StrictComponent = StrictComponent::from_static("jails");
+
+fn default_parent_cgroup() -> StrictComponentBuf {
     // Must match Elixir node's `@parent_cgroup`; operators need to keep them in sync.
-    "hyper".into()
+    StrictComponent::from_static("hyper").to_owned()
 }
 
 /// The `[network]` table: VM egress networking. Absent, or present without
@@ -204,13 +172,13 @@ impl Config {
     }
 
     /// Hyper's data root.
-    pub fn hyper_base(&self) -> &std::path::Path {
-        self.work_dir.as_path()
+    pub fn hyper_base(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+        &self.work_dir
     }
 
     /// Hyper's jail root, `<work_dir>/jails`.
-    pub fn jail_base(&self) -> PathBuf {
-        self.work_dir.join("jails")
+    pub fn jail_base(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        self.work_dir.join(JAILS)
     }
 
     /// The validated `dmsetup` binary the helper will run.
@@ -285,19 +253,20 @@ impl Config {
 
     /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to
     /// `"hyper"`, matching the Elixir node's default.
-    pub fn parent_cgroup(&self) -> &str {
+    pub fn parent_cgroup(&self) -> &StrictComponent {
         &self.jails.cgroup
+    }
+
+    pub fn parent_cgroup_dir(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        SafePath::from_static::<{ cgroup::ROOT }>().join(&self.jails.cgroup)
     }
 
     /// The UID/GID band the helper accepts from the BEAM. Defaults to
     /// `(900_000, 999_999)` when the key is absent (matching Elixir's defaults).
     /// A present range with min==0 or min>max is rejected at load time by
     /// [`Config::safe_load`], so this accessor is always total.
-    pub fn uid_gid_range(&self) -> (u32, u32) {
-        self.jails
-            .uid_gid_range
-            .map(|r| (r.min, r.max))
-            .unwrap_or(DEFAULT_UID_GID)
+    pub fn uid_gid_range(&self) -> UidGidRange {
+        self.jails.uid_gid_range
     }
 
     /// Read, ownership-check, parse, and validate the config file. See the module
@@ -324,15 +293,7 @@ impl Config {
         let body = std::io::read_to_string(std::fs::File::from(OwnedFd::from(file)))
             .map_err(|_| LoadingError::Unreadable(path.clone()))?;
         let config: Config =
-            toml::from_str(&body).map_err(|_| LoadingError::Malformed(path.clone()))?;
-
-        if !config.work_dir.is_absolute() {
-            return Err(LoadingError::Relative(path));
-        }
-
-        if let Some(r) = &config.jails.uid_gid_range {
-            validate_uid_gid_range(r)?;
-        }
+            toml::from_str(&body).map_err(|e| LoadingError::Malformed(path.clone(), e))?;
 
         Ok(config)
     }

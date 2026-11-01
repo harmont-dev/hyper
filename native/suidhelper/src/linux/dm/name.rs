@@ -1,8 +1,11 @@
+use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use crate::fs::path::{
-    IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
+    self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use derive_more::Display;
 use std::ffi::OsStr;
+use std::io;
+use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
@@ -11,6 +14,20 @@ const DM_NAME_MAX: usize = 127;
 #[derive(Debug, ThisError)]
 #[error("invalid dm device name: {0:?}")]
 pub struct InvalidDmName(String);
+
+#[derive(Debug, ThisError)]
+pub enum OpenDeviceError {
+    #[error("resolving {path:?}: {source}")]
+    Resolve {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(transparent)]
+    Path(#[from] path::ValidationError),
+    #[error(transparent)]
+    Open(#[from] file::ValidationError),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("{}", _0.as_os_str().to_string_lossy())]
@@ -33,6 +50,23 @@ impl DmName {
 
     pub fn path(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
         SafePath::from_static::<"/dev/mapper">().join(&self.0)
+    }
+
+    pub fn open(&self) -> Result<SafeFile<IsBlockDevice, Any, Any>, OpenDeviceError> {
+        // The dm form is a symlink under `/dev/mapper` — a root-owned `0755` dir an
+        // unprivileged caller cannot write — so resolving it to its real `/dev/dm-N`
+        // node cannot be redirected by the caller. We must resolve first: `SafeFile`
+        // refuses any symlink in the path (it must never follow an attacker-supplied
+        // one) and would otherwise reject the dm symlink itself. The re-opened target
+        // is still verified `IsBlockDevice`.
+        let link = self.path();
+        let real =
+            std::fs::canonicalize(link.as_path()).map_err(|source| OpenDeviceError::Resolve {
+                path: link.as_path().to_path_buf(),
+                source,
+            })?;
+        let real: SafePathBuf<IsAbsolute, StrictComponents> = real.try_into()?;
+        Ok(SafeFile::open(&real, OpenFlags::PATH)?)
     }
 }
 

@@ -10,7 +10,7 @@ use super::Access;
 use crate::process::binary::RootSafeBin;
 use derive_more::Constructor;
 pub use device::Device;
-pub use name::{DmName, InvalidDmName};
+pub use name::{DmName, InvalidDmName, OpenDeviceError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};

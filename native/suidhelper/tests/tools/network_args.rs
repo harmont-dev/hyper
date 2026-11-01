@@ -1,5 +1,6 @@
 use hyper_suidhelper::config::Network;
-use hyper_suidhelper::tools::jailer::VmId;
+use hyper_suidhelper::firecracker::id::UidGidRange;
+use hyper_suidhelper::firecracker::jailer::VmId;
 use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
 use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
@@ -7,9 +8,10 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 fn plan0() -> Plan {
+    let range = UidGidRange::default();
     Plan::derive(
-        900_000,
-        (900_000, 999_999),
+        range.uid(900_000).unwrap(),
+        range,
         Ipv4Addr::new(172, 31, 0, 0),
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     )
@@ -392,7 +394,7 @@ fn prepare_refuses_uid_outside_range() {
     // itself fails.
     let err = prepare::plan_from(
         42,
-        (900_000, 999_999),
+        UidGidRange::default(),
         "172.31.0.0/16",
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );
@@ -405,7 +407,7 @@ fn prepare_refuses_malformed_clone_pool_cidr() {
     // uid-range refusal.
     let err = prepare::plan_from(
         900_000,
-        (900_000, 999_999),
+        UidGidRange::default(),
         "not-a-cidr",
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );

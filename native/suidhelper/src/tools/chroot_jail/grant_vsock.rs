@@ -15,20 +15,19 @@
 //! A missing socket (`ENOENT`, anywhere on the path) is `Pending`: firecracker has
 //! not configured vsock yet, so the controller keeps probing.
 
-use super::grant;
 use crate::config::Config;
-use crate::fs::dir::SafeDir;
-use crate::fs::file::{self, OpenFlags};
-use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use crate::firecracker::chroot_jail::{self, JailRoot};
+use crate::fs::file;
+use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
 use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
 use nix::errno::Errno;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
-pub use super::grant::{GrantError, GrantOut};
+pub use crate::firecracker::chroot_jail::{GrantError, GrantOut};
 
 /// The fixed in-jail socket name Firecracker opens for vsock (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_vsock`).
@@ -109,17 +108,20 @@ impl IsTool for GrantVsock {
 /// Hand `socket` (`<jail_base>/<exec>/<id>/root/vsock.sock`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_vsock_under(jail_base: &Path, socket: &VsockSocket) -> Result<GrantOut, Error> {
-    let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
-    let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
-        return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
-    };
-
-    let root = match SafeDir::open(root, OpenFlags::RDONLY) {
+pub fn grant_vsock_under(
+    jail_base: &SafePath<IsAbsolute, StrictComponents>,
+    socket: &VsockSocket,
+) -> Result<GrantOut, Error> {
+    let shape = || Error::SocketShape(socket.0.as_ref().to_path_buf());
+    let (root, leaf) = socket.0.split_last().ok_or_else(shape)?;
+    let root = match JailRoot::open(jail_base, root) {
         Ok(root) => root,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(Error::Walk(e)),
+        Err(chroot_jail::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => {
+            return Ok(GrantOut::Pending)
+        }
+        Err(chroot_jail::OpenError::Base(e)) => return Err(Error::SocketBase(e)),
+        Err(chroot_jail::OpenError::Shape(_)) => return Err(shape()),
+        Err(chroot_jail::OpenError::Open(e)) => return Err(Error::Walk(e)),
     };
-
-    grant::grant_to_caller(root, leaf).map_err(Error::from)
+    Ok(root.grant_to_caller(leaf)?)
 }

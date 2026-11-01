@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 // The fully-enforced flavor used at every real call site.
 type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
+fn strict(p: impl AsRef<Path>) -> Strict {
+    p.as_ref().to_path_buf().try_into().unwrap()
+}
+
 // A plain, safe path component: no `.`/`..`/`/`/empty.
 fn safe_component() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9_]{0,7}"
@@ -87,7 +91,7 @@ proptest! {
 
         let safe = Strict::try_from(full.clone()).unwrap();
         let segments: Vec<String> = safe
-            .strip_base(&base)
+            .strip_base(&strict(&base))
             .unwrap()
             .segments()
             .map(|s| s.as_os_str().to_string_lossy().into_owned())
@@ -113,7 +117,7 @@ proptest! {
 
         let safe = Strict::try_from(path).unwrap();
         prop_assert!(matches!(
-            safe.strip_base(&base),
+            safe.strip_base(&strict(&base)),
             Err(RelativeError::NotUnderBase)
         ));
     }
@@ -138,7 +142,7 @@ proptest! {
         let full_parts: Vec<String> =
             base_parts.iter().chain(rel_parts.iter()).cloned().collect();
         let safe = Strict::try_from(join_abs(&full_parts)).unwrap();
-        let rel = safe.strip_base(&base).unwrap();
+        let rel = safe.strip_base(&strict(&base)).unwrap();
         prop_assert_eq!(rel.file_name(), rel.segments().last());
     }
 
@@ -149,7 +153,7 @@ proptest! {
         let base = join_abs(&base_parts);
         let safe = Strict::try_from(base.clone()).unwrap();
         prop_assert!(matches!(
-            safe.strip_base(&base),
+            safe.strip_base(&strict(&base)),
             Err(RelativeError::EqualsBase)
         ));
     }

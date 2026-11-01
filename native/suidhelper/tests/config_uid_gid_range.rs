@@ -8,52 +8,38 @@
 //!   receive it — it skips its privilege drop when uid == 0).
 //! - min > max is always rejected (incoherent range; likely a config typo).
 
-use hyper_suidhelper::config::{validate_uid_gid_range, Config, LoadingError, UidGidRange};
+use hyper_suidhelper::config::Config;
 use proptest::prelude::*;
+
+fn parse(min: u32, max: u32) -> Result<Config, toml::de::Error> {
+    toml::from_str(&format!(
+        "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [{min}, {max}]\n"
+    ))
+}
 
 #[test]
 fn absent_range_yields_default() {
-    assert_eq!(Config::default().uid_gid_range(), (900_000, 999_999));
+    let r = Config::default().uid_gid_range();
+    assert_eq!((r.min(), r.max()), (900_000, 999_999));
 }
 
 proptest! {
     #[test]
-    fn valid_range_accepted(min in 1u32.., delta in 0u32..) {
-        // max = min + delta, saturating so it never wraps past u32::MAX.
-        let max = min.saturating_add(delta);
-        let r = UidGidRange { min, max };
-        prop_assert!(validate_uid_gid_range(&r).is_ok());
-    }
-
-    #[test]
     fn valid_range_round_trips_via_toml(min in 1u32.., delta in 0u32..) {
         let max = min.saturating_add(delta);
-        let body = format!(
-            "work_dir = \"/srv/hyper\"\n[jails]\nuid_gid_range = [{min}, {max}]\n"
-        );
-        let config: Config = toml::from_str(&body).expect("valid TOML");
-        prop_assert_eq!(config.uid_gid_range(), (min, max));
+        let r = parse(min, max).expect("valid TOML").uid_gid_range();
+        prop_assert_eq!((r.min(), r.max()), (min, max));
     }
 
     #[test]
     fn zero_min_always_rejected(max in 0u32..) {
-        let r = UidGidRange { min: 0, max };
-        let rejected = matches!(
-            validate_uid_gid_range(&r),
-            Err(LoadingError::BadUidGidRange { min: 0, .. })
-        );
-        prop_assert!(rejected);
+        let err = parse(0, max).unwrap_err();
+        prop_assert!(err.to_string().contains("uid_gid_range"));
     }
 
     #[test]
     fn min_exceeds_max_always_rejected(max in 0u32..u32::MAX) {
-        // min = max + 1 is always strictly greater than max and always >= 1.
-        let min = max + 1;
-        let r = UidGidRange { min, max };
-        let rejected = matches!(
-            validate_uid_gid_range(&r),
-            Err(LoadingError::BadUidGidRange { .. })
-        );
-        prop_assert!(rejected);
+        let err = parse(max + 1, max).unwrap_err();
+        prop_assert!(err.to_string().contains("uid_gid_range"));
     }
 }

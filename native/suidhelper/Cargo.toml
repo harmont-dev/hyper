@@ -72,8 +72,12 @@ name = "tools_chroot_jail_grant_vsock"
 path = "tests/tools/chroot_jail_grant_vsock.rs"
 
 [[test]]
-name = "util_chroot_jail"
-path = "tests/util/chroot_jail.rs"
+name = "firecracker_chroot_jail"
+path = "tests/firecracker/chroot_jail.rs"
+
+[[test]]
+name = "firecracker_id"
+path = "tests/firecracker/id.rs"
 
 [[test]]
 name = "e2e_config"
@@ -106,6 +110,10 @@ path = "tests/config_uid_gid_range.rs"
 [[test]]
 name = "config_network"
 path = "tests/config_network.rs"
+
+[[test]]
+name = "config_paths"
+path = "tests/config_paths.rs"
 
 [[test]]
 name = "tools_dmsetup_backing"

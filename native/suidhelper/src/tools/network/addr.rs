@@ -6,7 +6,9 @@
 //! - `veth` names always satisfy `IFNAMSIZ` (<= 15);
 //! - a `uid` below the accepted range, or a `slot` past the pool's capacity, is
 //!   *always* refused — never wrapped into another VM's address.
-use crate::tools::jailer::VmId;
+use crate::firecracker::id::{JailUid, UidGidRange};
+use crate::firecracker::jailer::VmId;
+use nix::unistd::Uid;
 use std::net::Ipv4Addr;
 use thiserror::Error;
 
@@ -36,12 +38,13 @@ pub struct Plan {
 
 impl Plan {
     pub fn derive(
-        uid: u32,
-        uid_range: (u32, u32),
+        uid: JailUid,
+        uid_range: UidGidRange,
         clone_pool: Ipv4Addr,
         vm_id: &VmId,
     ) -> Result<Self, AddrError> {
-        let floor = uid_range.0;
+        let uid = Uid::from(uid).as_raw();
+        let floor = uid_range.min();
         if uid < floor {
             return Err(AddrError::UidBelowRange { uid, floor });
         }

@@ -11,7 +11,9 @@
 //!   * removal — a real `<exec>/<id>` tree is gone afterward, and its siblings
 //!     and the cgroup parent survive.
 
-use hyper_suidhelper::fs::path::{ComponentError, ValidationError};
+use hyper_suidhelper::fs::path::{
+    ComponentError, IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
+};
 use hyper_suidhelper::tools::chroot_jail::remove::{
     remove_cgroup_under, remove_chroot_under, CgroupError, ChrootError,
 };
@@ -20,6 +22,10 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
+fn strict(p: impl AsRef<Path>) -> SafePathBuf<IsAbsolute, StrictComponents> {
+    p.as_ref().to_path_buf().try_into().unwrap()
+}
+
 // `--chroot` must be exactly <exec>/<id>: a single component below the base is
 // too shallow.
 #[test]
@@ -27,7 +33,7 @@ fn chroot_too_shallow_is_depth_error() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let chroot = jail.join("only-one");
-    let err = remove_chroot_under(jail, &chroot).unwrap_err();
+    let err = remove_chroot_under(&strict(jail), &chroot).unwrap_err();
     assert!(matches!(err, ChrootError::Depth(_)), "got {err:?}");
 }
 
@@ -37,19 +43,29 @@ fn chroot_too_deep_is_depth_error() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let chroot = jail.join("exec").join("id").join("extra");
-    let err = remove_chroot_under(jail, &chroot).unwrap_err();
+    let err = remove_chroot_under(&strict(jail), &chroot).unwrap_err();
     assert!(matches!(err, ChrootError::Depth(_)), "got {err:?}");
 }
 
-// `--cgroup` must be at least two components below its base: a direct child is
-// too shallow.
 #[test]
-fn cgroup_too_shallow_is_depth_error() {
+fn cgroup_parent_itself_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let cgroup = base.join("leaf");
-    let err = remove_cgroup_under(base, &cgroup).unwrap_err();
-    assert!(matches!(err, CgroupError::Depth(_)), "got {err:?}");
+    let parent = tmp.path().join("hyper");
+    let err = remove_cgroup_under(&strict(&parent), &parent).unwrap_err();
+    assert!(
+        matches!(err, CgroupError::Base(RelativeError::EqualsBase)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn cgroup_leaf_that_is_not_a_vm_id_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let parent = tmp.path().join("hyper");
+    for leaf in ["-leaf", "a.b", "sshd.service", &"a".repeat(65)] {
+        let err = remove_cgroup_under(&strict(&parent), &parent.join(leaf)).unwrap_err();
+        assert!(matches!(err, CgroupError::Leaf(_)), "{leaf:?}: got {err:?}");
+    }
 }
 
 // A `..` component is rejected by the real SafePath gate, before any FS access.
@@ -58,7 +74,7 @@ fn chroot_with_dotdot_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let chroot = PathBuf::from(format!("{}/exec/../escape", jail.display()));
-    let err = remove_chroot_under(jail, &chroot).unwrap_err();
+    let err = remove_chroot_under(&strict(jail), &chroot).unwrap_err();
     assert!(
         matches!(
             err,
@@ -72,7 +88,7 @@ fn chroot_with_dotdot_is_rejected() {
 #[test]
 fn relative_chroot_is_rejected() {
     let tmp = tempfile::tempdir().unwrap();
-    let err = remove_chroot_under(tmp.path(), Path::new("exec/id")).unwrap_err();
+    let err = remove_chroot_under(&strict(tmp.path()), Path::new("exec/id")).unwrap_err();
     assert!(
         matches!(err, ChrootError::Path(ValidationError::NotAbsolute)),
         "got {err:?}",
@@ -85,16 +101,16 @@ fn missing_chroot_is_ok() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let chroot = jail.join("exec").join("id"); // never created
-    remove_chroot_under(jail, &chroot).expect("missing chroot must be Ok");
+    remove_chroot_under(&strict(jail), &chroot).expect("missing chroot must be Ok");
 }
 
-// Removing a cgroup leaf whose ancestor is missing is success.
+// Removing a cgroup leaf whose parent is missing is success.
 #[test]
 fn missing_cgroup_is_ok() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let cgroup = base.join("slice").join("leaf"); // slice/ never created
-    remove_cgroup_under(base, &cgroup).expect("missing cgroup must be Ok");
+    let parent = tmp.path().join("hyper"); // never created
+    let cgroup = parent.join("leaf");
+    remove_cgroup_under(&strict(&parent), &cgroup).expect("missing cgroup must be Ok");
 }
 
 // A real <exec>/<id> tree with contents is fully removed; a sibling id survives.
@@ -108,7 +124,7 @@ fn removes_chroot_tree_and_spares_siblings() {
     let sibling = jail.join("exec").join("other");
     fs::create_dir_all(&sibling).unwrap();
 
-    remove_chroot_under(jail, &victim).unwrap();
+    remove_chroot_under(&strict(jail), &victim).unwrap();
     assert!(!victim.exists(), "victim chroot must be gone");
     assert!(sibling.exists(), "sibling chroot must survive");
 }
@@ -132,7 +148,7 @@ fn symlinked_chroot_component_does_not_escape() {
 
     let chroot = jail.join("exec").join("id");
     // O_NOFOLLOW on the `exec` component makes the walk fail rather than follow.
-    let _ = remove_chroot_under(&jail, &chroot);
+    let _ = remove_chroot_under(&strict(&jail), &chroot);
 
     assert!(
         sentinel.join("id").join("keep.txt").exists(),
@@ -145,12 +161,11 @@ fn symlinked_chroot_component_does_not_escape() {
 #[test]
 fn missing_leaf_with_present_parent_is_ok() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path();
-    let parent = base.join("slice");
+    let parent = tmp.path().join("hyper");
     fs::create_dir(&parent).unwrap();
     let leaf = parent.join("leaf"); // never created
 
-    remove_cgroup_under(base, &leaf).expect("missing leaf must be Ok");
+    remove_cgroup_under(&strict(&parent), &leaf).expect("missing leaf must be Ok");
     assert!(parent.exists(), "parent must survive");
 }
 
@@ -168,7 +183,7 @@ proptest! {
         for c in &comps {
             chroot.push(c);
         }
-        let res = remove_chroot_under(jail, &chroot);
+        let res = remove_chroot_under(&strict(jail), &chroot);
         if comps.len() == 2 {
             prop_assert!(res.is_ok(), "depth 2 must be Ok, got {res:?}");
         } else {
@@ -176,23 +191,40 @@ proptest! {
         }
     }
 
-    // For a cgroup `depth` components below its base, remove_cgroup_under returns
-    // CgroupDepth iff depth == 1, else Ok (target missing -> idempotent).
     #[test]
-    fn cgroup_depth_classification(
+    fn cgroup_shape_classification(
         comps in prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..6)
     ) {
         let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let mut cgroup = base.to_path_buf();
+        let parent = tmp.path().join("hyper");
+        let mut cgroup = parent.clone();
         for c in &comps {
             cgroup.push(c);
         }
-        let res = remove_cgroup_under(base, &cgroup);
+        let res = remove_cgroup_under(&strict(&parent), &cgroup);
         if comps.len() == 1 {
-            prop_assert!(matches!(res, Err(CgroupError::Depth(_))), "got {res:?}");
+            prop_assert!(res.is_ok(), "parent/<id> must be Ok, got {res:?}");
         } else {
-            prop_assert!(res.is_ok(), "depth >= 2 must be Ok, got {res:?}");
+            prop_assert!(matches!(res, Err(CgroupError::Shape(_))), "got {res:?}");
         }
+    }
+
+    #[test]
+    fn cgroup_outside_parent_is_refused(
+        other in "[a-z][a-z0-9]{0,5}",
+        comps in prop::collection::vec("[a-z][a-z0-9]{0,5}", 0..4),
+    ) {
+        prop_assume!(other != "hyper");
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = tmp.path().join("hyper");
+        let mut cgroup = tmp.path().join(&other);
+        for c in &comps {
+            cgroup.push(c);
+        }
+        let res = remove_cgroup_under(&strict(&parent), &cgroup);
+        prop_assert!(
+            matches!(res, Err(CgroupError::Base(RelativeError::NotUnderBase))),
+            "got {res:?}"
+        );
     }
 }
