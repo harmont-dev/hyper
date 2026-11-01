@@ -7,7 +7,7 @@ root wholesale.
 ## Build & install
 
 Static **musl** binaries for both server arches. The toolchain and targets are
-pinned in `rust-toolchain.toml` (nightly + both musl targets), and aarch64
+pinned in `native/rust-toolchain.toml` (nightly + both musl targets), and aarch64
 cross-links via the toolchain's bundled `rust-lld` — no external cross toolchain
 is required:
 
@@ -22,7 +22,7 @@ one matching the host, setuid root:
 
 ```sh
 sudo install -o root -g root -m 4755 \
-  target/x86_64-unknown-linux-musl/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
+  ../target/x86_64-unknown-linux-musl/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
 ```
 
 Then point Hyper at it (runtime config). The tool paths must be absolute (the

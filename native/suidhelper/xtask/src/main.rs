@@ -37,10 +37,11 @@ fn main() {
     }
 }
 
-/// The workspace `target/` dir (xtask's manifest sits one level below the root).
+/// The workspace `target/` dir (xtask's manifest sits two levels below the root).
 fn target_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask has no parent dir")
+        .ancestors()
+        .nth(2)
+        .expect("xtask sits two levels below the workspace root")
         .join("target")
 }

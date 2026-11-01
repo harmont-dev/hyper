@@ -67,7 +67,7 @@ impl Version {
     fn render() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION"),
-            checksum_blake3: hyper_suidhelper::checksum::hex(),
+            checksum_blake3: hyperrs_elfsum::checksum!().hex(),
         }
     }
 }

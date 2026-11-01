@@ -7,10 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use hyper_suidhelper_meta::{CHECKSUM_LEN, CHECKSUM_SECTION as SECTION};
 use object::elf::PT_INTERP;
 use object::read::elf::ProgramHeader;
-use object::{Object, ObjectSection};
 
 use crate::{target_dir, BIN};
 
@@ -49,19 +47,13 @@ pub fn run() -> PathBuf {
         built.display()
     );
 
-    let (offset, size) = section_range(&bytes);
-    assert_eq!(size, CHECKSUM_LEN, "{SECTION} must be {CHECKSUM_LEN} bytes");
-
-    // Zero the slot before hashing so the digest is reproducible whether or not
-    // the binary was already stamped (re-running stamp is idempotent).
-    bytes[offset..offset + size].fill(0);
-    let digest = blake3::hash(&bytes);
-    bytes[offset..offset + size].copy_from_slice(digest.as_bytes());
+    hyperrs_elfsum::Elf::read(&mut bytes[..])
+        .unwrap_or_else(|err| panic!("cannot stamp {}: {err}", built.display()))
+        .stamp();
 
     let path = target_dir().join(BIN);
     std::fs::copy(&built, &path).expect("failed to copy release binary");
     std::fs::write(&path, &bytes).expect("failed to write stamped binary");
-    println!("stamped {} -> {}", path.display(), digest.to_hex());
     path
 }
 
@@ -91,16 +83,4 @@ fn has_interpreter(bytes: &[u8]) -> bool {
     elf.elf_program_headers()
         .iter()
         .any(|header| header.p_type(elf.endian()) == PT_INTERP)
-}
-
-/// File offset and size of the checksum section in the given ELF image.
-fn section_range(bytes: &[u8]) -> (usize, usize) {
-    let elf = object::File::parse(bytes).expect("failed to parse ELF");
-    let section = elf
-        .section_by_name(SECTION)
-        .unwrap_or_else(|| panic!("{SECTION} section not found — is checksum.rs linked in?"));
-    let (offset, size) = section
-        .file_range()
-        .expect("checksum section has no file range");
-    (offset as usize, size as usize)
 }

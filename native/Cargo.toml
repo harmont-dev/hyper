@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["guest-agent", "hyperrs-elfsum", "suidhelper", "suidhelper/xtask"]
+default-members = ["guest-agent", "hyperrs-elfsum", "suidhelper"]
+
+[profile.release]
+strip = true
+opt-level = "z"
+
+[profile.release-guest]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"

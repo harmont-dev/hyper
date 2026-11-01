@@ -27,7 +27,8 @@ mix test --only integration --only external
                  # live E2E: boots real Firecracker VMs. Needs a provisioned
                  # KVM host (docs/cookbook/install.md) + passwordless sudo.
                  # CI runs this in ci.yml's `integration` job on ubuntu-latest.
-cargo nextest run                     # Rust suite (run inside native/suidhelper/)
+cargo nextest run --workspace --all-features
+                 # Rust suite (run inside native/; one workspace for every crate)
 ```
 
 Pure tests under `test/unit` and `test/controls` need neither Postgres nor
@@ -47,6 +48,10 @@ run in CI's `integration` job, which provisions the GitHub-hosted runner via
   `lib/hyper/redist/` — **pure cores**: units algebra, strict number parsing,
   EWMA/rate controls, `/proc` parsers, hashing.
   No processes, no I/O. These are where property tests pay off most.
+- `native/` — one Cargo workspace (shared `Cargo.lock`, `target/`,
+  `rust-toolchain.toml`, release profiles) for every Rust crate below.
+- `native/hyperrs-elfsum/` — ELF self-checksum slot and stamping, shared by the
+  suidhelper and its xtask.
 - `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests
   inline in `src/` or in `tests/` (see Rust rules below).
 - Generated, do not hand-edit: `lib/hyper/firecracker/api/{operations,schemas}`
@@ -168,7 +173,7 @@ If a case needs its own assertions, it is a separate test, not a row.
   (`tests/` subdirectories are not auto-discovered) — copy an existing
   `[[test]]` block when adding one.
 - `proptest` is the dev-dependency; use `proptest!{ #[test] fn ... }` with
-  `prop_assert!`. CI runs `cargo nextest run --profile ci` (one retry to damp
+  `prop_assert!`. CI runs `cargo nextest run --workspace --profile ci` (one retry to damp
   flakes — do not write tests that *rely* on the retry).
 
 ## Other conventions

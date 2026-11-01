@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
 
   This is the privileged counterpart to `mix suidhelper.stamp`, which stamps
   only. `cargo` and the helper's toolchain (see
-  `native/suidhelper/rust-toolchain.toml`) must be installed.
+  `native/rust-toolchain.toml`) must be installed.
   """
 
   use Mix.Task
@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
   # dependency: there the crate lives under deps/hypervm/native/suidhelper, not
   # under the consumer project's root.
   @helper_dir Path.expand("../../../native/suidhelper", __DIR__)
-  @source Path.join(@helper_dir, "target/hyper-suidhelper")
+  @source Path.expand("../target/hyper-suidhelper", @helper_dir)
   # Must match `Hyper.Cfg.Tools.suidhelper/0`'s default path and the xtask's
   # `INSTALL_PATH`: a `PATH` location the unprivileged node can exec.
   @install_path "/usr/local/bin/hyper-suidhelper"
