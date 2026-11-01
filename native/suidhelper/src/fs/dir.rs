@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 //! Safe directory operations.
 
-use super::dev::DeviceNumber;
+use super::dev::{DeviceNode, DeviceNumber};
 use super::file::{
-    Any, FileType, IsDirectory, OpenFlags, Ownership, SafeFile, ValidationError, Writability,
+    Any, DeviceType, FileType, IsDirectory, IsRegularFile, OpenFlags, Owner, Ownership, SafeFile,
+    ValidationError, Writability,
 };
 use super::path::{StrictComponent, StrictComponentBuf};
 use nix::dir::{Dir, Type};
@@ -13,6 +14,8 @@ use nix::libc;
 use nix::sys::stat::{fstat, mkdirat, mknodat, FileStat, Mode, SFlag};
 use nix::unistd::{linkat, unlinkat, UnlinkatFlags};
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
@@ -28,6 +31,13 @@ pub enum Error {
     Open(#[from] ValidationError),
     #[error(transparent)]
     Sys(#[from] Errno),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("existing device node is {found}, expected {expected}")]
+    DeviceMismatch {
+        expected: DeviceNumber,
+        found: DeviceNumber,
+    },
 }
 
 impl Error {
@@ -37,7 +47,7 @@ impl Error {
         match self {
             Error::Open(ValidationError::Open(errno) | ValidationError::Fstat(errno))
             | Error::Sys(errno) => Some(*errno),
-            Error::Open(_) => None,
+            Error::Open(_) | Error::Io(_) | Error::DeviceMismatch { .. } => None,
         }
     }
 }
@@ -109,6 +119,54 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
             name.as_path(),
             AtFlags::AT_EMPTY_PATH,
         )
+    }
+
+    pub fn ensure_dir(&self, name: &StrictComponent, mode: Mode) -> Result<SafeDir, Error> {
+        self.mkdirat(name, mode)?;
+        Ok(self.openat(name, OpenFlags::RDONLY, Mode::empty())?)
+    }
+
+    pub fn make_device<T: DeviceType>(
+        &self,
+        name: &StrictComponent,
+        node: DeviceNode<T>,
+        owner: Owner,
+    ) -> Result<SafeFile<T, Any, Any>, Error> {
+        match self.mknodat(name, T::KIND, node.mode(), node.rdev()) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(errno) => return Err(errno.into()),
+        }
+        let device: SafeFile<T, Any, Any> = self.openat(name, OpenFlags::PATH, Mode::empty())?;
+        let found = device.rdev()?;
+        if found != node.rdev() {
+            return Err(Error::DeviceMismatch {
+                expected: node.rdev(),
+                found,
+            });
+        }
+        device.chown(Some(owner.uid), Some(owner.gid))?;
+        device.chmod(node.mode())?;
+        Ok(device)
+    }
+
+    pub fn link_or_copy<R2, O2>(
+        &self,
+        src: SafeFile<IsRegularFile, R2, O2>,
+        name: &StrictComponent,
+        copy_mode: Mode,
+    ) -> Result<(), Error> {
+        match self.linkat(&src, name) {
+            Ok(()) => Ok(()),
+            Err(Errno::EXDEV) => {
+                let dest = self.mkfileat(name, copy_mode)?;
+                io::copy(
+                    &mut File::from(OwnedFd::from(src)),
+                    &mut File::from(OwnedFd::from(dest)),
+                )?;
+                Ok(())
+            }
+            Err(errno) => Err(errno.into()),
+        }
     }
 
     /// Stat a file at the current directory.

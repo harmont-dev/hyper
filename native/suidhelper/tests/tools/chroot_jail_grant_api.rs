@@ -252,6 +252,10 @@ proptest! {
     fn shape_classification(
         parents in prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..6)
     ) {
+        let mut parents = parents;
+        if parents.len() == 3 {
+            parents[2] = "root".to_string();
+        }
         let tmp = tempfile::tempdir().unwrap();
         let jail = tmp.path();
         let mut socket = jail.to_path_buf();

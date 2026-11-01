@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 //! `chroot-jail`: per-VM chroot/jail lifecycle.
 
-mod grant;
 pub mod grant_api;
 pub mod grant_vsock;
 mod prepare;

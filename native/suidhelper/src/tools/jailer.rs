@@ -15,6 +15,7 @@ use crate::config::{BinError, Config};
 use crate::firecracker::id::IdError;
 use crate::firecracker::jailer::{CgroupLimits, CpuMax, Jailer, VmId};
 use crate::fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
+use crate::linux::netns;
 use crate::process::privilege::Unprivileged;
 use clap::Args;
 use std::convert::Infallible;
@@ -81,7 +82,7 @@ fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, Error> {
     // creates. Networking is mandatory, so in practice this is always `Some`.
     let netns = config
         .network()
-        .map(|_| SafePath::from_static::<"/var/run/netns">().join(&args.id));
+        .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&args.id));
 
     Jailer::builder()
         .jailer(&jailer)

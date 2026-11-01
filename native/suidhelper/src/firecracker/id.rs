@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use crate::fs::file::Owner;
 use derive_more::{Display, Into};
 use nix::unistd::{Gid, Uid};
 use serde::Deserialize;
@@ -82,3 +83,18 @@ pub struct JailUid(Uid);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Into)]
 pub struct JailGid(Gid);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JailOwner {
+    pub uid: JailUid,
+    pub gid: JailGid,
+}
+
+impl From<JailOwner> for Owner {
+    fn from(owner: JailOwner) -> Self {
+        Owner {
+            uid: owner.uid.into(),
+            gid: owner.gid.into(),
+        }
+    }
+}

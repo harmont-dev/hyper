@@ -1,29 +1,12 @@
-//! Contracts of the VM jail builder (`firecracker::chroot_jail`), driven through the
-//! base-injected seams. Non-root, in a tempdir, the promises under test:
-//!   * confinement — `open_chroot_under` follows no symlinked component and
-//!     refuses a chroot that is not under the jail base;
-//!   * source confinement — `stage_kernel_under` canonicalizes the source and
-//!     refuses anything resolving outside `hyper_base` (a symlink that escapes
-//!     is caught after resolution, not before);
-//!   * staging — a confined source is materialized as `vmlinux`, byte-identical,
-//!     and re-staging into an occupied slot is refused (O_EXCL / EEXIST).
-//!
-//! Root-gated (self-skip without root): a full `build_under` against a real loop
-//! device stages the kernel AND creates the `rootfs` block node whose major:minor
-//! mirrors the source device, owned by the requested uid:gid.
-
-use hyper_suidhelper::firecracker::chroot_jail::{
-    open_chroot_under, stage_kernel_under, ChrootJail, Error,
-};
-use hyper_suidhelper::firecracker::id::UidGidRange;
-use hyper_suidhelper::fs::dir::SafeDir;
-use hyper_suidhelper::fs::file::OpenFlags;
+use hyper_suidhelper::firecracker::chroot_jail::{JailRoot, KernelError, KernelImage, OpenError};
+use hyper_suidhelper::firecracker::id::{JailOwner, UidGidRange};
+use hyper_suidhelper::fs::dir;
 use hyper_suidhelper::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use hyper_suidhelper::linux::dm::DmName;
 use nix::errno::Errno;
-use nix::unistd::{Gid, Uid};
+use nix::sys::stat::{makedev, mknod, Mode, SFlag};
 use std::fs;
-use std::os::unix::fs::{symlink, MetadataExt};
+use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -33,149 +16,165 @@ fn strict(p: impl AsRef<Path>) -> Strict {
     p.as_ref().to_path_buf().try_into().unwrap()
 }
 
-fn safe(p: &Path) -> Strict {
-    p.to_path_buf()
-        .try_into()
-        .expect("test path is strict-absolute")
-}
-
 fn is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-fn own_ids() -> (Uid, Gid) {
-    (nix::unistd::getuid(), nix::unistd::getgid())
+fn owner(uid: u32, gid: u32) -> JailOwner {
+    let range = UidGidRange::try_from([uid.min(gid), uid.max(gid)]).unwrap();
+    JailOwner {
+        uid: range.uid(uid).unwrap(),
+        gid: range.gid(gid).unwrap(),
+    }
 }
 
-// A valid <exec>/<id> tree under the jail base opens successfully.
+fn jail_root(jail_base: &Path) -> PathBuf {
+    let root = jail_base.join("exec").join("id").join("root");
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
 #[test]
-fn open_chroot_descends_valid_tree() {
+fn jail_root_opens_exec_id_root() {
     let tmp = tempfile::tempdir().unwrap();
-    let jail = tmp.path();
-    let chroot = jail.join("exec").join("id");
-    fs::create_dir_all(&chroot).unwrap();
-    assert!(open_chroot_under(&strict(jail), &chroot).is_ok());
+    let root = jail_root(tmp.path());
+    assert!(JailRoot::open(&strict(tmp.path()), &strict(root)).is_ok());
+}
+
+#[test]
+fn jail_root_refuses_other_shapes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path();
+    for rel in [
+        "exec",
+        "exec/id",
+        "exec/id/root/extra",
+        "exec/id/notroot",
+        "exec/a_b/root",
+        "exec/-id/root",
+    ] {
+        let err = JailRoot::open(&strict(base), &strict(base.join(rel))).err();
+        assert!(
+            matches!(err, Some(OpenError::Shape(_))),
+            "{rel}: got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn jail_root_refuses_path_outside_base() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("jail");
+    let outside = tmp.path().join("elsewhere/exec/id/root");
+    let err = JailRoot::open(&strict(&base), &strict(outside)).err();
+    assert!(
+        matches!(err, Some(OpenError::Base(RelativeError::NotUnderBase))),
+        "got {err:?}"
+    );
 }
 
 // A symlinked component is not followed (O_NOFOLLOW): open must fail.
 #[test]
-fn open_chroot_rejects_symlinked_component() {
-    let tmp = tempfile::tempdir().unwrap();
-    let jail = tmp.path();
-    let real_exec = tmp.path().join("real-exec");
-    fs::create_dir_all(real_exec.join("id")).unwrap();
-    symlink(&real_exec, jail.join("exec")).unwrap();
-
-    let chroot = jail.join("exec").join("id");
-    assert!(
-        open_chroot_under(&strict(jail), &chroot).is_err(),
-        "open_chroot followed a symlinked component",
-    );
-}
-
-// A chroot that is not under the jail base is rejected.
-#[test]
-fn open_chroot_rejects_path_outside_base() {
+fn jail_root_refuses_symlinked_component() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path().join("jail");
     fs::create_dir(&jail).unwrap();
-    let outside = tmp.path().join("elsewhere").join("id");
-    let result = open_chroot_under(&strict(&jail), &outside);
-    let err = result.expect_err("expected an error for path outside base");
-    assert!(
-        matches!(err, Error::Relative(RelativeError::NotUnderBase)),
-        "got {err:?}",
-    );
+    let real_exec = tmp.path().join("real-exec");
+    fs::create_dir_all(real_exec.join("id").join("root")).unwrap();
+    symlink(&real_exec, jail.join("exec")).unwrap();
+
+    let err = JailRoot::open(&strict(&jail), &strict(jail.join("exec/id/root"))).err();
+    assert!(matches!(err, Some(OpenError::Open(_))), "got {err:?}");
 }
 
 // A source that lives entirely outside hyper_base is refused.
 #[test]
-fn stage_kernel_rejects_source_outside_base() {
+fn kernel_outside_base_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let hyper_base = tmp.path().join("hyper");
-    let chroot_dir = hyper_base.join("jail");
-    fs::create_dir_all(&chroot_dir).unwrap();
+    fs::create_dir(&hyper_base).unwrap();
     let outside = tmp.path().join("outside-kernel");
     fs::write(&outside, b"kernel").unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &outside, &strict(&hyper_base), uid, gid).unwrap_err();
-    assert!(matches!(err, Error::OutsideBase { .. }), "got {err:?}");
+    let err = KernelImage::open(&strict(&outside), &strict(&hyper_base)).err();
+    assert!(
+        matches!(err, Some(KernelError::OutsideBase { .. })),
+        "got {err:?}"
+    );
 }
 
 // A source UNDER hyper_base but which is a symlink RESOLVING outside it is
 // refused: confinement is enforced after canonicalization, not on the lexical
 // path. This is the key source-confinement invariant.
 #[test]
-fn stage_kernel_rejects_symlink_escaping_base() {
+fn kernel_symlink_escaping_base_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     let hyper_base = tmp.path().join("hyper");
-    let chroot_dir = hyper_base.join("jail");
-    fs::create_dir_all(&chroot_dir).unwrap();
-
-    let real_target = tmp.path().join("secret"); // OUTSIDE hyper_base
+    fs::create_dir(&hyper_base).unwrap();
+    let real_target = tmp.path().join("secret");
     fs::write(&real_target, b"secret kernel").unwrap();
-    let link = hyper_base.join("kernel-link"); // INSIDE hyper_base, escapes
+    let link = hyper_base.join("kernel-link");
     symlink(&real_target, &link).unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &link, &strict(&hyper_base), uid, gid).unwrap_err();
+    let err = KernelImage::open(&strict(&link), &strict(&hyper_base)).err();
     assert!(
-        matches!(err, Error::OutsideBase { .. }),
-        "symlink escaping the base must be refused, got {err:?}",
+        matches!(err, Some(KernelError::OutsideBase { .. })),
+        "got {err:?}"
     );
 }
 
-// A missing source path is reported as a source error, not a confinement one.
 #[test]
-fn stage_kernel_missing_source_errors() {
+fn missing_kernel_is_a_resolve_error() {
     let tmp = tempfile::tempdir().unwrap();
-    let hyper_base = tmp.path();
-    let chroot_dir = hyper_base.join("jail");
-    fs::create_dir_all(&chroot_dir).unwrap();
-    let missing = hyper_base.join("nope");
-
-    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let (uid, gid) = own_ids();
-    let err = stage_kernel_under(&chroot, &missing, &strict(hyper_base), uid, gid).unwrap_err();
-    assert!(matches!(err, Error::Source { .. }), "got {err:?}");
+    let missing = tmp.path().join("nope");
+    let err = KernelImage::open(&strict(&missing), &strict(tmp.path())).err();
+    assert!(
+        matches!(err, Some(KernelError::Resolve { .. })),
+        "got {err:?}"
+    );
 }
 
-// A confined source is staged byte-identically as `vmlinux`; re-staging into the
-// now-occupied slot is refused (O_EXCL / link EEXIST).
 #[test]
 fn stage_kernel_materializes_then_refuses_overwrite() {
     let tmp = tempfile::tempdir().unwrap();
-    let hyper_base = tmp.path();
-    let chroot_dir = hyper_base.join("jail");
-    fs::create_dir_all(&chroot_dir).unwrap();
-    let src = hyper_base.join("vmlinux-src");
+    let base = tmp.path();
+    let root_dir = jail_root(base);
+    let src = base.join("vmlinux-src");
     fs::write(&src, b"\x7fELF fake kernel bytes").unwrap();
+    let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
 
-    let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let (uid, gid) = own_ids();
-    stage_kernel_under(&chroot, &src, &strict(hyper_base), uid, gid).expect("first stage");
-
-    let staged = chroot_dir.join("vmlinux");
+    let kernel = KernelImage::open(&strict(&src), &strict(base)).unwrap();
+    root.stage_kernel(kernel).expect("first stage");
     assert_eq!(
-        fs::read(&staged).unwrap(),
-        b"\x7fELF fake kernel bytes",
-        "staged kernel bytes must match the source",
+        fs::read(root_dir.join("vmlinux")).unwrap(),
+        b"\x7fELF fake kernel bytes"
     );
 
-    // Re-staging must not silently clobber: the slot is occupied.
-    let chroot2 = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
-    let err = stage_kernel_under(&chroot2, &src, &strict(hyper_base), uid, gid).unwrap_err();
-    assert!(
-        matches!(&err, Error::StageKernel(e) if e.errno() == Some(Errno::EEXIST)),
-        "re-stage must be refused, got {err:?}"
+    let kernel = KernelImage::open(&strict(&src), &strict(base)).unwrap();
+    let err = root.stage_kernel(kernel).unwrap_err();
+    assert_eq!(err.errno(), Some(Errno::EEXIST), "got {err:?}");
+}
+
+#[test]
+fn stage_kernel_never_changes_the_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path();
+    let root_dir = jail_root(base);
+    let src = base.join("vmlinux-src");
+    fs::write(&src, b"kernel").unwrap();
+    let before = fs::metadata(&src).unwrap();
+
+    let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+    let kernel = KernelImage::open(&strict(&src), &strict(base)).unwrap();
+    root.stage_kernel(kernel).unwrap();
+
+    let after = fs::metadata(&src).unwrap();
+    assert_eq!(
+        (after.uid(), after.gid(), after.mode()),
+        (before.uid(), before.gid(), before.mode())
     );
 }
 
-/// Attach a fresh loop device backed by a 1 MiB temp file. Returns the device
-/// path, or None if losetup is unavailable / fails (test self-skips).
 fn setup_loop(tmp: &Path) -> Option<PathBuf> {
     let backing = tmp.join("backing.img");
     let f = fs::File::create(&backing).ok()?;
@@ -220,66 +219,90 @@ fn teardown_dm(name: &DmName) {
         .output();
 }
 
-// A full build stages the kernel AND creates a `rootfs` block node mirroring the
-// loop device's major:minor, both owned by the requested uid:gid.
 #[test]
-fn build_under_stages_kernel_and_mirrors_device_as_root() {
+fn add_rootfs_mirrors_the_device_as_root() {
     if !is_root() {
-        eprintln!("SKIP build_under_stages_kernel_and_mirrors_device: needs root for mknod/chown");
+        eprintln!("SKIP add_rootfs_mirrors_the_device: needs root for mknod/chown");
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let hyper_base = tmp.path();
-    let chroot_dir = hyper_base.join("jails").join("exec").join("id");
-    fs::create_dir_all(&chroot_dir).unwrap();
-    let jail_base = hyper_base.join("jails");
-    let kernel_src = hyper_base.join("vmlinux-src");
-    fs::write(&kernel_src, b"kernel image").unwrap();
+    let base = tmp.path();
+    let root_dir = jail_root(base);
 
-    let Some(dev) = setup_loop(hyper_base) else {
-        eprintln!("SKIP build_under: losetup unavailable");
+    let Some(dev) = setup_loop(base) else {
+        eprintln!("SKIP add_rootfs: losetup unavailable");
         return;
     };
     let Some(block) = setup_dm(&dev) else {
         teardown_loop(&dev);
-        eprintln!("SKIP build_under: dmsetup unavailable");
+        eprintln!("SKIP add_rootfs: dmsetup unavailable");
         return;
     };
-    let block_path = block.path();
 
-    let (uid, gid) = (12345u32, 12345u32);
-    let range = UidGidRange::try_from([uid, gid]).unwrap();
-    let res = ChrootJail::new(
-        chroot_dir.clone(),
-        range.uid(uid).unwrap(),
-        range.gid(gid).unwrap(),
-    )
-    .with_kernel(kernel_src.clone())
-    .with_rootfs(block.clone())
-    .build_under(&strict(&jail_base), &strict(hyper_base));
-
-    let dev_rdev = fs::metadata(block_path.as_path()).map(|m| m.rdev());
+    let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+    let res = block.open().map_err(|e| e.to_string()).and_then(|device| {
+        root.add_rootfs(&device, owner(12345, 12346))
+            .map_err(|e| e.to_string())
+    });
+    let dev_rdev = fs::metadata(block.path().as_path()).map(|m| m.rdev());
     teardown_dm(&block);
     teardown_loop(&dev);
-    res.expect("build_under must succeed as root against a real device");
+    res.expect("add_rootfs must succeed as root against a real device");
 
-    let vmlinux = chroot_dir.join("vmlinux");
-    let rootfs = chroot_dir.join("rootfs");
-    assert_eq!(fs::read(&vmlinux).unwrap(), b"kernel image");
+    let meta = fs::metadata(root_dir.join("rootfs")).unwrap();
+    assert!(meta.file_type().is_block_device());
+    assert_eq!(meta.rdev(), dev_rdev.unwrap());
+    assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
+    assert_eq!(meta.mode() & 0o777, 0o600);
+}
 
-    let kmeta = fs::metadata(&vmlinux).unwrap();
-    assert_eq!((kmeta.uid(), kmeta.gid()), (uid, gid), "kernel ownership");
+#[test]
+fn add_tun_is_idempotent_as_root() {
+    if !is_root() {
+        eprintln!("SKIP add_tun_is_idempotent: needs root for mknod/chown");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root_dir = jail_root(tmp.path());
+    let root = JailRoot::open(&strict(tmp.path()), &strict(&root_dir)).unwrap();
 
-    let rmeta = fs::metadata(&rootfs).unwrap();
-    assert_eq!((rmeta.uid(), rmeta.gid()), (uid, gid), "rootfs ownership");
-    assert_eq!(
-        rmeta.mode() & 0o170000,
-        0o060000,
-        "rootfs must be a block device"
+    root.add_tun(owner(12345, 12346)).unwrap();
+    root.add_tun(owner(12345, 12346)).unwrap();
+
+    let meta = fs::metadata(root_dir.join("dev/net/tun")).unwrap();
+    assert!(meta.file_type().is_char_device());
+    assert_eq!(meta.rdev(), makedev(10, 200));
+    assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
+    assert_eq!(meta.mode() & 0o777, 0o666);
+}
+
+#[test]
+fn add_tun_refuses_a_preexisting_node_with_another_number_as_root() {
+    if !is_root() {
+        eprintln!("SKIP add_tun_refuses_a_preexisting_node: needs root for mknod");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root_dir = jail_root(tmp.path());
+    fs::create_dir_all(root_dir.join("dev/net")).unwrap();
+    let planted = root_dir.join("dev/net/tun");
+    mknod(
+        &planted,
+        SFlag::S_IFCHR,
+        Mode::from_bits_truncate(0o666),
+        makedev(1, 3),
+    )
+    .unwrap();
+    let root = JailRoot::open(&strict(tmp.path()), &strict(&root_dir)).unwrap();
+
+    let err = root.add_tun(owner(12345, 12346)).unwrap_err();
+    assert!(
+        matches!(err, dir::Error::DeviceMismatch { .. }),
+        "got {err:?}"
     );
     assert_eq!(
-        rmeta.rdev(),
-        dev_rdev.unwrap(),
-        "rootfs node must mirror the source device major:minor",
+        fs::metadata(&planted).unwrap().uid(),
+        0,
+        "planted node must not be chowned"
     );
 }

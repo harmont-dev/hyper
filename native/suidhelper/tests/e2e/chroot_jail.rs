@@ -126,7 +126,7 @@ fn prepare_succeeds_and_builds_jail_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id");
+    let chroot = work.join("jails").join("exec").join("id").join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
@@ -176,7 +176,7 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id");
+    let chroot = work.join("jails").join("exec").join("id").join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
@@ -227,7 +227,7 @@ fn prepare_refuses_ids_outside_range_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id");
+    let chroot = work.join("jails").join("exec").join("id").join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
