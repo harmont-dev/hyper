@@ -23,7 +23,7 @@ defmodule Hyper.Node.FireVMM.Net do
   Kernel `hyper.resolver=` cmdline fragment carrying the DNS resolver IP the
   PID-1 guest agent writes to `/etc/resolv.conf` — kernel `ip=` autoconfig sets
   the guest's address/route but never DNS, so this closes that gap. Pure:
-  callers (`BootSpec.resolve/2`) read the configured resolver themselves.
+  callers (`BootSpec.resolve/3`) read the configured resolver themselves.
   """
   @spec resolver_cmdline(String.t()) :: String.t()
   def resolver_cmdline(resolver), do: "hyper.resolver=#{resolver}"

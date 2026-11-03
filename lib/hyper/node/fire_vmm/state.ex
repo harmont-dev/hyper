@@ -87,13 +87,19 @@ defmodule Hyper.Node.FireVMM.State do
   # device off the per-VM mutable layer, resolve the boot spec, set the readiness
   # deadline, and start probing the API.
   def init(
-        %Opts{vm_id: id, mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} =
-          opts
+        %Opts{
+          vm_id: id,
+          mutable: mutable,
+          kernel: kernel,
+          boot_args: boot_args,
+          type: type,
+          arch: arch
+        } = opts
       ) do
     case Hyper.Cluster.Routing.register_self({id, :state}) do
       :ok ->
         source = boot_source(id, kernel, Mutable.blk_path(mutable), boot_args)
-        spec = BootSpec.resolve(source, type)
+        spec = BootSpec.resolve(source, type, arch)
         deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
         data = %State{opts: opts, spec: spec, boot_deadline: deadline}
 
@@ -224,7 +230,7 @@ defmodule Hyper.Node.FireVMM.State do
 
     use OpenTelemetryDecorator
 
-    alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations, Vsock}
+    alias Hyper.Firecracker.Api.{CpuConfig, InstanceActionInfo, Operations, Vsock}
     alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Jailer, Opts}
     alias Unit.Time
 
@@ -271,18 +277,17 @@ defmodule Hyper.Node.FireVMM.State do
       {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
     end
 
-    # Device PUT sequence: machine-config -> boot-source -> drives -> NICs -> vsock.
-    # InstanceStart is deferred until the vsock UDS grant succeeds.
+    # Device PUT sequence: machine-config -> cpu-config -> boot-source -> drives ->
+    # NICs -> vsock. InstanceStart is deferred until the vsock UDS grant succeeds.
     @spec configure_devices(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
     @decorate with_span("Hyper.Node.FireVMM.State.Configuring.configure_devices", include: [:id])
     defp configure_devices(id, %BootSpec.Cold{} = cold) do
       via = Client.via(id)
 
       ops =
-        [
-          fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end,
-          fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end
-        ] ++
+        [fn opts -> Operations.put_machine_configuration(cold.machine_config, opts) end] ++
+          cpu_config_ops(cold.cpu_config) ++
+          [fn opts -> Operations.put_guest_boot_source(cold.boot_source, opts) end] ++
           Enum.map(cold.drives, fn drive ->
             fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end
           end) ++
@@ -305,6 +310,12 @@ defmodule Hyper.Node.FireVMM.State do
         end
       end)
     end
+
+    @spec cpu_config_ops(CpuConfig.t() | nil) :: [(keyword() -> :ok | {:error, term()})]
+    defp cpu_config_ops(nil), do: []
+
+    defp cpu_config_ops(%CpuConfig{} = config),
+      do: [fn opts -> Operations.put_cpu_configuration(config, opts) end]
 
     # Attempt to hand the vsock UDS to the node user. Firecracker may not have
     # created the socket yet immediately after PUT /vsock, so retry on
