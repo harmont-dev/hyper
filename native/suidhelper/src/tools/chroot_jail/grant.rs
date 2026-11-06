@@ -1,80 +1,175 @@
 // SPDX-License-Identifier: MIT
-//! Shared grant-socket logic reused by `grant-api` and `grant-vsock`.
-//!
-//! Both ops chown a jail-confined Unix-domain socket to the helper's caller and
-//! chmod it `0660`, then open the immediate parent `root` dir for group traversal.
-//! This module holds the common constants, the `GrantOut` result type, the
-//! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
-//! the logic block.
 
-use hyperrs_fs::dir::SafeDir;
-use hyperrs_fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
+use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+use hyperrs_fs::file::{self, IsSocket, Owner};
 use hyperrs_fs::path::StrictComponent;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};
-use serde::Serialize;
 use thiserror::Error as ThisError;
 
 /// Mode handed to the node: owner+group read/write, no world access.
-pub const SOCKET_MODE: u32 = 0o660;
+const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
 
-/// Mode set on the jail `root` dir so the node's group can traverse it to
-/// reach the socket: owner `rwx`, group `--x` (traverse, not list), other none.
-pub const JAIL_ROOT_MODE: u32 = 0o710;
-
-/// Result type shared by all `chroot-jail grant-*` ops.
-#[derive(Debug, Serialize)]
-#[serde(tag = "result", rename_all = "snake_case")]
-pub enum GrantOut {
-    /// The socket was handed to the caller (chowned + chmoded).
-    Granted,
-    /// The socket does not exist yet; the caller should keep waiting.
-    Pending,
-}
-
-/// Errors that can arise in the shared grant execution (stat / chown / chmod).
-/// `GrantApiError` and `GrantVsockError` wrap these transparently as their
-/// `Grant` variant.
 #[derive(Debug, ThisError)]
-pub enum GrantError {
-    #[error("not a socket (or is a symlink); refusing to touch it")]
-    NotASocket,
-    #[error("statting the socket: {0}")]
-    Stat(#[source] file::ValidationError),
-    #[error("chowning the socket to the caller: {0}")]
-    Chown(#[source] Errno),
-    #[error("chmoding the socket: {0}")]
-    Chmod(#[source] Errno),
-    #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] Errno),
-    #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] Errno),
+pub enum GrantSocketError {
+    #[error("walking to the jail root: {0}")]
+    Walk(#[source] file::ValidationError),
+    #[error(transparent)]
+    Grant(#[from] GrantError),
 }
 
-/// Stat `leaf` under `root` (`AT_SYMLINK_NOFOLLOW`), verify it is a real socket
-/// (`S_IFSOCK`; a symlink reports `S_IFLNK` and is refused), then chown it to
-/// the caller and chmod `0660`. Also open the parent `root` dir for the caller's
-/// group to traverse (chgrp'd to the caller, chmod'd `0710`) so the node can
-/// reach the socket even though the jailer left `root` at `0700`. Returns
-/// `Pending` if `leaf` is not yet present (`ENOENT`).
-pub fn grant_to_caller(root: SafeDir, leaf: &StrictComponent) -> Result<GrantOut, GrantError> {
-    let sock: SafeFile<IsSocket, Any, Any> = match root.openat(leaf, OpenFlags::PATH, Mode::empty())
-    {
-        Ok(sock) => sock,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(file::ValidationError::Open(Errno::ELOOP) | file::ValidationError::WrongFileType) => {
-            return Err(GrantError::NotASocket)
-        }
-        Err(e) => return Err(GrantError::Stat(e)),
+pub fn caller() -> Owner {
+    Owner {
+        uid: getuid(),
+        gid: getgid(),
+    }
+}
+
+pub fn grant_socket(
+    layout: &JailLayout<'_>,
+    socket: &StrictComponent,
+    owner: Owner,
+) -> Result<(), GrantSocketError> {
+    let root = match layout.open_root() {
+        Ok(root) => root,
+        Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing.into()),
+        Err(e) => return Err(GrantSocketError::Walk(e)),
     };
-    sock.chown(Some(getuid()), Some(getgid()))
-        .map_err(GrantError::Chown)?;
-    sock.chmod(Mode::from_bits_truncate(SOCKET_MODE))
-        .map_err(GrantError::Chmod)?;
-    root.chown(None, Some(getgid()))
-        .map_err(GrantError::ChgrpRoot)?;
-    root.chmod(Mode::from_bits_truncate(JAIL_ROOT_MODE))
-        .map_err(GrantError::ChmodRoot)?;
-    Ok(GrantOut::Granted)
+    Ok(root.grant::<IsSocket>(socket, owner, SOCKET_MODE)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{grant_socket, GrantSocketError};
+    use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+    use hyperrs_firecracker::VmId;
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+    use std::fs;
+    use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
+    use std::path::{Path, PathBuf};
+
+    const LEAF: &StrictComponent = StrictComponent::from_static("api.socket");
+
+    fn grant(jail: &Path) -> Result<(), GrantSocketError> {
+        let base: SafePathBuf<IsAbsolute, StrictComponents> =
+            jail.to_path_buf().try_into().unwrap();
+        let id: VmId = "id".parse().unwrap();
+        grant_socket(&JailLayout::new(&base, &id), LEAF, super::caller())
+    }
+
+    fn make_root(jail: &Path) -> PathBuf {
+        let root = jail.join("firecracker").join("id").join("root");
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn not_yet_created_is_missing() {
+        for create_root in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            if create_root {
+                make_root(tmp.path());
+            }
+            let res = grant(tmp.path());
+            assert!(
+                matches!(res, Err(GrantSocketError::Grant(GrantError::Missing))),
+                "create_root={create_root}: got {res:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_socket_is_granted_and_root_opened_for_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = make_root(tmp.path());
+        let socket = root.join("api.socket");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o755)).unwrap();
+
+        grant(tmp.path()).expect("real socket must grant");
+
+        let meta = fs::symlink_metadata(&socket).unwrap();
+        assert_eq!(meta.mode() & 0o777, 0o660);
+        assert_eq!(meta.uid(), nix::unistd::getuid().as_raw());
+        assert_eq!(meta.gid(), nix::unistd::getgid().as_raw());
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        assert_eq!(root_meta.mode() & 0o777, 0o710);
+        assert_eq!(root_meta.gid(), nix::unistd::getgid().as_raw());
+    }
+
+    #[test]
+    fn regular_file_at_leaf_is_refused_and_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let imposter = make_root(tmp.path()).join("api.socket");
+        fs::write(&imposter, b"not a socket").unwrap();
+        fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let err = grant(tmp.path()).unwrap_err();
+        assert!(
+            matches!(err, GrantSocketError::Grant(GrantError::WrongType)),
+            "got {err:?}"
+        );
+        assert_eq!(
+            fs::symlink_metadata(&imposter).unwrap().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn symlink_to_real_socket_at_leaf_is_refused_and_target_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = make_root(tmp.path());
+        let outside = tmp.path().join("outside.sock");
+        let _listener = UnixListener::bind(&outside).unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&outside, root.join("api.socket")).unwrap();
+
+        let err = grant(tmp.path()).unwrap_err();
+        assert!(
+            matches!(err, GrantSocketError::Grant(GrantError::WrongType)),
+            "got {err:?}"
+        );
+        assert_eq!(
+            fs::symlink_metadata(&outside).unwrap().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn symlinked_component_does_not_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        let sentinel = tmp.path().join("sentinel");
+        fs::create_dir_all(sentinel.join("id").join("root")).unwrap();
+        let outside_socket = sentinel.join("id").join("root").join("api.socket");
+        let _listener = UnixListener::bind(&outside_socket).unwrap();
+        fs::set_permissions(&outside_socket, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&sentinel, jail.join("firecracker")).unwrap();
+
+        let res = grant(&jail);
+        assert!(matches!(res, Err(GrantSocketError::Walk(_))), "got {res:?}");
+        assert_eq!(
+            fs::symlink_metadata(&outside_socket).unwrap().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn unreadable_jail_base_is_a_walk_error_not_missing() {
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        fs::set_permissions(&jail, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let res = grant(&jail);
+        fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(matches!(res, Err(GrantSocketError::Walk(_))), "got {res:?}");
+    }
 }

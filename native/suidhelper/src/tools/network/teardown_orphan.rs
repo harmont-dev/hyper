@@ -18,9 +18,9 @@
 use super::args::{self, Command};
 use super::NetworkOut;
 use crate::config::Config;
-use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
+use hyperrs_firecracker::VmId;
 use hyperrs_process::binary::{self, RootSafeBin};
 use hyperrs_process::privilege::{Root, Unprivileged};
 use thiserror::Error as ThisError;

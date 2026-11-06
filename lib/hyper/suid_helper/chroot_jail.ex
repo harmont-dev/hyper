@@ -12,21 +12,23 @@ defmodule Hyper.SuidHelper.ChrootJail do
 
   @type err :: SuidHelper.err()
 
+  @exit_retryable 75
+
   @doc """
   Prepare `chroot_root`'s boot artifacts: stage the `kernel` file in and `mknod`
   a node mirroring the rootfs `device`, both owned `uid:gid`. The helper places
   them at the fixed in-jail names (`/vmlinux`, `/rootfs`) and reads the device's
   major:minor itself.
   """
-  @spec prepare(Path.t(), Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) ::
+  @spec prepare(Hyper.Vm.Id.t(), Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.ChrootJail.prepare", include: [:chroot_root, :device])
-  def prepare(chroot_root, kernel, device, uid, gid) do
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.prepare", include: [:vm_id, :device])
+  def prepare(vm_id, kernel, device, uid, gid) do
     argv = [
       "chroot-jail",
       "prepare",
-      "--chroot",
-      chroot_root,
+      "--id",
+      vm_id,
       "--kernel",
       kernel,
       "--device",
@@ -49,10 +51,10 @@ defmodule Hyper.SuidHelper.ChrootJail do
   prior state is a no-op. The helper confines `chroot` under the jail base and
   `cgroup` under `/sys/fs/cgroup` (see `native/suidhelper`).
   """
-  @spec remove(Path.t(), Path.t()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.ChrootJail.remove", include: [:chroot, :cgroup])
-  def remove(chroot, cgroup) do
-    case SuidHelper.exec(["chroot-jail", "remove", "--chroot", chroot, "--cgroup", cgroup]) do
+  @spec remove(Hyper.Vm.Id.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.remove", include: [:vm_id])
+  def remove(vm_id) do
+    case SuidHelper.exec(["chroot-jail", "remove", "--id", vm_id]) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -69,12 +71,12 @@ defmodule Hyper.SuidHelper.ChrootJail do
   Returns `{:error, :socket_pending}` while firecracker has not yet created the
   socket, so the caller can keep waiting.
   """
-  @spec grant_api(Path.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_api", include: [:socket])
-  def grant_api(socket) do
-    case SuidHelper.exec(["chroot-jail", "grant-api", "--socket", socket]) do
-      {:ok, %{"result" => "granted"}} -> :ok
-      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+  @spec grant_api(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_api", include: [:vm_id])
+  def grant_api(vm_id) do
+    case SuidHelper.exec(["chroot-jail", "grant-api", "--id", vm_id]) do
+      {:ok, _} -> :ok
+      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end
@@ -89,12 +91,12 @@ defmodule Hyper.SuidHelper.ChrootJail do
   Returns `{:error, :socket_pending}` while firecracker has not yet created the
   vsock socket, so the caller can keep waiting.
   """
-  @spec grant_vsock(Path.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_vsock", include: [:socket])
-  def grant_vsock(socket) do
-    case SuidHelper.exec(["chroot-jail", "grant-vsock", "--socket", socket]) do
-      {:ok, %{"result" => "granted"}} -> :ok
-      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+  @spec grant_vsock(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_vsock", include: [:vm_id])
+  def grant_vsock(vm_id) do
+    case SuidHelper.exec(["chroot-jail", "grant-vsock", "--id", vm_id]) do
+      {:ok, _} -> :ok
+      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end

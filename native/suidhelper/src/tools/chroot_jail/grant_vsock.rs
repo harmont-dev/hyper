@@ -15,73 +15,25 @@
 //! A missing socket (`ENOENT`, anywhere on the path) is `Pending`: firecracker has
 //! not configured vsock yet, so the controller keeps probing.
 
-use super::grant;
 use crate::config::Config;
+use crate::tools::chroot_jail::grant::{caller, grant_socket, GrantSocketError};
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_fs::dir::SafeDir;
-use hyperrs_fs::file::{self, OpenFlags};
-use hyperrs_fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+use hyperrs_firecracker::VmId;
+use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{Root, Unprivileged};
-use nix::errno::Errno;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use thiserror::Error as ThisError;
-
-pub use super::grant::{GrantError, GrantOut};
 
 /// The fixed in-jail socket name Firecracker opens for vsock (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_vsock`).
 const VSOCK_NAME: &StrictComponent = StrictComponent::from_static("vsock.sock");
 
-#[derive(Debug, ThisError)]
-pub enum GrantVsockError {
-    #[error("--socket path: {0}")]
-    SocketPath(#[source] path::ValidationError),
-    #[error("--socket path: {0}")]
-    SocketBase(#[source] path::RelativeError),
-    #[error("--socket must be exactly <exec>/<id>/root/vsock.sock below JAIL_BASE: {0:?}")]
-    SocketShape(PathBuf),
-    #[error("--socket leaf must be {VSOCK_NAME:?}: {0:?}")]
-    SocketName(PathBuf),
-    #[error("walking to the jail root: {0}")]
-    Walk(#[source] hyperrs_fs::file::ValidationError),
-    #[error(transparent)]
-    Grant(#[from] GrantError),
-}
-
-/// A `--socket` value validated at clap-parse time to be an absolute,
-/// strictly-componented path whose leaf is exactly `vsock.sock`. The
-/// base-relative shape (`<exec>/<id>/root/<leaf>` below `JAIL_BASE`) needs the
-/// runtime `jail_base`, so it is *not* enforced here — `grant_vsock_under`
-/// checks it. Mirrors `jailer::JailSock`: the parse stays pure, reading no
-/// config.
-#[derive(Debug, Clone)]
-pub struct VsockSocket(SafePathBuf<IsAbsolute, StrictComponents>);
-
-impl FromStr for VsockSocket {
-    type Err = GrantVsockError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path: SafePathBuf<IsAbsolute, StrictComponents> = PathBuf::from(s)
-            .try_into()
-            .map_err(GrantVsockError::SocketPath)?;
-        if path.file_name() != Some(VSOCK_NAME) {
-            return Err(GrantVsockError::SocketName(PathBuf::from(s)));
-        }
-        Ok(Self(path))
-    }
-}
-
 #[derive(Args)]
 pub struct GrantVsockArgs {
-    /// Host path of the firecracker vsock socket, shape
-    /// <JAIL_BASE>/<exec>/<id>/root/vsock.sock.
     #[arg(long)]
-    socket: VsockSocket,
+    id: VmId,
 }
 
-/// Run the `grant-vsock` op in its own privileged scope (returns its serialized `Value`).
 pub fn run(
     args: GrantVsockArgs,
     token: &mut Unprivileged,
@@ -95,40 +47,23 @@ struct GrantVsock {
 
 impl IsTool for GrantVsock {
     type Args = GrantVsockArgs;
-    type Output = GrantOut;
-    type RunT = Result<GrantOut, GrantVsockError>;
+    type Output = ();
+    type RunT = Result<(), GrantSocketError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
-        grant_vsock_under(&Config::get().jail_base(), &self.args.socket)
+        let jail_base = Config::get().jail_base();
+        grant_socket(
+            &JailLayout::new(&jail_base, &self.args.id),
+            VSOCK_NAME,
+            caller(),
+        )
     }
 
-    fn parse(&self, res: Self::RunT) -> Result<GrantOut, Box<dyn std::error::Error>> {
+    fn parse(&self, res: Self::RunT) -> Result<(), Box<dyn std::error::Error>> {
         Ok(res?)
     }
-}
 
-/// Hand `socket` (`<jail_base>/<exec>/<id>/root/vsock.sock`) to the helper's
-/// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
-/// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_vsock_under(
-    jail_base: &Path,
-    socket: &VsockSocket,
-) -> Result<GrantOut, GrantVsockError> {
-    let rel = socket
-        .0
-        .strip_base(jail_base)
-        .map_err(GrantVsockError::SocketBase)?;
-    let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
-        return Err(GrantVsockError::SocketShape(
-            socket.0.as_ref().to_path_buf(),
-        ));
-    };
-
-    let root = match SafeDir::open(root, OpenFlags::RDONLY) {
-        Ok(root) => root,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(GrantVsockError::Walk(e)),
-    };
-
-    grant::grant_to_caller(root, leaf).map_err(GrantVsockError::from)
+    fn is_retryable(&self, res: &Self::RunT) -> bool {
+        matches!(res, Err(GrantSocketError::Grant(GrantError::Missing)))
+    }
 }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 //! Safe directory operations.
 
-use super::dev::DeviceNumber;
+use super::dev::{DeviceNode, DeviceNumber};
 use super::file::{
-    Any, FileType, IsDirectory, OpenFlags, Ownership, SafeFile, ValidationError, Writability,
+    Any, DeviceType, FileType, IsDirectory, OpenFlags, Owner, Ownership, SafeFile, ValidationError,
+    Writability,
 };
 use super::path::{StrictComponent, StrictComponentBuf};
 use nix::dir::{Dir, Type};
@@ -13,6 +14,7 @@ use nix::libc;
 use nix::sys::stat::{fstat, mkdirat, mknodat, FileStat, Mode, SFlag};
 use nix::unistd::{linkat, unlinkat, UnlinkatFlags};
 use std::ffi::OsStr;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
@@ -24,6 +26,13 @@ pub enum DirError {
     Open(#[from] ValidationError),
     #[error(transparent)]
     Sys(#[from] Errno),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("existing device node is {found}, expected {expected}")]
+    DeviceMismatch {
+        expected: DeviceNumber,
+        found: DeviceNumber,
+    },
 }
 
 impl DirError {
@@ -32,7 +41,7 @@ impl DirError {
         match self {
             DirError::Open(ValidationError::Open(errno) | ValidationError::Fstat(errno))
             | DirError::Sys(errno) => Some(*errno),
-            DirError::Open(_) => None,
+            DirError::Open(_) | DirError::Io(_) | DirError::DeviceMismatch { .. } => None,
         }
     }
 }
@@ -104,6 +113,41 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
             name.as_path(),
             AtFlags::AT_EMPTY_PATH,
         )
+    }
+
+    /// Create a directory `name` under this directory, with the given `mode`, if it does not exist.
+    pub fn ensure_dir(&self, name: &StrictComponent, mode: Mode) -> Result<SafeDir, DirError> {
+        self.mkdirat(name, mode)?;
+        Ok(self.openat(name, OpenFlags::RDONLY, Mode::empty())?)
+    }
+
+    /// Create a device `name` under `self`, with the given `node` device type and the given
+    /// `owner`.
+    pub fn make_device<T: DeviceType>(
+        &self,
+        name: &StrictComponent,
+        node: DeviceNode<T>,
+        owner: Owner,
+    ) -> Result<SafeFile<T, Any, Any>, DirError> {
+        match self.mknodat(name, T::KIND, node.mode(), node.rdev()) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(errno) => return Err(errno.into()),
+        }
+
+        let device: SafeFile<T, Any, Any> = self.openat(name, OpenFlags::PATH, Mode::empty())?;
+
+        let found = device.rdev()?;
+        if found != node.rdev() {
+            return Err(DirError::DeviceMismatch {
+                expected: node.rdev(),
+                found,
+            });
+        }
+
+        device.chown(Some(owner.uid), Some(owner.gid))?;
+        device.chmod(node.mode())?;
+
+        Ok(device)
     }
 
     /// Stat a file at the current directory.

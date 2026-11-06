@@ -31,72 +31,25 @@
 //! the path) is `Pending`, not an error: firecracker has not created it yet, so
 //! the controller keeps probing.
 
-use super::grant;
 use crate::config::Config;
+use crate::tools::chroot_jail::grant::{caller, grant_socket, GrantSocketError};
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_fs::dir::SafeDir;
-use hyperrs_fs::file::{self, OpenFlags};
-use hyperrs_fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+use hyperrs_firecracker::VmId;
+use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{Root, Unprivileged};
-use nix::errno::Errno;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use thiserror::Error as ThisError;
-
-pub use super::grant::{GrantError, GrantOut};
 
 /// The fixed in-jail socket name firecracker opens (mirrors the Elixir
 /// `Hyper.Node.FireVMM.Jailer` `@jail_socket`).
 const SOCKET_NAME: &StrictComponent = StrictComponent::from_static("api.socket");
 
-#[derive(Debug, ThisError)]
-pub enum GrantApiError {
-    #[error("--socket path: {0}")]
-    SocketPath(#[source] path::ValidationError),
-    #[error("--socket path: {0}")]
-    SocketBase(#[source] path::RelativeError),
-    #[error("--socket must be exactly <exec>/<id>/root/api.socket below JAIL_BASE: {0:?}")]
-    SocketShape(PathBuf),
-    #[error("--socket leaf must be {SOCKET_NAME:?}: {0:?}")]
-    SocketName(PathBuf),
-    #[error("walking to the jail root: {0}")]
-    Walk(#[source] hyperrs_fs::file::ValidationError),
-    #[error(transparent)]
-    Grant(#[from] GrantError),
-}
-
-/// A `--socket` value validated at clap-parse time to be an absolute,
-/// strictly-componented path whose leaf is exactly `api.socket`. The
-/// base-relative shape (`<exec>/<id>/root/<leaf>` below `JAIL_BASE`) needs the
-/// runtime `jail_base`, so it is *not* enforced here — `grant_api_under` checks
-/// it. Mirrors `jailer::JailSock`: the parse stays pure, reading no config.
-#[derive(Debug, Clone)]
-pub struct ApiSocket(SafePathBuf<IsAbsolute, StrictComponents>);
-
-impl FromStr for ApiSocket {
-    type Err = GrantApiError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path: SafePathBuf<IsAbsolute, StrictComponents> = PathBuf::from(s)
-            .try_into()
-            .map_err(GrantApiError::SocketPath)?;
-        if path.file_name() != Some(SOCKET_NAME) {
-            return Err(GrantApiError::SocketName(PathBuf::from(s)));
-        }
-        Ok(Self(path))
-    }
-}
-
 #[derive(Args)]
 pub struct GrantApiArgs {
-    /// Host path of the firecracker API socket, shape
-    /// <JAIL_BASE>/<exec>/<id>/root/api.socket.
     #[arg(long)]
-    socket: ApiSocket,
+    id: VmId,
 }
 
-/// Run the `grant-api` op in its own privileged scope (returns its serialized `Value`).
 pub fn run(
     args: GrantApiArgs,
     token: &mut Unprivileged,
@@ -110,35 +63,23 @@ struct GrantApi {
 
 impl IsTool for GrantApi {
     type Args = GrantApiArgs;
-    type Output = GrantOut;
-    type RunT = Result<GrantOut, GrantApiError>;
+    type Output = ();
+    type RunT = Result<(), GrantSocketError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
-        grant_api_under(&Config::get().jail_base(), &self.args.socket)
+        let jail_base = Config::get().jail_base();
+        grant_socket(
+            &JailLayout::new(&jail_base, &self.args.id),
+            SOCKET_NAME,
+            caller(),
+        )
     }
 
-    fn parse(&self, res: Self::RunT) -> Result<GrantOut, Box<dyn std::error::Error>> {
+    fn parse(&self, res: Self::RunT) -> Result<(), Box<dyn std::error::Error>> {
         Ok(res?)
     }
-}
 
-/// Hand `socket` (`<jail_base>/<exec>/<id>/root/api.socket`) to the helper's
-/// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
-/// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, GrantApiError> {
-    let rel = socket
-        .0
-        .strip_base(jail_base)
-        .map_err(GrantApiError::SocketBase)?;
-    let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
-        return Err(GrantApiError::SocketShape(socket.0.as_ref().to_path_buf()));
-    };
-
-    let root = match SafeDir::open(root, OpenFlags::RDONLY) {
-        Ok(root) => root,
-        Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(GrantApiError::Walk(e)),
-    };
-
-    grant::grant_to_caller(root, leaf).map_err(GrantApiError::from)
+    fn is_retryable(&self, res: &Self::RunT) -> bool {
+        matches!(res, Err(GrantSocketError::Grant(GrantError::Missing)))
+    }
 }

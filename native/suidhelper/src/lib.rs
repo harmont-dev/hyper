@@ -8,6 +8,6 @@
 //! point over these modules.
 
 pub mod config;
+pub mod id;
 pub mod insecure_mode;
 pub mod tools;
-pub mod util;

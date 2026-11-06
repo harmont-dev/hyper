@@ -191,7 +191,7 @@ defmodule Hyper.Node.Reaper do
     log_result(
       "chroot/cgroup",
       id,
-      ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
+      ChrootJail.remove(id)
     )
 
     log_result("dm volume", id, Dmsetup.remove(Img.Mutable.dm_name(id)))

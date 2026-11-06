@@ -723,10 +723,10 @@ name = "hyper-suidhelper"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
- "bon",
  "clap",
  "derive_more",
  "hyperrs-elfsum",
+ "hyperrs-firecracker",
  "hyperrs-fs",
  "hyperrs-linux",
  "hyperrs-process",
@@ -782,6 +782,20 @@ dependencies = [
  "blake3",
  "object",
  "proptest",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyperrs-firecracker"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "derive_more",
+ "hyperrs-fs",
+ "hyperrs-process",
+ "nix 0.29.0",
+ "proptest",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

@@ -142,7 +142,7 @@ defmodule Hyper.Node.FireVMM.State do
     @moduledoc "Poll the (already-launched) daemon's API socket, then advance to `:configuring`."
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
-    alias Hyper.Node.FireVMM.{Client, Jailer, Opts}
+    alias Hyper.Node.FireVMM.{Client, Opts}
     alias Hyper.SuidHelper.ChrootJail
     alias Unit.Time
 
@@ -186,7 +186,7 @@ defmodule Hyper.Node.FireVMM.State do
     defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
 
     defp ensure_api_granted(id, data) do
-      case ChrootJail.grant_api(Jailer.host_socket(id)) do
+      case ChrootJail.grant_api(id) do
         :ok ->
           {:cont, %{data | api_granted: true}}
 
@@ -225,7 +225,7 @@ defmodule Hyper.Node.FireVMM.State do
     use OpenTelemetryDecorator
 
     alias Hyper.Firecracker.Api.{InstanceActionInfo, Operations, Vsock}
-    alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Jailer, Opts}
+    alias Hyper.Node.FireVMM.{BootSpec, ChrootJail, Client, Opts}
     alias Unit.Time
 
     require Logger
@@ -314,7 +314,7 @@ defmodule Hyper.Node.FireVMM.State do
             | {:keep_state, State.t(), list()}
             | {:stop, term(), State.t()}
     defp do_grant_vsock(id, data) do
-      case Hyper.SuidHelper.ChrootJail.grant_vsock(Jailer.host_vsock(id)) do
+      case Hyper.SuidHelper.ChrootJail.grant_vsock(id) do
         :ok ->
           case instance_start(id) do
             :ok ->

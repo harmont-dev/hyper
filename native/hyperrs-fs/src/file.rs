@@ -214,10 +214,23 @@ impl<T, R, O> SafeFile<T, R, O> {
     }
 }
 
-pub trait DeviceType: FileType {}
+pub trait DeviceType: FileType {
+    const KIND: SFlag;
+}
 
-impl DeviceType for IsBlockDevice {}
-impl DeviceType for IsCharDevice {}
+impl DeviceType for IsBlockDevice {
+    const KIND: SFlag = SFlag::S_IFBLK;
+}
+
+impl DeviceType for IsCharDevice {
+    const KIND: SFlag = SFlag::S_IFCHR;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Owner {
+    pub uid: Uid,
+    pub gid: Gid,
+}
 
 impl<T: DeviceType, R, O> SafeFile<T, R, O> {
     /// The device's `rdev` (major:minor), ready for `mknod`.

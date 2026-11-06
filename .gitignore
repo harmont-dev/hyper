@@ -55,3 +55,4 @@ docs/superpowers/
 /test/grpc/node_modules/
 /test/grpc/generated/
 /test/grpc/junit.xml
+.DS_Store

@@ -16,14 +16,15 @@
 use crate::config::Config;
 use crate::tools::IsTool;
 use clap::Args;
+use hyperrs_firecracker::jailer::chroot::JailLayout;
+use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{self, OpenFlags};
-use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
 use hyperrs_linux::cgroup::{self, Cgroup};
 use hyperrs_process::privilege::{Root, Unprivileged};
 use nix::errno::Errno;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error as ThisError;
 
@@ -41,12 +42,6 @@ pub enum JailRemoveError {
 
 #[derive(Debug, ThisError)]
 pub enum ChrootError {
-    #[error("--chroot path: {0}")]
-    Path(#[source] path::ValidationError),
-    #[error("--chroot path: {0}")]
-    Base(#[source] path::RelativeError),
-    #[error("--chroot must be exactly <exec>/<id> below JAIL_BASE: {0:?}")]
-    Depth(PathBuf),
     #[error("opening chroot parent: {0}")]
     Open(#[source] file::ValidationError),
     #[error("removing chroot: {0}")]
@@ -55,12 +50,6 @@ pub enum ChrootError {
 
 #[derive(Debug, ThisError)]
 pub enum CgroupError {
-    #[error("--cgroup path: {0}")]
-    Path(#[source] path::ValidationError),
-    #[error("--cgroup path: {0}")]
-    Base(#[source] path::RelativeError),
-    #[error("--cgroup must be at least two components below /sys/fs/cgroup: {0:?}")]
-    Depth(PathBuf),
     #[error("opening cgroup: {0}")]
     Open(#[source] cgroup::OpenError),
     #[error("killing cgroup procs: {0}")]
@@ -71,12 +60,8 @@ pub enum CgroupError {
 
 #[derive(Args)]
 pub struct RemoveArgs {
-    /// Per-VM chroot directory to remove, shape <JAIL_BASE>/<exec>/<id>.
     #[arg(long)]
-    chroot: PathBuf,
-    /// Per-VM cgroup leaf directory to remove, under /sys/fs/cgroup.
-    #[arg(long)]
-    cgroup: PathBuf,
+    id: VmId,
 }
 
 #[derive(Serialize)]
@@ -105,8 +90,10 @@ impl IsTool for Remove {
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
         // chroot teardown below is not yanking files out from under a live process.
-        remove_cgroup_under(Path::new(cgroup::ROOT), &self.args.cgroup)?;
-        remove_chroot_under(&Config::get().jail_base(), &self.args.chroot)?;
+        let config = Config::get();
+        remove_cgroup(&config.parent_cgroup_dir(), &self.args.id)?;
+        let jail_base = config.jail_base();
+        remove_chroot(&JailLayout::new(&jail_base, &self.args.id))?;
         Ok(())
     }
 
@@ -119,19 +106,13 @@ impl IsTool for Remove {
 /// Recursively remove the per-VM chroot `<jail_base>/<exec>/<id>`, fd-relative
 /// after an `O_NOFOLLOW` walk from `jail_base`. Idempotent on a missing target.
 /// `--chroot` must be exactly `<exec>/<id>` (one parent component, one leaf).
-pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), ChrootError> {
-    let path: &LexicalPath = chroot.try_into().map_err(ChrootError::Path)?;
-    let rel = path.strip_base(jail_base).map_err(ChrootError::Base)?;
-    let (2, Some((parent, id))) = (rel.segments().count(), path.split_last()) else {
-        return Err(ChrootError::Depth(chroot.to_path_buf()));
-    };
-
-    let parent = match SafeDir::open(parent, OpenFlags::RDONLY) {
+pub fn remove_chroot(layout: &JailLayout<'_>) -> Result<(), ChrootError> {
+    let parent = match SafeDir::open(&layout.exec_dir(), OpenFlags::RDONLY) {
         Ok(parent) => parent,
         Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()),
         Err(e) => return Err(ChrootError::Open(e)),
     };
-    match parent.rmdirat_recursive(id) {
+    match parent.rmdirat_recursive(layout.id()) {
         Ok(()) => Ok(()),
         Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
         Err(e) => Err(ChrootError::Remove(e)),
@@ -143,20 +124,78 @@ pub fn remove_chroot_under(jail_base: &Path, chroot: &Path) -> Result<(), Chroot
 /// be at least two components below `base` (one or more parents, plus the leaf).
 /// Idempotent: a missing leaf is success, and a leaf that has not finished
 /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
-pub fn remove_cgroup_under(base: &Path, cgroup: &Path) -> Result<(), CgroupError> {
-    let path: &LexicalPath = cgroup.try_into().map_err(CgroupError::Path)?;
-    let rel = path.strip_base(base).map_err(CgroupError::Base)?;
-    if rel.segments().count() < 2 {
-        return Err(CgroupError::Depth(cgroup.to_path_buf()));
-    }
-
-    // Kill any process still in the leaf cgroup before removing it. Open the leaf
-    // O_NOFOLLOW (one step past the parent walk) and write "1" to cgroup.kill.
-    let cgroup = match Cgroup::open(path) {
+pub fn remove_cgroup(parent: &LexicalPath, id: &VmId) -> Result<(), CgroupError> {
+    let cgroup = match Cgroup::open(&parent.join(id)) {
         Ok(cgroup) => cgroup,
         Err(cgroup::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => return Ok(()),
         Err(e) => return Err(CgroupError::Open(e)),
     };
     cgroup.kill_procs(KILL_TIMEOUT).map_err(CgroupError::Kill)?;
     cgroup.remove().map_err(CgroupError::Remove)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{remove_cgroup, remove_chroot};
+    use hyperrs_firecracker::jailer::chroot::JailLayout;
+    use hyperrs_firecracker::VmId;
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    fn strict(p: &Path) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        p.to_path_buf().try_into().unwrap()
+    }
+
+    fn vm() -> VmId {
+        "id".parse().unwrap()
+    }
+
+    #[test]
+    fn missing_targets_are_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = strict(tmp.path());
+        let id = vm();
+        remove_chroot(&JailLayout::new(&jail, &id)).expect("missing chroot must be Ok");
+
+        let parent = tmp.path().join("hyper");
+        remove_cgroup(&strict(&parent), &id).expect("missing parent must be Ok");
+        fs::create_dir(&parent).unwrap();
+        remove_cgroup(&strict(&parent), &id).expect("missing leaf must be Ok");
+        assert!(parent.exists(), "cgroup parent must survive");
+    }
+
+    #[test]
+    fn removes_chroot_tree_and_spares_siblings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exec = tmp.path().join("firecracker");
+        let victim = exec.join("id");
+        fs::create_dir_all(victim.join("root")).unwrap();
+        fs::write(victim.join("root").join("vmlinux"), b"kernel").unwrap();
+        let sibling = exec.join("other");
+        fs::create_dir_all(&sibling).unwrap();
+
+        let jail = strict(tmp.path());
+        let id = vm();
+        remove_chroot(&JailLayout::new(&jail, &id)).unwrap();
+        assert!(!victim.exists(), "victim chroot must be gone");
+        assert!(sibling.exists(), "sibling chroot must survive");
+    }
+
+    #[test]
+    fn symlinked_exec_component_does_not_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        let sentinel = tmp.path().join("sentinel");
+        fs::create_dir_all(sentinel.join("id")).unwrap();
+        fs::write(sentinel.join("id").join("keep.txt"), b"do not delete").unwrap();
+        symlink(&sentinel, jail.join("firecracker")).unwrap();
+
+        let jail = strict(&jail);
+        let id = vm();
+        let _ = remove_chroot(&JailLayout::new(&jail, &id));
+        assert!(sentinel.join("id").join("keep.txt").exists());
+    }
 }

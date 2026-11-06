@@ -39,6 +39,20 @@ pub enum DispatchError {
     /// stays decoupled from each tool's concrete error type.
     #[error(transparent)]
     Tool(Box<dyn std::error::Error>),
+    #[error(transparent)]
+    Retryable(Box<dyn std::error::Error>),
+}
+
+pub const EXIT_FAILURE: i32 = 2;
+pub const EXIT_RETRYABLE: i32 = 75;
+
+impl DispatchError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            DispatchError::Retryable(_) => EXIT_RETRYABLE,
+            DispatchError::Privilege(_) | DispatchError::Tool(_) => EXIT_FAILURE,
+        }
+    }
 }
 
 /// A device tool: the clap args it accepts, the result type it produces, and how
@@ -58,6 +72,10 @@ pub trait IsTool {
     /// this point, the setuid has been demoted.
     fn parse(&self, res: Self::RunT) -> Result<Self::Output, Box<dyn std::error::Error>>;
 
+    fn is_retryable(&self, _res: &Self::RunT) -> bool {
+        false
+    }
+
     /// The privilege boundary: `run_privileged` executes as root inside the
     /// `Privileged` guard's scope; the guard drops privileges to the real uid
     /// when it falls out of scope, so `parse` (and serialization) never run as
@@ -69,7 +87,14 @@ pub trait IsTool {
             self.run_privileged(&root)
         };
 
-        let output = self.parse(res).map_err(DispatchError::Tool)?;
+        let retryable = self.is_retryable(&res);
+        let output = self.parse(res).map_err(|e| {
+            if retryable {
+                DispatchError::Retryable(e)
+            } else {
+                DispatchError::Tool(e)
+            }
+        })?;
         serde_json::to_value(output).map_err(|e| DispatchError::Tool(Box::new(e)))
     }
 }
