@@ -44,7 +44,19 @@
 //! <div class="warning">
 //!
 //! If you do not call [`hyperrs_elfsum::checksum!`](self::checksum) in your program, then stamping
-//! will fail with [`Error::MissingSection`].
+//! will fail with [`Error::MissingSection`]. If you do not need the checksum, I recommend adding a
+//!
+//! ```no_run
+//! // src/main.rs
+//! let _checksum: &'static hyperrs_elfsum::Slot = hyperrs_elfsum::checksum!();
+//! ```
+//!
+//! </div>
+//!
+//! <div class="warning">
+//!
+//! If you do not perform the compile-time stamping as in the `xtask`, then the resulting checksum
+//! will be `0`.
 //!
 //! </div>
 

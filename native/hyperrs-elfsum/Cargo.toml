@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 stamp = ["dep:blake3", "dep:object", "dep:thiserror"]
 
