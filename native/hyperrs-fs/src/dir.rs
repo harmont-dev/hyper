@@ -115,11 +115,14 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
         )
     }
 
+    /// Create a directory `name` under this directory, with the given `mode`, if it does not exist.
     pub fn ensure_dir(&self, name: &StrictComponent, mode: Mode) -> Result<SafeDir, DirError> {
         self.mkdirat(name, mode)?;
         Ok(self.openat(name, OpenFlags::RDONLY, Mode::empty())?)
     }
 
+    /// Create a device `name` under `self`, with the given `node` device type and the given
+    /// `owner`.
     pub fn make_device<T: DeviceType>(
         &self,
         name: &StrictComponent,
@@ -130,7 +133,9 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
             Ok(()) | Err(Errno::EEXIST) => {}
             Err(errno) => return Err(errno.into()),
         }
+
         let device: SafeFile<T, Any, Any> = self.openat(name, OpenFlags::PATH, Mode::empty())?;
+
         let found = device.rdev()?;
         if found != node.rdev() {
             return Err(DirError::DeviceMismatch {
@@ -138,15 +143,13 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
                 found,
             });
         }
+
         device.chown(Some(owner.uid), Some(owner.gid))?;
         device.chmod(node.mode())?;
+
         Ok(device)
     }
 
-    /// Perform a hard link falling back to a copy into this directory of the source file.
-    ///
-    /// The file will be called `name`, and, if the linking fails due to a filesystem boundary, the
-    /// file will be copied.
     /// Stat a file at the current directory.
     ///
     /// Note that this must remain private as this function is a footgun. It's very dangerous and
