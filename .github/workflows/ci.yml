@@ -279,7 +279,7 @@ jobs:
         run: |
           sudo -E env "PATH=$PATH" \
             cargo llvm-cov nextest \
-            -p hyper-suidhelper -p hyperrs-fs -p hyperrs-process \
+            -p hyper-suidhelper -p hyperrs-fs -p hyperrs-linux -p hyperrs-process \
             --features hyper-suidhelper/insecure_mode \
             -E 'test(/_as_root$/)' --lcov --output-path lcov-privileged.info
 
@@ -504,6 +504,7 @@ jobs:
             ../target/hyper-suidhelper \
             "$GITHUB_WORKSPACE/native/suidhelper/src" \
             "$GITHUB_WORKSPACE/native/hyperrs-fs/src" \
+            "$GITHUB_WORKSPACE/native/hyperrs-linux/src" \
             "$GITHUB_WORKSPACE/native/hyperrs-process/src" \
             > lcov-e2e.info
           sed -i "s|^SF:$GITHUB_WORKSPACE/|SF:|" lcov-e2e.info

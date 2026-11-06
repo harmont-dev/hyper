@@ -1,4 +1,4 @@
-use crate::linux::dm::{DmName, InvalidDmName};
+use hyperrs_linux::dm::{DmName, InvalidDmName};
 use thiserror::Error as ThisError;
 
 const HYPER_PREFIX: &str = "hyper-";

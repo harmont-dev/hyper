@@ -9,6 +9,5 @@
 
 pub mod config;
 pub mod insecure_mode;
-pub mod linux;
 pub mod tools;
 pub mod util;

@@ -2,13 +2,13 @@
 //! Declarative builder for a VM's chroot jail contents.
 
 use crate::config::Config;
-use crate::linux::dm::DmName;
 use hyperrs_fs::dev::DeviceNumber;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{
     self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile,
 };
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
+use hyperrs_linux::dm::DmName;
 use nix::errno::Errno;
 use nix::sys::stat::{Mode, SFlag};
 use nix::unistd::{Gid, Uid};

@@ -14,12 +14,12 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use crate::config::Config;
-use crate::linux::cgroup::{self, Cgroup};
 use crate::tools::IsTool;
 use clap::Args;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_linux::cgroup::{self, Cgroup};
 use hyperrs_process::privilege::{Root, Unprivileged};
 use nix::errno::Errno;
 use serde::Serialize;

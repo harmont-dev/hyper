@@ -4,11 +4,11 @@ mod name;
 mod table;
 
 use super::IsTool;
-use crate::linux::dm::{self, DmName, RemoveMode};
-use crate::linux::loopdev::LoopControl;
-use crate::linux::Access;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
+use hyperrs_linux::dm::{self, DmName, RemoveMode};
+use hyperrs_linux::loopdev::LoopControl;
+use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
 use hyperrs_process::privilege::Root;
 pub use message::{parse_message, MessageError, ThinMessage};

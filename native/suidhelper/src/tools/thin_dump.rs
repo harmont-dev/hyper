@@ -7,18 +7,18 @@
 //! implementations (the original C++ and the `pdata_tools` Rust rewrite)
 //! whose formatting can drift (attribute order, whitespace, escaping) without
 //! changing meaning, and a grammar-level parser is immune to that drift. See
-//! `crate::linux::dm::thin_dump` for the document model.
+//! `hyperrs_linux::dm::thin_dump` for the document model.
 
 use hyperrs_process::privilege::Root;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
-use crate::linux::dm::thin_dump::{self as dump, DumpError, MetadataDump, ThinMappings};
-use crate::linux::dm::ThinId;
-use crate::linux::loopdev::LoopDevNum;
 use clap::Args;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_fs::path;
+use hyperrs_linux::dm::thin_dump::{self as dump, DumpError, MetadataDump, ThinMappings};
+use hyperrs_linux::dm::ThinId;
+use hyperrs_linux::loopdev::LoopDevNum;
 use hyperrs_process::binary::RootSafeBin;
 
 #[derive(Debug, ThisError)]

@@ -1,5 +1,5 @@
 use super::{Device, DmName, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
-use crate::linux::Access;
+use crate::Access;
 use derive_more::{Display, Into};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use std::ffi::OsStr;
@@ -202,7 +202,7 @@ impl<'a> Thin<'a, Active<'a>> {
 #[cfg(test)]
 mod tests {
     use super::{Inactive, SnapshotError, Thin, ThinId, ThinPoolError};
-    use crate::linux::dm::{DmName, Dmsetup};
+    use crate::dm::{DmName, Dmsetup};
     use hyperrs_process::binary::RootSafeBin;
     use proptest::prelude::*;
     use std::fs;

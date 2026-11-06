@@ -1,9 +1,9 @@
 use super::IsTool;
-use crate::linux::dm::DmName;
 use crate::tools::parse_dm_device;
 use clap::Args;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_linux::dm::DmName;
 use hyperrs_process::privilege::Root;
 use serde::Serialize;
 use std::io;

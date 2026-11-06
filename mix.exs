@@ -223,6 +223,7 @@ defmodule Hyper.MixProject do
         native/guest-agent/Cargo.toml native/guest-agent/.cargo
         native/hyperrs-elfsum/src native/hyperrs-elfsum/Cargo.toml
         native/hyperrs-fs/src native/hyperrs-fs/Cargo.toml
+        native/hyperrs-linux/src native/hyperrs-linux/Cargo.toml
         native/hyperrs-process/src native/hyperrs-process/Cargo.toml
         native/suidhelper/src native/suidhelper/tests
         native/suidhelper/xtask native/suidhelper/build.rs

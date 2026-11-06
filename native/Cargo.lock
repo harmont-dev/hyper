@@ -728,6 +728,7 @@ dependencies = [
  "derive_more",
  "hyperrs-elfsum",
  "hyperrs-fs",
+ "hyperrs-linux",
  "hyperrs-process",
  "nix 0.29.0",
  "predicates",
@@ -792,6 +793,22 @@ dependencies = [
  "nix 0.29.0",
  "proptest",
  "ref-cast",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyperrs-linux"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "hyperrs-fs",
+ "hyperrs-process",
+ "nix 0.29.0",
+ "proptest",
+ "quick-xml",
+ "serde",
+ "smart-default",
  "tempfile",
  "thiserror 1.0.69",
 ]

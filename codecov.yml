@@ -27,6 +27,7 @@ flags:
     paths:
       - native/suidhelper/src/
       - native/hyperrs-fs/src/
+      - native/hyperrs-linux/src/
       - native/hyperrs-process/src/
     carryforward: true
 

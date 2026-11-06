@@ -2,11 +2,11 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
-use crate::linux::dm::DmName;
 use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
 use crate::util::chroot_jail::{self, ChrootJail};
 use clap::Args;
+use hyperrs_linux::dm::DmName;
 use hyperrs_process::privilege::{Root, Unprivileged};
 use serde::Serialize;
 use std::path::PathBuf;
