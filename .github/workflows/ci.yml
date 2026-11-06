@@ -499,7 +499,7 @@ jobs:
             -o suidhelper.profdata
           "$TOOLS/llvm-cov" export --format=lcov \
             --instr-profile=suidhelper.profdata \
-            ../target/hyper-suidhelper \
+            ../target/x86_64-unknown-linux-musl/release/hyper-suidhelper \
             "$GITHUB_WORKSPACE/native/suidhelper/src" \
             > lcov-e2e.info
           sed -i "s|^SF:$GITHUB_WORKSPACE/|SF:|" lcov-e2e.info

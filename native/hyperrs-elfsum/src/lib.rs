@@ -13,7 +13,32 @@
 //!
 //! The easiest way to use this is via [`cargo-xtask`](https://github.com/matklad/cargo-xtask).
 //!
-//! TODO
+//! In the binary, reserve the slot and report the checksum at runtime:
+//!
+//! ```no_run
+//! # #[cfg(target_os = "linux")]
+//! # fn main() {
+//! let checksum: &'static hyperrs_elfsum::Slot = hyperrs_elfsum::checksum!();
+//! println!("{}", checksum.hex());
+//! # }
+//! # #[cfg(not(target_os = "linux"))]
+//! # fn main() {}
+//! ```
+//!
+//! In the xtask, after `cargo build`, stamp the built ELF in place (needs the `stamp` feature):
+//!
+//! ```no_run
+//! # #[cfg(feature = "stamp")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let path = "target/release/my-binary";
+//! let mut bytes = std::fs::read(path)?;
+//! hyperrs_elfsum::Elf::read(&mut bytes[..])?.stamp();
+//! std::fs::write(path, &bytes)?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "stamp"))]
+//! # fn main() {}
+//! ```
 
 #[cfg(feature = "stamp")]
 mod stamp;
