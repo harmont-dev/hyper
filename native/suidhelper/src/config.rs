@@ -64,6 +64,7 @@ fn config_path() -> PathBuf {
 #[derive(Debug, Clone, Deserialize, SmartDefault)]
 pub struct Config {
     #[default(default_work_dir())]
+    #[serde(deserialize_with = "safe_path")]
     work_dir: SafePathBuf<IsAbsolute, StrictComponents>,
     #[serde(default)]
     tools: Tools,
@@ -83,6 +84,7 @@ pub struct Config {
 #[serde(default)]
 pub struct Jails {
     #[default(default_parent_cgroup())]
+    #[serde(deserialize_with = "strict_component")]
     cgroup: StrictComponentBuf,
     #[serde(deserialize_with = "uid_gid_range")]
     uid_gid_range: UidGidRange,
@@ -90,6 +92,22 @@ pub struct Jails {
 
 fn uid_gid_range<'de, D: Deserializer<'de>>(deserializer: D) -> Result<UidGidRange, D::Error> {
     UidGidRange::try_from(<[u32; 2]>::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+}
+
+fn safe_path<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<SafePathBuf<IsAbsolute, StrictComponents>, D::Error> {
+    PathBuf::deserialize(deserializer)?
+        .try_into()
+        .map_err(serde::de::Error::custom)
+}
+
+fn strict_component<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<StrictComponentBuf, D::Error> {
+    let raw = String::deserialize(deserializer)?;
+    let component: &StrictComponent = raw.as_str().try_into().map_err(serde::de::Error::custom)?;
+    Ok(component.to_owned())
 }
 
 /// Paths to the external binaries the helper runs, the `[tools]` table.

@@ -3,7 +3,6 @@
 
 use derive_more::AsRef;
 use ref_cast::{ref_cast_custom, RefCastCustom};
-use serde::{Deserialize, Deserializer};
 use std::borrow::Borrow;
 use std::ffi::OsStr;
 use std::marker::PhantomData;
@@ -366,27 +365,6 @@ where
         A::check(&path)?;
         S::check(&path)?;
         Ok(Self(path, PhantomData))
-    }
-}
-
-impl<'de, A, S> Deserialize<'de> for SafePathBuf<A, S>
-where
-    A: Absoluteness,
-    S: Components,
-{
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        PathBuf::deserialize(deserializer)?
-            .try_into()
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-impl<'de> Deserialize<'de> for StrictComponentBuf {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        let component: &StrictComponent =
-            raw.as_str().try_into().map_err(serde::de::Error::custom)?;
-        Ok(component.to_owned())
     }
 }
 
