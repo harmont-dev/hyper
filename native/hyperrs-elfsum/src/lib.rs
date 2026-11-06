@@ -1,4 +1,19 @@
 // SPDX-License-Identifier: MIT
+//! Utility for checksumming a file. Adds a new `.note.sum` ELF section to an ELF file which
+//! includes the full checksum of the ELF file itself, sans the checksum.
+//!
+//! This is generally useful for confirming that an ELF file was not accidentaly tampered with. It
+//! does not perform any serious security guarantees as any attacker could simply tamper the
+//! checksum.
+//!
+//! Mostly useful for ensuring that an ELF file was not corrupted, accidentally in transport, or
+//! that it matches some expected version.
+//!
+//! # Example
+//!
+//! The easiest way to use this is via [`cargo-xtask`](https://github.com/matklad/cargo-xtask).
+//!
+//! TODO
 
 #[cfg(feature = "stamp")]
 mod stamp;
