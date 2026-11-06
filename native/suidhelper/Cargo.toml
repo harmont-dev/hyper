@@ -64,10 +64,6 @@ name = "tools_chroot_jail_grant_vsock"
 path = "tests/tools/chroot_jail_grant_vsock.rs"
 
 [[test]]
-name = "util_chroot_jail"
-path = "tests/util/chroot_jail.rs"
-
-[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 
@@ -100,6 +96,10 @@ name = "config_network"
 path = "tests/config_network.rs"
 
 [[test]]
+name = "config_paths"
+path = "tests/config_paths.rs"
+
+[[test]]
 name = "tools_dmsetup_backing"
 path = "tests/tools/dmsetup_backing.rs"
 
@@ -107,10 +107,10 @@ path = "tests/tools/dmsetup_backing.rs"
 redundant_field_names = "allow"
 
 [dependencies]
-bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
+hyperrs-firecracker = { path = "../hyperrs-firecracker" }
 hyperrs-fs = { path = "../hyperrs-fs" }
 hyperrs-linux = { path = "../hyperrs-linux" }
 hyperrs-process = { path = "../hyperrs-process" }

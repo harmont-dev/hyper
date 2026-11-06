@@ -8,24 +8,28 @@
 //! across the image replacement. There is no output and no return on success.
 //!
 //! The validated newtypes, their refusal contracts, and the `execve` mechanics
-//! live in [`crate::util::jailer`]; this module is only the clap surface plus
+//! live in [`crate::firecracker::jailer`]; this module is only the clap surface plus
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};
-use crate::util::jailer::Jailer;
 use clap::Args;
+use hyperrs_firecracker::id::IdError;
+use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer, VmId};
+use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
+use hyperrs_linux::netns;
 use hyperrs_process::privilege::Unprivileged;
-use std::path::PathBuf;
+use std::convert::Infallible;
+use std::num::NonZeroU64;
 use thiserror::Error as ThisError;
-
-pub use crate::util::jailer::{validate_id_number, CgroupSetting, JailSock, VmId};
 
 #[derive(Debug, ThisError)]
 pub enum JailerError {
     #[error(transparent)]
     Bin(#[from] BinError),
     #[error(transparent)]
-    Jail(#[from] crate::util::jailer::JailerArgError),
+    Jail(#[from] hyperrs_firecracker::jailer::VmIdError),
+    #[error(transparent)]
+    Id(#[from] IdError),
 }
 
 #[derive(Args)]
@@ -39,12 +43,35 @@ pub struct JailerArgs {
     /// Unprivileged gid the jailer drops to (rejected if 0 or out of range).
     #[arg(long)]
     gid: u32,
-    /// Repeatable `KEY=VALUE` cgroup setting from the allowlist.
-    #[arg(long = "cgroup")]
-    cgroup: Vec<CgroupSetting>,
+    #[arg(long)]
+    memory_max: Option<NonZeroU64>,
+    #[command(flatten)]
+    cpu_max: Option<CpuMaxArgs>,
     /// Absolute firecracker API socket path (single filename under `/`).
     #[arg(long = "api-sock")]
-    api_sock: JailSock,
+    api_sock: SafePathBuf<IsAbsolute, StrictComponents>,
+}
+
+#[derive(Args)]
+struct CpuMaxArgs {
+    #[arg(long = "cpu-quota-us", required = false, requires = "period_us")]
+    quota_us: NonZeroU64,
+    #[arg(long = "cpu-period-us", required = false, requires = "quota_us")]
+    period_us: NonZeroU64,
+}
+
+impl From<CpuMaxArgs> for CpuMax {
+    fn from(
+        CpuMaxArgs {
+            quota_us,
+            period_us,
+        }: CpuMaxArgs,
+    ) -> Self {
+        Self {
+            quota_us,
+            period_us,
+        }
+    }
 }
 
 /// Validate the caller's args against trusted config, then hand off to
@@ -52,7 +79,13 @@ pub struct JailerArgs {
 /// On success this never returns (the process image is replaced); the `Ok` arm
 /// is therefore [`std::convert::Infallible`]. Every failure is returned as
 /// [`JailerError`] for the caller to print and exit non-zero.
-pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infallible, JailerError> {
+pub fn run(args: JailerArgs, token: Unprivileged) -> ! {
+    let Err(e) = try_run(args, token);
+    eprintln!("{e}");
+    std::process::exit(2)
+}
+
+fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, JailerError> {
     let config = Config::get();
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
@@ -62,16 +95,16 @@ pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infall
     let jail_base = config.jail_base();
     let range = config.uid_gid_range();
 
-    let uid = validate_id_number(args.uid, range).map_err(JailerError::Jail)?;
-    let gid = validate_id_number(args.gid, range).map_err(JailerError::Jail)?;
+    let uid = range.uid(args.uid)?;
+    let gid = range.gid(args.gid)?;
 
     // The netns path is derived entirely from trusted config (whether VM
     // networking is enabled) and the already-validated `--id` — the caller
     // cannot name it. Must match the `ip netns add <id>` path the network tool
     // creates. Networking is mandatory, so in practice this is always `Some`.
-    let netns: Option<PathBuf> = config
+    let netns = config
         .network()
-        .map(|_| PathBuf::from(format!("/var/run/netns/{}", args.id)));
+        .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&args.id));
 
     Jailer::builder()
         .jailer(&jailer)
@@ -81,10 +114,14 @@ pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infall
         .vm(&args.id)
         .uid(uid)
         .gid(gid)
-        .cgroups(&args.cgroup)
+        .limits(
+            CgroupLimits::builder()
+                .maybe_memory_max(args.memory_max)
+                .maybe_cpu_max(args.cpu_max.map(CpuMax::from))
+                .build(),
+        )
         .api_sock(&args.api_sock)
         .maybe_netns(netns.as_deref())
         .build()
         .invoke(token)
-        .map_err(JailerError::Jail)
 }

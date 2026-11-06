@@ -23,15 +23,21 @@
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
 use hyper_suidhelper::tools::chroot_jail::grant_vsock::{
-    grant_vsock_under, GrantError, GrantOut, GrantVsockError, VsockSocket,
+    grant_vsock_under, GrantError, GrantVsockError, VsockSocket,
 };
-use hyperrs_fs::path::{ComponentError, RelativeError, ValidationError};
+use hyperrs_fs::path::{
+    ComponentError, IsAbsolute, RelativeError, SafePathBuf, StrictComponents, ValidationError,
+};
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, os::unix::fs::MetadataExt};
+
+fn strict(p: impl AsRef<Path>) -> SafePathBuf<IsAbsolute, StrictComponents> {
+    p.as_ref().to_path_buf().try_into().unwrap()
+}
 
 /// Parse an absolute socket path into a validated `VsockSocket`, panicking if
 /// the lexical gate rejects it — for tests whose subject is the base-relative
@@ -97,7 +103,7 @@ fn socket_outside_jail_base_is_rejected() {
     let jail = tmp.path().join("jail");
     fs::create_dir(&jail).unwrap();
     let outside = tmp.path().join("elsewhere/exec/id/root/vsock.sock");
-    let err = grant_vsock_under(&jail, &sock(&outside)).unwrap_err();
+    let err = grant_vsock_under(&strict(&jail), &sock(&outside)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -112,7 +118,7 @@ fn too_shallow_is_shape_error() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let bad = jail.join("exec").join("id").join("vsock.sock"); // missing root/
-    let err = grant_vsock_under(jail, &sock(&bad)).unwrap_err();
+    let err = grant_vsock_under(&strict(jail), &sock(&bad)).unwrap_err();
     assert!(
         matches!(err, GrantVsockError::SocketShape(_)),
         "got {err:?}"
@@ -129,7 +135,7 @@ fn too_deep_is_shape_error() {
         .join("root")
         .join("extra")
         .join("vsock.sock");
-    let err = grant_vsock_under(jail, &sock(&bad)).unwrap_err();
+    let err = grant_vsock_under(&strict(jail), &sock(&bad)).unwrap_err();
     assert!(
         matches!(err, GrantVsockError::SocketShape(_)),
         "got {err:?}"
@@ -142,8 +148,11 @@ fn missing_socket_is_pending() {
     let jail = tmp.path();
     let root = make_root(jail);
     let socket = root.join("vsock.sock"); // never created
-    let out = grant_vsock_under(jail, &sock(&socket)).expect("missing socket must be Ok(Pending)");
-    assert!(matches!(out, GrantOut::Pending), "got {out:?}");
+    let res = grant_vsock_under(&strict(jail), &sock(&socket));
+    assert!(
+        matches!(res, Err(GrantVsockError::Grant(GrantError::Missing))),
+        "got {res:?}"
+    );
 }
 
 #[test]
@@ -151,8 +160,11 @@ fn missing_jail_tree_is_pending() {
     let tmp = tempfile::tempdir().unwrap();
     let jail = tmp.path();
     let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
-    let out = grant_vsock_under(jail, &sock(&socket)).expect("half-built jail must be Ok(Pending)");
-    assert!(matches!(out, GrantOut::Pending), "got {out:?}");
+    let res = grant_vsock_under(&strict(jail), &sock(&socket));
+    assert!(
+        matches!(res, Err(GrantVsockError::Grant(GrantError::Missing))),
+        "got {res:?}"
+    );
 }
 
 #[test]
@@ -164,8 +176,7 @@ fn real_socket_is_granted_and_chmod_0660() {
     let _listener = UnixListener::bind(&socket).unwrap();
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let out = grant_vsock_under(jail, &sock(&socket)).expect("real socket must grant");
-    assert!(matches!(out, GrantOut::Granted), "got {out:?}");
+    grant_vsock_under(&strict(jail), &sock(&socket)).expect("real socket must grant");
 
     let meta = fs::symlink_metadata(&socket).unwrap();
     assert_eq!(meta.mode() & 0o777, 0o660, "socket must be chmod'd 0660");
@@ -195,7 +206,7 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
     fs::write(&imposter, b"not a socket").unwrap();
     fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
 
-    let err = grant_vsock_under(jail, &sock(&imposter)).unwrap_err();
+    let err = grant_vsock_under(&strict(jail), &sock(&imposter)).unwrap_err();
     assert!(
         matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
@@ -218,7 +229,7 @@ fn symlink_at_leaf_is_refused() {
     let link = root.join("vsock.sock");
     symlink(&target, &link).unwrap();
 
-    let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
+    let err = grant_vsock_under(&strict(jail), &sock(&link)).unwrap_err();
     assert!(
         matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
@@ -241,7 +252,7 @@ fn symlinked_component_does_not_escape() {
     symlink(&sentinel, jail.join("exec")).unwrap();
 
     let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
-    let _ = grant_vsock_under(&jail, &sock(&socket)); // O_NOFOLLOW makes the walk refuse
+    let _ = grant_vsock_under(&strict(&jail), &sock(&socket)); // O_NOFOLLOW makes the walk refuse
 
     assert_eq!(
         fs::symlink_metadata(&outside_socket).unwrap().mode() & 0o777,
@@ -264,7 +275,7 @@ fn symlink_to_real_socket_at_leaf_is_refused_and_target_untouched() {
     let link = root.join("vsock.sock");
     symlink(&outside, &link).unwrap();
 
-    let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
+    let err = grant_vsock_under(&strict(jail), &sock(&link)).unwrap_err();
     assert!(
         matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
@@ -288,13 +299,13 @@ fn unreadable_jail_base_is_a_hard_walk_error_not_pending() {
     let socket = jail.join("exec").join("id").join("root").join("vsock.sock");
     fs::set_permissions(&jail, fs::Permissions::from_mode(0o000)).unwrap();
 
-    let res = grant_vsock_under(&jail, &sock(&socket));
+    let res = grant_vsock_under(&strict(&jail), &sock(&socket));
     // Restore before asserting so the tempdir can clean up even on failure.
     fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(
         matches!(res, Err(GrantVsockError::Walk(_))),
-        "EACCES must be a hard Walk error, never Ok(Pending): got {res:?}",
+        "EACCES must be a hard Walk error, never Missing: got {res:?}",
     );
 }
 
@@ -307,6 +318,10 @@ proptest! {
     fn shape_classification(
         parents in prop::collection::vec("[a-z][a-z0-9]{0,5}", 1..6)
     ) {
+        let mut parents = parents;
+        if parents.len() == 3 {
+            parents[2] = "root".to_string();
+        }
         let tmp = tempfile::tempdir().unwrap();
         let jail = tmp.path();
         let mut socket = jail.to_path_buf();
@@ -314,9 +329,9 @@ proptest! {
             socket.push(c);
         }
         socket.push("vsock.sock");
-        let res = grant_vsock_under(jail, &sock(&socket));
+        let res = grant_vsock_under(&strict(jail), &sock(&socket));
         if parents.len() == 3 {
-            prop_assert!(matches!(res, Ok(GrantOut::Pending)), "depth 3 must be Pending, got {res:?}");
+            prop_assert!(matches!(res, Err(GrantVsockError::Grant(GrantError::Missing))), "got {res:?}");
         } else {
             prop_assert!(matches!(res, Err(GrantVsockError::SocketShape(_))), "got {res:?}");
         }

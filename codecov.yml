@@ -26,6 +26,7 @@ flags:
   rust:
     paths:
       - native/suidhelper/src/
+      - native/hyperrs-firecracker/src/
       - native/hyperrs-fs/src/
       - native/hyperrs-linux/src/
       - native/hyperrs-process/src/

@@ -11,6 +11,7 @@ redundant_field_names = "allow"
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "into", "add", "debug"] }
 nix = { version = "0.29", features = ["user", "fs", "dir", "ioctl"] }
 ref-cast = "1.0.25"
+serde = "1"
 thiserror = "1"
 
 [dev-dependencies]

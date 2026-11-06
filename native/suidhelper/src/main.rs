@@ -16,7 +16,7 @@
 use clap::{Parser, Subcommand};
 use hyper_suidhelper::config;
 use hyper_suidhelper::tools::jailer::{self, JailerArgs};
-use hyper_suidhelper::tools::Tool;
+use hyper_suidhelper::tools::{Tool, EXIT_FAILURE};
 use hyperrs_process::privilege::{self, Unprivileged};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -83,7 +83,7 @@ impl SysTest {
         drop(token.elevate()?);
         Ok(Self {
             sys_test: "ok",
-            hyper_base: config::Config::get().hyper_base().to_path_buf(),
+            hyper_base: config::Config::get().hyper_base().as_path().to_path_buf(),
         })
     }
 }
@@ -110,25 +110,20 @@ fn run(mut token: Unprivileged) {
         Command::Tool(tool) => tool
             .run(&mut token)
             .map(Output::Tool)
-            .map_err(|e| e.to_string()),
+            .map_err(|e| (e.exit_code(), e.to_string())),
         Command::SysTest => SysTest::perform(&mut token)
             .map(Output::SysTest)
-            .map_err(|e| e.to_string()),
-        Command::Jailer(args) => {
-            let e = jailer::run(args, token).expect_err("jailer::run only returns on error");
-            eprintln!("{e}");
-            // _exit bypasses atexit handlers; safe because we are permanently root
-            // at this point and must not run any cleanup registered before escalation.
-            unsafe { nix::libc::_exit(2) }
-        }
+            .map_err(|e| (EXIT_FAILURE, e.to_string())),
+        Command::Jailer(args) => jailer::run(args, token),
         Command::Version => unreachable!("handled above"),
     };
 
-    match output.and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())) {
+    match output.and_then(|o| serde_json::to_string(&o).map_err(|e| (EXIT_FAILURE, e.to_string())))
+    {
         Ok(json) => println!("{json}"),
-        Err(msg) => {
+        Err((code, msg)) => {
             eprintln!("{msg}");
-            std::process::exit(2);
+            std::process::exit(code);
         }
     }
 }

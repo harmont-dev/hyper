@@ -74,11 +74,18 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     refute "--" in args
   end
 
-  test "args include --cgroup cpu.max and memory.max for :micro type" do
+  test "args carry the :micro cgroup limits as typed flags" do
     %{args: args} = Jailer.command(micro_opts())
-    assert "--cgroup" in args
-    assert Enum.any?(args, &String.starts_with?(&1, "cpu.max="))
-    assert Enum.any?(args, &String.starts_with?(&1, "memory.max="))
+    cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
+
+    assert flag_value(args, "--memory-max") == to_string(cgroup.memory_max)
+    assert flag_value(args, "--cpu-quota-us") == to_string(cgroup.cpu_max.quota_us)
+    assert flag_value(args, "--cpu-period-us") == to_string(cgroup.cpu_max.period_us)
+    refute "--cgroup" in args
+  end
+
+  defp flag_value(args, flag) do
+    args |> Enum.drop_while(&(&1 != flag)) |> Enum.at(1)
   end
 
   test "host_vsock/1 returns the chroot-rooted host path for vsock.sock" do

@@ -46,8 +46,8 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     end
   end
 
-  @granted_json ~S({"result":"granted"})
-  @pending_json ~S({"result":"pending"})
+  @granted_script "echo null"
+  @pending_script "echo 'socket does not exist yet' >&2; exit 75"
 
   setup context do
     tmp = Path.join(System.tmp_dir!(), "cfg-vsock-#{System.unique_integer([:positive])}")
@@ -91,7 +91,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
   test "granted: InstanceStart is issued and the VM advances to :running", %{tmp: tmp} do
     vm_id = Hyper.Vm.Id.generate()
-    stub_helper!(tmp, "echo '#{@granted_json}'")
+    stub_helper!(tmp, @granted_script)
     start_supervised!({ClientStub, {vm_id, self()}})
     await_client(vm_id)
 
@@ -108,7 +108,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     # InstanceStart attempt would crash the call — its absence is asserted
     # implicitly by the handler returning at all.
     rows = [
-      {"pending", "echo '#{@pending_json}'"},
+      {"pending", @pending_script},
       {"hard error", "echo boom >&2; exit 3"}
     ]
 
@@ -130,7 +130,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     # grant itself kept failing (exit 3, stderr text)" — the diagnostic an
     # operator gets for a boot that never came up.
     rows = [
-      {"echo '#{@pending_json}'", :socket_pending},
+      {@pending_script, :socket_pending},
       {"echo boom >&2; exit 3", {:grant_vsock, {3, "boom"}}}
     ]
 

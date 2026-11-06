@@ -2,23 +2,36 @@
 //! `chroot-jail prepare`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
+use crate::config::Config;
 use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
-use crate::util::chroot_jail::{self, ChrootJail};
 use clap::Args;
-use hyperrs_linux::dm::DmName;
+use hyperrs_firecracker::chroot_jail::{self, JailRoot, KernelImage};
+use hyperrs_firecracker::id::JailOwner;
+use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+use hyperrs_linux::dm::{DmName, OpenDeviceError};
 use hyperrs_process::privilege::{Root, Unprivileged};
 use serde::Serialize;
-use std::path::PathBuf;
+use thiserror::Error as ThisError;
+
+#[derive(Debug, ThisError)]
+pub enum JailPrepareError {
+    #[error(transparent)]
+    Jail(#[from] chroot_jail::OpenError),
+    #[error("opening rootfs device: {0}")]
+    Device(#[from] OpenDeviceError),
+    #[error(transparent)]
+    Build(#[from] chroot_jail::BuildError),
+}
 
 #[derive(Args)]
 pub struct PrepareArgs {
     /// Chroot root directory (under JAIL_BASE, shape <JAIL_BASE>/<exec>/<id>).
     #[arg(long)]
-    chroot: PathBuf,
+    chroot: SafePathBuf<IsAbsolute, StrictComponents>,
     /// Host kernel image path (under /srv/hyper); staged as <chroot>/vmlinux.
     #[arg(long)]
-    kernel: PathBuf,
+    kernel: SafePathBuf<IsAbsolute, StrictComponents>,
     /// Host block device to mirror as <chroot>/rootfs (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
     #[arg(long, value_parser = parse_dm_device)]
@@ -42,24 +55,50 @@ pub fn run(
     args: PrepareArgs,
     token: &mut Unprivileged,
 ) -> Result<serde_json::Value, crate::tools::DispatchError> {
-    Prepare { args }.run(token)
+    let config = Config::get();
+    let range = config.uid_gid_range();
+    let owner = JailOwner {
+        uid: range
+            .uid(args.uid)
+            .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?,
+        gid: range
+            .gid(args.gid)
+            .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?,
+    };
+    let kernel = KernelImage::open(&args.kernel)
+        .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?;
+    let tun = config.network().is_some();
+    Prepare {
+        args,
+        kernel,
+        owner,
+        tun,
+    }
+    .run(token)
 }
 
 struct Prepare {
     args: PrepareArgs,
+    kernel: KernelImage,
+    owner: JailOwner,
+    tun: bool,
 }
 
 impl IsTool for Prepare {
     type Args = PrepareArgs;
     type Output = PrepareOut;
-    type RunT = Result<(), chroot_jail::ChrootJailError>;
+    type RunT = Result<(), JailPrepareError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
-        let args = &self.args;
-        ChrootJail::new(args.chroot.clone(), args.uid, args.gid)
-            .with_kernel(args.kernel.clone())
-            .with_rootfs(args.device.clone())
-            .build()
+        let config = Config::get();
+        let root = JailRoot::open(&config.jail_base(), &self.args.chroot)?;
+        let device = self.args.device.open()?;
+        root.builder(self.owner)
+            .kernel(&self.kernel)
+            .rootfs(&device)
+            .tun(self.tun)
+            .build()?;
+        Ok(())
     }
 
     fn parse(&self, res: Self::RunT) -> Result<PrepareOut, Box<dyn std::error::Error>> {

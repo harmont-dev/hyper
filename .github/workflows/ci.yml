@@ -503,6 +503,7 @@ jobs:
             --instr-profile=suidhelper.profdata \
             ../target/hyper-suidhelper \
             "$GITHUB_WORKSPACE/native/suidhelper/src" \
+            "$GITHUB_WORKSPACE/native/hyperrs-firecracker/src" \
             "$GITHUB_WORKSPACE/native/hyperrs-fs/src" \
             "$GITHUB_WORKSPACE/native/hyperrs-linux/src" \
             "$GITHUB_WORKSPACE/native/hyperrs-process/src" \

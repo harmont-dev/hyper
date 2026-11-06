@@ -10,4 +10,3 @@
 pub mod config;
 pub mod insecure_mode;
 pub mod tools;
-pub mod util;

@@ -12,6 +12,8 @@ defmodule Hyper.SuidHelper.ChrootJail do
 
   @type err :: SuidHelper.err()
 
+  @exit_retryable 75
+
   @doc """
   Prepare `chroot_root`'s boot artifacts: stage the `kernel` file in and `mknod`
   a node mirroring the rootfs `device`, both owned `uid:gid`. The helper places
@@ -73,8 +75,8 @@ defmodule Hyper.SuidHelper.ChrootJail do
   @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_api", include: [:socket])
   def grant_api(socket) do
     case SuidHelper.exec(["chroot-jail", "grant-api", "--socket", socket]) do
-      {:ok, %{"result" => "granted"}} -> :ok
-      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+      {:ok, _} -> :ok
+      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end
@@ -93,8 +95,8 @@ defmodule Hyper.SuidHelper.ChrootJail do
   @decorate with_span("Hyper.SuidHelper.ChrootJail.grant_vsock", include: [:socket])
   def grant_vsock(socket) do
     case SuidHelper.exec(["chroot-jail", "grant-vsock", "--socket", socket]) do
-      {:ok, %{"result" => "granted"}} -> :ok
-      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
+      {:ok, _} -> :ok
+      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end
