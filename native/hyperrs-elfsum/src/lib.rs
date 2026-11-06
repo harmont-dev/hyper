@@ -25,13 +25,6 @@
 //! # fn main() {}
 //! ```
 //!
-//! <div class="warning">
-//!
-//! If you do not call [`hyperrs_elfsum::checksum!`](self::checksum), then [`hyperrs_elfsum`](self)
-//! will skip stamping your binary.
-//!
-//! </div>
-//!
 //! In a new xtask, after `cargo build`, stamp the built ELF in place (needs the `stamp` feature):
 //!
 //! ```no_run
@@ -47,6 +40,13 @@
 //! # #[cfg(not(feature = "stamp"))]
 //! # fn main() {}
 //! ```
+//!
+//! <div class="warning">
+//!
+//! If you do not call [`hyperrs_elfsum::checksum!`](self::checksum) in your program, then stamping
+//! will fail with [`Error::MissingSection`].
+//!
+//! </div>
 
 #[cfg(feature = "stamp")]
 mod stamp;
