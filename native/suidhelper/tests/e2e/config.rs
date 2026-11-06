@@ -4,7 +4,7 @@
 #![cfg(feature = "insecure_mode")]
 
 use hyper_suidhelper::config::{BinError, Config};
-use hyper_suidhelper::process::binary;
+use hyperrs_process::binary;
 use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use std::fs;

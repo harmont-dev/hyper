@@ -1,9 +1,11 @@
 //! Utilities for interacting with `/dev/loop-control`.
 use super::Access;
-use crate::fs::dev::DeviceNumber;
-use crate::fs::file::{self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use derive_more::{Display, From};
+use hyperrs_fs::dev::DeviceNumber;
+use hyperrs_fs::file::{
+    self, Any, IsBlockDevice, IsCharDevice, IsRegularFile, OpenFlags, SafeFile,
+};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use nix::errno::Errno;
 use smart_default::SmartDefault;
 use std::os::unix::io::AsRawFd;

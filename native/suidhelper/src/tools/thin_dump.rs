@@ -9,17 +9,17 @@
 //! changing meaning, and a grammar-level parser is immune to that drift. See
 //! `crate::linux::dm::thin_dump` for the document model.
 
-use crate::process::privilege::Root;
+use hyperrs_process::privilege::Root;
 use thiserror::Error as ThisError;
 
 use super::IsTool;
-use crate::fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
-use crate::fs::path;
 use crate::linux::dm::thin_dump::{self as dump, DumpError, MetadataDump, ThinMappings};
 use crate::linux::dm::ThinId;
 use crate::linux::loopdev::LoopDevNum;
-use crate::process::binary::RootSafeBin;
 use clap::Args;
+use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
+use hyperrs_fs::path;
+use hyperrs_process::binary::RootSafeBin;
 
 #[derive(Debug, ThisError)]
 pub enum ToolError {

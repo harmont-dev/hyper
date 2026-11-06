@@ -1,7 +1,7 @@
-use crate::fs::path::{
+use derive_more::Display;
+use hyperrs_fs::path::{
     IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
 };
-use derive_more::Display;
 use std::ffi::OsStr;
 use std::str::FromStr;
 use thiserror::Error as ThisError;

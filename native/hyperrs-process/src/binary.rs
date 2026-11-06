@@ -1,6 +1,6 @@
 //! Utilities for interacting with binaries.
-use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
+use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};

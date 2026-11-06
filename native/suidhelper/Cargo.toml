@@ -24,10 +24,6 @@ required-features = ["insecure_mode"]
 # auto-discovers test files at the top level of `tests/`, so each nested file
 # needs an explicit target pointing at its path.
 [[test]]
-name = "safe_path"
-path = "tests/util/safe_path.rs"
-
-[[test]]
 name = "config_seam"
 path = "tests/config_seam.rs"
 
@@ -54,10 +50,6 @@ path = "tests/tools/network_args.rs"
 [[test]]
 name = "tools_host_init"
 path = "tests/tools/host_init.rs"
-
-[[test]]
-name = "util_confinement"
-path = "tests/util/confinement.rs"
 
 [[test]]
 name = "tools_chroot_jail_remove"
@@ -119,9 +111,10 @@ bon = "3.9.3"
 clap = { version = "4", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
+hyperrs-fs = { path = "../hyperrs-fs" }
+hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
-ref-cast = "1.0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 smart-default = "0.7.1"

@@ -33,12 +33,12 @@
 
 use super::grant;
 use crate::config::Config;
-use crate::fs::dir::SafeDir;
-use crate::fs::file::{self, OpenFlags};
-use crate::fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
-use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{self, OpenFlags};
+use hyperrs_fs::path::{self, IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+use hyperrs_process::privilege::{Root, Unprivileged};
 use nix::errno::Errno;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -61,7 +61,7 @@ pub enum Error {
     #[error("--socket leaf must be {SOCKET_NAME:?}: {0:?}")]
     SocketName(PathBuf),
     #[error("walking to the jail root: {0}")]
-    Walk(#[source] crate::fs::file::ValidationError),
+    Walk(#[source] hyperrs_fs::file::ValidationError),
     #[error(transparent)]
     Grant(#[from] GrantError),
 }

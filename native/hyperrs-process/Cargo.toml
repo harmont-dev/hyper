@@ -1,0 +1,14 @@
+[package]
+name = "hyperrs-process"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["display"] }
+hyperrs-fs = { path = "../hyperrs-fs" }
+nix = { version = "0.29", features = ["user", "fs"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

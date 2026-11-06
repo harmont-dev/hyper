@@ -1,5 +1,5 @@
 use super::Cgroup;
-use crate::fs::file::{Any, IsRegularFile, SafeFile};
+use hyperrs_fs::file::{Any, IsRegularFile, SafeFile};
 use nix::errno::Errno;
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::unistd::{lseek, read, Whence};
@@ -80,8 +80,8 @@ impl Events<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Events, EventsState, ReadError};
-    use crate::fs::file::{OpenFlags, SafeFile};
-    use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
+    use hyperrs_fs::file::{OpenFlags, SafeFile};
+    use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use proptest::prelude::*;
     use std::fs;
     use tempfile::NamedTempFile;

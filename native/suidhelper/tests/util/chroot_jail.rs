@@ -12,13 +12,13 @@
 //! device stages the kernel AND creates the `rootfs` block node whose major:minor
 //! mirrors the source device, owned by the requested uid:gid.
 
-use hyper_suidhelper::fs::dir::SafeDir;
-use hyper_suidhelper::fs::file::OpenFlags;
-use hyper_suidhelper::fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use hyper_suidhelper::linux::dm::DmName;
 use hyper_suidhelper::util::chroot_jail::{
     open_chroot_under, stage_kernel_under, ChrootJail, Error,
 };
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::OpenFlags;
+use hyperrs_fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
 use nix::errno::Errno;
 use std::fs;
 use std::os::unix::fs::{symlink, MetadataExt};

@@ -4,11 +4,11 @@ use super::args;
 use super::exec;
 use super::prepare;
 use super::NetworkOut;
-use crate::process::binary::RootSafeBin;
-use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::jailer::VmId;
 use crate::tools::IsTool;
 use clap::Args;
+use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{Root, Unprivileged};
 use thiserror::Error as ThisError;
 
 #[derive(Args)]

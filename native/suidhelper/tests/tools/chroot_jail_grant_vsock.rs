@@ -22,10 +22,10 @@
 //!     its parent `root` dir is opened for the caller's group to traverse
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
-use hyper_suidhelper::fs::path::{ComponentError, RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_vsock::{
     grant_vsock_under, Error, GrantError, GrantOut, VsockSocket,
 };
+use hyperrs_fs::path::{ComponentError, RelativeError, ValidationError};
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::net::UnixListener;

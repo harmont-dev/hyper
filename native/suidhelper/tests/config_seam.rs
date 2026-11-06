@@ -8,7 +8,7 @@
 #![cfg(feature = "insecure_mode")]
 
 use hyper_suidhelper::config::{Config, LoadingError};
-use hyper_suidhelper::fs::path::{ComponentError, ValidationError};
+use hyperrs_fs::path::{ComponentError, ValidationError};
 
 #[test]
 fn override_path_is_consulted_through_the_real_lexical_gate() {

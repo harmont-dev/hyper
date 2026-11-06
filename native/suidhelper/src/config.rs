@@ -8,9 +8,9 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
-use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
-use crate::process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
+use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::Deserialize;
 use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;

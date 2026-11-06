@@ -26,6 +26,8 @@ flags:
   rust:
     paths:
       - native/suidhelper/src/
+      - native/hyperrs-fs/src/
+      - native/hyperrs-process/src/
     carryforward: true
 
 # Generated bindings, Mix tasks, deps, and test code never count toward

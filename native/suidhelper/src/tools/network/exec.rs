@@ -5,7 +5,7 @@
 //! the whole privileged window for every network op — `prepare`, `teardown`,
 //! and `host_init` differ only in which commands they hand to [`run_all`].
 use super::args::{Command, Which};
-use crate::process::privilege::{Root, RootCommandExt};
+use hyperrs_process::privilege::{Root, RootCommandExt};
 use std::os::unix::io::BorrowedFd;
 use std::process::Command as Proc;
 use thiserror::Error as ThisError;

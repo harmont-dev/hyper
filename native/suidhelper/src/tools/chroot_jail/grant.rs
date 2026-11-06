@@ -7,9 +7,9 @@
 //! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
 //! the logic block.
 
-use crate::fs::dir::SafeDir;
-use crate::fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
-use crate::fs::path::StrictComponent;
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
+use hyperrs_fs::path::StrictComponent;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};

@@ -12,8 +12,8 @@ pub use grant_vsock::GrantVsockArgs;
 pub use prepare::PrepareArgs;
 pub use remove::RemoveArgs;
 
-use crate::process::privilege::Unprivileged;
 use clap::Subcommand;
+use hyperrs_process::privilege::Unprivileged;
 
 #[derive(Subcommand)]
 pub enum ChrootJailOp {

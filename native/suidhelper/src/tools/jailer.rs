@@ -12,9 +12,9 @@
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};
-use crate::process::privilege::Unprivileged;
 use crate::util::jailer::Jailer;
 use clap::Args;
+use hyperrs_process::privilege::Unprivileged;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 

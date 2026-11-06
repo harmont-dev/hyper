@@ -1,12 +1,12 @@
 use super::backing::{BackingError, BackingFile};
 use super::name::{parse_dm_device, NameError};
 use crate::config::Config;
-use crate::fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use crate::linux::dm::{
     DmName, DmTable, LinearTable, ParseThinIdError, Persistence, SnapshotTable, ThinId,
     ThinPoolTable, ThinTable,
 };
 use crate::linux::loopdev::LoopDevice;
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use serde::Serialize;
 use std::fmt;
 use std::path::PathBuf;

@@ -1,5 +1,5 @@
-use crate::fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

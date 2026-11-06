@@ -21,10 +21,10 @@
 //! - [`JailSock`] accepts exactly `/` + one filename and rejects multi-component,
 //!   relative, `..`, and NUL/whitespace inputs.
 
-use crate::process::binary::{RootSafeBin, RootSafeBinPathBuf};
-use crate::process::privilege::{RootCommandExt, Unprivileged};
 use bon::Builder;
 use derive_more::{AsRef, Display};
+use hyperrs_process::binary::{RootSafeBin, RootSafeBinPathBuf};
+use hyperrs_process::privilege::{RootCommandExt, Unprivileged};
 use std::ffi::{CString, NulError, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;

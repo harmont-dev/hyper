@@ -17,8 +17,8 @@ pub mod teardown;
 pub mod teardown_orphan;
 
 use crate::config::Network;
-use crate::process::privilege::Unprivileged;
 use clap::Subcommand;
+use hyperrs_process::privilege::Unprivileged;
 use serde::Serialize;
 use thiserror::Error as ThisError;
 

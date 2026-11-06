@@ -23,8 +23,8 @@ pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
-use crate::process::privilege::{self, Root, Unprivileged};
 use clap::Subcommand;
+use hyperrs_process::privilege::{self, Root, Unprivileged};
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
