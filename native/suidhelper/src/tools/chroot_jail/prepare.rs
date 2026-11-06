@@ -41,7 +41,7 @@ pub enum PrepareOut {
 pub fn run(
     args: PrepareArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     Prepare { args }.run(token)
 }
 
@@ -52,7 +52,7 @@ struct Prepare {
 impl IsTool for Prepare {
     type Args = PrepareArgs;
     type Output = PrepareOut;
-    type RunT = Result<(), chroot_jail::Error>;
+    type RunT = Result<(), chroot_jail::ChrootJailError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let args = &self.args;

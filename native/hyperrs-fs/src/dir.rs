@@ -18,26 +18,21 @@ use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
 use thiserror::Error as ThisError;
 
-/// Failure of an operation that both opens (verifying the result) and makes
-/// further syscalls: [`SafeDir::write_file`] and [`SafeDir::remove_dir_all`].
-/// Every other operation returns [`ValidationError`] (opens) or
-/// [`nix::Error`] (plain syscalls) directly.
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum DirError {
     #[error(transparent)]
     Open(#[from] ValidationError),
     #[error(transparent)]
     Sys(#[from] Errno),
 }
 
-impl Error {
-    /// The underlying errno, for callers that treat some failures as success
-    /// (e.g. idempotent removal on `ENOENT`).
+impl DirError {
+    /// The underlying errno.
     pub fn errno(&self) -> Option<Errno> {
         match self {
-            Error::Open(ValidationError::Open(errno) | ValidationError::Fstat(errno))
-            | Error::Sys(errno) => Some(*errno),
-            Error::Open(_) => None,
+            DirError::Open(ValidationError::Open(errno) | ValidationError::Fstat(errno))
+            | DirError::Sys(errno) => Some(*errno),
+            DirError::Open(_) => None,
         }
     }
 }
@@ -144,7 +139,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     }
 
     /// Recursively, without following symlinks, remove child `name` and everything under it.
-    pub fn rmdirat_recursive(&self, name: &StrictComponent) -> Result<(), Error> {
+    pub fn rmdirat_recursive(&self, name: &StrictComponent) -> Result<(), DirError> {
         let child: SafeDir = self.openat(name, OpenFlags::RDONLY, Mode::empty())?;
         let entries = child.entries()?.collect::<nix::Result<Vec<_>>>()?;
         for (entry, ty) in entries {
@@ -159,7 +154,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     /// Get an iterator through all the entries in this directory.
     pub fn entries(
         &self,
-    ) -> Result<impl Iterator<Item = nix::Result<(StrictComponentBuf, Type)>> + '_, Error> {
+    ) -> Result<impl Iterator<Item = nix::Result<(StrictComponentBuf, Type)>> + '_, DirError> {
         let fresh: SafeDir = self.openat(Path::new("."), OpenFlags::RDONLY, Mode::empty())?;
 
         Ok(Dir::from(OwnedFd::from(fresh))?
@@ -202,11 +197,6 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
 
 #[cfg(test)]
 mod tests {
-    //! L2: the fd-relative confinement primitives. The security promise is that a
-    //! symlinked component can never redirect a walk or a recursive delete outside
-    //! the anchored tree. These run unprivileged in a tempdir; the cases needing
-    //! root (mknod, chown to another uid) are out of scope here.
-
     use super::SafeDir;
     use crate::file::{Any, IsRegularFile, OpenFlags, ValidationError};
     use crate::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
@@ -228,9 +218,6 @@ mod tests {
             .expect("test path must be strict-absolute")
     }
 
-    // remove_dir_all must unlink a symlinked entry, never follow it: a symlink
-    // inside the tree pointing at an external sentinel must leave the sentinel and
-    // its contents intact. This is the core TOCTOU guarantee.
     #[test]
     fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree() {
         let tmp = tempfile::tempdir().unwrap();
@@ -259,8 +246,6 @@ mod tests {
         );
     }
 
-    // openat never resolves outside its pinned dir or through a symlink, even for a
-    // multi-component name: the kernel refuses each with its own errno.
     #[test]
     fn openat_refuses_escape_and_symlinked_components() {
         let tmp = tempfile::tempdir().unwrap();
@@ -291,7 +276,6 @@ mod tests {
             .is_ok());
     }
 
-    // remove_dir_all recurses through real nested directories.
     #[test]
     fn rmdirat_recursive_clears_nested_tree() {
         let tmp = tempfile::tempdir().unwrap();

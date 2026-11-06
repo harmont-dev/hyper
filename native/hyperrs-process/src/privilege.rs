@@ -84,7 +84,7 @@ pub enum SealStep {
 }
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum PrivilegeError {
     #[error("raising euid to root: {0}")]
     RaiseUser(#[source] Errno),
     #[error("raising egid to root: {0}")]
@@ -139,9 +139,9 @@ impl Unprivileged {
         Ok(Self { _seal: () })
     }
 
-    pub fn elevate(&mut self) -> Result<Root<'_>, Error> {
-        seteuid(ROOT_UID).map_err(Error::RaiseUser)?;
-        setegid(ROOT_GID).map_err(Error::RaiseGroup)?;
+    pub fn elevate(&mut self) -> Result<Root<'_>, PrivilegeError> {
+        seteuid(ROOT_UID).map_err(PrivilegeError::RaiseUser)?;
+        setegid(ROOT_GID).map_err(PrivilegeError::RaiseGroup)?;
 
         let root = Root {
             _token: PhantomData,
@@ -174,15 +174,15 @@ fn seal_root(inherit: &[RawFd]) -> io::Result<()> {
     };
 
     if rc != 0 {
-        return Err(io::Error::other(Error::MarkCloexec(Errno::last())));
+        return Err(io::Error::other(PrivilegeError::MarkCloexec(Errno::last())));
     }
 
     for &fd in inherit {
         fcntl(fd, FcntlArg::F_SETFD(FdFlag::empty()))
-            .map_err(|errno| io::Error::other(Error::Inherit { fd, errno }))?;
+            .map_err(|errno| io::Error::other(PrivilegeError::Inherit { fd, errno }))?;
     }
 
-    let seal = |step| move |errno| io::Error::other(Error::Seal { step, errno });
+    let seal = |step| move |errno| io::Error::other(PrivilegeError::Seal { step, errno });
 
     seteuid(ROOT_UID).map_err(seal(SealStep::Euid))?;
     setresgid(ROOT_GID, ROOT_GID, ROOT_GID).map_err(seal(SealStep::Gids))?;

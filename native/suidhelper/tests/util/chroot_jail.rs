@@ -14,7 +14,7 @@
 
 use hyper_suidhelper::linux::dm::DmName;
 use hyper_suidhelper::util::chroot_jail::{
-    open_chroot_under, stage_kernel_under, ChrootJail, Error,
+    open_chroot_under, stage_kernel_under, ChrootJail, ChrootJailError,
 };
 use hyperrs_fs::dir::SafeDir;
 use hyperrs_fs::file::OpenFlags;
@@ -80,7 +80,7 @@ fn open_chroot_rejects_path_outside_base() {
     let result = open_chroot_under(&jail, &outside);
     let err = result.expect_err("expected an error for path outside base");
     assert!(
-        matches!(err, Error::Relative(RelativeError::NotUnderBase)),
+        matches!(err, ChrootJailError::Relative(RelativeError::NotUnderBase)),
         "got {err:?}",
     );
 }
@@ -98,7 +98,10 @@ fn stage_kernel_rejects_source_outside_base() {
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &outside, &hyper_base, uid, gid).unwrap_err();
-    assert!(matches!(err, Error::OutsideBase { .. }), "got {err:?}");
+    assert!(
+        matches!(err, ChrootJailError::OutsideBase { .. }),
+        "got {err:?}"
+    );
 }
 
 // A source UNDER hyper_base but which is a symlink RESOLVING outside it is
@@ -120,7 +123,7 @@ fn stage_kernel_rejects_symlink_escaping_base() {
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &link, &hyper_base, uid, gid).unwrap_err();
     assert!(
-        matches!(err, Error::OutsideBase { .. }),
+        matches!(err, ChrootJailError::OutsideBase { .. }),
         "symlink escaping the base must be refused, got {err:?}",
     );
 }
@@ -137,7 +140,7 @@ fn stage_kernel_missing_source_errors() {
     let chroot = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let (uid, gid) = own_ids();
     let err = stage_kernel_under(&chroot, &missing, hyper_base, uid, gid).unwrap_err();
-    assert!(matches!(err, Error::Source { .. }), "got {err:?}");
+    assert!(matches!(err, ChrootJailError::Source { .. }), "got {err:?}");
 }
 
 // A confined source is staged byte-identically as `vmlinux`; re-staging into the
@@ -166,7 +169,7 @@ fn stage_kernel_materializes_then_refuses_overwrite() {
     let chroot2 = SafeDir::open(&safe(&chroot_dir), OpenFlags::RDONLY).unwrap();
     let err = stage_kernel_under(&chroot2, &src, hyper_base, uid, gid).unwrap_err();
     assert!(
-        matches!(&err, Error::StageKernel(e) if e.errno() == Some(Errno::EEXIST)),
+        matches!(&err, ChrootJailError::StageKernel(e) if e.errno() == Some(Errno::EEXIST)),
         "re-stage must be refused, got {err:?}"
     );
 }

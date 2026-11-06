@@ -79,7 +79,7 @@ struct SysTest {
 }
 
 impl SysTest {
-    fn perform(token: &mut Unprivileged) -> Result<Self, privilege::Error> {
+    fn perform(token: &mut Unprivileged) -> Result<Self, privilege::PrivilegeError> {
         drop(token.elevate()?);
         Ok(Self {
             sys_test: "ok",

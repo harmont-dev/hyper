@@ -358,8 +358,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    //! Property tests for the lexical confinement gate.
-
     use super::{
         IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent, StrictComponents,
         ValidationError,
@@ -393,15 +391,12 @@ mod tests {
     }
 
     proptest! {
-        // An absolute path of only plain components is always accepted.
         #[test]
         fn accepts_clean_absolute_paths(parts in prop::collection::vec(safe_component(), 1..6)) {
             let path = join_abs(&parts);
             prop_assert!(Strict::try_from(path).is_ok());
         }
 
-        // A path containing ANY `.`/`..`/empty component is always rejected.
-        // (This is the confinement guarantee: `..`, `.`, and `//` never slip through.)
         #[test]
         fn rejects_any_loose_component(
             prefix in prop::collection::vec(safe_component(), 0..4),
@@ -422,7 +417,6 @@ mod tests {
             ));
         }
 
-        // A non-absolute path is always rejected on the absoluteness axis.
         #[test]
         fn rejects_relative_paths(parts in prop::collection::vec(safe_component(), 1..6)) {
             let rel: PathBuf = parts.iter().collect();
@@ -432,8 +426,6 @@ mod tests {
             ));
         }
 
-        // strip_base then segments yields exactly the components below the base,
-        // and base ++ segments rebuilds the original path.
         #[test]
         fn strip_base_segments_round_trip(
             base_parts in prop::collection::vec(safe_component(), 1..4),
@@ -458,7 +450,6 @@ mod tests {
             prop_assert_eq!(rebuilt, full);
         }
 
-        // A path that is not under `base` is rejected, never silently decomposed.
         #[test]
         fn strip_base_rejects_paths_outside_base(
             base_parts in prop::collection::vec(safe_component(), 1..4),

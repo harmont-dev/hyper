@@ -51,7 +51,7 @@ pub use super::grant::{GrantError, GrantOut};
 const SOCKET_NAME: &StrictComponent = StrictComponent::from_static("api.socket");
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum GrantApiError {
     #[error("--socket path: {0}")]
     SocketPath(#[source] path::ValidationError),
     #[error("--socket path: {0}")]
@@ -75,13 +75,14 @@ pub enum Error {
 pub struct ApiSocket(SafePathBuf<IsAbsolute, StrictComponents>);
 
 impl FromStr for ApiSocket {
-    type Err = Error;
+    type Err = GrantApiError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path: SafePathBuf<IsAbsolute, StrictComponents> =
-            PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
+        let path: SafePathBuf<IsAbsolute, StrictComponents> = PathBuf::from(s)
+            .try_into()
+            .map_err(GrantApiError::SocketPath)?;
         if path.file_name() != Some(SOCKET_NAME) {
-            return Err(Error::SocketName(PathBuf::from(s)));
+            return Err(GrantApiError::SocketName(PathBuf::from(s)));
         }
         Ok(Self(path))
     }
@@ -99,7 +100,7 @@ pub struct GrantApiArgs {
 pub fn run(
     args: GrantApiArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     GrantApi { args }.run(token)
 }
 
@@ -110,7 +111,7 @@ struct GrantApi {
 impl IsTool for GrantApi {
     type Args = GrantApiArgs;
     type Output = GrantOut;
-    type RunT = Result<GrantOut, Error>;
+    type RunT = Result<GrantOut, GrantApiError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         grant_api_under(&Config::get().jail_base(), &self.args.socket)
@@ -124,17 +125,20 @@ impl IsTool for GrantApi {
 /// Hand `socket` (`<jail_base>/<exec>/<id>/root/api.socket`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, Error> {
-    let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
+pub fn grant_api_under(jail_base: &Path, socket: &ApiSocket) -> Result<GrantOut, GrantApiError> {
+    let rel = socket
+        .0
+        .strip_base(jail_base)
+        .map_err(GrantApiError::SocketBase)?;
     let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
-        return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
+        return Err(GrantApiError::SocketShape(socket.0.as_ref().to_path_buf()));
     };
 
     let root = match SafeDir::open(root, OpenFlags::RDONLY) {
         Ok(root) => root,
         Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(Error::Walk(e)),
+        Err(e) => return Err(GrantApiError::Walk(e)),
     };
 
-    grant::grant_to_caller(root, leaf).map_err(Error::from)
+    grant::grant_to_caller(root, leaf).map_err(GrantApiError::from)
 }

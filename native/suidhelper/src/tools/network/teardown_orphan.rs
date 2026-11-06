@@ -33,11 +33,11 @@ pub struct TeardownOrphanArgs {
 }
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum OrphanTeardownError {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] binary::Error),
+    Bin(#[from] binary::RootSafeBinError),
     #[error("running ip {argv:?}: {source}")]
     Spawn {
         argv: Vec<String>,
@@ -51,9 +51,9 @@ pub enum Error {
 pub fn run(
     args: TeardownOrphanArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     TeardownOrphan::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?
         .run(token)
 }
 
@@ -63,7 +63,7 @@ struct TeardownOrphan {
 }
 
 impl TeardownOrphan {
-    fn new(args: TeardownOrphanArgs) -> Result<Self, Error> {
+    fn new(args: TeardownOrphanArgs) -> Result<Self, OrphanTeardownError> {
         let config = Config::get();
         super::resolve_network(config.network())?;
         Ok(Self {
@@ -76,7 +76,7 @@ impl TeardownOrphan {
 impl IsTool for TeardownOrphan {
     type Args = TeardownOrphanArgs;
     type Output = NetworkOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), OrphanTeardownError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         run_idempotent(&args::teardown_orphan_commands(&self.netns), &self.ip)
@@ -93,14 +93,14 @@ impl IsTool for TeardownOrphan {
 /// `super::exec::run_all`, whose contract for `prepare`/`teardown` is that
 /// any non-`allow_failure` non-zero exit is a real error — this op's whole
 /// point is that a missing netns is *not* an error.
-fn run_idempotent(commands: &[Command], ip: &RootSafeBin<"ip">) -> Result<(), Error> {
+fn run_idempotent(commands: &[Command], ip: &RootSafeBin<"ip">) -> Result<(), OrphanTeardownError> {
     for command in commands {
         let output = ip
             .command()
             .args(&command.argv)
             .env_clear()
             .output()
-            .map_err(|source| Error::Spawn {
+            .map_err(|source| OrphanTeardownError::Spawn {
                 argv: command.argv.clone(),
                 source,
             })?;
@@ -114,7 +114,7 @@ fn run_idempotent(commands: &[Command], ip: &RootSafeBin<"ip">) -> Result<(), Er
             continue;
         }
 
-        return Err(Error::Failed {
+        return Err(OrphanTeardownError::Failed {
             argv: command.argv.clone(),
             stderr,
         });

@@ -11,7 +11,7 @@ use std::process::Command as Proc;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum ExecError {
     #[error("running {bin:?} {argv:?}: {source}")]
     Spawn {
         bin: Which,
@@ -34,7 +34,7 @@ pub(super) fn run_all(
     root: &Root<'_>,
     inherit: &[BorrowedFd<'_>],
     resolve: impl Fn(Which) -> Proc,
-) -> Result<(), Error> {
+) -> Result<(), ExecError> {
     for command in commands {
         let mut proc = resolve(command.bin);
         // `ip` and `nft` refuse to run under `AT_SECURE` — the setuid-like state
@@ -48,14 +48,14 @@ pub(super) fn run_all(
         // privilege window.
         proc.args(&command.argv).spawn_as_root(root, inherit);
 
-        let output = proc.output().map_err(|source| Error::Spawn {
+        let output = proc.output().map_err(|source| ExecError::Spawn {
             bin: command.bin,
             argv: command.argv.clone(),
             source,
         })?;
 
         if !output.status.success() && !command.allow_failure {
-            return Err(Error::Failed {
+            return Err(ExecError::Failed {
                 bin: command.bin,
                 argv: command.argv.clone(),
                 code: output

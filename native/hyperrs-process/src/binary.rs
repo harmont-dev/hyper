@@ -10,7 +10,7 @@ use std::process::Command;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum RootSafeBinError {
     #[error("binary path {path}: {source}")]
     Path {
         path: PathBuf,
@@ -44,26 +44,27 @@ pub struct RootSafeBinPathBuf<const NAME: &'static str>(PathBuf);
 impl<const NAME: &'static str> RootSafeBin<NAME> {
     /// Validate that the given path is a safe binary, owned by root, non-symlink, not writable by
     /// everyone and matches `NAME`.
-    pub fn open(bin: &Path) -> Result<Self, Error> {
+    pub fn open(bin: &Path) -> Result<Self, RootSafeBinError> {
         let safe: &SafePath<IsAbsolute, StrictComponents> =
-            bin.try_into().map_err(|source| Error::Path {
+            bin.try_into().map_err(|source| RootSafeBinError::Path {
                 path: bin.to_path_buf(),
                 source,
             })?;
 
         if safe.file_name() != Some(const { StrictComponent::from_static(NAME) }) {
-            return Err(Error::Name {
+            return Err(RootSafeBinError::Name {
                 expected: NAME,
                 got: bin.to_path_buf(),
             });
         }
 
-        let file = Executable::open(safe, OpenFlags::PATH).map_err(|source| Error::File {
-            path: bin.to_path_buf(),
-            source,
-        })?;
+        let file =
+            Executable::open(safe, OpenFlags::PATH).map_err(|source| RootSafeBinError::File {
+                path: bin.to_path_buf(),
+                source,
+            })?;
         fcntl(file.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).map_err(|errno| {
-            Error::Inherit {
+            RootSafeBinError::Inherit {
                 path: bin.to_path_buf(),
                 errno,
             }
@@ -90,7 +91,7 @@ impl<const NAME: &'static str> AsFd for RootSafeBin<NAME> {
 }
 
 impl<const NAME: &'static str> RootSafeBinPathBuf<NAME> {
-    pub fn open(bin: &Path) -> Result<Self, Error> {
+    pub fn open(bin: &Path) -> Result<Self, RootSafeBinError> {
         RootSafeBin::<NAME>::open(bin)?;
         Ok(Self(bin.to_path_buf()))
     }

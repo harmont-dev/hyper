@@ -135,7 +135,7 @@ fn jailer_basename_mismatch_rejected() {
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
     assert!(
-        matches!(err, BinError::Bin(binary::Error::Name { .. })),
+        matches!(err, BinError::Bin(binary::RootSafeBinError::Name { .. })),
         "expected a Name error, got {err:?}",
     );
 }

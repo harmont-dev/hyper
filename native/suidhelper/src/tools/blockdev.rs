@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum BlockdevError {
     #[error("resolving {path}: {source}")]
     Resolve {
         path: PathBuf,
@@ -55,18 +55,18 @@ impl Blockdev {
 impl IsTool for Blockdev {
     type Args = BlockdevArgs;
     type Output = BlockdevOut;
-    type RunT = Result<BlockdevOut, Error>;
+    type RunT = Result<BlockdevOut, BlockdevError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let dev = self.path.path();
         let dev = dev.as_path();
-        let real = std::fs::canonicalize(dev).map_err(|source| Error::Resolve {
+        let real = std::fs::canonicalize(dev).map_err(|source| BlockdevError::Resolve {
             path: dev.to_path_buf(),
             source,
         })?;
         let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
         let file = SafeFile::<IsBlockDevice, Any, Any>::open(safe, OpenFlags::RDONLY)?;
-        let sectors = file.sectors().map_err(Error::Size)?;
+        let sectors = file.sectors().map_err(BlockdevError::Size)?;
         Ok(BlockdevOut { sectors })
     }
 

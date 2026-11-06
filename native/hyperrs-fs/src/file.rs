@@ -338,7 +338,6 @@ mod tests {
             .expect("test path must be strict-absolute")
     }
 
-    // SafeFile file-type axis: a regular file is not a block device.
     #[test]
     fn safefile_type_axis_distinguishes_file_types() {
         let tmp = tempfile::tempdir().unwrap();
@@ -355,7 +354,6 @@ mod tests {
         assert!(SafeFile::<IsRegularFile, Any, Any>::open(&d, OpenFlags::PATH).is_err());
     }
 
-    // SafeFile owner axis: a file we (non-root) own fails RootOwner.
     #[test]
     fn safefile_owner_axis_rejects_non_root_file() {
         let tmp = tempfile::tempdir().unwrap();
@@ -365,7 +363,6 @@ mod tests {
         assert!(SafeFile::<IsRegularFile, RootOwner, Any>::open(&p, OpenFlags::PATH).is_err());
     }
 
-    // SafeFile mode axis: a group/other-writable file fails OwnerOnlyWritable.
     #[test]
     fn safefile_mode_axis_rejects_group_writable() {
         let tmp = tempfile::tempdir().unwrap();
@@ -401,9 +398,6 @@ mod tests {
         assert_eq!(fs::read(&f).unwrap(), b"hello");
     }
 
-    // SafeFile::open refuses a symlink in any component with ELOOP. The `Any` type
-    // axis means a followed (or `O_PATH`-held) symlink would otherwise succeed, so
-    // only the kernel's resolve refusal can make this pass.
     #[test]
     fn safefile_open_rejects_symlink_in_any_component() {
         let tmp = tempfile::tempdir().unwrap();

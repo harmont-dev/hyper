@@ -40,7 +40,7 @@ pub const MAX_CGROUPS: usize = 16;
 const MAX_SOCK_LEN: usize = 108;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum JailerArgError {
     #[error("invalid --id {0:?}: must be 1..=64 chars of [A-Za-z0-9_-], not starting with '-'")]
     VmId(String),
     #[error("invalid --cgroup {0:?}: unknown key or value outside its grammar")]
@@ -57,12 +57,12 @@ pub enum Error {
 
 /// `n != 0 && lo <= n <= hi`. uid/gid 0 is rejected unconditionally: a jailer run
 /// with uid 0 skips its privilege drop and leaves firecracker running as root.
-pub fn validate_id_number(n: u32, range: (u32, u32)) -> Result<u32, Error> {
+pub fn validate_id_number(n: u32, range: (u32, u32)) -> Result<u32, JailerArgError> {
     let (lo, hi) = range;
     if n != 0 && lo <= n && n <= hi {
         Ok(n)
     } else {
-        Err(Error::IdNumber { value: n, lo, hi })
+        Err(JailerArgError::IdNumber { value: n, lo, hi })
     }
 }
 
@@ -74,10 +74,10 @@ pub fn validate_id_number(n: u32, range: (u32, u32)) -> Result<u32, Error> {
 pub struct VmId(String);
 
 impl FromStr for VmId {
-    type Err = Error;
+    type Err = JailerArgError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let reject = || Error::VmId(s.to_string());
+        let reject = || JailerArgError::VmId(s.to_string());
         let bytes = s.as_bytes();
         if !(1..=64).contains(&bytes.len()) {
             return Err(reject());
@@ -114,10 +114,10 @@ pub struct CgroupSetting {
 }
 
 impl FromStr for CgroupSetting {
-    type Err = Error;
+    type Err = JailerArgError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let reject = || Error::Cgroup(s.to_string());
+        let reject = || JailerArgError::Cgroup(s.to_string());
         // Split on the FIRST `=`. None of the value grammars contains a `=`, so a
         // second `=` lands in `value` and is rejected by the grammar check below.
         let (raw_key, value) = s.split_once('=').ok_or_else(reject)?;
@@ -159,10 +159,10 @@ impl FromStr for CgroupSetting {
 pub struct JailSock(String);
 
 impl FromStr for JailSock {
-    type Err = Error;
+    type Err = JailerArgError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let reject = || Error::Sock(s.to_string());
+        let reject = || JailerArgError::Sock(s.to_string());
         if s.len() > MAX_SOCK_LEN {
             return Err(reject());
         }
@@ -206,7 +206,7 @@ impl Jailer<'_> {
     /// Build the exact argv handed to the jailer. argv[0] is the jailer path. The
     /// caller never names the jailer, the `--exec-file`, the chroot base, the
     /// cgroup version, or the parent cgroup — those come from trusted config.
-    fn argv(&self) -> Result<Vec<CString>, Error> {
+    fn argv(&self) -> Result<Vec<CString>, JailerArgError> {
         let vm: &str = self.vm.as_ref();
         let api_sock: &str = self.api_sock.as_ref();
         let mut argv = vec![
@@ -247,10 +247,10 @@ impl Jailer<'_> {
     /// Permanently become root and `execve` the jailer in our place. On success
     /// this never returns (the process image is replaced); the `Ok` arm is
     /// therefore [`std::convert::Infallible`]. Every failure is returned as
-    /// [`Error`] for the caller to print and exit non-zero.
-    pub fn invoke(self, token: Unprivileged) -> Result<std::convert::Infallible, Error> {
+    /// [`JailerArgError`] for the caller to print and exit non-zero.
+    pub fn invoke(self, token: Unprivileged) -> Result<std::convert::Infallible, JailerArgError> {
         if self.cgroups.len() > MAX_CGROUPS {
-            return Err(Error::TooManyCgroups(self.cgroups.len()));
+            return Err(JailerArgError::TooManyCgroups(self.cgroups.len()));
         }
 
         // Resolve everything that can fail before any privilege is raised.

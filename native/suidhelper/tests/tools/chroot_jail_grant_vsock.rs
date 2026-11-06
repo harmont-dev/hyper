@@ -23,7 +23,7 @@
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
 use hyper_suidhelper::tools::chroot_jail::grant_vsock::{
-    grant_vsock_under, Error, GrantError, GrantOut, VsockSocket,
+    grant_vsock_under, GrantError, GrantOut, GrantVsockError, VsockSocket,
 };
 use hyperrs_fs::path::{ComponentError, RelativeError, ValidationError};
 use proptest::prelude::*;
@@ -54,7 +54,7 @@ fn wrong_leaf_name_is_rejected_at_parse() {
     // reject it, before any filesystem access.
     let bad = tmp.path().join("exec/id/root/evil.vsock");
     let err = VsockSocket::from_str(bad.to_str().unwrap()).unwrap_err();
-    assert!(matches!(err, Error::SocketName(_)), "got {err:?}");
+    assert!(matches!(err, GrantVsockError::SocketName(_)), "got {err:?}");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn api_socket_name_is_rejected_at_parse() {
     let tmp = tempfile::tempdir().unwrap();
     let bad = tmp.path().join("exec/id/root/api.socket");
     let err = VsockSocket::from_str(bad.to_str().unwrap()).unwrap_err();
-    assert!(matches!(err, Error::SocketName(_)), "got {err:?}");
+    assert!(matches!(err, GrantVsockError::SocketName(_)), "got {err:?}");
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn dotdot_traversal_is_rejected_at_parse() {
     assert!(
         matches!(
             err,
-            Error::SocketPath(ValidationError::Component(ComponentError::ParentDir))
+            GrantVsockError::SocketPath(ValidationError::Component(ComponentError::ParentDir))
         ),
         "got {err:?}",
     );
@@ -83,7 +83,10 @@ fn dotdot_traversal_is_rejected_at_parse() {
 fn relative_socket_is_rejected_at_parse() {
     let err = VsockSocket::from_str("exec/id/root/vsock.sock").unwrap_err();
     assert!(
-        matches!(err, Error::SocketPath(ValidationError::NotAbsolute)),
+        matches!(
+            err,
+            GrantVsockError::SocketPath(ValidationError::NotAbsolute)
+        ),
         "got {err:?}",
     );
 }
@@ -96,7 +99,10 @@ fn socket_outside_jail_base_is_rejected() {
     let outside = tmp.path().join("elsewhere/exec/id/root/vsock.sock");
     let err = grant_vsock_under(&jail, &sock(&outside)).unwrap_err();
     assert!(
-        matches!(err, Error::SocketBase(RelativeError::NotUnderBase)),
+        matches!(
+            err,
+            GrantVsockError::SocketBase(RelativeError::NotUnderBase)
+        ),
         "got {err:?}",
     );
 }
@@ -107,7 +113,10 @@ fn too_shallow_is_shape_error() {
     let jail = tmp.path();
     let bad = jail.join("exec").join("id").join("vsock.sock"); // missing root/
     let err = grant_vsock_under(jail, &sock(&bad)).unwrap_err();
-    assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
+    assert!(
+        matches!(err, GrantVsockError::SocketShape(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -121,7 +130,10 @@ fn too_deep_is_shape_error() {
         .join("extra")
         .join("vsock.sock");
     let err = grant_vsock_under(jail, &sock(&bad)).unwrap_err();
-    assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
+    assert!(
+        matches!(err, GrantVsockError::SocketShape(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -185,7 +197,7 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
 
     let err = grant_vsock_under(jail, &sock(&imposter)).unwrap_err();
     assert!(
-        matches!(err, Error::Grant(GrantError::NotASocket)),
+        matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
     );
     assert_eq!(
@@ -208,7 +220,7 @@ fn symlink_at_leaf_is_refused() {
 
     let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
     assert!(
-        matches!(err, Error::Grant(GrantError::NotASocket)),
+        matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
     );
 }
@@ -254,7 +266,7 @@ fn symlink_to_real_socket_at_leaf_is_refused_and_target_untouched() {
 
     let err = grant_vsock_under(jail, &sock(&link)).unwrap_err();
     assert!(
-        matches!(err, Error::Grant(GrantError::NotASocket)),
+        matches!(err, GrantVsockError::Grant(GrantError::NotASocket)),
         "got {err:?}"
     );
     assert_eq!(
@@ -281,7 +293,7 @@ fn unreadable_jail_base_is_a_hard_walk_error_not_pending() {
     fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(
-        matches!(res, Err(Error::Walk(_))),
+        matches!(res, Err(GrantVsockError::Walk(_))),
         "EACCES must be a hard Walk error, never Ok(Pending): got {res:?}",
     );
 }
@@ -306,7 +318,7 @@ proptest! {
         if parents.len() == 3 {
             prop_assert!(matches!(res, Ok(GrantOut::Pending)), "depth 3 must be Pending, got {res:?}");
         } else {
-            prop_assert!(matches!(res, Err(Error::SocketShape(_))), "got {res:?}");
+            prop_assert!(matches!(res, Err(GrantVsockError::SocketShape(_))), "got {res:?}");
         }
     }
 }

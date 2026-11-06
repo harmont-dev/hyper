@@ -35,7 +35,7 @@ pub use super::grant::{GrantError, GrantOut};
 const VSOCK_NAME: &StrictComponent = StrictComponent::from_static("vsock.sock");
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum GrantVsockError {
     #[error("--socket path: {0}")]
     SocketPath(#[source] path::ValidationError),
     #[error("--socket path: {0}")]
@@ -60,13 +60,14 @@ pub enum Error {
 pub struct VsockSocket(SafePathBuf<IsAbsolute, StrictComponents>);
 
 impl FromStr for VsockSocket {
-    type Err = Error;
+    type Err = GrantVsockError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let path: SafePathBuf<IsAbsolute, StrictComponents> =
-            PathBuf::from(s).try_into().map_err(Error::SocketPath)?;
+        let path: SafePathBuf<IsAbsolute, StrictComponents> = PathBuf::from(s)
+            .try_into()
+            .map_err(GrantVsockError::SocketPath)?;
         if path.file_name() != Some(VSOCK_NAME) {
-            return Err(Error::SocketName(PathBuf::from(s)));
+            return Err(GrantVsockError::SocketName(PathBuf::from(s)));
         }
         Ok(Self(path))
     }
@@ -84,7 +85,7 @@ pub struct GrantVsockArgs {
 pub fn run(
     args: GrantVsockArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     GrantVsock { args }.run(token)
 }
 
@@ -95,7 +96,7 @@ struct GrantVsock {
 impl IsTool for GrantVsock {
     type Args = GrantVsockArgs;
     type Output = GrantOut;
-    type RunT = Result<GrantOut, Error>;
+    type RunT = Result<GrantOut, GrantVsockError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         grant_vsock_under(&Config::get().jail_base(), &self.args.socket)
@@ -109,17 +110,25 @@ impl IsTool for GrantVsock {
 /// Hand `socket` (`<jail_base>/<exec>/<id>/root/vsock.sock`) to the helper's
 /// caller, fd-relative after an `O_NOFOLLOW` walk from `jail_base`. Returns
 /// `Pending` if any path component or the socket itself is not yet present.
-pub fn grant_vsock_under(jail_base: &Path, socket: &VsockSocket) -> Result<GrantOut, Error> {
-    let rel = socket.0.strip_base(jail_base).map_err(Error::SocketBase)?;
+pub fn grant_vsock_under(
+    jail_base: &Path,
+    socket: &VsockSocket,
+) -> Result<GrantOut, GrantVsockError> {
+    let rel = socket
+        .0
+        .strip_base(jail_base)
+        .map_err(GrantVsockError::SocketBase)?;
     let (4, Some((root, leaf))) = (rel.segments().count(), socket.0.split_last()) else {
-        return Err(Error::SocketShape(socket.0.as_ref().to_path_buf()));
+        return Err(GrantVsockError::SocketShape(
+            socket.0.as_ref().to_path_buf(),
+        ));
     };
 
     let root = match SafeDir::open(root, OpenFlags::RDONLY) {
         Ok(root) => root,
         Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(GrantOut::Pending),
-        Err(e) => return Err(Error::Walk(e)),
+        Err(e) => return Err(GrantVsockError::Walk(e)),
     };
 
-    grant::grant_to_caller(root, leaf).map_err(Error::from)
+    grant::grant_to_caller(root, leaf).map_err(GrantVsockError::from)
 }

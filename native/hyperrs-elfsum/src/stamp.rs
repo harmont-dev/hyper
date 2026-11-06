@@ -7,7 +7,7 @@ use crate::{Digest, LEN};
 const SECTION: &str = ".note.sum";
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum StampError {
     #[error("not a parseable object file: {0}")]
     Parse(#[from] object::Error),
     #[error("{SECTION} section not found")]
@@ -24,7 +24,7 @@ pub struct Elf<B> {
 }
 
 impl<B: AsRef<[u8]>> Elf<B> {
-    pub fn read(bytes: B) -> Result<Self, Error> {
+    pub fn read(bytes: B) -> Result<Self, StampError> {
         let slot = slot_offset(bytes.as_ref())?;
         Ok(Self { bytes, slot })
     }
@@ -59,11 +59,13 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Elf<B> {
     }
 }
 
-fn slot_offset(elf: &[u8]) -> Result<usize, Error> {
+fn slot_offset(elf: &[u8]) -> Result<usize, StampError> {
     let file = object::File::parse(elf)?;
-    let section = file.section_by_name(SECTION).ok_or(Error::MissingSection)?;
-    <&Digest>::try_from(section.data()?).map_err(|_| Error::WrongSize(section.size()))?;
-    let (offset, _) = section.file_range().ok_or(Error::NoFileRange)?;
+    let section = file
+        .section_by_name(SECTION)
+        .ok_or(StampError::MissingSection)?;
+    <&Digest>::try_from(section.data()?).map_err(|_| StampError::WrongSize(section.size()))?;
+    let (offset, _) = section.file_range().ok_or(StampError::NoFileRange)?;
     Ok(usize::try_from(offset).expect("data() bounds-checked the section against the file"))
 }
 
@@ -157,7 +159,7 @@ mod tests {
         #[test]
         fn rejects_any_slot_that_is_not_digest_sized(len in (0..128usize).prop_filter("not LEN", |&n| n != LEN)) {
             let bytes = image(b"before", &vec![0; len], b"after");
-            prop_assert!(matches!(Elf::read(bytes), Err(Error::WrongSize(n)) if n == len as u64));
+            prop_assert!(matches!(Elf::read(bytes), Err(StampError::WrongSize(n)) if n == len as u64));
         }
     }
 
@@ -169,12 +171,15 @@ mod tests {
 
         assert!(matches!(
             Elf::read(obj.write().unwrap()),
-            Err(Error::MissingSection)
+            Err(StampError::MissingSection)
         ));
     }
 
     #[test]
     fn rejects_bytes_that_are_not_an_object_file() {
-        assert!(matches!(Elf::read(b"not an elf"), Err(Error::Parse(_))));
+        assert!(matches!(
+            Elf::read(b"not an elf"),
+            Err(StampError::Parse(_))
+        ));
     }
 }

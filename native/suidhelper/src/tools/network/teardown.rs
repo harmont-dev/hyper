@@ -22,19 +22,19 @@ pub struct TeardownArgs {
 }
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum NetworkTeardownError {
     #[error(transparent)]
-    Plan(#[from] prepare::Error),
+    Plan(#[from] prepare::NetworkPrepareError),
     #[error(transparent)]
-    Exec(#[from] exec::Error),
+    Exec(#[from] exec::ExecError),
 }
 
 pub fn run(
     args: TeardownArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     Teardown::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?
         .run(token)
 }
 
@@ -45,7 +45,7 @@ struct Teardown {
 }
 
 impl Teardown {
-    fn new(args: TeardownArgs) -> Result<Self, Error> {
+    fn new(args: TeardownArgs) -> Result<Self, NetworkTeardownError> {
         // Teardown only deletes the netns/veth (no in-netns sysctl), so the
         // resolved sysctl path is unused here.
         let (plan, ip, nft, _sysctl) = prepare::resolve(args.uid, &args.vm_id)?;
@@ -56,7 +56,7 @@ impl Teardown {
 impl IsTool for Teardown {
     type Args = TeardownArgs;
     type Output = NetworkOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), NetworkTeardownError>;
 
     fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let commands = args::teardown_commands(&self.plan);

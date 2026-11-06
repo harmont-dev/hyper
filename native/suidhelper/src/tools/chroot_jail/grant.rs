@@ -34,8 +34,8 @@ pub enum GrantOut {
 }
 
 /// Errors that can arise in the shared grant execution (stat / chown / chmod).
-/// Each `grant-*` op's `Error` wraps these transparently as its `Grant`
-/// variant.
+/// `GrantApiError` and `GrantVsockError` wrap these transparently as their
+/// `Grant` variant.
 #[derive(Debug, ThisError)]
 pub enum GrantError {
     #[error("not a socket (or is a symlink); refusing to touch it")]

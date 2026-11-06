@@ -28,13 +28,13 @@ pub struct HostInitArgs {}
 const IP_FORWARD_PATH: &str = "/proc/sys/net/ipv4/ip_forward";
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum HostInitError {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error(transparent)]
-    Bin(#[from] binary::Error),
+    Bin(#[from] binary::RootSafeBinError),
     #[error(transparent)]
-    Exec(#[from] exec::Error),
+    Exec(#[from] exec::ExecError),
     #[error("failed to read {IP_FORWARD_PATH}: {0}")]
     IpForwardRead(#[source] std::io::Error),
     #[error(
@@ -55,9 +55,9 @@ pub fn ip_forward_enabled(contents: &str) -> bool {
 pub fn run(
     args: HostInitArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     HostInit::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?
         .run(token)
 }
 
@@ -68,7 +68,7 @@ struct HostInit {
 }
 
 impl HostInit {
-    fn new(_args: HostInitArgs) -> Result<Self, Error> {
+    fn new(_args: HostInitArgs) -> Result<Self, HostInitError> {
         let config = Config::get();
         let network = super::resolve_network(config.network())?;
         Ok(Self {
@@ -88,12 +88,13 @@ impl HostInit {
 impl IsTool for HostInit {
     type Args = HostInitArgs;
     type Output = NetworkOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), HostInitError>;
 
     fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
-        let ip_forward = std::fs::read_to_string(IP_FORWARD_PATH).map_err(Error::IpForwardRead)?;
+        let ip_forward =
+            std::fs::read_to_string(IP_FORWARD_PATH).map_err(HostInitError::IpForwardRead)?;
         if !ip_forward_enabled(&ip_forward) {
-            return Err(Error::IpForwardDisabled);
+            return Err(HostInitError::IpForwardDisabled);
         }
 
         let commands = args::host_init_commands(&self.uplink, &self.clone_pool);

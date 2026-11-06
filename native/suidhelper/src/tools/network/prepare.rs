@@ -25,19 +25,19 @@ pub struct PrepareArgs {
 }
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum NetworkPrepareError {
     #[error(transparent)]
     NetworkingDisabled(#[from] super::NetworkingDisabled),
     #[error("clone_pool {0:?} is not a valid IPv4 CIDR")]
     InvalidClonePool(String),
     #[error(transparent)]
-    Uid(#[from] crate::util::jailer::Error),
+    Uid(#[from] crate::util::jailer::JailerArgError),
     #[error(transparent)]
     Addr(#[from] AddrError),
     #[error(transparent)]
-    Bin(#[from] binary::Error),
+    Bin(#[from] binary::RootSafeBinError),
     #[error(transparent)]
-    Exec(#[from] exec::Error),
+    Exec(#[from] exec::ExecError),
 }
 
 /// Derive the [`Plan`] for `uid`, refusing before any command is ever run.
@@ -50,7 +50,7 @@ pub fn plan_from(
     range: (u32, u32),
     clone_pool_str: &str,
     vm_id: &VmId,
-) -> Result<Plan, Error> {
+) -> Result<Plan, NetworkPrepareError> {
     jailer::validate_id_number(uid, range)?;
     let clone_pool = parse_cidr_base(clone_pool_str)?;
     Ok(Plan::derive(uid, range, clone_pool, vm_id)?)
@@ -59,8 +59,8 @@ pub fn plan_from(
 /// Parse an IPv4 CIDR's base address, e.g. `"172.31.0.0/16"` -> `172.31.0.0`.
 /// The prefix length is validated (`0..=32`) but otherwise unused: `Plan::derive`
 /// only needs the pool's base address, not its width.
-fn parse_cidr_base(s: &str) -> Result<Ipv4Addr, Error> {
-    let reject = || Error::InvalidClonePool(s.to_string());
+fn parse_cidr_base(s: &str) -> Result<Ipv4Addr, NetworkPrepareError> {
+    let reject = || NetworkPrepareError::InvalidClonePool(s.to_string());
     let mut parts = s.splitn(2, '/');
     let addr: Ipv4Addr = parts
         .next()
@@ -93,7 +93,7 @@ pub(super) fn resolve(
         RootSafeBin<"nft">,
         RootSafeBin<"sysctl">,
     ),
-    Error,
+    NetworkPrepareError,
 > {
     let config = Config::get();
     let network = super::resolve_network(config.network())?;
@@ -104,9 +104,9 @@ pub(super) fn resolve(
 pub fn run(
     args: PrepareArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     Prepare::new(args)
-        .map_err(|e| crate::tools::Error::Tool(Box::new(e)))?
+        .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?
         .run(token)
 }
 
@@ -118,7 +118,7 @@ struct Prepare {
 }
 
 impl Prepare {
-    fn new(args: PrepareArgs) -> Result<Self, Error> {
+    fn new(args: PrepareArgs) -> Result<Self, NetworkPrepareError> {
         let (plan, ip, nft, sysctl) = resolve(args.uid, &args.vm_id)?;
         Ok(Self {
             plan,
@@ -132,7 +132,7 @@ impl Prepare {
 impl IsTool for Prepare {
     type Args = PrepareArgs;
     type Output = NetworkOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), NetworkPrepareError>;
 
     fn run_privileged(&self, root: &Root<'_>) -> Self::RunT {
         let commands = args::prepare_commands(
