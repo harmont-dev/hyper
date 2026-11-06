@@ -31,24 +31,19 @@ defmodule Mix.Tasks.Suidhelper.Install do
   # dependency: there the crate lives under deps/hypervm/native/suidhelper, not
   # under the consumer project's root.
   @helper_dir Path.expand("../../../native/suidhelper", __DIR__)
-  @source Path.expand("../target/hyper-suidhelper", @helper_dir)
   # Must match `Hyper.Cfg.Tools.suidhelper/0`'s default path and the xtask's
   # `INSTALL_PATH`: a `PATH` location the unprivileged node can exec.
   @install_path "/usr/local/bin/hyper-suidhelper"
 
   @impl Mix.Task
   def run(argv) do
-    stamp!(argv)
-    install_privileged()
+    argv |> stamp!() |> install_privileged()
   end
 
   defp stamp!(argv) do
-    case System.cmd("cargo", ["xtask", "stamp" | argv],
-           cd: @helper_dir,
-           into: IO.stream(:stdio, :line)
-         ) do
-      {_, 0} ->
-        :ok
+    case System.cmd("cargo", ["xtask", "stamp" | argv], cd: @helper_dir) do
+      {output, 0} ->
+        String.trim(output)
 
       {_, _} ->
         Mix.raise("""
@@ -60,16 +55,16 @@ defmodule Mix.Tasks.Suidhelper.Install do
     end
   end
 
-  defp install_privileged do
+  defp install_privileged(source) do
     if passwordless_sudo?() do
-      Mix.shell().info("Installing #{@source} -> #{@install_path} (setuid root)")
+      Mix.shell().info("Installing #{source} -> #{@install_path} (setuid root)")
 
-      case System.cmd("sudo", install_argv(), into: IO.stream(:stdio, :line)) do
+      case System.cmd("sudo", install_argv(source), into: IO.stream(:stdio, :line)) do
         {_, 0} -> Mix.shell().info("installed #{@install_path} (setuid root)")
-        {_, _} -> Mix.raise(manual_instructions())
+        {_, _} -> Mix.raise(manual_instructions(source))
       end
     else
-      Mix.shell().info(manual_instructions())
+      Mix.shell().info(manual_instructions(source))
     end
   end
 
@@ -81,16 +76,16 @@ defmodule Mix.Tasks.Suidhelper.Install do
     match?({_, 0}, System.cmd("sudo", ["-n", "true"], stderr_to_stdout: true))
   end
 
-  defp install_argv,
-    do: ["install", "-o", "root", "-g", "root", "-m", "4755", @source, @install_path]
+  defp install_argv(source),
+    do: ["install", "-o", "root", "-g", "root", "-m", "4755", source, @install_path]
 
-  defp manual_instructions do
+  defp manual_instructions(source) do
     """
 
     The binary is built and stamped, but installing it setuid-root needs a
     password and `sudo` has no terminal to prompt on here. Run the copy yourself:
 
-        sudo #{Enum.join(install_argv(), " ")}
+        sudo #{Enum.join(install_argv(source), " ")}
     """
   end
 end

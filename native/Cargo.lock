@@ -436,6 +436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "escargot"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "189159de09e965c688ce1bfae3d974b8fc6826e2eaefcb6e0d40f337ec98492b"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1960,7 +1971,9 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "escargot",
  "hyperrs-elfsum",
+ "log",
  "object",
 ]
 

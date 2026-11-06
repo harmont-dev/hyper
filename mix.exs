@@ -505,21 +505,20 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
   use Mix.Task.Compiler
 
   @helper_dir "native/suidhelper"
-  @binary "native/target/hyper-suidhelper"
   @out "lib/hyper/suid_helper/expected.ex"
 
   @impl Mix.Task.Compiler
   def run(_argv) do
-    stamp!()
-    json = capture_version!()
+    binary = stamp!()
+    json = capture_version!(binary)
     generate(json)
     {:ok, []}
   end
 
   defp stamp! do
     case System.cmd("cargo", ["xtask", "stamp"], cd: @helper_dir, stderr_to_stdout: true) do
-      {_, 0} ->
-        :ok
+      {output, 0} ->
+        output |> String.split("\n", trim: true) |> List.last()
 
       {output, code} ->
         Mix.raise("""
@@ -532,8 +531,8 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
     end
   end
 
-  defp capture_version! do
-    case System.cmd(Path.expand(@binary), ["version"], stderr_to_stdout: true) do
+  defp capture_version!(binary) do
+    case System.cmd(binary, ["version"], stderr_to_stdout: true) do
       {out, 0} ->
         String.trim(out)
 

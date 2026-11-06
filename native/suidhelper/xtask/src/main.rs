@@ -3,10 +3,7 @@
 //! Cargo has no native post-link hook, so the checksum-stamping and install
 //! steps live here as ordinary cargo subcommands (one per module).
 
-mod install;
 mod stamp;
-
-use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -24,24 +21,28 @@ struct Cli {
 enum Command {
     /// Build the release binary and write its checksum into the ELF.
     Stamp,
-    /// Stamp, then install the binary setuid-root.
-    Install,
+}
+
+struct Stderr;
+
+impl log::Log for Stderr {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 fn main() {
+    log::set_logger(&Stderr).expect("no logger is installed before main");
+    log::set_max_level(log::LevelFilter::Info);
     match Cli::parse().command {
-        Command::Stamp => {
-            stamp::run();
-        }
-        Command::Install => install::run(),
+        Command::Stamp => stamp::run(),
     }
-}
-
-/// The workspace `target/` dir (xtask's manifest sits two levels below the root).
-fn target_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("xtask sits two levels below the workspace root")
-        .join("target")
 }
