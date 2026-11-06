@@ -1,23 +1,21 @@
 mod backing;
-mod message;
 mod name;
 mod table;
 
 use super::IsTool;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
-use hyperrs_linux::dm::{self, DmName, RemoveMode};
+use hyperrs_linux::dm::{self, DmName, DmTable, RemoveMode, Slot, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
 use hyperrs_process::privilege::Root;
-pub use message::{parse_message, MessageError, ThinMessage};
 pub use name::{parse_dm_device, parse_dm_name, NameError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
-pub use table::{parse_table, resolve_table, Slot, Source, TableError, TableSpec};
+pub use table::{parse_table, resolve_table, TableError};
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -35,7 +33,7 @@ enum DmOp {
         #[arg(long)]
         readonly: bool,
         #[arg(long, value_parser = resolve_table)]
-        table: TableSpec<BackingFile>,
+        table: DmTable<BackingFile>,
     },
     Remove {
         #[arg(long)]
@@ -46,7 +44,7 @@ enum DmOp {
     Message {
         #[arg(value_parser = parse_dm_name)]
         name: DmName,
-        #[arg(long, value_parser = parse_message)]
+        #[arg(long)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
@@ -131,7 +129,7 @@ impl IsTool for Dmsetup {
                     Ok::<_, Box<dyn std::error::Error>>(device)
                 })?;
                 DmsetupOut::Created {
-                    device: dm.create(name, &attached.to_dm(), access)?.path().into(),
+                    device: dm.create(name, &attached, access)?.path().into(),
                     loops,
                 }
             }
@@ -145,14 +143,7 @@ impl IsTool for Dmsetup {
                 DmsetupOut::Removed
             }
             DmOp::Message { name, message } => {
-                let pool = dm.thin_pool(name)?;
-                match *message {
-                    ThinMessage::CreateThin(id) => pool.create_thin(id).map(drop)?,
-                    ThinMessage::CreateSnap { id, origin } => pool.create_snap(id, origin)?,
-                    ThinMessage::Delete(id) => pool.delete_thin(id)?,
-                    ThinMessage::ReserveMetadataSnap => pool.reserve_metadata_snap()?,
-                    ThinMessage::ReleaseMetadataSnap => pool.release_metadata_snap()?,
-                }
+                dm.thin_pool(name)?.send(*message)?;
                 DmsetupOut::Messaged
             }
             DmOp::Suspend { name } => {

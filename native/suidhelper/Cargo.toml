@@ -28,10 +28,6 @@ name = "config_seam"
 path = "tests/config_seam.rs"
 
 [[test]]
-name = "tools_dmsetup_parsers"
-path = "tests/tools/dmsetup_parsers.rs"
-
-[[test]]
 name = "tools_blockcopy"
 path = "tests/tools/blockcopy.rs"
 

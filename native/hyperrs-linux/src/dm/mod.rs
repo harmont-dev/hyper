@@ -10,13 +10,16 @@ use super::Access;
 use derive_more::Constructor;
 pub use device::Device;
 use hyperrs_process::binary::RootSafeBin;
-pub use name::{DmName, InvalidDmName, OpenDeviceError};
+pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::io;
-pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
+pub use table::{
+    DmTable, LinearTable, ParseTableError, Persistence, SlotPath, Slot, SnapshotTable, Source,
+    ThinPoolTable, ThinTable,
+};
 pub use thin::{
-    Active, Inactive, ParseThinIdError, SnapshotError, Thin, ThinId, ThinIdOutOfRange, ThinPool,
-    ThinPoolError,
+    Active, Inactive, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin, ThinId,
+    ThinIdOutOfRange, ThinMessage, ThinPool, ThinPoolError,
 };
 use thiserror::Error;
 
@@ -55,10 +58,10 @@ pub struct Dmsetup {
 }
 
 impl Dmsetup {
-    pub fn create(
+    pub fn create<F: SlotPath>(
         &self,
         name: &DmName,
-        table: &DmTable,
+        table: &DmTable<F>,
         access: Access,
     ) -> Result<Device<'_>, RunError> {
         let table = table.to_string();

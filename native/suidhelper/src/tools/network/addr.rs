@@ -16,7 +16,6 @@ pub const INNER_TAP_IP: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 1);
 pub const INNER_GUEST_IP: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 2);
 pub const INNER_PREFIX: u8 = 30;
 pub const TAP_NAME: &str = "tap0";
-pub const GUEST_IFACE: &str = "eth0";
 
 #[derive(Debug, Error)]
 pub enum AddrError {
