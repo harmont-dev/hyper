@@ -4,13 +4,13 @@
 
 use crate::config::Config;
 use crate::id::JailOwner;
-use crate::tools::parse_dm_device;
+use crate::tools::HyperDmName;
 use crate::tools::{DispatchError, IsTool};
 use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelImage};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
-use hyperrs_linux::dm::{DmName, OpenDeviceError};
+use hyperrs_linux::dm::OpenDeviceError;
 use hyperrs_process::privilege::{Root, Unprivileged};
 use serde::Serialize;
 use thiserror::Error as ThisError;
@@ -34,8 +34,8 @@ pub struct PrepareArgs {
     kernel: SafePathBuf<IsAbsolute, StrictComponents>,
     /// Host block device to mirror as <chroot>/rootfs (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
-    #[arg(long, value_parser = parse_dm_device)]
-    device: DmName,
+    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    device: HyperDmName,
     /// UID to own the staged files.
     #[arg(long)]
     uid: u32,

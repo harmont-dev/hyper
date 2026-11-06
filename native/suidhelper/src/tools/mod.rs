@@ -16,8 +16,8 @@ pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{
-    parse_dm_device, parse_dm_name, parse_table, BackingError, BackingFile, Dmsetup, DmsetupArgs,
-    NameError, TableError,
+    parse_table, BackingError, BackingFile, Dmsetup, DmsetupArgs, HyperDmName, NameError,
+    TableError,
 };
 pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};

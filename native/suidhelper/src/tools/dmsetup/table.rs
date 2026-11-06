@@ -1,5 +1,5 @@
 use super::backing::{BackingError, BackingFile};
-use super::name::{require_hyper, NameError};
+use super::name::{HyperDmName, NameError};
 use crate::config::Config;
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::{DmTable, ParseTableError};
@@ -23,7 +23,9 @@ pub enum TableError {
 
 pub fn parse_table(s: &str) -> Result<DmTable<FilePath>, TableError> {
     let table: DmTable<FilePath> = s.parse()?;
-    table.devices().try_for_each(require_hyper)?;
+    table
+        .devices()
+        .try_for_each(|dev| HyperDmName::try_from(dev.clone()).map(drop))?;
     table.try_map(|file, _| {
         let path = file.as_path();
         if path.starts_with(DEV_PREFIX) {

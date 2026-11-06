@@ -1,9 +1,8 @@
 use super::IsTool;
-use crate::tools::parse_dm_device;
+use crate::tools::HyperDmName;
 use clap::Args;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
-use hyperrs_linux::dm::DmName;
 use hyperrs_process::privilege::Root;
 use serde::Serialize;
 use std::io;
@@ -31,8 +30,8 @@ pub struct BlockdevArgs {
     /// Only the size query is permitted, so clap requires it.
     #[arg(long = "getsz", required = true)]
     getsz: bool,
-    #[arg(value_parser = parse_dm_device)]
-    path: DmName,
+    #[arg(value_parser = HyperDmName::from_device_path)]
+    path: HyperDmName,
 }
 
 #[derive(Serialize)]
@@ -41,7 +40,7 @@ pub struct BlockdevOut {
 }
 
 pub struct Blockdev {
-    path: DmName,
+    path: HyperDmName,
 }
 
 impl Blockdev {

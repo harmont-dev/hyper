@@ -5,12 +5,12 @@ mod table;
 use super::IsTool;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
-use hyperrs_linux::dm::{self, DmName, DmTable, RemoveMode, Slot, ThinMessage};
+use hyperrs_linux::dm::{self, DmTable, RemoveMode, Slot, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
 use hyperrs_process::privilege::Root;
-pub use name::{parse_dm_device, parse_dm_name, NameError};
+pub use name::{HyperDmName, NameError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -28,8 +28,7 @@ pub struct DmsetupArgs {
 #[derive(Subcommand)]
 enum DmOp {
     Create {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
+        name: HyperDmName,
         #[arg(long)]
         readonly: bool,
         #[arg(long, value_parser = resolve_table)]
@@ -38,26 +37,18 @@ enum DmOp {
     Remove {
         #[arg(long)]
         retry: bool,
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
+        name: HyperDmName,
     },
     Message {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
+        name: HyperDmName,
         #[arg(long)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
     /// of the device's thin id).
-    Suspend {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
-    },
+    Suspend { name: HyperDmName },
     /// Resume a suspended dm device.
-    Resume {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
-    },
+    Resume { name: HyperDmName },
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
