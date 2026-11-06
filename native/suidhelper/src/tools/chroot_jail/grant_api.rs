@@ -32,7 +32,7 @@
 //! the controller keeps probing.
 
 use crate::config::Config;
-use crate::tools::chroot_jail::grant::{grant_socket, GrantSocketError};
+use crate::tools::chroot_jail::grant::{caller, grant_socket, GrantSocketError};
 use crate::tools::IsTool;
 use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
@@ -68,7 +68,11 @@ impl IsTool for GrantApi {
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let jail_base = Config::get().jail_base();
-        grant_socket(&JailLayout::new(&jail_base, &self.args.id), SOCKET_NAME)
+        grant_socket(
+            &JailLayout::new(&jail_base, &self.args.id),
+            SOCKET_NAME,
+            caller(),
+        )
     }
 
     fn parse(&self, res: Self::RunT) -> Result<(), Box<dyn std::error::Error>> {

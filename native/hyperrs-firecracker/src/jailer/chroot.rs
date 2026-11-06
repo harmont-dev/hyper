@@ -7,14 +7,13 @@ use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{
-    self, Any, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, Owner, SafeFile,
+    self, Any, FileType, IsBlockDevice, IsRegularFile, OpenFlags, Owner, SafeFile,
 };
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents,
 };
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
-use nix::unistd::{getgid, getuid};
 use std::fs::File;
 use std::io::{self, Seek};
 use std::os::unix::io::{AsFd, OwnedFd};
@@ -40,9 +39,6 @@ const ROOTFS_MODE: Mode = Mode::from_bits_truncate(0o600);
 
 /// The mode of directories created by this utility in the chrooted jail.
 const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
-
-/// Mode handed to the node: owner+group read/write, no world access.
-const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
 
 /// Mode set on `ROOT_NAME`.
 const JAIL_ROOT_MODE: Mode = Mode::from_bits_truncate(0o710);
@@ -77,15 +73,15 @@ pub enum BuildError {
 
 #[derive(Debug, ThisError)]
 pub enum GrantError {
-    #[error("socket does not exist yet")]
+    #[error("file does not exist yet")]
     Missing,
-    #[error("not a socket (or is a symlink); refusing to touch it")]
-    NotASocket,
-    #[error("statting the socket: {0}")]
+    #[error("not the expected file type (or is a symlink); refusing to touch it")]
+    WrongType,
+    #[error("opening the file: {0}")]
     Stat(#[source] file::ValidationError),
-    #[error("chowning the socket to the caller: {0}")]
+    #[error("chowning the file to the caller: {0}")]
     Chown(#[source] Errno),
-    #[error("chmoding the socket: {0}")]
+    #[error("chmoding the file: {0}")]
     Chmod(#[source] Errno),
     #[error("chgrp-ing the jail root dir to the caller: {0}")]
     ChgrpRoot(#[source] Errno),
@@ -223,32 +219,36 @@ impl JailRoot {
         Ok(())
     }
 
-    /// Stat `leaf` under the jail root (`AT_SYMLINK_NOFOLLOW`), verify it is a real
-    /// socket (`S_IFSOCK`; a symlink reports `S_IFLNK` and is refused), then chown it
-    /// to the caller and chmod `0660`. Also open the jail root for the caller's
-    /// group to traverse (chgrp'd to the caller, chmod'd `0710`) so the node can
-    /// reach the socket even though the jailer left `root` at `0700`. Returns
-    /// `Pending` if `leaf` is not yet present (`ENOENT`).
-    pub fn grant_to_caller(&self, leaf: &StrictComponent) -> Result<(), GrantError> {
-        let sock: SafeFile<IsSocket, Any, Any> =
-            match self.0.openat(leaf, OpenFlags::PATH, Mode::empty()) {
-                Ok(sock) => sock,
-                Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing),
-                Err(
-                    file::ValidationError::Open(Errno::ELOOP)
-                    | file::ValidationError::WrongFileType,
-                ) => return Err(GrantError::NotASocket),
-                Err(e) => return Err(GrantError::Stat(e)),
-            };
-        sock.chown(Some(getuid()), Some(getgid()))
+    /// Confirm that a path leaf `<name>`, under the jail, is the given [`FileType`] and then grant
+    /// ownership to the given `owner`, under the given `mode.
+    pub fn grant<T: FileType>(
+        &self,
+        name: &StrictComponent,
+        owner: Owner,
+        mode: Mode,
+    ) -> Result<(), GrantError> {
+        let file: SafeFile<T, Any, Any> = match self.0.openat(name, OpenFlags::PATH, Mode::empty())
+        {
+            Ok(file) => file,
+            Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing),
+            Err(
+                file::ValidationError::Open(Errno::ELOOP) | file::ValidationError::WrongFileType,
+            ) => return Err(GrantError::WrongType),
+            Err(e) => return Err(GrantError::Stat(e)),
+        };
+
+        file.chown(Some(owner.uid), Some(owner.gid))
             .map_err(GrantError::Chown)?;
-        sock.chmod(SOCKET_MODE).map_err(GrantError::Chmod)?;
+        file.chmod(mode).map_err(GrantError::Chmod)?;
+
         self.0
-            .chown(None, Some(getgid()))
+            .chown(None, Some(owner.gid))
             .map_err(GrantError::ChgrpRoot)?;
+
         self.0
             .chmod(JAIL_ROOT_MODE)
             .map_err(GrantError::ChmodRoot)?;
+
         Ok(())
     }
 }

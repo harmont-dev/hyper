@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
 
 use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
-use hyperrs_fs::file;
+use hyperrs_fs::file::{self, IsSocket, Owner};
 use hyperrs_fs::path::StrictComponent;
 use nix::errno::Errno;
+use nix::sys::stat::Mode;
+use nix::unistd::{getgid, getuid};
 use thiserror::Error as ThisError;
+
+/// Mode handed to the node: owner+group read/write, no world access.
+const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
 
 #[derive(Debug, ThisError)]
 pub enum GrantSocketError {
@@ -14,16 +19,24 @@ pub enum GrantSocketError {
     Grant(#[from] GrantError),
 }
 
+pub fn caller() -> Owner {
+    Owner {
+        uid: getuid(),
+        gid: getgid(),
+    }
+}
+
 pub fn grant_socket(
     layout: &JailLayout<'_>,
     socket: &StrictComponent,
+    owner: Owner,
 ) -> Result<(), GrantSocketError> {
     let root = match layout.open_root() {
         Ok(root) => root,
         Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing.into()),
         Err(e) => return Err(GrantSocketError::Walk(e)),
     };
-    Ok(root.grant_to_caller(socket)?)
+    Ok(root.grant::<IsSocket>(socket, owner, SOCKET_MODE)?)
 }
 
 #[cfg(test)]
@@ -43,7 +56,7 @@ mod tests {
         let base: SafePathBuf<IsAbsolute, StrictComponents> =
             jail.to_path_buf().try_into().unwrap();
         let id: VmId = "id".parse().unwrap();
-        grant_socket(&JailLayout::new(&base, &id), LEAF)
+        grant_socket(&JailLayout::new(&base, &id), LEAF, super::caller())
     }
 
     fn make_root(jail: &Path) -> PathBuf {
@@ -95,7 +108,7 @@ mod tests {
 
         let err = grant(tmp.path()).unwrap_err();
         assert!(
-            matches!(err, GrantSocketError::Grant(GrantError::NotASocket)),
+            matches!(err, GrantSocketError::Grant(GrantError::WrongType)),
             "got {err:?}"
         );
         assert_eq!(
@@ -115,7 +128,7 @@ mod tests {
 
         let err = grant(tmp.path()).unwrap_err();
         assert!(
-            matches!(err, GrantSocketError::Grant(GrantError::NotASocket)),
+            matches!(err, GrantSocketError::Grant(GrantError::WrongType)),
             "got {err:?}"
         );
         assert_eq!(
