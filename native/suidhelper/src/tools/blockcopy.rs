@@ -6,11 +6,11 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
-use crate::linux::dm::DmName;
-use crate::process::privilege::Root;
 use crate::tools::parse_dm_device;
 use clap::Args;
 use derive_more::Constructor;
+use hyperrs_linux::dm::DmName;
+use hyperrs_process::privilege::Root;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};

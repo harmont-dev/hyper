@@ -1,6 +1,6 @@
 use super::{DmName, ThinId};
-use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use derive_more::Display;
+use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
 #[derive(Debug, Clone, Display)]

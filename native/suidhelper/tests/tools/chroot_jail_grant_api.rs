@@ -21,10 +21,10 @@
 //!     its parent `root` dir is opened for the caller's group to traverse
 //!     (chgrp'd to the caller, chmod'd 0710) so the node can reach the socket.
 
-use hyper_suidhelper::fs::path::{ComponentError, RelativeError, ValidationError};
 use hyper_suidhelper::tools::chroot_jail::grant_api::{
-    grant_api_under, ApiSocket, Error, GrantError, GrantOut,
+    grant_api_under, ApiSocket, GrantApiError, GrantError, GrantOut,
 };
+use hyperrs_fs::path::{ComponentError, RelativeError, ValidationError};
 use proptest::prelude::*;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::net::UnixListener;
@@ -51,7 +51,7 @@ fn wrong_leaf_basename_is_rejected_at_parse() {
     let tmp = tempfile::tempdir().unwrap();
     let bad = tmp.path().join("exec/id/root/evil.sock");
     let err = ApiSocket::from_str(bad.to_str().unwrap()).unwrap_err();
-    assert!(matches!(err, Error::SocketName(_)), "got {err:?}");
+    assert!(matches!(err, GrantApiError::SocketName(_)), "got {err:?}");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn dotdot_traversal_is_rejected_at_parse() {
     assert!(
         matches!(
             err,
-            Error::SocketPath(ValidationError::Component(ComponentError::ParentDir))
+            GrantApiError::SocketPath(ValidationError::Component(ComponentError::ParentDir))
         ),
         "got {err:?}",
     );
@@ -72,7 +72,7 @@ fn dotdot_traversal_is_rejected_at_parse() {
 fn relative_socket_is_rejected_at_parse() {
     let err = ApiSocket::from_str("exec/id/root/api.socket").unwrap_err();
     assert!(
-        matches!(err, Error::SocketPath(ValidationError::NotAbsolute)),
+        matches!(err, GrantApiError::SocketPath(ValidationError::NotAbsolute)),
         "got {err:?}",
     );
 }
@@ -85,7 +85,7 @@ fn socket_outside_jail_base_is_rejected() {
     let outside = tmp.path().join("elsewhere/exec/id/root/api.socket");
     let err = grant_api_under(&jail, &sock(&outside)).unwrap_err();
     assert!(
-        matches!(err, Error::SocketBase(RelativeError::NotUnderBase)),
+        matches!(err, GrantApiError::SocketBase(RelativeError::NotUnderBase)),
         "got {err:?}",
     );
 }
@@ -96,7 +96,7 @@ fn too_shallow_is_shape_error() {
     let jail = tmp.path();
     let bad = jail.join("exec").join("id").join("api.socket"); // missing root/
     let err = grant_api_under(jail, &sock(&bad)).unwrap_err();
-    assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
+    assert!(matches!(err, GrantApiError::SocketShape(_)), "got {err:?}");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn too_deep_is_shape_error() {
         .join("extra")
         .join("api.socket");
     let err = grant_api_under(jail, &sock(&bad)).unwrap_err();
-    assert!(matches!(err, Error::SocketShape(_)), "got {err:?}");
+    assert!(matches!(err, GrantApiError::SocketShape(_)), "got {err:?}");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn regular_file_at_leaf_is_refused_and_untouched() {
 
     let err = grant_api_under(jail, &sock(&imposter)).unwrap_err();
     assert!(
-        matches!(err, Error::Grant(GrantError::NotASocket)),
+        matches!(err, GrantApiError::Grant(GrantError::NotASocket)),
         "got {err:?}"
     );
     assert_eq!(
@@ -203,7 +203,7 @@ fn symlink_at_leaf_is_refused() {
 
     let err = grant_api_under(jail, &sock(&link)).unwrap_err();
     assert!(
-        matches!(err, Error::Grant(GrantError::NotASocket)),
+        matches!(err, GrantApiError::Grant(GrantError::NotASocket)),
         "got {err:?}"
     );
 }
@@ -255,7 +255,7 @@ proptest! {
         if parents.len() == 3 {
             prop_assert!(matches!(res, Ok(GrantOut::Pending)), "depth 3 must be Pending, got {res:?}");
         } else {
-            prop_assert!(matches!(res, Err(Error::SocketShape(_))), "got {res:?}");
+            prop_assert!(matches!(res, Err(GrantApiError::SocketShape(_))), "got {res:?}");
         }
     }
 }

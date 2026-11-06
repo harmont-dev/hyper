@@ -7,9 +7,9 @@ mod thin;
 pub mod thin_dump;
 
 use super::Access;
-use crate::process::binary::RootSafeBin;
 use derive_more::Constructor;
 pub use device::Device;
+use hyperrs_process::binary::RootSafeBin;
 pub use name::{DmName, InvalidDmName};
 use std::ffi::OsStr;
 use std::io;

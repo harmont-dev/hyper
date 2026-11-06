@@ -1,4 +1,4 @@
-use crate::linux::dm::{ParseThinIdError, ThinId};
+use hyperrs_linux::dm::{ParseThinIdError, ThinId};
 use thiserror::Error as ThisError;
 
 /// A thin-pool message we permit: provision, snapshot, or drop a thin device by id, or pin/unpin the pool's metadata snapshot.

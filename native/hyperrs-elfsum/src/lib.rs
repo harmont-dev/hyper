@@ -4,7 +4,7 @@
 mod stamp;
 
 #[cfg(feature = "stamp")]
-pub use stamp::{Elf, Error};
+pub use stamp::{Elf, StampError};
 
 const LEN: usize = 32;
 

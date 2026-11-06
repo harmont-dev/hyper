@@ -2,9 +2,9 @@ mod events;
 
 pub use events::{Events, EventsState, ReadError};
 
-use crate::fs::dir::SafeDir;
-use crate::fs::file::{self, Any, IsDirectory, OpenFlags, SafeFile};
-use crate::fs::path::{
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{self, Any, IsDirectory, OpenFlags, SafeFile};
+use hyperrs_fs::path::{
     IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use nix::errno::Errno;
@@ -148,7 +148,7 @@ impl Cgroup {
 #[cfg(test)]
 mod tests {
     use super::{Cgroup, OpenError, ROOT};
-    use crate::fs::path::{IsAbsolute, SafePath, StrictComponents};
+    use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use nix::errno::Errno;
     use nix::libc::SIGKILL;
     use std::fs;

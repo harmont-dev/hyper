@@ -1,0 +1,18 @@
+[package]
+name = "hyperrs-fs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lints.clippy]
+redundant_field_names = "allow"
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "into", "add", "debug"] }
+nix = { version = "0.29", features = ["user", "fs", "dir", "ioctl"] }
+ref-cast = "1.0.25"
+thiserror = "1"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"

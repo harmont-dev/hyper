@@ -12,20 +12,20 @@
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};
-use crate::process::privilege::Unprivileged;
 use crate::util::jailer::Jailer;
 use clap::Args;
+use hyperrs_process::privilege::Unprivileged;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
 pub use crate::util::jailer::{validate_id_number, CgroupSetting, JailSock, VmId};
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum JailerError {
     #[error(transparent)]
     Bin(#[from] BinError),
     #[error(transparent)]
-    Jail(#[from] crate::util::jailer::Error),
+    Jail(#[from] crate::util::jailer::JailerArgError),
 }
 
 #[derive(Args)]
@@ -51,8 +51,8 @@ pub struct JailerArgs {
 /// [`Jailer::invoke`], which permanently becomes root and `execve`s the jailer.
 /// On success this never returns (the process image is replaced); the `Ok` arm
 /// is therefore [`std::convert::Infallible`]. Every failure is returned as
-/// [`Error`] for the caller to print and exit non-zero.
-pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infallible, Error> {
+/// [`JailerError`] for the caller to print and exit non-zero.
+pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infallible, JailerError> {
     let config = Config::get();
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
@@ -62,8 +62,8 @@ pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infall
     let jail_base = config.jail_base();
     let range = config.uid_gid_range();
 
-    let uid = validate_id_number(args.uid, range).map_err(Error::Jail)?;
-    let gid = validate_id_number(args.gid, range).map_err(Error::Jail)?;
+    let uid = validate_id_number(args.uid, range).map_err(JailerError::Jail)?;
+    let gid = validate_id_number(args.gid, range).map_err(JailerError::Jail)?;
 
     // The netns path is derived entirely from trusted config (whether VM
     // networking is enabled) and the already-validated `--id` — the caller
@@ -86,5 +86,5 @@ pub fn run(args: JailerArgs, token: Unprivileged) -> Result<std::convert::Infall
         .maybe_netns(netns.as_deref())
         .build()
         .invoke(token)
-        .map_err(Error::Jail)
+        .map_err(JailerError::Jail)
 }

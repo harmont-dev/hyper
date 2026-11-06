@@ -727,11 +727,13 @@ dependencies = [
  "clap",
  "derive_more",
  "hyperrs-elfsum",
+ "hyperrs-fs",
+ "hyperrs-linux",
+ "hyperrs-process",
  "nix 0.29.0",
  "predicates",
  "proptest",
  "quick-xml",
- "ref-cast",
  "serde",
  "serde_json",
  "smart-default",
@@ -780,6 +782,45 @@ dependencies = [
  "blake3",
  "object",
  "proptest",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyperrs-fs"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "nix 0.29.0",
+ "proptest",
+ "ref-cast",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyperrs-linux"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "hyperrs-fs",
+ "hyperrs-process",
+ "nix 0.29.0",
+ "proptest",
+ "quick-xml",
+ "serde",
+ "smart-default",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyperrs-process"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "hyperrs-fs",
+ "nix 0.29.0",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

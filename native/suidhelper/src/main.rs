@@ -15,13 +15,13 @@
 
 use clap::{Parser, Subcommand};
 use hyper_suidhelper::config;
-use hyper_suidhelper::process::privilege::{self, Unprivileged};
 use hyper_suidhelper::tools::jailer::{self, JailerArgs};
 use hyper_suidhelper::tools::Tool;
+use hyperrs_process::privilege::{self, Unprivileged};
 use serde::Serialize;
 use std::path::PathBuf;
 
-hyper_suidhelper::setuid_main!(run);
+hyperrs_process::setuid_main!(run);
 
 #[derive(Parser)]
 #[command(
@@ -79,7 +79,7 @@ struct SysTest {
 }
 
 impl SysTest {
-    fn perform(token: &mut Unprivileged) -> Result<Self, privilege::Error> {
+    fn perform(token: &mut Unprivileged) -> Result<Self, privilege::PrivilegeError> {
         drop(token.elevate()?);
         Ok(Self {
             sys_test: "ok",

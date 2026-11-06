@@ -1,5 +1,5 @@
 use super::{DmName, Dmsetup, RemoveMode, RunError};
-use crate::fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use std::ffi::OsStr;
 
 #[derive(Debug, Clone)]

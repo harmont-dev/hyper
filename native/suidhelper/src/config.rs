@@ -8,9 +8,9 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
-use crate::fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
-use crate::process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
+use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::Deserialize;
 use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;
@@ -40,7 +40,7 @@ pub enum BinError {
     #[error("required binary `{0}` is not configured in /etc/hyper/config.toml")]
     Unconfigured(&'static str),
     #[error(transparent)]
-    Bin(#[from] binary::Error),
+    Bin(#[from] binary::RootSafeBinError),
 }
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
@@ -214,24 +214,24 @@ impl Config {
     }
 
     /// The validated `dmsetup` binary the helper will run.
-    pub fn dmsetup(&self) -> Result<RootSafeBin<"dmsetup">, binary::Error> {
+    pub fn dmsetup(&self) -> Result<RootSafeBin<"dmsetup">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.dmsetup)
     }
 
     /// The validated `ip` (iproute2) binary the network tool runs.
-    pub fn ip(&self) -> Result<RootSafeBin<"ip">, binary::Error> {
+    pub fn ip(&self) -> Result<RootSafeBin<"ip">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.ip)
     }
 
     /// The validated `nft` (nftables) binary the network tool runs.
-    pub fn nft(&self) -> Result<RootSafeBin<"nft">, binary::Error> {
+    pub fn nft(&self) -> Result<RootSafeBin<"nft">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.nft)
     }
 
     /// The `sysctl` binary, used to enable IPv4 forwarding inside a VM's netns
     /// (a fresh netns defaults `net.ipv4.ip_forward` to 0, independent of the
     /// host, so the netns would not route the guest's egress without it).
-    pub fn sysctl(&self) -> Result<RootSafeBin<"sysctl">, binary::Error> {
+    pub fn sysctl(&self) -> Result<RootSafeBin<"sysctl">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.sysctl)
     }
 
@@ -257,7 +257,7 @@ impl Config {
 
     /// The validated `thin_dump` binary (thin-provisioning-tools) the helper
     /// will run.
-    pub fn thin_dump(&self) -> Result<RootSafeBin<"thin_dump">, binary::Error> {
+    pub fn thin_dump(&self) -> Result<RootSafeBin<"thin_dump">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.thin_dump)
     }
 

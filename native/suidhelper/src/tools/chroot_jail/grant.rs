@@ -7,9 +7,9 @@
 //! `O_NOFOLLOW` walk helper, and the core grant execution so neither op duplicates
 //! the logic block.
 
-use crate::fs::dir::SafeDir;
-use crate::fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
-use crate::fs::path::StrictComponent;
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{self, Any, IsSocket, OpenFlags, SafeFile};
+use hyperrs_fs::path::StrictComponent;
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
 use nix::unistd::{getgid, getuid};
@@ -34,8 +34,8 @@ pub enum GrantOut {
 }
 
 /// Errors that can arise in the shared grant execution (stat / chown / chmod).
-/// Each `grant-*` op's `Error` wraps these transparently as its `Grant`
-/// variant.
+/// `GrantApiError` and `GrantVsockError` wrap these transparently as their
+/// `Grant` variant.
 #[derive(Debug, ThisError)]
 pub enum GrantError {
     #[error("not a socket (or is a symlink); refusing to touch it")]

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["guest-agent", "hyperrs-elfsum", "suidhelper", "suidhelper/xtask"]
-default-members = ["guest-agent", "hyperrs-elfsum", "suidhelper"]
+members = ["guest-agent", "hyperrs-elfsum", "hyperrs-fs", "hyperrs-linux", "hyperrs-process", "suidhelper", "suidhelper/xtask"]
+default-members = ["guest-agent", "hyperrs-elfsum", "hyperrs-fs", "hyperrs-linux", "hyperrs-process", "suidhelper"]
 
 [profile.release]
 strip = true

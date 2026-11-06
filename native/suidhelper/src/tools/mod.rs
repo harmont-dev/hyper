@@ -23,8 +23,8 @@ pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
-use crate::process::privilege::{self, Root, Unprivileged};
 use clap::Subcommand;
+use hyperrs_process::privilege::{self, Root, Unprivileged};
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
@@ -32,9 +32,9 @@ use thiserror::Error as ThisError;
 /// privilege guard, or the chosen tool's own failure on the way out. (Operand
 /// validation is handled by clap at parse time, so it never reaches here.)
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum DispatchError {
     #[error(transparent)]
-    Privilege(#[from] privilege::Error),
+    Privilege(#[from] privilege::PrivilegeError),
     /// A tool's own error (operand validation or execution), boxed so this layer
     /// stays decoupled from each tool's concrete error type.
     #[error(transparent)]
@@ -63,14 +63,14 @@ pub trait IsTool {
     /// when it falls out of scope, so `parse` (and serialization) never run as
     /// root. The root window is exactly the one `run_privileged` call. Serializes
     /// the parsed output to a `Value` so every tool returns one common type.
-    fn run(&self, token: &mut Unprivileged) -> Result<serde_json::Value, Error> {
+    fn run(&self, token: &mut Unprivileged) -> Result<serde_json::Value, DispatchError> {
         let res = {
             let root = token.elevate()?;
             self.run_privileged(&root)
         };
 
-        let output = self.parse(res).map_err(Error::Tool)?;
-        serde_json::to_value(output).map_err(|e| Error::Tool(Box::new(e)))
+        let output = self.parse(res).map_err(DispatchError::Tool)?;
+        serde_json::to_value(output).map_err(|e| DispatchError::Tool(Box::new(e)))
     }
 }
 
@@ -116,11 +116,13 @@ impl Tool {
     /// op), returning its already-serialized `Value`. The binary path is taken
     /// from the trusted config and validated (`RootSafeBin`) here, as the real uid,
     /// before any privilege is acquired.
-    pub fn run(self, token: &mut Unprivileged) -> Result<serde_json::Value, Error> {
+    pub fn run(self, token: &mut Unprivileged) -> Result<serde_json::Value, DispatchError> {
         let config = Config::get();
         match self {
             Tool::Dmsetup { args } => {
-                let bin = config.dmsetup().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config
+                    .dmsetup()
+                    .map_err(|e| DispatchError::Tool(Box::new(e)))?;
                 Dmsetup::new(bin, args).run(token)
             }
             Tool::Blockdev { args } => Blockdev::new(args).run(token),
@@ -128,7 +130,9 @@ impl Tool {
             Tool::ChrootJail { op } => op.run(token),
             Tool::Network { op } => op.run(token),
             Tool::ThinDump { args } => {
-                let bin = config.thin_dump().map_err(|e| Error::Tool(Box::new(e)))?;
+                let bin = config
+                    .thin_dump()
+                    .map_err(|e| DispatchError::Tool(Box::new(e)))?;
                 ThinDump::new(bin, args).run(token)
             }
         }

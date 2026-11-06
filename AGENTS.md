@@ -52,6 +52,12 @@ run in CI's `integration` job, which provisions the GitHub-hosted runner via
   `rust-toolchain.toml`, release profiles) for every Rust crate below.
 - `native/hyperrs-elfsum/` — ELF self-checksum slot and stamping, shared by the
   suidhelper and its xtask.
+- `native/hyperrs-fs/` — fd-anchored, confinement-checked paths, files and
+  directories (`SafePath`, `SafeFile`, `SafeDir`).
+- `native/hyperrs-process/` — root-safe binary resolution (`RootSafeBin`) and
+  the privilege guard.
+- `native/hyperrs-linux/` — Linux kernel interfaces: cgroups, device-mapper
+  (incl. thin pools and `thin_dump`), loop devices.
 - `native/suidhelper/` — the privileged Rust helper. Source in `src/`, tests
   inline in `src/` or in `tests/` (see Rust rules below).
 - Generated, do not hand-edit: `lib/hyper/firecracker/api/{operations,schemas}`
@@ -76,7 +82,7 @@ for these families (the existing suites are worked examples of each):
 - **Round-trip / inverse** — `parse(render(x)) == x`, `decode(encode(x)) == x`,
   `with_value(value(q)) == q`. See `test/unit/quantity_properties_test.exs`,
   `test/sys/linux/proc/stat_properties_test.exs`,
-  `native/suidhelper/tests/util/safe_path.rs` (`strip_base` + `segments` rebuild the path).
+  `native/hyperrs-fs/src/path.rs` (`strip_base` + `segments` rebuild the path).
 - **Algebraic laws** — commutativity, associativity, identity, inverse, total
   order. See the additive-group laws in `quantity_properties_test.exs`.
 - **Oracle / model** — the result equals an independent reference computation
@@ -164,10 +170,10 @@ If a case needs its own assertions, it is a separate test, not a row.
 
 - **We are migrating tests inline.** New tests for a module go in a
   `#[cfg(test)] mod tests` block at the bottom of the file under test, not in
-  `tests/`. Many existing tests still live in `tests/` (`src/linux/` and
-  `src/insecure_mode.rs` are already migrated); when you substantially change a
-  module whose tests are still in `tests/`, move them inline as part of the
-  change. `tests/` remains the home for tests that drive the built binary or
+  `tests/`. Many existing tests still live in `tests/` (`src/insecure_mode.rs`
+  and the extracted `hyperrs-*` crates are already migrated); when you
+  substantially change a module whose tests are still in `tests/`, move them
+  inline as part of the change. `tests/` remains the home for tests that drive the built binary or
   span modules (`tests/e2e/`, `tests/config_seam.rs`).
 - Each file in `tests/` must be registered as a `[[test]]` target in `Cargo.toml`
   (`tests/` subdirectories are not auto-discovered) — copy an existing

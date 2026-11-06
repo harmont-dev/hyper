@@ -5,10 +5,10 @@
 //! named where only a backing file may go, non-strict file paths, and malformed
 //! arity. These are the contract that keeps dmsetup off arbitrary storage.
 
-use hyper_suidhelper::linux::dm::ThinId;
 use hyper_suidhelper::tools::{
     parse_dm_device, parse_dm_name, parse_message, parse_table, NameError, ThinMessage,
 };
+use hyperrs_linux::dm::ThinId;
 use proptest::prelude::*;
 use std::path::Path;
 

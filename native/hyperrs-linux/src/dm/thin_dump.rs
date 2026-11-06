@@ -1,8 +1,8 @@
 //! `thin-dump` utilities.
 use super::ThinId;
-use crate::fs::file::{IsBlockDevice, SafeFile};
-use crate::process::binary::RootSafeBin;
 use derive_more::{Constructor, Into};
+use hyperrs_fs::file::{IsBlockDevice, SafeFile};
+use hyperrs_process::binary::RootSafeBin;
 use serde::Deserialize;
 use std::io;
 use std::os::unix::io::AsRawFd;

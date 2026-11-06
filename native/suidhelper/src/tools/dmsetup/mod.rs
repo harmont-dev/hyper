@@ -4,13 +4,13 @@ mod name;
 mod table;
 
 use super::IsTool;
-use crate::linux::dm::{self, DmName, RemoveMode};
-use crate::linux::loopdev::LoopControl;
-use crate::linux::Access;
-use crate::process::binary::RootSafeBin;
-use crate::process::privilege::Root;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
+use hyperrs_linux::dm::{self, DmName, RemoveMode};
+use hyperrs_linux::loopdev::LoopControl;
+use hyperrs_linux::Access;
+use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::Root;
 pub use message::{parse_message, MessageError, ThinMessage};
 pub use name::{parse_dm_device, parse_dm_name, NameError};
 use serde::Serialize;

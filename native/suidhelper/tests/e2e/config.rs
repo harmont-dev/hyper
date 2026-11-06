@@ -4,7 +4,7 @@
 #![cfg(feature = "insecure_mode")]
 
 use hyper_suidhelper::config::{BinError, Config};
-use hyper_suidhelper::process::binary;
+use hyperrs_process::binary;
 use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use std::fs;
@@ -135,7 +135,7 @@ fn jailer_basename_mismatch_rejected() {
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
     assert!(
-        matches!(err, BinError::Bin(binary::Error::Name { .. })),
+        matches!(err, BinError::Bin(binary::RootSafeBinError::Name { .. })),
         "expected a Name error, got {err:?}",
     );
 }

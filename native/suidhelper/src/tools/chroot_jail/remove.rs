@@ -14,13 +14,13 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use crate::config::Config;
-use crate::fs::dir::{self, SafeDir};
-use crate::fs::file::{self, OpenFlags};
-use crate::fs::path::{self, IsAbsolute, SafePath, StrictComponents};
-use crate::linux::cgroup::{self, Cgroup};
-use crate::process::privilege::{Root, Unprivileged};
 use crate::tools::IsTool;
 use clap::Args;
+use hyperrs_fs::dir::{self, SafeDir};
+use hyperrs_fs::file::{self, OpenFlags};
+use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_linux::cgroup::{self, Cgroup};
+use hyperrs_process::privilege::{Root, Unprivileged};
 use nix::errno::Errno;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -32,7 +32,7 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum JailRemoveError {
     #[error(transparent)]
     Chroot(#[from] ChrootError),
     #[error(transparent)]
@@ -50,7 +50,7 @@ pub enum ChrootError {
     #[error("opening chroot parent: {0}")]
     Open(#[source] file::ValidationError),
     #[error("removing chroot: {0}")]
-    Remove(#[source] dir::Error),
+    Remove(#[source] dir::DirError),
 }
 
 #[derive(Debug, ThisError)]
@@ -89,7 +89,7 @@ pub enum RemoveOut {
 pub fn run(
     args: RemoveArgs,
     token: &mut Unprivileged,
-) -> Result<serde_json::Value, crate::tools::Error> {
+) -> Result<serde_json::Value, crate::tools::DispatchError> {
     Remove { args }.run(token)
 }
 
@@ -100,7 +100,7 @@ struct Remove {
 impl IsTool for Remove {
     type Args = RemoveArgs;
     type Output = RemoveOut;
-    type RunT = Result<(), Error>;
+    type RunT = Result<(), JailRemoveError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the

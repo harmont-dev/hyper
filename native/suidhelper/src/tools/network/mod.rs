@@ -17,8 +17,8 @@ pub mod teardown;
 pub mod teardown_orphan;
 
 use crate::config::Network;
-use crate::process::privilege::Unprivileged;
 use clap::Subcommand;
+use hyperrs_process::privilege::Unprivileged;
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
@@ -66,7 +66,10 @@ pub enum NetworkOp {
 impl NetworkOp {
     /// Route to the selected op; each runs in its own privileged scope and
     /// returns its own serialized `Value`.
-    pub fn run(self, token: &mut Unprivileged) -> Result<serde_json::Value, crate::tools::Error> {
+    pub fn run(
+        self,
+        token: &mut Unprivileged,
+    ) -> Result<serde_json::Value, crate::tools::DispatchError> {
         match self {
             NetworkOp::Prepare(args) => prepare::run(args, token),
             NetworkOp::Teardown(args) => teardown::run(args, token),
