@@ -14,8 +14,9 @@
 use crate::config::{BinError, Config};
 use crate::id::IdError;
 use clap::Args;
-use hyperrs_firecracker::chroot_jail::JailLayout;
-use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer, VmId};
+use hyperrs_firecracker::jailer::chroot::JailLayout;
+use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer};
+use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use hyperrs_linux::netns;
 use hyperrs_process::privilege::Unprivileged;
@@ -28,7 +29,7 @@ pub enum JailerError {
     #[error(transparent)]
     Bin(#[from] BinError),
     #[error(transparent)]
-    Jail(#[from] hyperrs_firecracker::jailer::VmIdError),
+    Jail(#[from] hyperrs_firecracker::VmIdError),
     #[error(transparent)]
     Id(#[from] IdError),
 }

@@ -3,6 +3,8 @@
 #![feature(unsized_const_params)]
 #![allow(incomplete_features)]
 
-pub mod chroot_jail;
 pub mod jailer;
 mod tun;
+mod vm_id;
+
+pub use vm_id::{VmId, VmIdError};

@@ -9,6 +9,7 @@ redundant_field_names = "allow"
 
 [dependencies]
 bon = "3.9.3"
+derive_more = { version = "2.1.1", features = ["display"] }
 hyperrs-fs = { path = "../hyperrs-fs" }
 hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["user", "fs"] }

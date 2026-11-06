@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 //! Module responsible for preparing a `chroot` jail to the firecracker jailer.
 
-use crate::jailer::{VmId, FIRECRACKER};
+use super::FIRECRACKER;
 use crate::tun;
+use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{
@@ -112,12 +113,26 @@ impl KernelImage {
     }
 }
 
+/// The overal layout of the jail path. See [`JailLayout::new`].
 pub struct JailLayout<'a> {
     base: &'a SafePath<IsAbsolute, StrictComponents>,
     id: &'a VmId,
 }
 
 impl<'a> JailLayout<'a> {
+    /// Create a new filesystem layout from the given `base` directory and the VM id.
+    ///
+    /// This manages a directory of the layout.
+    ///
+    /// ```text
+    /// <base>/
+    ///   firecracker/
+    ///     <id>/ <- this is what firecracker chroot's into
+    ///       root/
+    /// ```
+    ///
+    /// Please note that the firecracker jailer will create this directory layout, as opposed to
+    /// this utility.
     pub fn new(base: &'a SafePath<IsAbsolute, StrictComponents>, id: &'a VmId) -> Self {
         Self { base, id }
     }
@@ -147,19 +162,30 @@ impl<'a> JailLayout<'a> {
     }
 }
 
+/// The root directory of the chroot jail.
 pub struct JailRoot(SafeDir);
 
+#[bon::bon]
 impl JailRoot {
-    pub fn builder(&self, owner: Owner) -> JailBuilder<'_, Unset, Unset> {
-        JailBuilder {
-            root: self,
-            owner,
-            kernel: Unset,
-            rootfs: Unset,
-            tun: false,
+    #[builder(finish_fn = build)]
+    pub fn builder(
+        &self,
+        #[builder(start_fn)] owner: Owner,
+        kernel: &KernelImage,
+        rootfs: &BlockDevice,
+        #[builder(default)] tun: bool,
+    ) -> Result<(), BuildError> {
+        self.stage_kernel(kernel).map_err(BuildError::Kernel)?;
+        self.add_rootfs(rootfs, owner).map_err(BuildError::Rootfs)?;
+
+        if tun {
+            self.add_tun(owner).map_err(BuildError::Tun)?;
         }
+
+        Ok(())
     }
 
+    /// Put the kernel image in the chroot jail.
     pub fn stage_kernel(&self, kernel: &KernelImage) -> Result<(), dir::DirError> {
         self.0
             .linkat(&kernel.0, KERNEL_NAME)
@@ -167,6 +193,7 @@ impl JailRoot {
                 if errno != Errno::EXDEV {
                     return Err(errno.into());
                 }
+
                 let dest = self.0.mkfileat(KERNEL_NAME, KERNEL_MODE)?;
                 let mut src = File::from(kernel.0.as_fd().try_clone_to_owned()?);
                 src.rewind()?;
@@ -175,6 +202,7 @@ impl JailRoot {
             })
     }
 
+    /// Add the rootfs block device into the chroot jail.
     pub fn add_rootfs<R, O>(
         &self,
         device: &SafeFile<IsBlockDevice, R, O>,
@@ -185,6 +213,7 @@ impl JailRoot {
         Ok(())
     }
 
+    /// TODO(markovejnovic): Remove this slop
     pub fn add_tun(&self, owner: Owner) -> Result<(), dir::DirError> {
         let net = self
             .0
@@ -224,70 +253,12 @@ impl JailRoot {
     }
 }
 
-pub struct Unset;
-
 type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
-
-pub struct JailBuilder<'a, K, D> {
-    root: &'a JailRoot,
-    owner: Owner,
-    kernel: K,
-    rootfs: D,
-    tun: bool,
-}
-
-impl<'a, D> JailBuilder<'a, Unset, D> {
-    pub fn kernel(self, kernel: &'a KernelImage) -> JailBuilder<'a, &'a KernelImage, D> {
-        JailBuilder {
-            root: self.root,
-            owner: self.owner,
-            kernel,
-            rootfs: self.rootfs,
-            tun: self.tun,
-        }
-    }
-}
-
-impl<'a, K> JailBuilder<'a, K, Unset> {
-    pub fn rootfs(self, device: &'a BlockDevice) -> JailBuilder<'a, K, &'a BlockDevice> {
-        JailBuilder {
-            root: self.root,
-            owner: self.owner,
-            kernel: self.kernel,
-            rootfs: device,
-            tun: self.tun,
-        }
-    }
-}
-
-impl<K, D> JailBuilder<'_, K, D> {
-    pub fn tun(self, enabled: bool) -> Self {
-        Self {
-            tun: enabled,
-            ..self
-        }
-    }
-}
-
-impl<'a> JailBuilder<'a, &'a KernelImage, &'a BlockDevice> {
-    pub fn build(self) -> Result<(), BuildError> {
-        self.root
-            .stage_kernel(self.kernel)
-            .map_err(BuildError::Kernel)?;
-        self.root
-            .add_rootfs(self.rootfs, self.owner)
-            .map_err(BuildError::Rootfs)?;
-        if self.tun {
-            self.root.add_tun(self.owner).map_err(BuildError::Tun)?;
-        }
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::{JailLayout, JailRoot, KernelError, KernelImage};
-    use crate::jailer::VmId;
+    use crate::VmId;
     use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};

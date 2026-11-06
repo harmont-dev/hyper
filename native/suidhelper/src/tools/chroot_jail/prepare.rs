@@ -7,8 +7,8 @@ use crate::id::JailOwner;
 use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::chroot_jail::{self, JailLayout, KernelImage};
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelImage};
+use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::{DmName, OpenDeviceError};
 use hyperrs_process::privilege::{Root, Unprivileged};
@@ -22,7 +22,7 @@ pub enum JailPrepareError {
     #[error("opening rootfs device: {0}")]
     Device(#[from] OpenDeviceError),
     #[error(transparent)]
-    Build(#[from] chroot_jail::BuildError),
+    Build(#[from] BuildError),
 }
 
 #[derive(Args)]

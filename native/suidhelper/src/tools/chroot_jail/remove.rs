@@ -16,8 +16,8 @@
 use crate::config::Config;
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::chroot_jail::JailLayout;
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::jailer::chroot::JailLayout;
+use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
@@ -137,8 +137,8 @@ pub fn remove_cgroup(parent: &LexicalPath, id: &VmId) -> Result<(), CgroupError>
 #[cfg(test)]
 mod tests {
     use super::{remove_cgroup, remove_chroot};
-    use hyperrs_firecracker::chroot_jail::JailLayout;
-    use hyperrs_firecracker::jailer::VmId;
+    use hyperrs_firecracker::jailer::chroot::JailLayout;
+    use hyperrs_firecracker::VmId;
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
     use std::fs;
     use std::os::unix::fs::symlink;

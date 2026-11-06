@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use hyperrs_firecracker::chroot_jail::{GrantError, JailLayout};
+use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
 use hyperrs_fs::file;
 use hyperrs_fs::path::StrictComponent;
 use nix::errno::Errno;
@@ -29,8 +29,8 @@ pub fn grant_socket(
 #[cfg(test)]
 mod tests {
     use super::{grant_socket, GrantSocketError};
-    use hyperrs_firecracker::chroot_jail::{GrantError, JailLayout};
-    use hyperrs_firecracker::jailer::VmId;
+    use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+    use hyperrs_firecracker::VmId;
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
     use std::fs;
     use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};

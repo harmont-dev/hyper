@@ -7,7 +7,7 @@
 //! - a `uid` below the accepted range, or a `slot` past the pool's capacity, is
 //!   *always* refused — never wrapped into another VM's address.
 use crate::id::{JailUid, UidGidRange};
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::VmId;
 use nix::unistd::Uid;
 use std::net::Ipv4Addr;
 use thiserror::Error;

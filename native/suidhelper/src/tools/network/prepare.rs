@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::id::{IdError, UidGidRange};
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::VmId;
 use hyperrs_process::binary::{self, RootSafeBin};
 use hyperrs_process::privilege::{Root, Unprivileged};
 use std::net::Ipv4Addr;

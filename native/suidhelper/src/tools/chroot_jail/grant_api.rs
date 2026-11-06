@@ -35,8 +35,8 @@ use crate::config::Config;
 use crate::tools::chroot_jail::grant::{grant_socket, GrantSocketError};
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::chroot_jail::{GrantError, JailLayout};
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
+use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{Root, Unprivileged};
 

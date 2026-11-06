@@ -6,7 +6,7 @@ use super::prepare;
 use super::NetworkOut;
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::jailer::VmId;
+use hyperrs_firecracker::VmId;
 use hyperrs_process::binary::RootSafeBin;
 use hyperrs_process::privilege::{Root, Unprivileged};
 use thiserror::Error as ThisError;
