@@ -199,7 +199,9 @@ impl<F: SlotPath> fmt::Display for Source<F> {
 
 impl<F: SlotPath> fmt::Display for DmTable<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let path = |p: &F| p.slot_path().as_path().display();
+        fn path<F: SlotPath>(p: &F) -> std::path::Display<'_> {
+            p.slot_path().as_path().display()
+        }
         match self {
             DmTable::Linear(LinearTable { sectors, origin }) => {
                 write!(f, "0 {sectors} linear {origin} 0")

@@ -138,7 +138,7 @@ mod tests {
         #[test]
         fn device_path_refuses_anything_outside_dev_mapper(s in dm_name(), dir in "/dev/[a-z]{0,8}/?|[a-z/]{0,12}") {
             prop_assume!(dir != "/dev/mapper/");
-            let got = DmName::from_device_path(&format!("{dir}{s}"));
+            let got = DmName::from_device_path(format!("{dir}{s}"));
             prop_assert!(matches!(got, Err(ParseDmDeviceError::NotMapper(_))), "{:?}", got);
         }
 
