@@ -233,7 +233,11 @@ impl<F: SlotPath> fmt::Display for DmTable<F> {
                 id,
                 origin,
             }) => {
-                write!(f, "0 {sectors} thin {} {id}", pool.path().as_path().display())?;
+                write!(
+                    f,
+                    "0 {sectors} thin {} {id}",
+                    pool.path().as_path().display()
+                )?;
                 match origin {
                     Some(origin) => write!(f, " {origin}"),
                     None => Ok(()),
@@ -317,14 +321,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn file() -> impl Strategy<Value = FilePath> {
-        ("[a-z]{1,8}", prop::collection::vec("[A-Za-z0-9._-]{1,8}", 0..4)).prop_filter_map(
-            "not a strict path, or under /dev",
-            |(first, rest)| {
+        (
+            "[a-z]{1,8}",
+            prop::collection::vec("[A-Za-z0-9._-]{1,8}", 0..4),
+        )
+            .prop_filter_map("not a strict path, or under /dev", |(first, rest)| {
                 (first != "dev")
                     .then(|| format!("/{first}/{}", rest.join("/")))
                     .and_then(|s| PathBuf::from(s.trim_end_matches('/')).try_into().ok())
-            },
-        )
+            })
     }
 
     fn dm_name() -> impl Strategy<Value = DmName> {
@@ -332,7 +337,10 @@ mod tests {
     }
 
     fn source() -> impl Strategy<Value = Source<FilePath>> {
-        prop_oneof![dm_name().prop_map(Source::Device), file().prop_map(Source::File)]
+        prop_oneof![
+            dm_name().prop_map(Source::Device),
+            file().prop_map(Source::File)
+        ]
     }
 
     fn thin_id() -> impl Strategy<Value = ThinId> {
@@ -367,14 +375,18 @@ mod tests {
                     })
                 }
             ),
-            (any::<u64>(), dm_name(), thin_id(), prop::option::of(source())).prop_map(
-                |(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
+            (
+                any::<u64>(),
+                dm_name(),
+                thin_id(),
+                prop::option::of(source())
+            )
+                .prop_map(|(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
                     sectors,
                     pool,
                     id,
                     origin,
-                })
-            ),
+                })),
         ]
     }
 

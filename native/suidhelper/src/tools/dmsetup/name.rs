@@ -14,7 +14,7 @@ pub enum NameError {
 }
 
 pub fn require_hyper(name: &DmName) -> Result<(), NameError> {
-    if name.as_os_str().as_encoded_bytes().starts_with(HYPER_PREFIX.as_bytes()) {
+    if name.to_string().starts_with(HYPER_PREFIX) {
         Ok(())
     } else {
         Err(NameError::NotHyper(name.clone()))

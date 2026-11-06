@@ -269,7 +269,9 @@ impl Config {
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] jailer` before any VM can be launched.
     pub fn jailer(&self) -> Result<RootSafeBin<"jailer">, BinError> {
-        Ok(RootSafeBin::open(required::<"jailer">(&self.tools.jailer)?)?)
+        Ok(RootSafeBin::open(required::<"jailer">(
+            &self.tools.jailer,
+        )?)?)
     }
 
     /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to

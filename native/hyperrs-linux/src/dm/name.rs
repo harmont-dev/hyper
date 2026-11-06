@@ -43,11 +43,13 @@ pub enum OpenDeviceError {
 pub struct DmName(StrictComponentBuf);
 
 impl DmName {
-    pub fn from_device_path(s: impl AsRef<&Path>) -> Result<Self, ParseDmDeviceError> {
-        let s = s.as_ref();
-        let name = s
-            .strip_prefix(MAPPER_PREFIX)
-            .ok_or_else(|| ParseDmDeviceError::NotMapper(s.display().into()))?;
+    pub fn from_device_path(path: impl AsRef<Path>) -> Result<Self, ParseDmDeviceError> {
+        let path = path.as_ref();
+        let not_mapper = || ParseDmDeviceError::NotMapper(path.display().to_string());
+        let name = path
+            .to_str()
+            .and_then(|s| s.strip_prefix(MAPPER_PREFIX))
+            .ok_or_else(not_mapper)?;
 
         Ok(name.parse()?)
     }

@@ -122,7 +122,7 @@ pub struct Thin<'a, S> {
 
 impl<'a> ThinPool<'a> {
     pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
-        let table = dmsetup.run([OsStr::new("table"), name.as_os_str()])?;
+        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
         match table.lines().collect::<Vec<_>>().as_slice() {
             [line] if line.split_whitespace().nth(2) == Some("thin-pool") => Ok(Self {
                 device: dmsetup.device(name),
@@ -169,7 +169,7 @@ impl<'a> ThinPool<'a> {
             .dmsetup
             .run([
                 OsStr::new("message"),
-                self.device.name().as_os_str(),
+                self.device.name().as_ref(),
                 OsStr::new("0"),
                 OsStr::new(&message),
             ])
@@ -243,7 +243,9 @@ impl<'a> Thin<'a, Active<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError};
+    use super::{
+        Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError,
+    };
     use crate::dm::{DmName, Dmsetup};
     use hyperrs_process::binary::RootSafeBin;
     use proptest::prelude::*;

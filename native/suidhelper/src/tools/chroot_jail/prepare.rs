@@ -58,15 +58,10 @@ pub fn run(
     let config = Config::get();
     let range = config.uid_gid_range();
     let owner = JailOwner {
-        uid: range
-            .uid(args.uid)
-            .map_err(DispatchError::tool)?,
-        gid: range
-            .gid(args.gid)
-            .map_err(DispatchError::tool)?,
+        uid: range.uid(args.uid).map_err(DispatchError::tool)?,
+        gid: range.gid(args.gid).map_err(DispatchError::tool)?,
     };
-    let kernel = KernelImage::open(&args.kernel)
-        .map_err(DispatchError::tool)?;
+    let kernel = KernelImage::open(&args.kernel).map_err(DispatchError::tool)?;
     let tun = config.network().is_some();
     Prepare {
         args,

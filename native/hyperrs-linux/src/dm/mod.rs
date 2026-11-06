@@ -14,7 +14,7 @@ pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{
-    DmTable, LinearTable, ParseTableError, Persistence, SlotPath, Slot, SnapshotTable, Source,
+    DmTable, LinearTable, ParseTableError, Persistence, Slot, SlotPath, SnapshotTable, Source,
     ThinPoolTable, ThinTable,
 };
 pub use thin::{
@@ -65,7 +65,7 @@ impl Dmsetup {
         access: Access,
     ) -> Result<Device<'_>, RunError> {
         let table = table.to_string();
-        let mut args = vec![OsStr::new("create"), name.as_os_str()];
+        let mut args = vec![OsStr::new("create"), name.as_ref()];
         if access == Access::ReadOnly {
             args.push(OsStr::new("--readonly"));
         }
