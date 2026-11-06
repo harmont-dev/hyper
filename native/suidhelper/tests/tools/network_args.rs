@@ -1,8 +1,8 @@
 use hyper_suidhelper::config::Network;
+use hyper_suidhelper::id::UidGidRange;
 use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
 use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
-use hyperrs_firecracker::id::UidGidRange;
 use hyperrs_firecracker::jailer::VmId;
 use std::net::Ipv4Addr;
 use std::str::FromStr;

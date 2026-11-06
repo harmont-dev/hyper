@@ -12,8 +12,9 @@
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};
+use crate::id::IdError;
 use clap::Args;
-use hyperrs_firecracker::id::IdError;
+use hyperrs_firecracker::chroot_jail::JailLayout;
 use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer, VmId};
 use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponents};
 use hyperrs_linux::netns;
@@ -106,14 +107,15 @@ fn try_run(args: JailerArgs, token: Unprivileged) -> Result<Infallible, JailerEr
         .network()
         .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&args.id));
 
+    let layout = JailLayout::new(&jail_base, &args.id);
+
     Jailer::builder()
         .jailer(&jailer)
         .firecracker(&firecracker)
-        .jail_base(&jail_base)
+        .layout(&layout)
         .parent_cgroup(config.parent_cgroup())
-        .vm(&args.id)
-        .uid(uid)
-        .gid(gid)
+        .uid(uid.into())
+        .gid(gid.into())
         .limits(
             CgroupLimits::builder()
                 .maybe_memory_max(args.memory_max)

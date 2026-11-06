@@ -126,7 +126,11 @@ fn prepare_succeeds_and_builds_jail_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id").join("root");
+    let chroot = work
+        .join("jails")
+        .join("firecracker")
+        .join("id")
+        .join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
@@ -142,8 +146,8 @@ fn prepare_succeeds_and_builds_jail_as_root() {
         &[
             "chroot-jail",
             "prepare",
-            "--chroot",
-            chroot.to_str().unwrap(),
+            "--id",
+            "id",
             "--kernel",
             kernel.to_str().unwrap(),
             "--device",
@@ -176,7 +180,11 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id").join("root");
+    let chroot = work
+        .join("jails")
+        .join("firecracker")
+        .join("id")
+        .join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
@@ -194,8 +202,8 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
         &[
             "chroot-jail",
             "prepare",
-            "--chroot",
-            chroot.to_str().unwrap(),
+            "--id",
+            "id",
             "--kernel",
             kernel.to_str().unwrap(),
             "--device",
@@ -227,7 +235,11 @@ fn prepare_refuses_ids_outside_range_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id").join("root");
+    let chroot = work
+        .join("jails")
+        .join("firecracker")
+        .join("id")
+        .join("root");
     fs::create_dir_all(&chroot).unwrap();
     let kernel = work.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
@@ -244,8 +256,8 @@ fn prepare_refuses_ids_outside_range_as_root() {
             &[
                 "chroot-jail",
                 "prepare",
-                "--chroot",
-                chroot.to_str().unwrap(),
+                "--id",
+                "id",
                 "--kernel",
                 kernel.to_str().unwrap(),
                 "--device",
@@ -278,8 +290,8 @@ fn prepare_rejects_system_device_operand() {
         &[
             "chroot-jail",
             "prepare",
-            "--chroot",
-            "/srv/jails/exec/id",
+            "--id",
+            "id",
             "--kernel",
             "/srv/vmlinux",
             "--device",
@@ -303,65 +315,30 @@ fn remove_succeeds_and_is_idempotent_as_root() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id");
+    let chroot = work.join("jails").join("firecracker").join("id");
     fs::create_dir_all(chroot.join("inner")).unwrap();
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
     let cfg = write_config_with_parent_cgroup(tmp.path(), &work, "hyper-e2e-does-not-exist");
 
-    // A cgroup leaf that does not exist under the real /sys/fs/cgroup: removal of
-    // a missing target is success, and nothing on the host is modified.
-    let missing_cgroup = "/sys/fs/cgroup/hyper-e2e-does-not-exist/leaf";
-
-    let out = run(
-        &cfg,
-        &[
-            "chroot-jail",
-            "remove",
-            "--chroot",
-            chroot.to_str().unwrap(),
-            "--cgroup",
-            missing_cgroup,
-        ],
-    )
-    .success();
+    let out = run(&cfg, &["chroot-jail", "remove", "--id", "id"]).success();
     let json = stdout_json(&out);
     assert_eq!(json["result"], "removed");
     assert!(!chroot.exists(), "chroot must be gone");
 }
 
 #[test]
-fn remove_refuses_cgroup_outside_parent_as_root() {
-    if !is_root() {
-        eprintln!("SKIP remove_refuses_cgroup_outside_parent: needs root");
-        return;
-    }
+fn remove_refuses_an_invalid_id() {
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("exec").join("id");
+    let chroot = work.join("jails").join("firecracker").join("id");
     fs::create_dir_all(&chroot).unwrap();
-    let cfg = write_config_with_parent_cgroup(tmp.path(), &work, "hyper-e2e-does-not-exist");
+    let cfg = write_config(tmp.path(), &work);
 
-    for cgroup in [
-        "/sys/fs/cgroup/hyper-e2e-other/leaf",
-        "/sys/fs/cgroup/hyper-e2e-does-not-exist",
-        "/sys/fs/cgroup/hyper-e2e-does-not-exist/leaf/deeper",
-        "/sys/fs/cgroup/hyper-e2e-does-not-exist/not.a.vm.id",
-    ] {
-        run(
-            &cfg,
-            &[
-                "chroot-jail",
-                "remove",
-                "--chroot",
-                chroot.to_str().unwrap(),
-                "--cgroup",
-                cgroup,
-            ],
-        )
-        .code(2);
+    for id in ["../id", "a/b", "..", "-id", "a_b", ""] {
+        run(&cfg, &["chroot-jail", "remove", "--id", id]).code(2);
         assert!(
             chroot.exists(),
-            "{cgroup}: chroot must survive a refused remove"
+            "{id:?}: chroot must survive a refused remove"
         );
     }
 }
@@ -379,16 +356,12 @@ fn grant_exit_code_separates_not_yet_from_refused_as_root() {
     let cfg = write_config(tmp.path(), &work);
 
     let rows = [
-        ("grant-api", jails.join("exec/id/root/api.socket"), 75),
-        ("grant-vsock", jails.join("exec/id/root/vsock.sock"), 75),
-        ("grant-api", jails.join("exec/api.socket"), 2),
-        ("grant-vsock", jails.join("exec/vsock.sock"), 2),
+        ("grant-api", "id", 75),
+        ("grant-vsock", "id", 75),
+        ("grant-api", "../id", 2),
+        ("grant-vsock", "a/b", 2),
     ];
-    for (op, socket, code) in rows {
-        run(
-            &cfg,
-            &["chroot-jail", op, "--socket", socket.to_str().unwrap()],
-        )
-        .code(code);
+    for (op, id, code) in rows {
+        run(&cfg, &["chroot-jail", op, "--id", id]).code(code);
     }
 }

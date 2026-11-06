@@ -3,11 +3,12 @@
 //! inside a VM chroot, via the [`ChrootJail`] builder.
 
 use crate::config::Config;
+use crate::id::JailOwner;
 use crate::tools::parse_dm_device;
 use crate::tools::IsTool;
 use clap::Args;
-use hyperrs_firecracker::chroot_jail::{self, JailRoot, KernelImage};
-use hyperrs_firecracker::id::JailOwner;
+use hyperrs_firecracker::chroot_jail::{self, JailLayout, KernelImage};
+use hyperrs_firecracker::jailer::VmId;
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::{DmName, OpenDeviceError};
 use hyperrs_process::privilege::{Root, Unprivileged};
@@ -16,8 +17,8 @@ use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum JailPrepareError {
-    #[error(transparent)]
-    Jail(#[from] chroot_jail::OpenError),
+    #[error("opening jail root: {0}")]
+    Jail(#[from] hyperrs_fs::file::ValidationError),
     #[error("opening rootfs device: {0}")]
     Device(#[from] OpenDeviceError),
     #[error(transparent)]
@@ -26,9 +27,8 @@ pub enum JailPrepareError {
 
 #[derive(Args)]
 pub struct PrepareArgs {
-    /// Chroot root directory (under JAIL_BASE, shape <JAIL_BASE>/<exec>/<id>).
     #[arg(long)]
-    chroot: SafePathBuf<IsAbsolute, StrictComponents>,
+    id: VmId,
     /// Host kernel image path (under /srv/hyper); staged as <chroot>/vmlinux.
     #[arg(long)]
     kernel: SafePathBuf<IsAbsolute, StrictComponents>,
@@ -91,9 +91,10 @@ impl IsTool for Prepare {
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let config = Config::get();
-        let root = JailRoot::open(&config.jail_base(), &self.args.chroot)?;
+        let jail_base = config.jail_base();
+        let root = JailLayout::new(&jail_base, &self.args.id).open_root()?;
         let device = self.args.device.open()?;
-        root.builder(self.owner)
+        root.builder(self.owner.into())
             .kernel(&self.kernel)
             .rootfs(&device)
             .tun(self.tun)

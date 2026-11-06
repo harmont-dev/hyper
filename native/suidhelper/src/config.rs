@@ -8,7 +8,7 @@
 //! decide which UIDs it *accepts* (default `{900_000, 999_999}` when the key is
 //! absent). Operators narrowing the range must set **both**.
 
-use hyperrs_firecracker::id::UidGidRange;
+use crate::id::UidGidRange;
 use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,

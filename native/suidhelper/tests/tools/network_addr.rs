@@ -1,5 +1,5 @@
+use hyper_suidhelper::id::{JailUid, UidGidRange};
 use hyper_suidhelper::tools::network::addr::{self, AddrError, Plan};
-use hyperrs_firecracker::id::{JailUid, UidGidRange};
 use hyperrs_firecracker::jailer::VmId;
 use proptest::prelude::*;
 use std::net::Ipv4Addr;

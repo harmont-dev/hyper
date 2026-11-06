@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MIT
 //! API into the Firecracker jailer.
 
-use crate::id::{JailGid, JailUid};
+use crate::chroot_jail::JailLayout;
 use bon::Builder;
 use hyperrs_fs::path::{
     ComponentError, IsAbsolute, SafePath, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use hyperrs_process::binary::{RootSafeBin, RootSafeBinPathBuf};
 use hyperrs_process::privilege::{RootCommandExt, Unprivileged};
+use nix::unistd::{Gid, Uid};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::process::Command;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
+
+pub const FIRECRACKER: &str = "firecracker";
 
 #[derive(Debug, ThisError)]
 pub enum VmIdError {
@@ -78,9 +81,8 @@ pub struct Jailer<'a> {
     /// The binary to the jailer.
     jailer: &'a RootSafeBin<"jailer">,
     /// The binary to firecracker.
-    firecracker: &'a RootSafeBinPathBuf<"firecracker">,
-    /// The base directory for the jail.
-    jail_base: &'a SafePath<IsAbsolute, StrictComponents>,
+    firecracker: &'a RootSafeBinPathBuf<FIRECRACKER>,
+    layout: &'a JailLayout<'a>,
     /// The cgroup in which a new, per-vm cgroup will be created.
     ///
     /// ```text
@@ -90,12 +92,10 @@ pub struct Jailer<'a> {
     ///     <vm-id-2>/
     /// ```
     parent_cgroup: &'a StrictComponent,
-    /// A unique name that is passed to the jailer.
-    vm: &'a VmId,
     /// The user this VM runs under.
-    uid: JailUid,
+    uid: Uid,
     /// The group this VM runs under.
-    gid: JailGid,
+    gid: Gid,
     /// The explicit cgroup settings, given as `KEY=VALUE` pairs.
     limits: CgroupLimits,
     /// The path to the Firecracker API socket.
@@ -108,7 +108,7 @@ impl Jailer<'_> {
     fn command(&self) -> Command {
         let mut cmd = self.jailer.command();
         cmd.arg("--id")
-            .arg(self.vm.as_os_str())
+            .arg(self.layout.id().as_os_str())
             .arg("--exec-file")
             .arg(self.firecracker.as_path())
             .arg("--uid")
@@ -116,7 +116,7 @@ impl Jailer<'_> {
             .arg("--gid")
             .arg(self.gid.to_string())
             .arg("--chroot-base-dir")
-            .arg(self.jail_base.as_path())
+            .arg(self.layout.base().as_path())
             .arg("--cgroup-version")
             .arg("2")
             .arg("--parent-cgroup")

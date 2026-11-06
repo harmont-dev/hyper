@@ -6,7 +6,7 @@
 //! - `veth` names always satisfy `IFNAMSIZ` (<= 15);
 //! - a `uid` below the accepted range, or a `slot` past the pool's capacity, is
 //!   *always* refused — never wrapped into another VM's address.
-use hyperrs_firecracker::id::{JailUid, UidGidRange};
+use crate::id::{JailUid, UidGidRange};
 use hyperrs_firecracker::jailer::VmId;
 use nix::unistd::Uid;
 use std::net::Ipv4Addr;

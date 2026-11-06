@@ -14,7 +14,6 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
   use OpenTelemetryDecorator
 
   alias Hyper.Node.FireVMM.BootSpec.Cold
-  alias Hyper.Node.FireVMM.Jailer
   alias Hyper.SuidHelper
 
   # In-jail filenames + the rootfs drive id (matches BootSpec.resolve/2).
@@ -31,14 +30,13 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
           {:ok, Cold.t()} | {:error, term()}
   @decorate with_span("Hyper.Node.FireVMM.ChrootJail.stage", include: [:vm_id])
   def stage(vm_id, uid, gid, %Cold{} = cold) do
-    chroot_root = Jailer.chroot_root(vm_id)
     kernel = cold.boot_source.kernel_image_path
     device = root_drive_host_path(cold)
 
     # The helper places the kernel at <chroot_root>/@kernel_name and the rootfs
     # node at <chroot_root>/@root_name; those names are the contract it rewrites
     # the spec against below.
-    with :ok <- SuidHelper.ChrootJail.prepare(chroot_root, kernel, device, uid, gid) do
+    with :ok <- SuidHelper.ChrootJail.prepare(vm_id, kernel, device, uid, gid) do
       {:ok, jailify(cold, in_jail(@kernel_name), in_jail(@root_name))}
     end
   end

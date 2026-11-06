@@ -108,7 +108,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id, uid: uid}) do
     net = Hyper.SuidHelper.Network.teardown(id, uid)
-    jail = SuidHelper.ChrootJail.remove(Jailer.chroot_dir(id), Jailer.cgroup_dir(id))
+    jail = SuidHelper.ChrootJail.remove(id)
     with :ok <- net, do: jail
   end
 

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 //! Module responsible for preparing a `chroot` jail to the firecracker jailer.
 
-use crate::id::JailOwner;
-use crate::jailer::VmId;
+use crate::jailer::{VmId, FIRECRACKER};
 use crate::tun;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
-use hyperrs_fs::file::{self, Any, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, SafeFile};
+use hyperrs_fs::file::{
+    self, Any, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, Owner, SafeFile,
+};
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents,
 };
@@ -25,6 +26,8 @@ const KERNEL_NAME: &StrictComponent = StrictComponent::from_static("vmlinux");
 /// The name of the rootfs block device in the chroot jail.
 const ROOTFS_NAME: &StrictComponent = StrictComponent::from_static("rootfs");
 
+const EXEC_NAME: &StrictComponent = StrictComponent::from_static(FIRECRACKER);
+
 /// The jail directory's own path.
 const ROOT_NAME: &StrictComponent = StrictComponent::from_static("root");
 
@@ -42,16 +45,6 @@ const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
 
 /// Mode set on `ROOT_NAME`.
 const JAIL_ROOT_MODE: Mode = Mode::from_bits_truncate(0o710);
-
-#[derive(Debug, ThisError)]
-pub enum OpenError {
-    #[error(transparent)]
-    Base(#[from] path::RelativeError),
-    #[error("jail root must be exactly <exec>/<vm id>/root below the jail base: {0:?}")]
-    Shape(PathBuf),
-    #[error("opening jail root: {0}")]
-    Open(#[from] file::ValidationError),
-}
 
 #[derive(Debug, ThisError)]
 pub enum KernelError {
@@ -119,36 +112,45 @@ impl KernelImage {
     }
 }
 
+pub struct JailLayout<'a> {
+    base: &'a SafePath<IsAbsolute, StrictComponents>,
+    id: &'a VmId,
+}
+
+impl<'a> JailLayout<'a> {
+    pub fn new(base: &'a SafePath<IsAbsolute, StrictComponents>, id: &'a VmId) -> Self {
+        Self { base, id }
+    }
+
+    pub fn base(&self) -> &'a SafePath<IsAbsolute, StrictComponents> {
+        self.base
+    }
+
+    pub fn id(&self) -> &'a VmId {
+        self.id
+    }
+
+    pub fn exec_dir(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        self.base.join(EXEC_NAME)
+    }
+
+    pub fn chroot_dir(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        self.exec_dir().join(self.id)
+    }
+
+    pub fn root(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        self.chroot_dir().join(ROOT_NAME)
+    }
+
+    pub fn open_root(&self) -> Result<JailRoot, file::ValidationError> {
+        SafeDir::open(&self.root(), OpenFlags::RDONLY).map(JailRoot)
+    }
+}
+
 pub struct JailRoot(SafeDir);
 
 impl JailRoot {
-    pub fn open(
-        jail_base: &SafePath<IsAbsolute, StrictComponents>,
-        path: &SafePath<IsAbsolute, StrictComponents>,
-    ) -> Result<Self, OpenError> {
-        let mut segments = path.strip_base(jail_base)?.segments();
-        let shape_ok = match (
-            segments.next(),
-            segments.next(),
-            segments.next(),
-            segments.next(),
-        ) {
-            (Some(_exec), Some(id), Some(root), None) => {
-                root == ROOT_NAME
-                    && id
-                        .as_os_str()
-                        .to_str()
-                        .is_some_and(|id| id.parse::<VmId>().is_ok())
-            }
-            _ => false,
-        };
-        if !shape_ok {
-            return Err(OpenError::Shape(path.as_path().to_path_buf()));
-        }
-        Ok(Self(SafeDir::open(path, OpenFlags::RDONLY)?))
-    }
-
-    pub fn builder(&self, owner: JailOwner) -> JailBuilder<'_, Unset, Unset> {
+    pub fn builder(&self, owner: Owner) -> JailBuilder<'_, Unset, Unset> {
         JailBuilder {
             root: self,
             owner,
@@ -176,19 +178,19 @@ impl JailRoot {
     pub fn add_rootfs<R, O>(
         &self,
         device: &SafeFile<IsBlockDevice, R, O>,
-        owner: JailOwner,
+        owner: Owner,
     ) -> Result<(), dir::DirError> {
         let node = DeviceNode::<IsBlockDevice>::new(device.rdev()?, ROOTFS_MODE);
-        self.0.make_device(ROOTFS_NAME, node, owner.into())?;
+        self.0.make_device(ROOTFS_NAME, node, owner)?;
         Ok(())
     }
 
-    pub fn add_tun(&self, owner: JailOwner) -> Result<(), dir::DirError> {
+    pub fn add_tun(&self, owner: Owner) -> Result<(), dir::DirError> {
         let net = self
             .0
             .ensure_dir(tun::DEV, DIR_MODE)?
             .ensure_dir(tun::NET, DIR_MODE)?;
-        net.make_device(tun::NAME, tun::NODE, owner.into())?;
+        net.make_device(tun::NAME, tun::NODE, owner)?;
         Ok(())
     }
 
@@ -228,7 +230,7 @@ type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
 
 pub struct JailBuilder<'a, K, D> {
     root: &'a JailRoot,
-    owner: JailOwner,
+    owner: Owner,
     kernel: K,
     rootfs: D,
     tun: bool,
@@ -284,13 +286,16 @@ impl<'a> JailBuilder<'a, &'a KernelImage, &'a BlockDevice> {
 
 #[cfg(test)]
 mod tests {
-    use super::{JailRoot, KernelError, KernelImage, OpenError};
-    use crate::id::{JailOwner, UidGidRange};
+    use super::{JailLayout, JailRoot, KernelError, KernelImage};
+    use crate::jailer::VmId;
+    use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
-    use hyperrs_fs::path::{IsAbsolute, RelativeError, SafePathBuf, StrictComponents};
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
     use hyperrs_fs::{dir, file};
     use nix::errno::Errno;
     use nix::sys::stat::{makedev, mknod, Mode, SFlag};
+    use nix::unistd::{Gid, Uid};
+    use proptest::prelude::*;
     use std::fs;
     use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt, PermissionsExt};
     use std::path::{Path, PathBuf};
@@ -306,71 +311,73 @@ mod tests {
         nix::unistd::geteuid().is_root()
     }
 
-    fn owner(uid: u32, gid: u32) -> JailOwner {
-        let range = UidGidRange::try_from([uid.min(gid), uid.max(gid)]).unwrap();
-        JailOwner {
-            uid: range.uid(uid).unwrap(),
-            gid: range.gid(gid).unwrap(),
+    fn owner(uid: u32, gid: u32) -> Owner {
+        Owner {
+            uid: Uid::from_raw(uid),
+            gid: Gid::from_raw(gid),
         }
     }
 
+    fn vm() -> VmId {
+        "id".parse().unwrap()
+    }
+
+    fn open_root(jail_base: &Path) -> JailRoot {
+        JailLayout::new(&strict(jail_base), &vm())
+            .open_root()
+            .unwrap()
+    }
+
     fn jail_root(jail_base: &Path) -> PathBuf {
-        let root = jail_base.join("exec").join("id").join("root");
+        let root = jail_base.join("firecracker").join("id").join("root");
         fs::create_dir_all(&root).unwrap();
         root
     }
 
     #[test]
-    fn jail_root_opens_exec_id_root() {
+    fn layout_opens_the_jailer_root() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = jail_root(tmp.path());
-        assert!(JailRoot::open(&strict(tmp.path()), &strict(root)).is_ok());
+        jail_root(tmp.path());
+        assert!(JailLayout::new(&strict(tmp.path()), &vm())
+            .open_root()
+            .is_ok());
     }
 
-    #[test]
-    fn jail_root_refuses_other_shapes() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        for rel in [
-            "exec",
-            "exec/id",
-            "exec/id/root/extra",
-            "exec/id/notroot",
-            "exec/a_b/root",
-            "exec/-id/root",
-        ] {
-            let err = JailRoot::open(&strict(base), &strict(base.join(rel))).err();
-            assert!(
-                matches!(err, Some(OpenError::Shape(_))),
-                "{rel}: got {err:?}"
+    proptest! {
+        #[test]
+        fn layout_root_is_exactly_firecracker_id_root_below_base(
+            id in "[A-Za-z0-9][A-Za-z0-9-]{0,63}"
+        ) {
+            let base = strict("/srv/jails");
+            let id: VmId = id.parse().unwrap();
+            let root = JailLayout::new(&base, &id).root();
+            let segments: Vec<_> = root
+                .strip_base(&base)
+                .unwrap()
+                .segments()
+                .map(|c| c.as_os_str().to_owned())
+                .collect();
+            prop_assert_eq!(
+                segments,
+                ["firecracker", &id.to_string(), "root"].map(std::ffi::OsString::from).to_vec()
             );
         }
     }
 
     #[test]
-    fn jail_root_refuses_path_outside_base() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().join("jail");
-        let outside = tmp.path().join("elsewhere/exec/id/root");
-        let err = JailRoot::open(&strict(&base), &strict(outside)).err();
-        assert!(
-            matches!(err, Some(OpenError::Base(RelativeError::NotUnderBase))),
-            "got {err:?}"
-        );
-    }
-
-    // A symlinked component is not followed (O_NOFOLLOW): open must fail.
-    #[test]
-    fn jail_root_refuses_symlinked_component() {
+    fn layout_refuses_symlinked_component() {
         let tmp = tempfile::tempdir().unwrap();
         let jail = tmp.path().join("jail");
         fs::create_dir(&jail).unwrap();
         let real_exec = tmp.path().join("real-exec");
         fs::create_dir_all(real_exec.join("id").join("root")).unwrap();
-        symlink(&real_exec, jail.join("exec")).unwrap();
+        symlink(&real_exec, jail.join("firecracker")).unwrap();
 
-        let err = JailRoot::open(&strict(&jail), &strict(jail.join("exec/id/root"))).err();
-        assert!(matches!(err, Some(OpenError::Open(_))), "got {err:?}");
+        let err = JailLayout::new(&strict(&jail), &vm()).open_root().err();
+        assert!(
+            matches!(err, Some(file::ValidationError::Open(Errno::ELOOP))),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -407,7 +414,7 @@ mod tests {
         let link = base.join("vmlinux");
         symlink(&real, &link).unwrap();
 
-        let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+        let root = open_root(base);
         root.stage_kernel(&KernelImage::open(&strict(&link)).unwrap())
             .unwrap();
         assert_eq!(fs::read(root_dir.join("vmlinux")).unwrap(), b"real kernel");
@@ -431,7 +438,7 @@ mod tests {
         let root_dir = jail_root(base);
         let src = base.join("vmlinux-src");
         fs::write(&src, b"\x7fELF fake kernel bytes").unwrap();
-        let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+        let root = open_root(base);
 
         let kernel = KernelImage::open(&strict(&src)).unwrap();
         root.stage_kernel(&kernel).expect("first stage");
@@ -448,12 +455,12 @@ mod tests {
     fn stage_kernel_never_changes_the_source() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
-        let root_dir = jail_root(base);
+        jail_root(base);
         let src = base.join("vmlinux-src");
         fs::write(&src, b"kernel").unwrap();
         let before = fs::metadata(&src).unwrap();
 
-        let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+        let root = open_root(base);
         let kernel = KernelImage::open(&strict(&src)).unwrap();
         root.stage_kernel(&kernel).unwrap();
 
@@ -502,7 +509,7 @@ mod tests {
             return;
         };
 
-        let root = JailRoot::open(&strict(base), &strict(&root_dir)).unwrap();
+        let root = open_root(base);
         let res = SafeFile::<IsBlockDevice, Any, Any>::open(&strict(&dev), OpenFlags::PATH)
             .map_err(|e| e.to_string())
             .and_then(|device| {
@@ -528,7 +535,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let root_dir = jail_root(tmp.path());
-        let root = JailRoot::open(&strict(tmp.path()), &strict(&root_dir)).unwrap();
+        let root = open_root(tmp.path());
 
         root.add_tun(owner(12345, 12346)).unwrap();
         root.add_tun(owner(12345, 12346)).unwrap();
@@ -557,7 +564,7 @@ mod tests {
             makedev(1, 3),
         )
         .unwrap();
-        let root = JailRoot::open(&strict(tmp.path()), &strict(&root_dir)).unwrap();
+        let root = open_root(tmp.path());
 
         let err = root.add_tun(owner(12345, 12346)).unwrap_err();
         assert!(
