@@ -74,8 +74,7 @@ pub type Digest = [u8; LEN];
 pub struct Slot(Digest);
 
 impl Slot {
-    #[doc(hidden)]
-    pub const fn zeroed() -> Self {
+    const fn zeroed() -> Self {
         Self([0; LEN])
     }
 
@@ -88,14 +87,16 @@ impl Slot {
     }
 }
 
+#[doc(hidden)]
+#[cfg_attr(target_os = "linux", link_section = ".note.sum")]
+#[used]
+pub static SLOT: Slot = Slot::zeroed();
+
 #[macro_export]
 macro_rules! checksum {
-    () => {{
-        #[link_section = ".note.sum"]
-        #[used]
-        static SLOT: $crate::Slot = $crate::Slot::zeroed();
-        &SLOT
-    }};
+    () => {
+        &$crate::SLOT
+    };
 }
 
 #[cfg(test)]
@@ -121,9 +122,10 @@ mod tests {
     #[test]
     fn checksum_macro_lands_in_the_stamped_section() {
         let slot: &'static Slot = crate::checksum!();
+        assert!(std::ptr::eq(slot, crate::checksum!()));
 
         let exe = std::fs::read("/proc/self/exe").unwrap();
-        let elf = Elf::read(exe).expect("macro must emit SECTION with LEN bytes");
-        assert_eq!(*elf.stored(), slot.get());
+        Elf::read(exe).expect("macro must emit SECTION with LEN bytes");
+        assert_eq!(slot.get(), [0; LEN]);
     }
 }
