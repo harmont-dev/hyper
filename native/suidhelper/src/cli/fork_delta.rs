@@ -117,7 +117,7 @@ impl Op for ThinForkDelta {
             let pool = dmsetup.thin_pool(&self.pool)?;
             let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
-                Err(e @ SnapshotError::Resume(_)) => {
+                Err(e @ SnapshotError::Resume { created: true, .. }) => {
                     let _ = pool.delete_thin(self.scratch_id);
                     return Err(e.into());
                 }
@@ -174,7 +174,9 @@ impl ThinForkDelta {
                     .write(true)
                     .open(target_name.path().as_path())?
             };
-            Ok::<_, ForkDeltaError>(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
+            let stats = copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?;
+            dst.sync_all()?;
+            Ok::<_, ForkDeltaError>(stats)
         })();
         let removed = (|| {
             let _root = token.elevate()?;

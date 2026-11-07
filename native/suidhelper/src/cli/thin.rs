@@ -4,8 +4,8 @@ use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError,
-    ThinId, ThinPoolError, ThinPoolTable,
+    self, DevPath, DmTable, NumberError, OpenThinError, Origin, RemoveMode, Role, RunError,
+    SnapshotError, ThinId, ThinPoolError, ThinPoolTable,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -91,7 +91,14 @@ impl Op for ThinPoolCreate {
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         {
             let _root = token.elevate()?;
-            let _ = dm.device(&self.name).remove(RemoveMode::Retry);
+            if let Err(e) = dm.device(&self.name).remove(RemoveMode::Retry) {
+                if !matches!(
+                    dm.device(&self.name).number(),
+                    Err(NumberError::Run(RunError::Failed(_)))
+                ) {
+                    return Err(e.into());
+                }
+            }
             let metadata = table.backing(Role::Metadata).ok_or(ThinError::NoMetadata)?;
             metadata
                 .file()
@@ -116,7 +123,7 @@ impl Op for ThinVolumeCreate {
             None => pool.create_thin(self.thin_id)?,
             Some(parent) => match pool.open_thin(parent)?.snapshot(self.thin_id) {
                 Ok(snapshot) => snapshot,
-                Err(e @ SnapshotError::Resume(_)) => {
+                Err(e @ SnapshotError::Resume { created: true, .. }) => {
                     let _ = pool.delete_thin(self.thin_id);
                     return Err(e.into());
                 }

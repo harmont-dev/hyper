@@ -19,6 +19,8 @@ defmodule Hyper.Node.Img.ThinPool do
 
   use OpenTelemetryDecorator
 
+  require Logger
+
   @pool_name "hyper-thinpool"
   @data_file "thinpool.data"
   @meta_file "thinpool.meta"
@@ -36,7 +38,9 @@ defmodule Hyper.Node.Img.ThinPool do
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.create_volume", include: [:name, :parent])
   def create_volume(name, origin_dev, parent \\ nil) do
-    GenServer.call(__MODULE__, {:create_volume, name, origin_dev, parent}, :timer.seconds(30))
+    serialized_on(parent, fn ->
+      GenServer.call(__MODULE__, {:create_volume, name, origin_dev, parent}, :timer.seconds(30))
+    end)
   end
 
   @spec fork_delta(String.t(), Path.t(), Path.t()) ::
@@ -45,12 +49,20 @@ defmodule Hyper.Node.Img.ThinPool do
   def fork_delta(parent, origin, cow) do
     {scratch_id, meta_loop} = GenServer.call(__MODULE__, :reserve_scratch)
 
-    try do
-      SuidHelper.ForkDelta.run(@pool_name, meta_loop, parent, scratch_id, origin, cow)
-    after
-      GenServer.call(__MODULE__, {:release_scratch, scratch_id})
-    end
+    result =
+      serialized_on(parent, fn ->
+        SuidHelper.ForkDelta.run(@pool_name, meta_loop, parent, scratch_id, origin, cow)
+      end)
+
+    GenServer.call(__MODULE__, {:release_scratch, scratch_id, result})
+    result
   end
+
+  @spec serialized_on(String.t() | nil, (-> result)) :: result when result: term()
+  defp serialized_on(nil, fun), do: fun.()
+
+  defp serialized_on(parent, fun),
+    do: :global.trans({{__MODULE__, parent}, self()}, fun, [node()])
 
   @doc "Remove thin volume `name` and free its thin device `id`."
   @spec destroy(String.t(), non_neg_integer()) :: :ok
@@ -79,7 +91,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
     case SuidHelper.Thin.create_volume(@pool_name, id, name, origin_dev, parent) do
       {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
-      {:error, _} = err -> {:reply, err, id_free(state, id)}
+      {:error, _} = err -> {:reply, err, retire(state, id, err)}
     end
   end
 
@@ -90,12 +102,18 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:release_scratch, id}, _from, state), do: {:reply, :ok, id_free(state, id)}
+  def handle_call({:release_scratch, id, {:ok, _}}, _from, state),
+    do: {:reply, :ok, id_free(state, id)}
+
+  def handle_call({:release_scratch, id, err}, _from, state),
+    do: {:reply, :ok, retire(state, id, err)}
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
-    _ = SuidHelper.Thin.destroy(@pool_name, name)
-    {:reply, :ok, id_free(state, id)}
+    case SuidHelper.Thin.destroy(@pool_name, name) do
+      :ok -> {:reply, :ok, id_free(state, id)}
+      {:error, _} = err -> {:reply, :ok, retire(state, id, err)}
+    end
   end
 
   @impl true
@@ -126,6 +144,12 @@ defmodule Hyper.Node.Img.ThinPool do
   @doc false
   @spec id_free(map(), non_neg_integer()) :: map()
   def id_free(%{freed: freed} = s, id), do: %{s | freed: [id | freed]}
+
+  @spec retire(map(), non_neg_integer(), term()) :: map()
+  defp retire(state, id, err) do
+    Logger.warning("thin id #{id} may still be in #{@pool_name}; retiring it: #{inspect(err)}")
+    state
+  end
 
   # Create a sparse file of `size` if absent; reuse it if already present.
   @spec ensure_backing(String.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}

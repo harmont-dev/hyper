@@ -160,19 +160,25 @@ fn volume_frees_the_id_when_activation_fails_as_root(pool: Option<Pool>) {
 }
 
 #[rstest]
-#[case::succeeds(None, true, &["msg-create_snap", "resume", "create"])]
-#[case::create_snap_fails(Some("msg-create_snap"), false, &["msg-create_snap", "resume"])]
-#[case::resume_fails(Some("resume"), false, &["msg-create_snap", "resume", "msg-delete"])]
-#[case::activation_fails(Some("create"), false, &["msg-create_snap", "resume", "create", "msg-delete"])]
+#[case::succeeds(&[], true, &["msg-create_snap", "resume", "create"])]
+#[case::suspend_fails(&["suspend"], false, &["resume"])]
+#[case::create_snap_fails(&["msg-create_snap"], false, &["msg-create_snap", "resume"])]
+#[case::resume_fails(&["resume"], false, &["msg-create_snap", "resume", "resume", "msg-delete"])]
+#[case::create_snap_and_resume_fail(
+    &["msg-create_snap", "resume"],
+    false,
+    &["msg-create_snap", "resume", "resume"]
+)]
+#[case::activation_fails(&["create"], false, &["msg-create_snap", "resume", "create", "msg-delete"])]
 fn forked_volume_freezes_the_parent_only_around_create_snap_as_root(
     pool: Option<Pool>,
-    #[case] failing: Option<&str>,
+    #[case] failing: &[&str],
     #[case] succeeds: bool,
     #[case] after_suspend: &[&str],
 ) {
     let pool = require!(pool);
     pool.parent_table("0 2048 thin 253:1 7");
-    if let Some(verb) = failing {
+    for verb in failing {
         pool.fail(verb);
     }
     let request = pool.request(
@@ -198,7 +204,9 @@ fn forked_volume_freezes_the_parent_only_around_create_snap_as_root(
         calls[4..].iter().map(verb).collect::<Vec<_>>(),
         after_suspend
     );
-    assert!(calls.contains(&"message hyper-pool 0 create_snap 8 7".to_string()));
+    if after_suspend.contains(&"msg-create_snap") {
+        assert!(calls.contains(&"message hyper-pool 0 create_snap 8 7".to_string()));
+    }
     if succeeds {
         assert_eq!(
             calls.last().unwrap(),
@@ -287,4 +295,47 @@ fn foreign_devices_are_refused_before_dmsetup_runs_as_root(
     run(&pool.config, pool.request(op, fields)).code(2);
 
     assert!(pool.calls().is_empty());
+}
+
+#[rstest]
+#[case::old_pool_survives_its_removal(&["remove"], false)]
+#[case::no_old_pool(&["remove", "info"], true)]
+fn pool_create_zeroes_the_metadata_only_once_no_old_pool_is_live_as_root(
+    pool: Option<Pool>,
+    #[case] failing: &[&str],
+    #[case] zeroed: bool,
+) {
+    let pool = require!(pool);
+    for verb in failing {
+        pool.fail(verb);
+    }
+    let base = fs::canonicalize(pool.dir.path()).unwrap();
+    let metadata = base.join("meta.img");
+    fs::write(&metadata, vec![0xAA_u8; 1 << 20]).unwrap();
+    fs::write(base.join("data.img"), vec![0u8; 1 << 20]).unwrap();
+
+    let out = run(
+        &pool.config,
+        json!({"op": "thin_pool_create", "name": "hyper-pool", "metadata": metadata,
+               "data": base.join("data.img"), "block_sectors": 128, "low_water": 0}),
+    );
+    if zeroed {
+        out.success();
+    } else {
+        out.code(2);
+    }
+
+    let header = fs::read(&metadata).unwrap()[..4096].to_vec();
+    let expected = if zeroed { 0 } else { 0xAA };
+    assert!(
+        header.iter().all(|&byte| byte == expected),
+        "zeroed: {zeroed}"
+    );
+    assert_eq!(
+        pool.calls()[..2],
+        [
+            "remove --retry hyper-pool",
+            "info -c --noheadings -o major,minor hyper-pool"
+        ]
+    );
 }
