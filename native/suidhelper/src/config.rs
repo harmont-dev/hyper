@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Runtime host configuration, read from a single root-owned TOML file.
 //!
+//! TODO(markovejnoivc): This file is a little bit sloppy, and needs some cleanup.
+//!
 //! ## UID/GID range divergence
 //!
 //! Elixir keeps a default `{900_000, 999_999}` that governs which UIDs the node

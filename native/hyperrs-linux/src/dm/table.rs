@@ -1,6 +1,6 @@
 use super::name::MAPPER_PREFIX;
 use super::{DmName, ParseDmDeviceError, ParseThinIdError, ThinId};
-use derive_more::Display;
+use derive_more::{Display, TryUnwrap};
 use hyperrs_fs::path::{self, IsAbsolute, SafePathBuf, StrictComponents};
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -37,7 +37,8 @@ pub enum Role {
 }
 
 /// The device a table reads from.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display, TryUnwrap)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Origin {
     /// An existing dm device, rendered as `/dev/mapper/<name>`.
     #[display("{}", _0.path().as_path().display())]
@@ -48,13 +49,13 @@ pub enum Origin {
 }
 
 /// The snapshot `<persistent?>` flag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::EnumString)]
 pub enum Persistence {
     /// `P`: exceptions are stored on the COW device and survive reboot.
-    #[display("P")]
+    #[strum(serialize = "P")]
     Persistent,
     /// `N`: exceptions are kept in memory only.
-    #[display("N")]
+    #[strum(serialize = "N")]
     Transient,
 }
 
@@ -65,7 +66,6 @@ pub struct LinearTable {
     pub origin: Origin,
 }
 
-/// `dm-snapshot` table.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display(
     "0 {sectors} snapshot {origin} {} {persistence} {chunk}",
@@ -79,7 +79,6 @@ pub struct SnapshotTable {
     pub chunk: u64,
 }
 
-/// `dm-thin` pool table.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display(
     "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
@@ -94,7 +93,6 @@ pub struct ThinPoolTable {
     pub low_water: u64,
 }
 
-/// `dm-thin` tables.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display(
     "0 {sectors} thin {} {id}{}",
@@ -123,74 +121,14 @@ pub enum ParseTableError {
     #[error("table number: {0}")]
     Number(#[from] ParseIntError),
     /// A snapshot `<persistent?>` flag other than `P` or `N`.
-    #[error(transparent)]
-    Persistence(#[from] InvalidPersistence),
+    #[error("snapshot persistence must be `P` or `N`")]
+    Persistence(#[from] strum::ParseError),
     /// A thin device id that is not a 24-bit integer.
     #[error(transparent)]
     ThinId(#[from] ParseThinIdError),
 }
 
-#[derive(Debug, ThisError)]
-#[error("snapshot persistence must be `P` or `N`: {0:?}")]
-pub struct InvalidPersistence(String);
-
-impl Origin {
-    fn try_map_path<E>(
-        self,
-        role: Role,
-        f: &mut impl FnMut(DevPath, Role) -> Result<DevPath, E>,
-    ) -> Result<Self, E> {
-        Ok(match self {
-            Origin::Device(dev) => Origin::Device(dev),
-            Origin::Path(path) => Origin::Path(f(path, role)?),
-        })
-    }
-
-    fn device(&self) -> Option<&DmName> {
-        match self {
-            Origin::Device(dev) => Some(dev),
-            Origin::Path(_) => None,
-        }
-    }
-
-    fn path(&self) -> Option<&DevPath> {
-        match self {
-            Origin::Device(_) => None,
-            Origin::Path(path) => Some(path),
-        }
-    }
-}
-
 impl DmTable {
-    pub fn try_map_paths<E>(
-        self,
-        mut f: impl FnMut(DevPath, Role) -> Result<DevPath, E>,
-    ) -> Result<Self, E> {
-        Ok(match self {
-            DmTable::Linear(t) => DmTable::Linear(LinearTable {
-                origin: t.origin.try_map_path(Role::Origin, &mut f)?,
-                ..t
-            }),
-            DmTable::Snapshot(t) => DmTable::Snapshot(SnapshotTable {
-                origin: t.origin.try_map_path(Role::Origin, &mut f)?,
-                cow: f(t.cow, Role::Cow)?,
-                ..t
-            }),
-            DmTable::ThinPool(t) => DmTable::ThinPool(ThinPoolTable {
-                metadata: f(t.metadata, Role::Metadata)?,
-                data: f(t.data, Role::Data)?,
-                ..t
-            }),
-            DmTable::Thin(t) => DmTable::Thin(ThinTable {
-                origin: t
-                    .origin
-                    .map(|o| o.try_map_path(Role::Origin, &mut f))
-                    .transpose()?,
-                ..t
-            }),
-        })
-    }
-
     pub fn paths(&self) -> impl Iterator<Item = (Role, &DevPath)> {
         let (origin, first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
@@ -204,32 +142,44 @@ impl DmTable {
             ),
             DmTable::Thin(ThinTable { origin, .. }) => (origin.as_ref(), None, None),
         };
-        let origin = origin.and_then(Origin::path).map(|p| (Role::Origin, p));
+        let origin = origin
+            .and_then(|o| o.try_unwrap_path_ref().ok())
+            .map(|p| (Role::Origin, p));
+        origin.into_iter().chain(first).chain(second)
+    }
+
+    pub fn paths_mut(&mut self) -> impl Iterator<Item = (Role, &mut DevPath)> {
+        let (origin, first, second) = match self {
+            DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
+            DmTable::Snapshot(SnapshotTable { origin, cow, .. }) => {
+                (Some(origin), Some((Role::Cow, cow)), None)
+            }
+            DmTable::ThinPool(ThinPoolTable { metadata, data, .. }) => (
+                None,
+                Some((Role::Metadata, metadata)),
+                Some((Role::Data, data)),
+            ),
+            DmTable::Thin(ThinTable { origin, .. }) => (origin.as_mut(), None, None),
+        };
+        let origin = origin
+            .and_then(|o| o.try_unwrap_path_mut().ok())
+            .map(|p| (Role::Origin, p));
         origin.into_iter().chain(first).chain(second)
     }
 
     pub fn devices(&self) -> impl Iterator<Item = &DmName> {
         let (first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. })
-            | DmTable::Snapshot(SnapshotTable { origin, .. }) => (origin.device(), None),
-            DmTable::ThinPool(_) => (None, None),
-            DmTable::Thin(ThinTable { pool, origin, .. }) => {
-                (Some(pool), origin.as_ref().and_then(Origin::device))
+            | DmTable::Snapshot(SnapshotTable { origin, .. }) => {
+                (origin.try_unwrap_device_ref().ok(), None)
             }
+            DmTable::ThinPool(_) => (None, None),
+            DmTable::Thin(ThinTable { pool, origin, .. }) => (
+                Some(pool),
+                origin.as_ref().and_then(|o| o.try_unwrap_device_ref().ok()),
+            ),
         };
         first.into_iter().chain(second)
-    }
-}
-
-impl FromStr for Persistence {
-    type Err = InvalidPersistence;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "P" => Ok(Persistence::Persistent),
-            "N" => Ok(Persistence::Transient),
-            _ => Err(InvalidPersistence(s.into())),
-        }
     }
 }
 

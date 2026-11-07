@@ -220,6 +220,10 @@ If a case needs its own assertions, it is a separate test, not a row.
     - on an enum, put the `bound(...)` on the variant whose format uses it;
     - never derive a constructor (`From`, `Constructor`) on a validated
       newtype — its only way in must be the checked `TryFrom`/`FromStr`.
+  For a unit-variant enum with a string form (both `Display` and `FromStr`),
+  use `strum` (`Display`, `EnumString`, `#[strum(serialize = "…")]`) so one
+  attribute drives both directions; derive_more's `FromStr` only matches
+  variant names.
   Hand-write an impl only when its body carries real logic.
 - Zero compiler warnings — `--warnings-as-errors` is enforced.
 - Conventional Commits, scoped to subsystem: `feat(fire_vmm): ...`,

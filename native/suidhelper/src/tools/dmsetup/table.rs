@@ -30,9 +30,11 @@ impl ResolvedTable {
         &self,
         mut f: impl FnMut(Role, &BackingFile) -> Result<DevPath, E>,
     ) -> Result<DmTable, E> {
-        self.table
-            .clone()
-            .try_map_paths(|_, role| f(role, &self.backing[&role]))
+        let mut table = self.table.clone();
+        for (role, path) in table.paths_mut() {
+            *path = f(role, &self.backing[&role])?;
+        }
+        Ok(table)
     }
 }
 

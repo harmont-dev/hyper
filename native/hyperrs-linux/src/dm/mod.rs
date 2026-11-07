@@ -14,8 +14,8 @@ pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{
-    DevPath, DmTable, InvalidPersistence, LinearTable, Origin, ParseTableError, Persistence, Role,
-    SnapshotTable, ThinPoolTable, ThinTable,
+    DevPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable,
+    ThinPoolTable, ThinTable,
 };
 pub use thin::{
     Active, Inactive, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin, ThinId,
