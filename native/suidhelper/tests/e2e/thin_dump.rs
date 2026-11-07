@@ -155,10 +155,10 @@ fn thin_dump_failure_is_an_error_as_root(
 }
 
 #[rstest]
-fn thin_dump_refuses_non_loop_meta_as_root(
-    dump: Dump,
-    #[values("/dev/sda", "/dev/loop0/../sda", "/dev/mapper/hyper-pool")] bad: &str,
-) {
+#[case::not_a_loop("/dev/sda")]
+#[case::traversal_from_loop("/dev/loop0/../sda")]
+#[case::mapper_device("/dev/mapper/hyper-pool")]
+fn thin_dump_refuses_non_loop_meta_as_root(dump: Dump, #[case] bad: &str) {
     if !is_root() {
         eprintln!("SKIP thin_dump meta refusal: needs root");
         return;

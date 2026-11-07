@@ -7,17 +7,13 @@ fn parse(work_dir: &str) -> Result<Config, toml::de::Error> {
 }
 
 #[rstest]
-fn non_strict_work_dir_is_refused_at_load(
-    #[values(
-        "relative/path",
-        "/srv/../etc",
-        "/srv/./hyper",
-        "/srv//hyper",
-        "/srv/hyper/",
-        ""
-    )]
-    work_dir: &str,
-) {
+#[case::relative("relative/path")]
+#[case::parent_dir("/srv/../etc")]
+#[case::current_dir("/srv/./hyper")]
+#[case::double_slash("/srv//hyper")]
+#[case::trailing_slash("/srv/hyper/")]
+#[case::empty("")]
+fn non_strict_work_dir_is_refused_at_load(#[case] work_dir: &str) {
     assert!(parse(work_dir).is_err(), "{work_dir:?} accepted");
 }
 
@@ -29,9 +25,13 @@ fn bases_derive_from_work_dir() {
 }
 
 #[rstest]
-fn non_component_parent_cgroup_is_refused_at_load(
-    #[values("", ".", "..", "a/b", "/hyper", "hyper/")] cgroup: &str,
-) {
+#[case::empty("")]
+#[case::current_dir(".")]
+#[case::parent_dir("..")]
+#[case::nested("a/b")]
+#[case::absolute("/hyper")]
+#[case::trailing_slash("hyper/")]
+fn non_component_parent_cgroup_is_refused_at_load(#[case] cgroup: &str) {
     let body = format!("work_dir = \"/srv/hyper\"\n[jails]\ncgroup = {cgroup:?}\n");
     assert!(
         toml::from_str::<Config>(&body).is_err(),

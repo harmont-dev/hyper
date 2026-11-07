@@ -313,26 +313,22 @@ mod tests {
     }
 
     #[rstest]
-    fn message_rejects_strings_outside_the_grammar(
-        #[values(
-            "resize 10",
-            "create_thin",
-            "delete",
-            "delete x",
-            "",
-            "create_thin -1",
-            "create_snap",
-            "create_snap 1",
-            "create_snap x 2",
-            "create_snap 1 y",
-            "create_snap -1 2",
-            "reserve_metadata",
-            "create_thin 16777216",
-            "delete 16777216",
-            "create_snap 1 16777216"
-        )]
-        bad: &str,
-    ) {
+    #[case::unknown_verb("resize 10")]
+    #[case::create_thin_without_id("create_thin")]
+    #[case::delete_without_id("delete")]
+    #[case::non_numeric_delete_id("delete x")]
+    #[case::empty("")]
+    #[case::negative_create_thin_id("create_thin -1")]
+    #[case::create_snap_without_ids("create_snap")]
+    #[case::create_snap_without_origin("create_snap 1")]
+    #[case::non_numeric_snap_id("create_snap x 2")]
+    #[case::non_numeric_snap_origin("create_snap 1 y")]
+    #[case::negative_snap_id("create_snap -1 2")]
+    #[case::truncated_verb("reserve_metadata")]
+    #[case::create_thin_id_past_24_bits("create_thin 16777216")]
+    #[case::delete_id_past_24_bits("delete 16777216")]
+    #[case::snap_origin_past_24_bits("create_snap 1 16777216")]
+    fn message_rejects_strings_outside_the_grammar(#[case] bad: &str) {
         assert!(bad.parse::<ThinMessage>().is_err(), "accepted {bad:?}");
     }
 
@@ -396,9 +392,10 @@ mod tests {
     }
 
     #[rstest]
-    fn thin_pool_refuses_a_device_that_is_not_a_pool_as_root(
-        #[values("0 100 linear 7:0 0", "0 100 thin /dev/mapper/hyper-pool 1", "")] table: &str,
-    ) {
+    #[case::linear("0 100 linear 7:0 0")]
+    #[case::thin("0 100 thin /dev/mapper/hyper-pool 1")]
+    #[case::empty("")]
+    fn thin_pool_refuses_a_device_that_is_not_a_pool_as_root(#[case] table: &str) {
         if !is_root() {
             eprintln!("SKIP thin_pool_refuses: needs root to own the fake dmsetup");
             return;

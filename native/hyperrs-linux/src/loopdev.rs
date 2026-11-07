@@ -261,20 +261,16 @@ mod tests {
     }
 
     #[rstest]
-    fn rejects_known_attack_strings(
-        #[values(
-            "/dev/loop",
-            "/dev/loop+7",
-            "/dev/loop-1",
-            "/dev/loop0/../sda",
-            "/dev/sda",
-            "../dev/loop0",
-            "dev/loop0",
-            "/dev//loop0",
-            "7"
-        )]
-        bad: &str,
-    ) {
+    #[case::no_number("/dev/loop")]
+    #[case::plus_sign("/dev/loop+7")]
+    #[case::negative("/dev/loop-1")]
+    #[case::traversal_out("/dev/loop0/../sda")]
+    #[case::not_a_loop("/dev/sda")]
+    #[case::relative_parent("../dev/loop0")]
+    #[case::relative("dev/loop0")]
+    #[case::double_slash("/dev//loop0")]
+    #[case::bare_number("7")]
+    fn rejects_known_attack_strings(#[case] bad: &str) {
         assert!(bad.parse::<LoopDevNum>().is_err(), "accepted {bad:?}");
     }
 }

@@ -264,10 +264,13 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
 }
 
 #[rstest]
-fn remove_refuses_an_invalid_id(
-    work: Work,
-    #[values("../id", "a/b", "..", "-id", "a_b", "")] id: &str,
-) {
+#[case::traversal("../id")]
+#[case::separator("a/b")]
+#[case::parent_dir("..")]
+#[case::leading_dash("-id")]
+#[case::underscore("a_b")]
+#[case::empty("")]
+fn remove_refuses_an_invalid_id(work: Work, #[case] id: &str) {
     let cfg = work.config("");
 
     run(&cfg, &["chroot-jail", "remove", "--id", id]).code(2);

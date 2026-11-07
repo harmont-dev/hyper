@@ -89,17 +89,17 @@ mod tests {
     }
 
     #[rstest]
-    fn check_table_accepts_tables_over_hyper_devices(
-        #[values(
-            "0 100 linear /srv/hyper/layers/base.img 0",
-            "0 100 linear /dev/mapper/hyper-img 0",
-            "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8",
-            "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024",
-            "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
-            "0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img"
-        )]
-        table: &str,
-    ) {
+    #[case::linear_over_file("0 100 linear /srv/hyper/layers/base.img 0")]
+    #[case::linear_over_hyper_device("0 100 linear /dev/mapper/hyper-img 0")]
+    #[case::snapshot_of_hyper_device(
+        "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8"
+    )]
+    #[case::thin_pool_over_files(
+        "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024"
+    )]
+    #[case::thin_with_hyper_origin("0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig")]
+    #[case::thin_with_file_origin("0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img")]
+    fn check_table_accepts_tables_over_hyper_devices(#[case] table: &str) {
         let table: DmTable = table.parse().unwrap();
         assert!(HyperDmName::check_table(&table).is_ok(), "rejected {table}");
     }
