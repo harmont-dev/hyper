@@ -59,15 +59,20 @@ defmodule Hyper.Node.Img.Publish do
 
   @spec materialize(map(), Hyper.Img.id()) :: {:ok, Hyper.Img.id()} | {:error, term()}
   defp materialize(
-         %{thin_name: origin_name, thin_id: origin_id, origin_dev: ro_dev, sectors: sectors},
+         %{
+           thin_name: origin_name,
+           thin_id: origin_id,
+           origin_dev: ro_dev,
+           img_server: img_server
+         },
          img_id
        ) do
     tmp = Hyper.Vm.Id.generate()
 
     with {:ok, %{dev: snap_dev, id: snap_id}} <-
-           ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, sectors, ro_dev) do
+           ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, ro_dev) do
       try do
-        write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, img_id)
+        write_delta(tmp, ro_dev, {snap_dev, snap_id}, Img.Server.size(img_server), img_id)
       after
         :ok = ThinPool.destroy(snap_name(tmp), snap_id)
       end
@@ -80,17 +85,17 @@ defmodule Hyper.Node.Img.Publish do
           String.t(),
           Path.t(),
           {Path.t(), non_neg_integer()},
-          pos_integer(),
+          Information.t(),
           Hyper.Img.id()
         ) ::
           {:ok, Hyper.Img.id()} | {:error, term()}
-  defp write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, parent_img_id) do
+  defp write_delta(tmp, ro_dev, {snap_dev, snap_id}, size, parent_img_id) do
     cow_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-delta-#{tmp}.img")
 
-    with :ok <- create_sparse(cow_path, cow_size(sectors)) do
+    with :ok <- create_sparse(cow_path, cow_size(size)) do
       try do
         with {:ok, write_dev} <-
-               SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_path, sectors),
+               SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_path),
              {:ok, _stats} <- ThinPool.copy_provisioned(snap_id, snap_dev, write_dev),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
@@ -111,11 +116,11 @@ defmodule Hyper.Node.Img.Publish do
 
   # The exception store must hold up to the whole device plus per-chunk
   # metadata; it is sparse, so apparent size costs nothing.
-  @spec cow_size(pos_integer()) :: Information.t()
-  defp cow_size(sectors) do
-    entries = div(sectors, Hyper.Cfg.Img.chunk_sectors())
+  @spec cow_size(Information.t()) :: Information.t()
+  defp cow_size(size) do
+    entries = div(Information.as_sectors(size), Hyper.Cfg.Img.chunk_sectors())
 
-    Information.sectors(sectors) + Information.bytes(entries * @exception_entry_bytes) +
+    size + Information.bytes(entries * @exception_entry_bytes) +
       @cow_slack
   end
 

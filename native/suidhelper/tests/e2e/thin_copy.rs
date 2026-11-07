@@ -7,11 +7,10 @@ use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod support;
 use serde_json::{json, Value};
-use support::{is_root, run, stdout_json};
+use support::{is_root, run, stdout_json, MapperDevice};
 
 const BLOCK_SECTORS: u64 = 128;
 const BLOCK_BYTES: usize = (BLOCK_SECTORS * 512) as usize;
@@ -132,59 +131,6 @@ fn install(dir: &Path, name: &str, body: &str) -> PathBuf {
     fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
-}
-
-struct LoopDevice(String);
-
-impl LoopDevice {
-    fn attach(backing: &Path) -> Option<Self> {
-        let out = Command::new("losetup")
-            .args(["--find", "--show"])
-            .arg(backing)
-            .output()
-            .ok()
-            .filter(|out| out.status.success())?;
-        Some(Self(String::from_utf8(out.stdout).ok()?.trim().to_string()))
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("losetup").args(["--detach", &self.0]).status();
-    }
-}
-
-struct MapperDevice {
-    name: String,
-    _loop_dev: LoopDevice,
-}
-
-impl MapperDevice {
-    fn linear(name: &str, backing: &Path) -> Option<Self> {
-        let loop_dev = LoopDevice::attach(backing)?;
-        let sectors = fs::metadata(backing).unwrap().len() / 512;
-        let table = format!("0 {sectors} linear {} 0", loop_dev.0);
-        Command::new("dmsetup")
-            .args(["create", name, "--table", &table])
-            .status()
-            .is_ok_and(|status| status.success())
-            .then(|| Self {
-                name: name.to_string(),
-                _loop_dev: loop_dev,
-            })
-    }
-
-    fn path(&self) -> String {
-        format!("/dev/mapper/{}", self.name)
-    }
-}
-
-impl Drop for MapperDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("dmsetup")
-            .args(["remove", "--retry", &self.name])
-            .status();
-    }
 }
 
 #[rstest]

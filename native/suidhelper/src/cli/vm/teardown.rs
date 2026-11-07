@@ -14,7 +14,7 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use super::VmOut;
-use crate::cli::{DispatchError, Op};
+use crate::cli::Op;
 use crate::config::Config;
 use crate::network;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
@@ -32,6 +32,14 @@ use thiserror::Error as ThisError;
 const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 
 type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
+
+#[derive(Debug, ThisError)]
+pub enum TeardownError {
+    #[error(transparent)]
+    Jail(#[from] JailRemoveError),
+    #[error(transparent)]
+    Network(#[from] network::TeardownError),
+}
 
 #[derive(Debug, ThisError)]
 pub enum JailRemoveError {
@@ -64,9 +72,9 @@ pub struct Teardown {
 
 impl Op for Teardown {
     type Output = VmOut;
-    type Error = DispatchError;
+    type Error = TeardownError;
 
-    fn run(self, mut token: Unprivileged) -> Result<VmOut, DispatchError> {
+    fn run(self, mut token: Unprivileged) -> Result<VmOut, TeardownError> {
         let Teardown { id, uid } = self;
         teardown(&id, uid, &mut token)?;
         Ok(VmOut::ToreDown)
@@ -77,10 +85,10 @@ pub fn teardown(
     id: &VmId,
     uid: Option<u32>,
     token: &mut Unprivileged,
-) -> Result<(), DispatchError> {
-    let jail = remove_jail(id, token).map_err(DispatchError::tool);
+) -> Result<(), TeardownError> {
+    let jail = remove_jail(id, token).map_err(TeardownError::from);
     let net = if network::enabled() {
-        network::teardown(id, uid, token).map_err(DispatchError::tool)
+        network::teardown(id, uid, token).map_err(TeardownError::from)
     } else {
         Ok(())
     };

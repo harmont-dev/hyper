@@ -68,6 +68,14 @@ impl HyperDmTable {
         Ok(Self { table, backing })
     }
 
+    pub fn table(&self) -> &DmTable {
+        &self.table
+    }
+
+    pub fn backing(&self, role: Role) -> Option<&BackingFile> {
+        self.backing.get(&role)
+    }
+
     pub fn attach<E>(
         &self,
         mut f: impl FnMut(Role, &BackingFile) -> Result<DevPath, E>,

@@ -33,11 +33,11 @@ defmodule Hyper.Node.Img.ThinPool do
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc "Provision a thin volume of `sectors` over read-only `origin_dev`."
-  @spec create_external(String.t(), Path.t(), pos_integer()) ::
+  @spec create_external(String.t(), Path.t()) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.create_external", include: [:name])
-  def create_external(name, origin_dev, sectors) do
-    GenServer.call(__MODULE__, {:create_external, name, origin_dev, sectors})
+  def create_external(name, origin_dev) do
+    GenServer.call(__MODULE__, {:create_external, name, origin_dev})
   end
 
   @doc """
@@ -50,13 +50,13 @@ defmodule Hyper.Node.Img.ThinPool do
   (`origin_dev`) as its parent — unprovisioned reads must keep resolving
   through the composed RO image chain.
   """
-  @spec snapshot(String.t(), String.t(), non_neg_integer(), pos_integer(), Path.t()) ::
+  @spec snapshot(String.t(), String.t(), non_neg_integer(), Path.t()) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.snapshot", include: [:name, :origin_name])
-  def snapshot(name, origin_name, origin_id, sectors, origin_dev) do
+  def snapshot(name, origin_name, origin_id, origin_dev) do
     GenServer.call(
       __MODULE__,
-      {:snapshot, name, origin_name, origin_id, sectors, origin_dev},
+      {:snapshot, name, origin_name, origin_id, origin_dev},
       :timer.seconds(30)
     )
   end
@@ -84,13 +84,11 @@ defmodule Hyper.Node.Img.ThinPool do
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
          :ok <- reclaim_stale_pool(),
          :ok <- zero_metadata(meta),
-         sectors = Information.as_sectors(ImgConfig.thin_pool_data_size()),
          {:ok, _pool_dev, meta_loop} <-
            SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,
              meta,
              data,
-             sectors,
              ImgConfig.thin_block_sectors(),
              0
            ) do
@@ -101,12 +99,12 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:create_external, name, origin_dev, sectors}, _from, state) do
+  def handle_call({:create_external, name, origin_dev}, _from, state) do
     {id, state} = id_alloc(state)
 
     with :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_thin #{id}"),
          {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, sectors, origin_dev) do
+           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, origin_dev) do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->
@@ -116,14 +114,14 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:snapshot, name, origin_name, origin_id, sectors, origin_dev}, _from, state) do
+  def handle_call({:snapshot, name, origin_name, origin_id, origin_dev}, _from, state) do
     {id, state} = id_alloc(state)
 
     with :ok <- SuidHelper.Dmsetup.suspend(origin_name),
          :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_snap #{id} #{origin_id}"),
          :ok <- SuidHelper.Dmsetup.resume(origin_name),
          {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, sectors, origin_dev) do
+           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, origin_dev) do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->

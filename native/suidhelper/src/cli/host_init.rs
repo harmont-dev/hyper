@@ -1,5 +1,5 @@
 // TODO(markovejnovic): This is slop and should be removed when networking is re-done.
-use crate::cli::{Op, OpError};
+use crate::cli::Op;
 use crate::network::{self, host_init::HostInitError};
 use hyperrs_process::privilege::Unprivileged;
 use serde::{Deserialize, Serialize};
@@ -23,5 +23,3 @@ impl Op for HostInit {
         Ok(HostInitOut::HostReady)
     }
 }
-
-impl OpError for HostInitError {}

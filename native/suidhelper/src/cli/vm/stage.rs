@@ -3,7 +3,7 @@
 //! inside a VM chroot, via the `ChrootJail` builder.
 
 use super::VmOut;
-use crate::cli::{MapperPath, Op, OpError};
+use crate::cli::{MapperPath, Op};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
@@ -77,5 +77,3 @@ impl Op for Stage {
         Ok(VmOut::Staged)
     }
 }
-
-impl OpError for JailStageError {}

@@ -34,7 +34,7 @@ defmodule Hyper.Node.Img.Server do
             layers: [Hyper.Layer.id()],
             dm_names: [String.t()],
             blk_path: Path.t() | nil,
-            sectors: pos_integer() | nil,
+            size: Information.t() | nil,
             holders: %{pid() => reference()},
             idle_ref: reference() | nil
           }
@@ -42,7 +42,7 @@ defmodule Hyper.Node.Img.Server do
     defstruct [
       :img_id,
       :blk_path,
-      :sectors,
+      :size,
       layers: [],
       dm_names: [],
       holders: %{},
@@ -68,8 +68,8 @@ defmodule Hyper.Node.Img.Server do
   @spec blk_path(GenServer.server()) :: Path.t()
   def blk_path(server), do: GenServer.call(server, :blk_path)
 
-  @spec sectors(GenServer.server()) :: pos_integer()
-  def sectors(server), do: GenServer.call(server, :sectors)
+  @spec size(GenServer.server()) :: Information.t()
+  def size(server), do: GenServer.call(server, :size)
 
   @doc """
   Take a reference on `server` on behalf of the calling process. The image stays
@@ -95,14 +95,14 @@ defmodule Hyper.Node.Img.Server do
     layer_ids = resolve_layers(img_id)
 
     with {:ok, layer_paths} <- acquire_layers(layer_ids),
-         {:ok, %{blk_path: blk_path, dm_names: dm_names, sectors: sectors}} <-
+         {:ok, %{blk_path: blk_path, dm_names: dm_names, size: size}} <-
            build_chain(img_id, layer_paths) do
       state = %State{
         img_id: img_id,
         layers: layer_ids,
         dm_names: dm_names,
         blk_path: blk_path,
-        sectors: sectors
+        size: size
       }
 
       {:ok, arm_idle(state)}
@@ -138,8 +138,8 @@ defmodule Hyper.Node.Img.Server do
     {:reply, blk_path, state}
   end
 
-  def handle_call(:sectors, _from, %State{sectors: sectors} = state) do
-    {:reply, sectors, state}
+  def handle_call(:size, _from, %State{size: size} = state) do
+    {:reply, size, state}
   end
 
   @impl true
@@ -210,7 +210,7 @@ defmodule Hyper.Node.Img.Server do
   # Stack dm-snapshot devices: base loop is the origin, each delta loop is layered
   # on top. Rolls back any devices it created if a later one fails.
   @spec build_chain(Hyper.Img.id(), [Path.t()]) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()], sectors: pos_integer()}}
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()], size: Information.t()}}
           | {:error, term()}
   # An unknown image id resolves to no layers; return a clean domain error so
   # `init/1` stops with `{:stop, :unknown_image}` (which the scheduler maps to
@@ -219,39 +219,36 @@ defmodule Hyper.Node.Img.Server do
   defp build_chain(_img_id, []), do: {:error, :unknown_image}
 
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- file_sectors(base),
-         {:ok, chain} <- build_layers(img_id, base, deltas, sectors) do
-      {:ok, Map.put(chain, :sectors, sectors)}
+    with {:ok, %File.Stat{size: bytes}} <- File.stat(base),
+         {:ok, chain} <- build_layers(img_id, base, deltas) do
+      {:ok, Map.put(chain, :size, Information.bytes(bytes))}
     end
   end
 
-  @spec build_layers(Hyper.Img.id(), Path.t(), [Path.t()], pos_integer()) ::
+  @spec build_layers(Hyper.Img.id(), Path.t(), [Path.t()]) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_layers(img_id, base, [], sectors), do: build_linear(img_id, base, sectors)
+  defp build_layers(img_id, base, []), do: build_linear(img_id, base)
+  defp build_layers(img_id, base, deltas), do: build_snapshots(img_id, base, deltas)
 
-  defp build_layers(img_id, base, deltas, sectors) do
-    build_snapshots(img_id, base, deltas, sectors)
-  end
-
-  @spec build_linear(Hyper.Img.id(), Path.t(), pos_integer()) ::
+  @spec build_linear(Hyper.Img.id(), Path.t()) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_linear(img_id, base, sectors) do
+  defp build_linear(img_id, base) do
     name = dm_name(img_id, 0)
 
-    with {:ok, dev} <- SuidHelper.Dmsetup.create_linear(name, base, sectors) do
+    with {:ok, dev} <- SuidHelper.Dmsetup.create_linear(name, base) do
       {:ok, %{blk_path: dev, dm_names: [name]}}
     end
   end
 
-  @spec build_snapshots(Hyper.Img.id(), Path.t(), [Path.t()], pos_integer()) ::
+  @spec build_snapshots(Hyper.Img.id(), Path.t(), [Path.t()]) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_snapshots(img_id, base, deltas, sectors) do
+  defp build_snapshots(img_id, base, deltas) do
     deltas
     |> Enum.with_index(1)
     |> Enum.reduce_while({:ok, base, []}, fn {cow_file, idx}, {:ok, origin, names} ->
       name = dm_name(img_id, idx)
 
-      case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_file, sectors) do
+      case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_file) do
         {:ok, dev} ->
           {:cont, {:ok, dev, [name | names]}}
 
@@ -263,13 +260,6 @@ defmodule Hyper.Node.Img.Server do
     |> case do
       {:ok, blk_path, names} -> {:ok, %{blk_path: blk_path, dm_names: Enum.reverse(names)}}
       {:error, _} = err -> err
-    end
-  end
-
-  @spec file_sectors(Path.t()) :: {:ok, non_neg_integer()} | {:error, File.posix()}
-  defp file_sectors(path) do
-    with {:ok, %File.Stat{size: size}} <- File.stat(path) do
-      {:ok, size |> Information.bytes() |> Information.as_sectors()}
     end
   end
 

@@ -11,74 +11,33 @@ use crate::config::Config;
 use crate::dm::HyperDmName;
 use enum_dispatch::enum_dispatch;
 use hyperrs_linux::dm::ThinId;
-use hyperrs_process::privilege::{self, Unprivileged};
+use hyperrs_process::privilege::Unprivileged;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::process::ExitCode;
 use thiserror::Error as ThisError;
 
-/// Errors of the dispatch layer: an invalid configured binary (`RootSafeBin`), the
-/// privilege guard, or the chosen tool's own failure on the way out. (Operand
-/// validation is handled by clap at parse time, so it never reaches here.)
-#[derive(Debug, ThisError)]
-pub enum DispatchError {
-    #[error(transparent)]
-    Privilege(#[from] privilege::PrivilegeError),
-    /// A tool's own error (operand validation or execution), boxed so this layer
-    /// stays decoupled from each tool's concrete error type.
-    #[error(transparent)]
-    Tool(Box<dyn std::error::Error>),
-    #[error(transparent)]
-    Retryable(Box<dyn std::error::Error>),
-}
-
-pub const EXIT_FAILURE: u8 = 2;
-pub const EXIT_RETRYABLE: u8 = 75;
-
-impl DispatchError {
-    pub fn tool(e: impl std::error::Error + 'static) -> Self {
-        DispatchError::Tool(Box::new(e))
-    }
-
-    pub fn exit_code(&self) -> u8 {
-        match self {
-            DispatchError::Retryable(_) => EXIT_RETRYABLE,
-            DispatchError::Privilege(_) | DispatchError::Tool(_) => EXIT_FAILURE,
-        }
-    }
-}
-
-pub trait OpError: std::error::Error + 'static {}
-
-impl OpError for std::convert::Infallible {}
+const EXIT_FAILURE: u8 = 2;
 
 pub trait Op {
     type Output: Serialize;
-    type Error: Into<DispatchError>;
+    type Error: Display;
 
     fn run(self, token: Unprivileged) -> Result<Self::Output, Self::Error>;
 }
 
 #[enum_dispatch]
 pub trait Dispatch {
-    fn dispatch(self, token: Unprivileged) -> Result<serde_json::Value, DispatchError>;
+    fn dispatch(self, token: Unprivileged) -> Result<String, String>;
 }
 
 impl<T: Op> Dispatch for T {
-    fn dispatch(self, token: Unprivileged) -> Result<serde_json::Value, DispatchError> {
-        to_json(self.run(token).map_err(Into::into)?)
+    fn dispatch(self, token: Unprivileged) -> Result<String, String> {
+        let output = self.run(token).map_err(|e| e.to_string())?;
+        serde_json::to_string(&output).map_err(|e| e.to_string())
     }
-}
-
-impl<E: OpError> From<E> for DispatchError {
-    fn from(e: E) -> Self {
-        DispatchError::tool(e)
-    }
-}
-
-pub fn to_json(out: impl Serialize) -> Result<serde_json::Value, DispatchError> {
-    serde_json::to_value(out).map_err(DispatchError::tool)
 }
 
 pub struct MapperPath;
@@ -143,7 +102,7 @@ pub fn parse_request(mut args: impl Iterator<Item = OsString>) -> Result<Request
 pub fn run(token: Unprivileged) -> ExitCode {
     let request = match parse_request(std::env::args_os().skip(1)) {
         Ok(request) => request,
-        Err(e) => return fail(&DispatchError::tool(e)),
+        Err(e) => return fail(e),
     };
 
     // `version` is a pure self-report: it touches neither config nor privileges,
@@ -152,26 +111,22 @@ pub fn run(token: Unprivileged) -> ExitCode {
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
     if !matches!(request, Request::Version(_)) {
         if let Err(e) = Config::init() {
-            eprintln!("hyper-suidhelper: {e}");
-            return ExitCode::from(EXIT_FAILURE);
+            return fail(format!("hyper-suidhelper: {e}"));
         }
     }
 
-    let output = request
-        .dispatch(token)
-        .and_then(|value| serde_json::to_string(&value).map_err(DispatchError::tool));
-    match output {
+    match request.dispatch(token) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(e) => fail(&e),
+        Err(e) => fail(e),
     }
 }
 
-fn fail(e: &DispatchError) -> ExitCode {
+fn fail(e: impl Display) -> ExitCode {
     eprintln!("{e}");
-    ExitCode::from(e.exit_code())
+    ExitCode::from(EXIT_FAILURE)
 }
 
 #[cfg(test)]
@@ -198,13 +153,13 @@ mod tests {
             json!({"op": "vm_grant_vsock", "id": "v1"}),
             json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
             json!({"op": "vm_teardown", "id": "v1"}),
-            json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "sectors": 8,
+            json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, 
                    "origin": "/srv/hyper/base.img"}),
-            json!({"op": "dm_snapshot", "name": "hyper-img-1", "readonly": true, "sectors": 8,
+            json!({"op": "dm_snapshot", "name": "hyper-img-1", "readonly": true, 
                    "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}),
-            json!({"op": "dm_thin_pool", "name": "hyper-pool", "sectors": 8, "metadata": "/srv/hyper/meta",
+            json!({"op": "dm_thin_pool", "name": "hyper-pool", "metadata": "/srv/hyper/meta",
                    "data": "/srv/hyper/data", "block_sectors": 128, "low_water": 0}),
-            json!({"op": "dm_thin", "name": "hyper-v1", "sectors": 8, "pool": "hyper-pool", "thin_id": 1,
+            json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool", "thin_id": 1,
                    "origin": "/dev/mapper/hyper-img"}),
             json!({"op": "dm_remove", "name": "hyper-v1", "retry": true}),
             json!({"op": "dm_suspend", "name": "hyper-v1"}),
@@ -248,7 +203,6 @@ mod tests {
         for request in valid_requests() {
             let optional: &[&str] = match request["op"].as_str().unwrap() {
                 "vm_teardown" => &["uid"],
-                "dm_thin" => &["origin"],
                 _ => &[],
             };
             for field in request.as_object().unwrap().keys() {
@@ -280,16 +234,18 @@ mod tests {
         "meta": "/dev/loop3", "thin_id": 7, "src": "/dev/sda", "dst": "/dev/mapper/hyper-b"}))]
     #[case::thin_copy_chunk_bytes(json!({"op": "thin_copy", "pool": "hyper-pool", "meta": "/dev/loop3",
         "thin_id": 7, "src": "/dev/mapper/hyper-a", "dst": "/dev/mapper/hyper-b", "chunk_bytes": 1}))]
-    #[case::thin_id_as_string(json!({"op": "dm_thin", "name": "hyper-v1", "sectors": 8,
-        "pool": "hyper-pool", "thin_id": "1"}))]
+    #[case::thin_id_as_string(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
+        "thin_id": "1", "origin": "/dev/mapper/hyper-img"}))]
     #[case::relative_cow(json!({"op": "dm_snapshot", "name": "hyper-v1", "readonly": true,
-        "sectors": 8, "origin": "/dev/mapper/hyper-img", "cow": "cow.img", "chunk_sectors": 8}))]
-    #[case::thin_id_past_24_bits(json!({"op": "dm_thin", "name": "hyper-v1", "sectors": 8,
-        "pool": "hyper-pool", "thin_id": 16_777_216}))]
-    #[case::negative_sectors(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-        "sectors": -8, "origin": "/srv/hyper/base.img"}))]
+        "origin": "/dev/mapper/hyper-img", "cow": "cow.img", "chunk_sectors": 8}))]
+    #[case::thin_id_past_24_bits(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
+        "thin_id": 16_777_216, "origin": "/dev/mapper/hyper-img"}))]
+    #[case::caller_chosen_sectors(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
+        "sectors": 8, "origin": "/srv/hyper/base.img"}))]
+    #[case::thin_without_origin(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
+        "thin_id": 1}))]
     #[case::readonly_thin_pool(json!({"op": "dm_thin_pool", "name": "hyper-pool", "readonly": true,
-        "sectors": 8, "metadata": "/srv/hyper/meta", "data": "/srv/hyper/data",
+        "metadata": "/srv/hyper/meta", "data": "/srv/hyper/data",
         "block_sectors": 128, "low_water": 0}))]
     fn malformed_requests_are_refused(#[case] request: Value) {
         assert!(

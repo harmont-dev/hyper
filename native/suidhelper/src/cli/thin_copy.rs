@@ -1,6 +1,6 @@
 use crate::cli::MapperPath;
+use crate::cli::Op;
 use crate::cli::ThinIdNumber;
-use crate::cli::{Op, OpError};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
@@ -192,8 +192,6 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     }
     Ok(filled)
 }
-
-impl OpError for ThinCopyError {}
 
 #[cfg(test)]
 mod tests {

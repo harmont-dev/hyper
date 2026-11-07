@@ -49,7 +49,6 @@ defmodule Hyper.Node.Img.Mutable do
       :img_id,
       :img_server,
       :origin_dev,
-      :sectors,
       :thin_name,
       :thin_id,
       :blk_path,
@@ -61,7 +60,6 @@ defmodule Hyper.Node.Img.Mutable do
             img_id: Hyper.Img.id(),
             img_server: GenServer.server(),
             origin_dev: Path.t(),
-            sectors: pos_integer(),
             thin_name: String.t(),
             thin_id: non_neg_integer(),
             blk_path: Path.t(),
@@ -87,7 +85,7 @@ defmodule Hyper.Node.Img.Mutable do
           thin_id: non_neg_integer(),
           blk_path: Path.t(),
           origin_dev: Path.t(),
-          sectors: pos_integer()
+          img_server: GenServer.server()
         }
   def describe(server), do: GenServer.call(server, :describe)
 
@@ -114,13 +112,11 @@ defmodule Hyper.Node.Img.Mutable do
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         sectors = Server.sectors(img_server),
-         {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev, sectors) do
+         {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev) do
       state = %State{
         img_id: img_id,
         img_server: img_server,
         origin_dev: ro_dev,
-        sectors: sectors,
         thin_name: name,
         thin_id: id,
         blk_path: dev
@@ -147,16 +143,14 @@ defmodule Hyper.Node.Img.Mutable do
          {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         sectors = Server.sectors(img_server),
          {:ok, %{dev: dev, id: id}} <-
-           ThinPool.snapshot(name, origin_name, origin_id, sectors, ro_dev) do
+           ThinPool.snapshot(name, origin_name, origin_id, ro_dev) do
       release_parent(parent)
 
       state = %State{
         img_id: img_id,
         img_server: img_server,
         origin_dev: ro_dev,
-        sectors: sectors,
         thin_name: name,
         thin_id: id,
         blk_path: dev
@@ -199,7 +193,7 @@ defmodule Hyper.Node.Img.Mutable do
       thin_id: state.thin_id,
       blk_path: state.blk_path,
       origin_dev: state.origin_dev,
-      sectors: state.sectors
+      img_server: state.img_server
     }
 
     {:reply, reply, state}

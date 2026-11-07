@@ -12,18 +12,17 @@ defmodule Hyper.SuidHelper.Dmsetup do
   (exception store) over `origin_dev`. `sectors` is the logical size in 512-byte
   sectors. Returns the `/dev/mapper/<name>` path.
   """
-  @spec create_snapshot(String.t(), Path.t(), Path.t(), pos_integer()) ::
-          {:ok, Path.t()} | {:error, err()}
+  @spec create_snapshot(String.t(), Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot", include: [:name])
-  def create_snapshot(name, origin, cow_file, sectors) do
-    with {:ok, dev, _loops} <- create(snapshot(name, origin, cow_file, sectors, true)),
+  def create_snapshot(name, origin, cow_file) do
+    with {:ok, dev, _loops} <- create(snapshot(name, origin, cow_file, true)),
          do: {:ok, dev}
   end
 
-  @spec create_linear(String.t(), Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, err()}
+  @spec create_linear(String.t(), Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_linear", include: [:name])
-  def create_linear(name, origin, sectors) do
-    request = %{op: "dm_linear", name: name, readonly: true, sectors: sectors, origin: origin}
+  def create_linear(name, origin) do
+    request = %{op: "dm_linear", name: name, readonly: true, origin: origin}
     with {:ok, dev, _loops} <- create(request), do: {:ok, dev}
   end
 
@@ -38,15 +37,13 @@ defmodule Hyper.SuidHelper.Dmsetup do
           Path.t(),
           Path.t(),
           pos_integer(),
-          pos_integer(),
           non_neg_integer()
         ) :: {:ok, Path.t(), Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_pool", include: [:name])
-  def create_thin_pool(name, meta_file, data_file, sectors, block_sectors, low_water) do
+  def create_thin_pool(name, meta_file, data_file, block_sectors, low_water) do
     request = %{
       op: "dm_thin_pool",
       name: name,
-      sectors: sectors,
       metadata: meta_file,
       data: data_file,
       block_sectors: block_sectors,
@@ -62,14 +59,13 @@ defmodule Hyper.SuidHelper.Dmsetup do
   `pool_dev`, with `origin_dev` as its read-only external origin. Returns
   `/dev/mapper/<name>`.
   """
-  @spec create_thin_external(String.t(), String.t(), non_neg_integer(), pos_integer(), Path.t()) ::
+  @spec create_thin_external(String.t(), String.t(), non_neg_integer(), Path.t()) ::
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_external", include: [:name])
-  def create_thin_external(name, pool, dev_id, sectors, origin_dev) do
+  def create_thin_external(name, pool, dev_id, origin_dev) do
     request = %{
       op: "dm_thin",
       name: name,
-      sectors: sectors,
       pool: pool,
       thin_id: dev_id,
       origin: origin_dev
@@ -114,11 +110,10 @@ defmodule Hyper.SuidHelper.Dmsetup do
   which is how a fork's delta layer file is populated. Same table as
   `create_snapshot/4`, minus `--readonly`.
   """
-  @spec create_snapshot_rw(String.t(), Path.t(), Path.t(), pos_integer()) ::
-          {:ok, Path.t()} | {:error, err()}
+  @spec create_snapshot_rw(String.t(), Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot_rw", include: [:name])
-  def create_snapshot_rw(name, origin_dev, cow_file, sectors) do
-    with {:ok, dev, _loops} <- create(snapshot(name, origin_dev, cow_file, sectors, false)),
+  def create_snapshot_rw(name, origin_dev, cow_file) do
+    with {:ok, dev, _loops} <- create(snapshot(name, origin_dev, cow_file, false)),
          do: {:ok, dev}
   end
 
@@ -132,13 +127,12 @@ defmodule Hyper.SuidHelper.Dmsetup do
     end
   end
 
-  @spec snapshot(String.t(), Path.t(), Path.t(), pos_integer(), boolean()) :: map()
-  defp snapshot(name, origin, cow_file, sectors, readonly) do
+  @spec snapshot(String.t(), Path.t(), Path.t(), boolean()) :: map()
+  defp snapshot(name, origin, cow_file, readonly) do
     %{
       op: "dm_snapshot",
       name: name,
       readonly: readonly,
-      sectors: sectors,
       origin: origin,
       cow: cow_file,
       chunk_sectors: Hyper.Cfg.Img.chunk_sectors()

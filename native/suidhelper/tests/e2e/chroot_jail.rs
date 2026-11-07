@@ -264,21 +264,24 @@ fn remove_refuses_an_invalid_id(work: Work, #[case] id: &str) {
 }
 
 #[rstest]
-#[case::api_not_yet("vm_grant_api", "id", 75)]
-#[case::vsock_not_yet("vm_grant_vsock", "id", 75)]
-#[case::api_refused("vm_grant_api", "../id", 2)]
-#[case::vsock_refused("vm_grant_vsock", "a/b", 2)]
-fn grant_exit_code_separates_not_yet_from_refused_as_root(
-    work: Work,
-    #[case] op: &str,
-    #[case] id: &str,
-    #[case] code: i32,
-) {
+#[case::api_not_yet("vm_grant_api")]
+#[case::vsock_not_yet("vm_grant_vsock")]
+fn grant_reports_a_socket_not_created_yet_as_pending_as_root(work: Work, #[case] op: &str) {
     if !is_root() {
-        eprintln!("SKIP grant_exit_code_separates_not_yet_from_refused: needs root");
+        eprintln!("SKIP grant pending: needs root");
         return;
     }
     let cfg = work.config("");
 
-    run(&cfg, json!({"op": op, "id": id})).code(code);
+    let out = run(&cfg, json!({"op": op, "id": "id"})).success();
+    assert_eq!(stdout_json(&out)["result"], "pending");
+}
+
+#[rstest]
+#[case::api_traversal("vm_grant_api", "../id")]
+#[case::vsock_nested("vm_grant_vsock", "a/b")]
+fn grant_refuses_an_invalid_id(work: Work, #[case] op: &str, #[case] id: &str) {
+    let cfg = work.config("");
+
+    run(&cfg, json!({"op": op, "id": id})).code(2).stdout("");
 }

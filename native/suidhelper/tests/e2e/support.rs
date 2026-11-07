@@ -14,7 +14,9 @@
 
 use assert_cmd::assert::Assert;
 use assert_cmd::Command;
+use std::fs;
 use std::path::Path;
+use std::process::Command as Process;
 
 pub const BIN: &str = env!("CARGO_BIN_EXE_hyper-suidhelper");
 
@@ -42,4 +44,57 @@ pub fn run_args(config: &Path, args: &[&str]) -> Assert {
 
 pub fn stdout_json(assert: &Assert) -> serde_json::Value {
     serde_json::from_slice(&assert.get_output().stdout).expect("stdout is JSON")
+}
+
+pub struct LoopDevice(String);
+
+impl LoopDevice {
+    pub fn attach(backing: &Path) -> Option<Self> {
+        let out = Process::new("losetup")
+            .args(["--find", "--show"])
+            .arg(backing)
+            .output()
+            .ok()
+            .filter(|out| out.status.success())?;
+        Some(Self(String::from_utf8(out.stdout).ok()?.trim().to_string()))
+    }
+}
+
+impl Drop for LoopDevice {
+    fn drop(&mut self) {
+        let _ = Process::new("losetup").args(["--detach", &self.0]).status();
+    }
+}
+
+pub struct MapperDevice {
+    name: String,
+    _loop_dev: LoopDevice,
+}
+
+impl MapperDevice {
+    pub fn linear(name: &str, backing: &Path) -> Option<Self> {
+        let loop_dev = LoopDevice::attach(backing)?;
+        let sectors = fs::metadata(backing).unwrap().len() / 512;
+        let table = format!("0 {sectors} linear {} 0", loop_dev.0);
+        Process::new("dmsetup")
+            .args(["create", name, "--table", &table])
+            .status()
+            .is_ok_and(|status| status.success())
+            .then(|| Self {
+                name: name.to_string(),
+                _loop_dev: loop_dev,
+            })
+    }
+
+    pub fn path(&self) -> String {
+        format!("/dev/mapper/{}", self.name)
+    }
+}
+
+impl Drop for MapperDevice {
+    fn drop(&mut self) {
+        let _ = Process::new("dmsetup")
+            .args(["remove", "--retry", &self.name])
+            .status();
+    }
 }

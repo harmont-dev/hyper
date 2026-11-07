@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 mod support;
 use serde_json::{json, Value};
-use support::{is_root, run, run_args, stdout_json};
+use support::{is_root, run, run_args, stdout_json, MapperDevice};
 
 /// Install a root-owned fake tool named `basename` that records its argv (minus
 /// argv[0]) into `record` as a JSON array, then exits 0 with valid stdout for
@@ -108,35 +108,33 @@ fn substitute(value: &Value, f: &impl Fn(&str) -> Option<String>) -> Value {
 
 #[rstest]
 #[case::linear_over_a_file(
-    json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "sectors": 100,
-           "origin": "{file:base.img}"}),
-    "0 100 linear {origin} 0"
+    json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "{file:base.img}"}),
+    "0 2048 linear {origin} 0"
+)]
+#[case::linear_over_a_dm_device(
+    json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "{dm}"}),
+    "0 2048 linear {dm} 0"
 )]
 #[case::readonly_snapshot_over_a_dm_device(
-    json!({"op": "dm_snapshot", "name": "hyper-vm1", "readonly": true, "sectors": 100,
-           "origin": "/dev/mapper/hyper-img", "cow": "{file:cow.img}", "chunk_sectors": 8}),
-    "0 100 snapshot /dev/mapper/hyper-img {cow} P 8"
+    json!({"op": "dm_snapshot", "name": "hyper-vm1", "readonly": true, "origin": "{dm}",
+           "cow": "{file:cow.img}", "chunk_sectors": 8}),
+    "0 2048 snapshot {dm} {cow} P 8"
 )]
 #[case::writable_snapshot_over_a_file(
-    json!({"op": "dm_snapshot", "name": "hyper-fork", "readonly": false, "sectors": 100,
-           "origin": "{file:base.img}", "cow": "{file:cow.img}", "chunk_sectors": 16}),
-    "0 100 snapshot {origin} {cow} P 16"
+    json!({"op": "dm_snapshot", "name": "hyper-fork", "readonly": false, "origin": "{file:base.img}",
+           "cow": "{file:cow.img}", "chunk_sectors": 16}),
+    "0 2048 snapshot {origin} {cow} P 16"
 )]
-#[case::thin_pool(
-    json!({"op": "dm_thin_pool", "name": "hyper-pool", "sectors": 100, "metadata": "{file:meta.img}",
+#[case::thin_pool_sized_by_its_data_file(
+    json!({"op": "dm_thin_pool", "name": "hyper-pool", "metadata": "{file:meta.img}",
            "data": "{file:data.img}", "block_sectors": 128, "low_water": 0}),
-    "0 100 thin-pool {metadata} {data} 128 0"
+    "0 2048 thin-pool {metadata} {data} 128 0"
 )]
-#[case::thin_with_an_external_origin(
-    json!({"op": "dm_thin", "name": "hyper-vm1", "sectors": 100, "pool": "hyper-pool", "thin_id": 7,
-           "origin": "/dev/mapper/hyper-img"}),
-    "0 100 thin /dev/mapper/hyper-pool 7 /dev/mapper/hyper-img"
+#[case::thin_sized_by_its_external_origin(
+    json!({"op": "dm_thin", "name": "hyper-vm1", "pool": "hyper-pool", "thin_id": 7, "origin": "{dm}"}),
+    "0 2048 thin /dev/mapper/hyper-pool 7 {dm}"
 )]
-#[case::thin_without_an_origin(
-    json!({"op": "dm_thin", "name": "hyper-vm1", "sectors": 100, "pool": "hyper-pool", "thin_id": 7}),
-    "0 100 thin /dev/mapper/hyper-pool 7"
-)]
-fn dm_create_renders_the_table_over_the_attached_loops_as_root(
+fn dm_create_sizes_and_renders_the_table_over_the_attached_loops_as_root(
     fake: FakeDmsetup,
     #[case] request: Value,
     #[case] table: &str,
@@ -146,19 +144,31 @@ fn dm_create_renders_the_table_over_the_attached_loops_as_root(
         return;
     }
     let cfg = fake.printing("");
-    let request = substitute(&request, &|s| {
-        let name = s.strip_prefix("{file:")?.strip_suffix('}')?;
-        Some(fake.backing(name))
+    let origin_file = fake.base.join("origin-dev.img");
+    fs::write(&origin_file, vec![0u8; 1024 * 1024]).unwrap();
+    let Some(origin) = MapperDevice::linear(
+        &format!("hyper-e2e-origin-{}", std::process::id()),
+        &origin_file,
+    ) else {
+        eprintln!("SKIP dm create: losetup/dmsetup unavailable");
+        return;
+    };
+    let dm = origin.path();
+    let request = substitute(&request, &|s| match s.strip_prefix("{file:") {
+        Some(name) => Some(fake.backing(name.strip_suffix('}')?)),
+        None => (s == "{dm}").then(|| dm.clone()),
     });
 
     let json = stdout_json(&run(&cfg, request.clone()).success());
 
     let loops = json["loops"].as_object().unwrap();
-    let table = loops.iter().fold(table.to_string(), |table, (role, path)| {
-        let path = path.as_str().unwrap();
-        assert!(path.starts_with("/dev/loop"), "{role} loop: {path}");
-        table.replace(&format!("{{{role}}}"), path)
-    });
+    let table = loops
+        .iter()
+        .fold(table.replace("{dm}", &dm), |table, (role, path)| {
+            let path = path.as_str().unwrap();
+            assert!(path.starts_with("/dev/loop"), "{role} loop: {path}");
+            table.replace(&format!("{{{role}}}"), path)
+        });
     assert!(
         !table.contains('{'),
         "a backing file was not attached: {table}"
@@ -175,24 +185,21 @@ fn dm_create_renders_the_table_over_the_attached_loops_as_root(
 }
 
 #[rstest]
-#[case::foreign_origin_device(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-    "sectors": 8, "origin": "/dev/mapper/root"}))]
-#[case::foreign_thin_origin(json!({"op": "dm_thin", "name": "hyper-vm1", "sectors": 8,
+#[case::foreign_origin_device(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "/dev/mapper/root"}))]
+#[case::foreign_thin_origin(json!({"op": "dm_thin", "name": "hyper-vm1",
     "pool": "hyper-pool", "thin_id": 1, "origin": "/dev/mapper/root"}))]
 #[case::backing_file_outside_the_work_dir(json!({"op": "dm_linear", "name": "hyper-img",
-    "readonly": true, "sectors": 8, "origin": "/etc/passwd"}))]
-#[case::missing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-    "sectors": 8, "origin": "{base}/absent.img"}))]
-#[case::traversing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-    "sectors": 8, "origin": "{base}/../etc/passwd"}))]
-#[case::symlinked_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-    "sectors": 8, "origin": "{base}/link.img"}))]
-#[case::directory_as_backing_file(json!({"op": "dm_snapshot", "name": "hyper-vm1", "readonly": true,
-    "sectors": 8, "origin": "/dev/mapper/hyper-img", "cow": "{base}", "chunk_sectors": 8}))]
-#[case::foreign_name(json!({"op": "dm_linear", "name": "sda1", "readonly": true, "sectors": 8,
+    "readonly": true, "origin": "/etc/passwd"}))]
+#[case::missing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "{base}/absent.img"}))]
+#[case::traversing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "{base}/../etc/passwd"}))]
+#[case::symlinked_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, "origin": "{base}/link.img"}))]
+#[case::directory_as_backing_file(json!({"op": "dm_snapshot", "name": "hyper-vm1", "readonly": true, "origin": "/dev/mapper/hyper-img", "cow": "{base}", "chunk_sectors": 8}))]
+#[case::absent_origin_device(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
+    "origin": "/dev/mapper/hyper-e2e-absent"}))]
+#[case::foreign_name(json!({"op": "dm_linear", "name": "sda1", "readonly": true,
     "origin": "/dev/mapper/hyper-img"}))]
-#[case::foreign_pool(json!({"op": "dm_thin", "name": "hyper-vm1", "sectors": 8,
-    "pool": "vg0-pool", "thin_id": 1}))]
+#[case::foreign_pool(json!({"op": "dm_thin", "name": "hyper-vm1",
+    "pool": "vg0-pool", "thin_id": 1, "origin": "/dev/mapper/hyper-img"}))]
 #[case::unknown_message(json!({"op": "dm_message", "name": "hyper-pool",
     "message": "set_transaction_id 0 1"}))]
 #[case::foreign_remove(json!({"op": "dm_remove", "name": "root", "retry": false}))]

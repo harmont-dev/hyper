@@ -29,7 +29,7 @@ macro_rules! setuid_main {
                 Ok(token) => $entry(token),
                 Err(e) => {
                     ::std::eprintln!("hyper-suidhelper: {e}");
-                    ::std::process::ExitCode::from(2)
+                    ::std::process::exit(2)
                 }
             }
         }

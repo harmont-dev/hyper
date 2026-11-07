@@ -12,13 +12,13 @@
 //! the trusted-config resolution that feeds them.
 
 use super::VmOut;
-use crate::cli::{Op, OpError};
+use crate::cli::Op;
 use crate::config::{BinError, Config};
 use crate::id::IdError;
 use hyperrs_firecracker::jailer::chroot::JailLayout;
 use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer};
 use hyperrs_firecracker::VmId;
-use hyperrs_fs::path::SafePath;
+use hyperrs_fs::path::{SafePath, StrictComponent};
 use hyperrs_linux::netns;
 use hyperrs_process::privilege::Unprivileged;
 use serde::Deserialize;
@@ -109,7 +109,8 @@ fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError>
         .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&args.id));
 
     let layout = JailLayout::new(&jail_base, &args.id);
-    let api_sock = SafePath::from_static::<"/">().join(super::API_SOCKET);
+    let api_sock =
+        SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
 
     Jailer::builder()
         .jailer(&jailer)
@@ -129,8 +130,6 @@ fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError>
         .build()
         .invoke(token)
 }
-
-impl OpError for JailerError {}
 
 #[cfg(test)]
 mod tests {
