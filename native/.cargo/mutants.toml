@@ -2,3 +2,9 @@ test_tool = "nextest"
 all_features = true
 test_workspace = true
 exclude_globs = ["suidhelper/xtask/**"]
+exclude_re = [
+    # Needs root; killed by the root-gated e2e_chroot_jail tests in the privileged E2E job.
+    'replace Teardown::teardown -> ',
+    # PID-1 mounts inside a booted guest; killed by the KVM integration job.
+    'replace setup -> io::Result<\(\)> with Ok\(\(\)\)',
+]

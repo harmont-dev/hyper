@@ -44,6 +44,10 @@ name = "e2e_chroot_jail"
 path = "tests/e2e/chroot_jail.rs"
 
 [[test]]
+name = "e2e_net"
+path = "tests/e2e/net.rs"
+
+[[test]]
 name = "e2e_version"
 path = "tests/e2e/version.rs"
 

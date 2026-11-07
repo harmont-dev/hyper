@@ -56,20 +56,11 @@ fn a_trusted_config_loads_and_the_helper_elevates_as_root(
 
 #[rstest]
 fn host_init_reports_the_work_dir_the_helper_trusts_as_root(tmp: TempDir) {
-    let forwarding = fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default();
-    if !is_root() || forwarding.trim() != "1" {
-        eprintln!("SKIP host_init: needs root and ip_forward=1");
+    if !is_root() {
+        eprintln!("SKIP host_init: needs root");
         return;
     }
-    let nft = tmp.path().join("nft");
-    fs::copy("/bin/true", &nft).unwrap();
-    let cfg = write_root_config(
-        tmp.path(),
-        &format!(
-            "work_dir = \"/srv/hyper\"\n[tools]\nnft = \"{}\"\n[network]\nuplink = \"eth0\"\n",
-            nft.display()
-        ),
-    );
+    let cfg = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
 
     let out = run(&cfg, json!({"op": "host_init"})).success();
     let json = stdout_json(&out);
