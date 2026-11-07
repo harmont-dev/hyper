@@ -9,17 +9,17 @@ use thiserror::Error as ThisError;
 
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(bound(F: SlotPath))]
-pub enum DmTable<F> {
-    Linear(LinearTable<F>),
-    Snapshot(SnapshotTable<F>),
-    ThinPool(ThinPoolTable<F>),
-    Thin(ThinTable<F>),
+#[display(bound(B: BackingPath))]
+pub enum DmTable<B> {
+    Linear(LinearTable<B>),
+    Snapshot(SnapshotTable<B>),
+    ThinPool(ThinPoolTable<B>),
+    Thin(ThinTable<B>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Slot {
+pub enum Role {
     Origin,
     Cow,
     Metadata,
@@ -27,12 +27,12 @@ pub enum Slot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum Source<F> {
+pub enum Origin<B> {
     #[display("{}", _0.path().as_path().display())]
     Device(DmName),
-    #[display(bound(F: SlotPath))]
-    #[display("{}", _0.slot_path().as_path().display())]
-    File(F),
+    #[display(bound(B: BackingPath))]
+    #[display("{}", _0.backing_path().as_path().display())]
+    File(B),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
@@ -44,57 +44,57 @@ pub enum Persistence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(bound(F: SlotPath))]
+#[display(bound(B: BackingPath))]
 #[display("0 {sectors} linear {origin} 0")]
-pub struct LinearTable<F> {
+pub struct LinearTable<B> {
     pub sectors: u64,
-    pub origin: Source<F>,
+    pub origin: Origin<B>,
 }
 
 /// `dm-snapshot` table.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(bound(F: SlotPath))]
+#[display(bound(B: BackingPath))]
 #[display(
     "0 {sectors} snapshot {origin} {} {persistence} {chunk}",
-    cow.slot_path().as_path().display()
+    cow.backing_path().as_path().display()
 )]
-pub struct SnapshotTable<F> {
+pub struct SnapshotTable<B> {
     pub sectors: u64,
-    pub origin: Source<F>,
-    pub cow: F,
+    pub origin: Origin<B>,
+    pub cow: B,
     pub persistence: Persistence,
     pub chunk: u64,
 }
 
 /// `dm-thin` pool table.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(bound(F: SlotPath))]
+#[display(bound(B: BackingPath))]
 #[display(
     "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
-    metadata.slot_path().as_path().display(),
-    data.slot_path().as_path().display()
+    metadata.backing_path().as_path().display(),
+    data.backing_path().as_path().display()
 )]
-pub struct ThinPoolTable<F> {
+pub struct ThinPoolTable<B> {
     pub sectors: u64,
-    pub metadata: F,
-    pub data: F,
+    pub metadata: B,
+    pub data: B,
     pub block_sectors: u64,
     pub low_water: u64,
 }
 
 /// `dm-thin` tables.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display(bound(F: SlotPath))]
+#[display(bound(B: BackingPath))]
 #[display(
     "0 {sectors} thin {} {id}{}",
     pool.path().as_path().display(),
     origin.as_ref().map(|o| format!(" {o}")).unwrap_or_default()
 )]
-pub struct ThinTable<F> {
+pub struct ThinTable<B> {
     pub sectors: u64,
     pub pool: DmName,
     pub id: ThinId,
-    pub origin: Option<Source<F>>,
+    pub origin: Option<Origin<B>>,
 }
 
 #[derive(Debug, ThisError)]
@@ -109,51 +109,51 @@ pub enum ParseTableError {
     ThinId(#[from] ParseThinIdError),
 }
 
-pub trait SlotPath {
-    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents>;
+pub trait BackingPath {
+    fn backing_path(&self) -> &SafePath<IsAbsolute, StrictComponents>;
 }
 
-impl SlotPath for SafePathBuf<IsAbsolute, StrictComponents> {
-    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+impl BackingPath for SafePathBuf<IsAbsolute, StrictComponents> {
+    fn backing_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
         self
     }
 }
 
-impl SlotPath for LoopDevice {
-    fn slot_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
+impl BackingPath for LoopDevice {
+    fn backing_path(&self) -> &SafePath<IsAbsolute, StrictComponents> {
         self.path()
     }
 }
 
-impl<F> Source<F> {
+impl<B> Origin<B> {
     fn try_map<G, E>(
         &self,
-        slot: Slot,
-        f: &mut impl FnMut(&F, Slot) -> Result<G, E>,
-    ) -> Result<Source<G>, E> {
+        role: Role,
+        f: &mut impl FnMut(&B, Role) -> Result<G, E>,
+    ) -> Result<Origin<G>, E> {
         Ok(match self {
-            Source::Device(dev) => Source::Device(dev.clone()),
-            Source::File(file) => Source::File(f(file, slot)?),
+            Origin::Device(dev) => Origin::Device(dev.clone()),
+            Origin::File(file) => Origin::File(f(file, role)?),
         })
     }
 
     fn device(&self) -> Option<&DmName> {
         match self {
-            Source::Device(dev) => Some(dev),
-            Source::File(_) => None,
+            Origin::Device(dev) => Some(dev),
+            Origin::File(_) => None,
         }
     }
 }
 
-impl<F> DmTable<F> {
+impl<B> DmTable<B> {
     pub fn try_map<G, E>(
         &self,
-        mut f: impl FnMut(&F, Slot) -> Result<G, E>,
+        mut f: impl FnMut(&B, Role) -> Result<G, E>,
     ) -> Result<DmTable<G>, E> {
         Ok(match self {
             DmTable::Linear(LinearTable { sectors, origin }) => DmTable::Linear(LinearTable {
                 sectors: *sectors,
-                origin: origin.try_map(Slot::Origin, &mut f)?,
+                origin: origin.try_map(Role::Origin, &mut f)?,
             }),
             DmTable::Snapshot(SnapshotTable {
                 sectors,
@@ -163,8 +163,8 @@ impl<F> DmTable<F> {
                 chunk,
             }) => DmTable::Snapshot(SnapshotTable {
                 sectors: *sectors,
-                origin: origin.try_map(Slot::Origin, &mut f)?,
-                cow: f(cow, Slot::Cow)?,
+                origin: origin.try_map(Role::Origin, &mut f)?,
+                cow: f(cow, Role::Cow)?,
                 persistence: *persistence,
                 chunk: *chunk,
             }),
@@ -176,8 +176,8 @@ impl<F> DmTable<F> {
                 low_water,
             }) => DmTable::ThinPool(ThinPoolTable {
                 sectors: *sectors,
-                metadata: f(metadata, Slot::Metadata)?,
-                data: f(data, Slot::Data)?,
+                metadata: f(metadata, Role::Metadata)?,
+                data: f(data, Role::Data)?,
                 block_sectors: *block_sectors,
                 low_water: *low_water,
             }),
@@ -192,7 +192,7 @@ impl<F> DmTable<F> {
                 id: *id,
                 origin: origin
                     .as_ref()
-                    .map(|origin| origin.try_map(Slot::Origin, &mut f))
+                    .map(|origin| origin.try_map(Role::Origin, &mut f))
                     .transpose()?,
             }),
         })
@@ -204,7 +204,7 @@ impl<F> DmTable<F> {
             | DmTable::Snapshot(SnapshotTable { origin, .. }) => (origin.device(), None),
             DmTable::ThinPool(_) => (None, None),
             DmTable::Thin(ThinTable { pool, origin, .. }) => {
-                (Some(pool), origin.as_ref().and_then(Source::device))
+                (Some(pool), origin.as_ref().and_then(Origin::device))
             }
         };
         first.into_iter().chain(second)
@@ -224,11 +224,11 @@ impl FromStr for DmTable<FilePath> {
                 .try_into()
                 .map_err(|e| ParseTableError::Path(t.to_string(), e))
         };
-        let source = |t: &str| -> Result<Source<FilePath>, ParseTableError> {
+        let parse_origin = |t: &str| -> Result<Origin<FilePath>, ParseTableError> {
             if t.starts_with(MAPPER_PREFIX) {
-                Ok(Source::Device(DmName::from_device_path(t)?))
+                Ok(Origin::Device(DmName::from_device_path(t)?))
             } else {
-                Ok(Source::File(file(t)?))
+                Ok(Origin::File(file(t)?))
             }
         };
 
@@ -236,7 +236,7 @@ impl FromStr for DmTable<FilePath> {
         Ok(match fields.as_slice() {
             ["0", sectors, "linear", origin, "0"] => DmTable::Linear(LinearTable {
                 sectors: number(sectors)?,
-                origin: source(origin)?,
+                origin: parse_origin(origin)?,
             }),
             ["0", sectors, "snapshot", origin, cow, mode, chunk] => {
                 let persistence = match *mode {
@@ -246,7 +246,7 @@ impl FromStr for DmTable<FilePath> {
                 };
                 DmTable::Snapshot(SnapshotTable {
                     sectors: number(sectors)?,
-                    origin: source(origin)?,
+                    origin: parse_origin(origin)?,
                     cow: file(cow)?,
                     persistence,
                     chunk: number(chunk)?,
@@ -266,7 +266,7 @@ impl FromStr for DmTable<FilePath> {
                     sectors: number(sectors)?,
                     pool: DmName::from_device_path(pool)?,
                     id: id.parse()?,
-                    origin: origin.first().map(|o| source(o)).transpose()?,
+                    origin: origin.first().map(|o| parse_origin(o)).transpose()?,
                 })
             }
             _ => return Err(malformed()),
@@ -277,7 +277,7 @@ impl FromStr for DmTable<FilePath> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DmTable, FilePath, LinearTable, ParseTableError, Persistence, SnapshotTable, Source,
+        DmTable, FilePath, LinearTable, Origin, ParseTableError, Persistence, SnapshotTable,
         ThinPoolTable, ThinTable,
     };
     use crate::dm::{DmName, ThinId};
@@ -300,10 +300,10 @@ mod tests {
         "[a-z][a-z0-9_-]{0,15}".prop_filter_map("reserved", |s| s.parse().ok())
     }
 
-    fn source() -> impl Strategy<Value = Source<FilePath>> {
+    fn origin() -> impl Strategy<Value = Origin<FilePath>> {
         prop_oneof![
-            dm_name().prop_map(Source::Device),
-            file().prop_map(Source::File)
+            dm_name().prop_map(Origin::Device),
+            file().prop_map(Origin::File)
         ]
     }
 
@@ -317,9 +317,9 @@ mod tests {
 
     fn table() -> impl Strategy<Value = DmTable<FilePath>> {
         prop_oneof![
-            (any::<u64>(), source())
+            (any::<u64>(), origin())
                 .prop_map(|(sectors, origin)| DmTable::Linear(LinearTable { sectors, origin })),
-            (any::<u64>(), source(), file(), persistence(), any::<u64>()).prop_map(
+            (any::<u64>(), origin(), file(), persistence(), any::<u64>()).prop_map(
                 |(sectors, origin, cow, persistence, chunk)| DmTable::Snapshot(SnapshotTable {
                     sectors,
                     origin,
@@ -343,7 +343,7 @@ mod tests {
                 any::<u64>(),
                 dm_name(),
                 thin_id(),
-                prop::option::of(source())
+                prop::option::of(origin())
             )
                 .prop_map(|(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
                     sectors,
@@ -417,7 +417,7 @@ mod tests {
         assert!(matches!(
             got,
             DmTable::Linear(LinearTable {
-                origin: Source::Device(_),
+                origin: Origin::Device(_),
                 ..
             })
         ));

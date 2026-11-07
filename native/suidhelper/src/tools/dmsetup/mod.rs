@@ -5,7 +5,7 @@ mod table;
 use super::IsTool;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
-use hyperrs_linux::dm::{self, DmTable, RemoveMode, Slot, ThinMessage};
+use hyperrs_linux::dm::{self, DmTable, RemoveMode, Role, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
@@ -61,7 +61,7 @@ enum DmOp {
 pub enum DmsetupOut {
     Created {
         device: PathBuf,
-        loops: BTreeMap<Slot, PathBuf>,
+        loops: BTreeMap<Role, PathBuf>,
     },
     Removed,
     Messaged,
@@ -109,14 +109,14 @@ impl IsTool for Dmsetup {
                 };
                 let control = LoopControl::open()?;
                 let mut loops = BTreeMap::new();
-                let attached = table.try_map(|backing, slot| {
-                    let slot_access = match slot {
-                        Slot::Origin => Access::ReadOnly,
-                        Slot::Cow => access,
-                        Slot::Metadata | Slot::Data => Access::ReadWrite,
+                let attached = table.try_map(|backing, role| {
+                    let role_access = match role {
+                        Role::Origin => Access::ReadOnly,
+                        Role::Cow => access,
+                        Role::Metadata | Role::Data => Access::ReadWrite,
                     };
-                    let device = control.attach(backing.file(), slot_access, ATTACH_TIMEOUT)?;
-                    loops.insert(slot, device.path().as_ref().to_path_buf());
+                    let device = control.attach(backing.file(), role_access, ATTACH_TIMEOUT)?;
+                    loops.insert(role, device.path().as_ref().to_path_buf());
                     Ok::<_, Box<dyn std::error::Error>>(device)
                 })?;
                 DmsetupOut::Created {

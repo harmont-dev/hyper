@@ -1,4 +1,4 @@
-use super::{Device, DmName, DmTable, Dmsetup, RemoveMode, RunError, Source, ThinTable};
+use super::{Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
 use crate::Access;
 use derive_more::{Display, Into};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
@@ -194,7 +194,7 @@ impl<'a> Thin<'a, Inactive> {
             sectors,
             pool: self.pool.device.name().clone(),
             id: self.id,
-            origin: origin.map(Source::File),
+            origin: origin.map(Origin::File),
         });
         let device = self
             .pool
