@@ -32,29 +32,11 @@ defmodule Hyper.Node.Img.ThinPool do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Provision a thin volume of `sectors` over read-only `origin_dev`."
-  @spec create_external(String.t(), Path.t()) ::
+  @spec create_volume(String.t(), Path.t(), String.t() | nil) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.create_external", include: [:name])
-  def create_external(name, origin_dev) do
-    GenServer.call(__MODULE__, {:create_external, name, origin_dev})
-  end
-
-  @doc """
-  Take an internal snapshot of live thin volume `origin_name` (thin id
-  `origin_id`) and activate it as `name`, sharing the pool's blocks COW-style.
-
-  dm-thin requires the origin suspended while `create_snap` is sent; the origin
-  is resumed on *every* path out, so a failed snapshot never leaves the parent
-  VM's I/O frozen. The snapshot is activated with the same external origin
-  (`origin_dev`) as its parent — unprovisioned reads must keep resolving
-  through the composed RO image chain.
-  """
-  @spec snapshot(String.t(), String.t(), Path.t()) ::
-          {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.snapshot", include: [:name, :origin_name])
-  def snapshot(name, origin_name, origin_dev) do
-    GenServer.call(__MODULE__, {:snapshot, name, origin_name, origin_dev}, :timer.seconds(30))
+  @decorate with_span("Hyper.Node.Img.ThinPool.create_volume", include: [:name, :parent])
+  def create_volume(name, origin_dev, parent \\ nil) do
+    GenServer.call(__MODULE__, {:create_volume, name, origin_dev, parent}, :timer.seconds(30))
   end
 
   @spec fork_delta(String.t(), Path.t(), Path.t()) ::
@@ -92,20 +74,10 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:create_external, name, origin_dev}, _from, state) do
+  def handle_call({:create_volume, name, origin_dev, parent}, _from, state) do
     {id, state} = id_alloc(state)
 
-    case SuidHelper.Thin.create(@pool_name, id, name, origin_dev) do
-      {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
-      {:error, _} = err -> {:reply, err, id_free(state, id)}
-    end
-  end
-
-  @impl true
-  def handle_call({:snapshot, name, origin_name, origin_dev}, _from, state) do
-    {id, state} = id_alloc(state)
-
-    case SuidHelper.Thin.snapshot(@pool_name, origin_name, id, name, origin_dev) do
+    case SuidHelper.Thin.create_volume(@pool_name, id, name, origin_dev, parent) do
       {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
       {:error, _} = err -> {:reply, err, id_free(state, id)}
     end

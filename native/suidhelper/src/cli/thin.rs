@@ -58,24 +58,13 @@ pub struct ThinPoolCreate {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ThinCreate {
+pub struct ThinVolumeCreate {
     pool: HyperDmName,
     thin_id: ThinId,
     name: HyperDmName,
     #[serde_as(as = "MapperPath")]
     origin: HyperDmName,
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ThinSnapshot {
-    pool: HyperDmName,
-    parent: HyperDmName,
-    thin_id: ThinId,
-    name: HyperDmName,
-    #[serde_as(as = "MapperPath")]
-    origin: HyperDmName,
+    parent: Option<HyperDmName>,
 }
 
 #[derive(Deserialize)]
@@ -118,7 +107,7 @@ impl Op for ThinPoolCreate {
     }
 }
 
-impl Op for ThinCreate {
+impl Op for ThinVolumeCreate {
     type Output = ThinOut;
     type Error = ThinError;
 
@@ -127,30 +116,18 @@ impl Op for ThinCreate {
         let _root = token.elevate()?;
         let sectors = dm_op::device_sectors(&self.origin)?;
         let pool = dm.thin_pool(&self.pool)?;
-        let thin = pool.create_thin(self.thin_id)?;
-        let activated = thin.activate(&self.name, sectors, origin(&self.origin));
-        activate_or_delete(&pool, self.thin_id, activated)
-    }
-}
-
-impl Op for ThinSnapshot {
-    type Output = ThinOut;
-    type Error = ThinError;
-
-    fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
-        let dm = dm_op::dmsetup().map_err(DmError::from)?;
-        let _root = token.elevate()?;
-        let sectors = dm_op::device_sectors(&self.origin)?;
-        let pool = dm.thin_pool(&self.pool)?;
-        let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.thin_id) {
-            Ok(snapshot) => snapshot,
-            Err(e @ SnapshotError::Resume(_)) => {
-                let _ = pool.delete_thin(self.thin_id);
-                return Err(e.into());
-            }
-            Err(e) => return Err(e.into()),
+        let thin = match &self.parent {
+            None => pool.create_thin(self.thin_id)?,
+            Some(parent) => match pool.open_thin(parent)?.snapshot(self.thin_id) {
+                Ok(snapshot) => snapshot,
+                Err(e @ SnapshotError::Resume(_)) => {
+                    let _ = pool.delete_thin(self.thin_id);
+                    return Err(e.into());
+                }
+                Err(e) => return Err(e.into()),
+            },
         };
-        let activated = snapshot.activate(&self.name, sectors, origin(&self.origin));
+        let activated = thin.activate(&self.name, sectors, origin(&self.origin));
         activate_or_delete(&pool, self.thin_id, activated)
     }
 }

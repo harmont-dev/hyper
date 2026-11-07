@@ -119,10 +119,10 @@ macro_rules! require {
 }
 
 #[rstest]
-fn thin_create_allocates_the_id_then_activates_it_sized_by_its_origin_as_root(pool: Option<Pool>) {
+fn volume_allocates_the_id_then_activates_it_sized_by_its_origin_as_root(pool: Option<Pool>) {
     let pool = require!(pool);
     let request = pool.request(
-        "thin_create",
+        "thin_volume_create",
         json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin()}),
     );
 
@@ -143,11 +143,11 @@ fn thin_create_allocates_the_id_then_activates_it_sized_by_its_origin_as_root(po
 }
 
 #[rstest]
-fn thin_create_frees_the_id_when_activation_fails_as_root(pool: Option<Pool>) {
+fn volume_frees_the_id_when_activation_fails_as_root(pool: Option<Pool>) {
     let pool = require!(pool);
     pool.fail("create");
     let request = pool.request(
-        "thin_create",
+        "thin_volume_create",
         json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin()}),
     );
 
@@ -164,7 +164,7 @@ fn thin_create_frees_the_id_when_activation_fails_as_root(pool: Option<Pool>) {
 #[case::create_snap_fails(Some("msg-create_snap"), false, &["msg-create_snap", "resume"])]
 #[case::resume_fails(Some("resume"), false, &["msg-create_snap", "resume", "msg-delete"])]
 #[case::activation_fails(Some("create"), false, &["msg-create_snap", "resume", "create", "msg-delete"])]
-fn thin_snapshot_freezes_the_parent_only_around_create_snap_as_root(
+fn forked_volume_freezes_the_parent_only_around_create_snap_as_root(
     pool: Option<Pool>,
     #[case] failing: Option<&str>,
     #[case] succeeds: bool,
@@ -176,7 +176,7 @@ fn thin_snapshot_freezes_the_parent_only_around_create_snap_as_root(
         pool.fail(verb);
     }
     let request = pool.request(
-        "thin_snapshot",
+        "thin_volume_create",
         json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin()}),
     );
 
@@ -214,14 +214,14 @@ fn thin_snapshot_freezes_the_parent_only_around_create_snap_as_root(
 #[case::linear("0 2048 linear 7:0 0")]
 #[case::thin_of_another_pool("0 2048 thin 253:9 7")]
 #[case::absent("")]
-fn thin_snapshot_refuses_a_parent_that_is_not_a_thin_of_the_pool_as_root(
+fn forked_volume_refuses_a_parent_that_is_not_a_thin_of_the_pool_as_root(
     pool: Option<Pool>,
     #[case] table: &str,
 ) {
     let pool = require!(pool);
     pool.parent_table(table);
     let request = pool.request(
-        "thin_snapshot",
+        "thin_volume_create",
         json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin()}),
     );
 
@@ -268,13 +268,13 @@ fn thin_destroy_refuses_a_device_that_is_not_a_thin_of_the_pool_as_root(pool: Op
 }
 
 #[rstest]
-#[case::foreign_pool("thin_create", json!({"pool": "vg0-pool", "thin_id": 1, "name": "hyper-vm1",
+#[case::foreign_pool("thin_volume_create", json!({"pool": "vg0-pool", "thin_id": 1, "name": "hyper-vm1",
     "origin": "/dev/mapper/hyper-img"}))]
-#[case::foreign_name("thin_create", json!({"thin_id": 1, "name": "sda1",
+#[case::foreign_name("thin_volume_create", json!({"thin_id": 1, "name": "sda1",
     "origin": "/dev/mapper/hyper-img"}))]
-#[case::foreign_origin("thin_create", json!({"thin_id": 1, "name": "hyper-vm1",
+#[case::foreign_origin("thin_volume_create", json!({"thin_id": 1, "name": "hyper-vm1",
     "origin": "/dev/mapper/root"}))]
-#[case::foreign_parent("thin_snapshot", json!({"parent": "root", "thin_id": 2,
+#[case::foreign_parent("thin_volume_create", json!({"parent": "root", "thin_id": 2,
     "name": "hyper-fork", "origin": "/dev/mapper/hyper-img"}))]
 #[case::foreign_destroy("thin_destroy", json!({"name": "root"}))]
 fn foreign_devices_are_refused_before_dmsetup_runs_as_root(

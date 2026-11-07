@@ -29,26 +29,18 @@ defmodule Hyper.SuidHelper.Thin do
     end
   end
 
-  @spec create(String.t(), non_neg_integer(), String.t(), Path.t()) ::
+  @spec create_volume(String.t(), non_neg_integer(), String.t(), Path.t(), String.t() | nil) ::
           {:ok, Path.t()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Thin.create", include: [:name, :thin_id])
-  def create(pool, thin_id, name, origin) do
-    created(%{op: "thin_create", pool: pool, thin_id: thin_id, name: name, origin: origin})
+  @decorate with_span("Hyper.SuidHelper.Thin.create_volume", include: [:name, :thin_id, :parent])
+  def create_volume(pool, thin_id, name, origin, parent) do
+    %{op: "thin_volume_create", pool: pool, thin_id: thin_id, name: name, origin: origin}
+    |> put_parent(parent)
+    |> created()
   end
 
-  @spec snapshot(String.t(), String.t(), non_neg_integer(), String.t(), Path.t()) ::
-          {:ok, Path.t()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Thin.snapshot", include: [:parent, :name, :thin_id])
-  def snapshot(pool, parent, thin_id, name, origin) do
-    created(%{
-      op: "thin_snapshot",
-      pool: pool,
-      parent: parent,
-      thin_id: thin_id,
-      name: name,
-      origin: origin
-    })
-  end
+  @spec put_parent(map(), String.t() | nil) :: map()
+  defp put_parent(request, nil), do: request
+  defp put_parent(request, parent), do: Map.put(request, :parent, parent)
 
   @spec destroy(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Thin.destroy", include: [:name])

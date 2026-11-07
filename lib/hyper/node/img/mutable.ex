@@ -112,7 +112,7 @@ defmodule Hyper.Node.Img.Mutable do
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev) do
+         {:ok, %{dev: dev, id: id}} <- ThinPool.create_volume(name, ro_dev) do
       state = %State{
         img_id: img_id,
         img_server: img_server,
@@ -144,7 +144,7 @@ defmodule Hyper.Node.Img.Mutable do
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
          {:ok, %{dev: dev, id: id}} <-
-           ThinPool.snapshot(name, origin_name, ro_dev) do
+           ThinPool.create_volume(name, ro_dev, origin_name) do
       release_parent(parent)
 
       state = %State{
