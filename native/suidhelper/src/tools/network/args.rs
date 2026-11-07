@@ -30,7 +30,7 @@ pub enum Which {
 }
 
 /// One step of a prepare/teardown/host-init sequence: the binary to run and its
-/// exact argv (argv[0] is the binary itself, named by [`Which`], not repeated
+/// exact argv (`argv[0]` is the binary itself, named by [`Which`], not repeated
 /// here). `allow_failure` marks a step whose non-zero exit must not stop the
 /// sequence — used only by the leading `nft delete table ip hyper` in
 /// [`host_init_commands`], since that command's whole purpose is to clear

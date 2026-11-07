@@ -44,7 +44,7 @@
 //! <div class="warning">
 //!
 //! If you do not call [`hyperrs_elfsum::checksum!`](self::checksum) in your program, then stamping
-//! will fail with [`Error::MissingSection`]. If you do not need the checksum, I recommend adding a
+//! will fail with [`StampError::MissingSection`]. If you do not need the checksum, I recommend adding a
 //!
 //! ```no_run
 //! // src/main.rs
