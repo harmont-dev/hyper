@@ -16,7 +16,7 @@ pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{
-    parse_table, BackingError, BackingFile, Dmsetup, DmsetupArgs, HyperDmName, NameError,
+    BackingError, BackingFile, Dmsetup, DmsetupArgs, HyperDmName, HyperDmTable, NameError,
     TableError,
 };
 pub use network::NetworkOp;

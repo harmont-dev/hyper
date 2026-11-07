@@ -1,9 +1,8 @@
 mod backing;
 mod name;
-mod table;
 
 use super::IsTool;
-pub use backing::{BackingError, BackingFile};
+pub use backing::{BackingError, BackingFile, HyperDmTable, TableError};
 use clap::{Args, Subcommand};
 use hyperrs_linux::dm::{self, RemoveMode, Role, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
@@ -15,7 +14,6 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
-pub use table::{parse_table, resolve_table, ResolvedTable, TableError};
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -31,8 +29,8 @@ enum DmOp {
         name: HyperDmName,
         #[arg(long)]
         readonly: bool,
-        #[arg(long, value_parser = resolve_table)]
-        table: ResolvedTable,
+        #[arg(long, value_parser = HyperDmTable::resolve)]
+        table: HyperDmTable,
     },
     Remove {
         #[arg(long)]

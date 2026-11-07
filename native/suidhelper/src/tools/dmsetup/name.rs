@@ -1,4 +1,4 @@
-use hyperrs_linux::dm::{DmName, InvalidDmName, ParseDmDeviceError};
+use hyperrs_linux::dm::{DmName, DmTable, InvalidDmName, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
@@ -21,6 +21,12 @@ pub struct HyperDmName(DmName);
 impl HyperDmName {
     pub fn from_device_path(path: &str) -> Result<Self, NameError> {
         DmName::from_device_path(path)?.try_into()
+    }
+
+    pub fn check_table(table: &DmTable) -> Result<(), NameError> {
+        table
+            .devices()
+            .try_for_each(|dev| Self::try_from(dev.clone()).map(drop))
     }
 }
 
@@ -48,6 +54,7 @@ impl FromStr for HyperDmName {
 #[cfg(test)]
 mod tests {
     use super::{HyperDmName, NameError};
+    use hyperrs_linux::dm::DmTable;
     use proptest::prelude::*;
     use std::path::Path;
 
@@ -78,6 +85,24 @@ mod tests {
         }
 
         #[test]
+        fn a_device_we_do_not_own_is_refused_in_every_device_slot(name in "[a-z][a-z0-9_]{0,12}") {
+            prop_assume!(name != "control");
+            let dev = format!("/dev/mapper/{name}");
+            for table in [
+                format!("0 8 linear {dev} 0"),
+                format!("0 8 snapshot {dev} /srv/hyper/cow P 8"),
+                format!("0 8 thin {dev} 1"),
+                format!("0 8 thin /dev/mapper/hyper-pool 1 {dev}"),
+            ] {
+                let table: DmTable = table.parse().unwrap();
+                prop_assert!(
+                    matches!(HyperDmName::check_table(&table), Err(NameError::NotHyper(_))),
+                    "accepted {}", table
+                );
+            }
+        }
+
+        #[test]
         fn dm_device_refuses_mapper_names_we_do_not_own(name in "[a-z][a-z0-9._-]{0,12}") {
             prop_assume!(!name.starts_with("hyper-") && name != "control");
             let s = format!("/dev/mapper/{name}");
@@ -102,6 +127,21 @@ mod tests {
                 HyperDmName::from_device_path(bad).is_err(),
                 "accepted {bad:?}"
             );
+        }
+    }
+
+    #[test]
+    fn check_table_accepts_tables_over_hyper_devices() {
+        for s in [
+            "0 100 linear /srv/hyper/layers/base.img 0",
+            "0 100 linear /dev/mapper/hyper-img 0",
+            "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8",
+            "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024",
+            "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
+            "0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img",
+        ] {
+            let table: DmTable = s.parse().unwrap();
+            assert!(HyperDmName::check_table(&table).is_ok(), "rejected {s:?}");
         }
     }
 }
