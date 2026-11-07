@@ -19,13 +19,13 @@ impl<'a> Device<'a> {
 
     pub fn suspend(&self) -> Result<(), RunError> {
         self.dmsetup
-            .run([OsStr::new("suspend"), self.name.as_os_str()])
+            .run([OsStr::new("suspend"), self.name.as_ref()])
             .map(drop)
     }
 
     pub fn resume(&self) -> Result<(), RunError> {
         self.dmsetup
-            .run([OsStr::new("resume"), self.name.as_os_str()])
+            .run([OsStr::new("resume"), self.name.as_ref()])
             .map(drop)
     }
 
@@ -34,7 +34,7 @@ impl<'a> Device<'a> {
         if mode == RemoveMode::Retry {
             args.push(OsStr::new("--retry"));
         }
-        args.push(self.name.as_os_str());
+        args.push(self.name.as_ref());
         self.dmsetup.run(args).map(drop)
     }
 }

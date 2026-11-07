@@ -16,8 +16,8 @@ pub use blockcopy::{Blockcopy, BlockcopyArgs};
 pub use blockdev::{Blockdev, BlockdevArgs};
 pub use chroot_jail::ChrootJailOp;
 pub use dmsetup::{
-    parse_dm_device, parse_dm_name, parse_message, parse_table, BackingError, BackingFile, Dmsetup,
-    DmsetupArgs, MessageError, NameError, Slot, Source, TableError, TableSpec, ThinMessage,
+    BackingError, BackingFile, Dmsetup, DmsetupArgs, HyperDmName, HyperDmTable, NameError,
+    TableError,
 };
 pub use network::NetworkOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
@@ -47,6 +47,10 @@ pub const EXIT_FAILURE: i32 = 2;
 pub const EXIT_RETRYABLE: i32 = 75;
 
 impl DispatchError {
+    pub fn tool(e: impl std::error::Error + 'static) -> Self {
+        DispatchError::Tool(Box::new(e))
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
             DispatchError::Retryable(_) => EXIT_RETRYABLE,
@@ -95,7 +99,7 @@ pub trait IsTool {
                 DispatchError::Tool(e)
             }
         })?;
-        serde_json::to_value(output).map_err(|e| DispatchError::Tool(Box::new(e)))
+        serde_json::to_value(output).map_err(DispatchError::tool)
     }
 }
 
@@ -145,9 +149,7 @@ impl Tool {
         let config = Config::get();
         match self {
             Tool::Dmsetup { args } => {
-                let bin = config
-                    .dmsetup()
-                    .map_err(|e| DispatchError::Tool(Box::new(e)))?;
+                let bin = config.dmsetup().map_err(DispatchError::tool)?;
                 Dmsetup::new(bin, args).run(token)
             }
             Tool::Blockdev { args } => Blockdev::new(args).run(token),
@@ -155,9 +157,7 @@ impl Tool {
             Tool::ChrootJail { op } => op.run(token),
             Tool::Network { op } => op.run(token),
             Tool::ThinDump { args } => {
-                let bin = config
-                    .thin_dump()
-                    .map_err(|e| DispatchError::Tool(Box::new(e)))?;
+                let bin = config.thin_dump().map_err(DispatchError::tool)?;
                 ThinDump::new(bin, args).run(token)
             }
         }

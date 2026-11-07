@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Runtime host configuration, read from a single root-owned TOML file.
 //!
+//! TODO(markovejnoivc): This file is a little bit sloppy, and needs some cleanup.
+//!
 //! ## UID/GID range divergence
 //!
 //! Elixir keeps a default `{900_000, 999_999}` that governs which UIDs the node
@@ -18,7 +20,7 @@ use hyperrs_process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::{Deserialize, Deserializer};
 use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use thiserror::Error;
 
@@ -139,6 +141,10 @@ pub struct Tools {
     jailer: Option<PathBuf>,
 }
 
+fn required<const NAME: &'static str>(path: &Option<PathBuf>) -> Result<&Path, BinError> {
+    path.as_deref().ok_or(BinError::Unconfigured(NAME))
+}
+
 // The default data root. Must match the Elixir node's `@dev_work_dir`, which it
 // uses when the same config file is absent, so both sides agree (see
 // `Hyper.Node.check_helper_base`).
@@ -256,22 +262,18 @@ impl Config {
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] firecracker` before any VM can be launched.
     pub fn firecracker(&self) -> Result<RootSafeBinPathBuf<"firecracker">, BinError> {
-        self.tools
-            .firecracker
-            .as_deref()
-            .ok_or(BinError::Unconfigured("firecracker"))
-            .and_then(|p| RootSafeBinPathBuf::open(p).map_err(BinError::Bin))
+        Ok(RootSafeBinPathBuf::open(required::<"firecracker">(
+            &self.tools.firecracker,
+        )?)?)
     }
 
     /// The Firecracker jailer binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] jailer` before any VM can be launched.
     pub fn jailer(&self) -> Result<RootSafeBin<"jailer">, BinError> {
-        self.tools
-            .jailer
-            .as_deref()
-            .ok_or(BinError::Unconfigured("jailer"))
-            .and_then(|p| RootSafeBin::open(p).map_err(BinError::Bin))
+        Ok(RootSafeBin::open(required::<"jailer">(
+            &self.tools.jailer,
+        )?)?)
     }
 
     /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to

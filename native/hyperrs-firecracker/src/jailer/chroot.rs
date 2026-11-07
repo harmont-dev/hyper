@@ -7,7 +7,7 @@ use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{
-    self, Any, FileType, IsBlockDevice, IsRegularFile, OpenFlags, Owner, SafeFile,
+    self, Any, FileType, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, Owner, SafeFile,
 };
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents,
@@ -43,6 +43,9 @@ const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
 /// Mode set on `ROOT_NAME`.
 const JAIL_ROOT_MODE: Mode = Mode::from_bits_truncate(0o710);
 
+/// Mode handed to the node: owner+group read/write, no world access.
+const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
+
 #[derive(Debug, ThisError)]
 pub enum KernelError {
     #[error("resolving kernel source {path:?}: {source}")]
@@ -75,6 +78,8 @@ pub enum BuildError {
 pub enum GrantError {
     #[error("file does not exist yet")]
     Missing,
+    #[error("walking to the jail root: {0}")]
+    Walk(#[source] file::ValidationError),
     #[error("not the expected file type (or is a symlink); refusing to touch it")]
     WrongType,
     #[error("opening the file: {0}")]
@@ -87,6 +92,14 @@ pub enum GrantError {
     ChgrpRoot(#[source] Errno),
     #[error("chmoding the jail root dir for traversal: {0}")]
     ChmodRoot(#[source] Errno),
+}
+
+#[derive(Debug, ThisError)]
+pub enum RemoveError {
+    #[error("opening chroot parent: {0}")]
+    Open(#[source] file::ValidationError),
+    #[error("removing chroot: {0}")]
+    Remove(#[source] dir::DirError),
 }
 
 /// Kernel image [`SafeFile`] to be loaded into the firecracker chroot jail.
@@ -155,6 +168,31 @@ impl<'a> JailLayout<'a> {
 
     pub fn open_root(&self) -> Result<JailRoot, file::ValidationError> {
         SafeDir::open(&self.root(), OpenFlags::RDONLY).map(JailRoot)
+    }
+
+    /// Grant access to a socket `name` to the `owner`.
+    pub fn grant_socket(&self, name: &StrictComponent, owner: Owner) -> Result<(), GrantError> {
+        let root = match self.open_root() {
+            Ok(root) => root,
+            Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing),
+            Err(e) => return Err(GrantError::Walk(e)),
+        };
+        root.grant::<IsSocket>(name, owner, SOCKET_MODE)
+    }
+
+    /// Recursively remove the per-VM chroot `<base>/<exec>/<id>`, fd-relative
+    /// after an `O_NOFOLLOW` walk from `base`. Idempotent on a missing target.
+    pub fn remove(&self) -> Result<(), RemoveError> {
+        let parent = match SafeDir::open(&self.exec_dir(), OpenFlags::RDONLY) {
+            Ok(parent) => parent,
+            Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()),
+            Err(e) => return Err(RemoveError::Open(e)),
+        };
+        match parent.rmdirat_recursive(self.id) {
+            Ok(()) => Ok(()),
+            Err(e) if e.errno() == Some(Errno::ENOENT) => Ok(()),
+            Err(e) => Err(RemoveError::Remove(e)),
+        }
     }
 }
 
@@ -257,11 +295,11 @@ type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
 
 #[cfg(test)]
 mod tests {
-    use super::{JailLayout, JailRoot, KernelError, KernelImage};
+    use super::{GrantError, JailLayout, JailRoot, KernelError, KernelImage};
     use crate::VmId;
     use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
-    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
     use hyperrs_fs::{dir, file};
     use nix::errno::Errno;
     use nix::sys::stat::{makedev, mknod, Mode, SFlag};
@@ -269,6 +307,7 @@ mod tests {
     use proptest::prelude::*;
     use std::fs;
     use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -547,5 +586,151 @@ mod tests {
             0,
             "planted node must not be chowned"
         );
+    }
+    const API_SOCKET: &StrictComponent = StrictComponent::from_static("api.socket");
+
+    fn grant(jail_base: &Path) -> Result<(), GrantError> {
+        JailLayout::new(&strict(jail_base), &vm()).grant_socket(API_SOCKET, Owner::caller())
+    }
+
+    #[test]
+    fn grant_before_the_socket_exists_is_missing() {
+        for create_root in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            if create_root {
+                jail_root(tmp.path());
+            }
+            let res = grant(tmp.path());
+            assert!(
+                matches!(res, Err(GrantError::Missing)),
+                "create_root={create_root}: got {res:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn grant_hands_the_socket_over_and_opens_root_for_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = jail_root(tmp.path());
+        let socket = root.join("api.socket");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o755)).unwrap();
+
+        grant(tmp.path()).expect("real socket must grant");
+
+        let meta = fs::symlink_metadata(&socket).unwrap();
+        assert_eq!(meta.mode() & 0o777, 0o660);
+        assert_eq!(meta.uid(), nix::unistd::getuid().as_raw());
+        assert_eq!(meta.gid(), nix::unistd::getgid().as_raw());
+        let root_meta = fs::symlink_metadata(&root).unwrap();
+        assert_eq!(root_meta.mode() & 0o777, 0o710);
+        assert_eq!(root_meta.gid(), nix::unistd::getgid().as_raw());
+    }
+
+    #[test]
+    fn grant_refuses_a_regular_file_leaf_and_leaves_it_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let imposter = jail_root(tmp.path()).join("api.socket");
+        fs::write(&imposter, b"not a socket").unwrap();
+        fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let err = grant(tmp.path()).unwrap_err();
+        assert!(matches!(err, GrantError::WrongType), "got {err:?}");
+        assert_eq!(
+            fs::symlink_metadata(&imposter).unwrap().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn grant_refuses_a_symlinked_leaf_and_leaves_its_target_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = jail_root(tmp.path());
+        let outside = tmp.path().join("outside.sock");
+        let _listener = UnixListener::bind(&outside).unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&outside, root.join("api.socket")).unwrap();
+
+        let err = grant(tmp.path()).unwrap_err();
+        assert!(matches!(err, GrantError::WrongType), "got {err:?}");
+        assert_eq!(
+            fs::symlink_metadata(&outside).unwrap().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn grant_through_a_symlinked_component_does_not_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        let sentinel = tmp.path().join("sentinel");
+        fs::create_dir_all(sentinel.join("id").join("root")).unwrap();
+        let outside_socket = sentinel.join("id").join("root").join("api.socket");
+        let _listener = UnixListener::bind(&outside_socket).unwrap();
+        fs::set_permissions(&outside_socket, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink(&sentinel, jail.join("firecracker")).unwrap();
+
+        let res = grant(&jail);
+        assert!(matches!(res, Err(GrantError::Walk(_))), "got {res:?}");
+        assert_eq!(
+            fs::symlink_metadata(&outside_socket).unwrap().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn grant_on_an_unreadable_jail_base_is_a_walk_error_not_missing() {
+        if is_root() {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        fs::set_permissions(&jail, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let res = grant(&jail);
+        fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(matches!(res, Err(GrantError::Walk(_))), "got {res:?}");
+    }
+
+    #[test]
+    fn remove_of_a_missing_chroot_is_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        JailLayout::new(&strict(tmp.path()), &vm())
+            .remove()
+            .expect("missing chroot must be Ok");
+    }
+
+    #[test]
+    fn remove_deletes_the_chroot_tree_and_spares_siblings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exec = tmp.path().join("firecracker");
+        let victim = exec.join("id");
+        fs::create_dir_all(victim.join("root")).unwrap();
+        fs::write(victim.join("root").join("vmlinux"), b"kernel").unwrap();
+        let sibling = exec.join("other");
+        fs::create_dir_all(&sibling).unwrap();
+
+        JailLayout::new(&strict(tmp.path()), &vm())
+            .remove()
+            .unwrap();
+        assert!(!victim.exists(), "victim chroot must be gone");
+        assert!(sibling.exists(), "sibling chroot must survive");
+    }
+
+    #[test]
+    fn remove_through_a_symlinked_exec_component_does_not_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jail = tmp.path().join("jail");
+        fs::create_dir(&jail).unwrap();
+        let sentinel = tmp.path().join("sentinel");
+        fs::create_dir_all(sentinel.join("id")).unwrap();
+        fs::write(sentinel.join("id").join("keep.txt"), b"do not delete").unwrap();
+        symlink(&sentinel, jail.join("firecracker")).unwrap();
+
+        let _ = JailLayout::new(&strict(&jail), &vm()).remove();
+        assert!(sentinel.join("id").join("keep.txt").exists());
     }
 }

@@ -7,7 +7,7 @@ use derive_more::{BitOr, Into};
 use nix::fcntl::{open, openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
 use nix::libc::AT_FDCWD;
 use nix::sys::stat::{fchmodat, fstat, FchmodatFlags, FileStat, Mode, SFlag};
-use nix::unistd::{dup, fchownat, Gid, Uid};
+use nix::unistd::{dup, fchownat, getgid, getuid, Gid, Uid};
 use std::io;
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
@@ -230,6 +230,15 @@ impl DeviceType for IsCharDevice {
 pub struct Owner {
     pub uid: Uid,
     pub gid: Gid,
+}
+
+impl Owner {
+    pub fn caller() -> Self {
+        Self {
+            uid: getuid(),
+            gid: getgid(),
+        }
+    }
 }
 
 impl<T: DeviceType, R, O> SafeFile<T, R, O> {

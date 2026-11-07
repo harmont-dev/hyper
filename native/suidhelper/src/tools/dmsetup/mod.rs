@@ -1,23 +1,19 @@
 mod backing;
-mod message;
 mod name;
-mod table;
 
 use super::IsTool;
-pub use backing::{BackingError, BackingFile};
+pub use backing::{BackingError, BackingFile, HyperDmTable, TableError};
 use clap::{Args, Subcommand};
-use hyperrs_linux::dm::{self, DmName, RemoveMode};
+use hyperrs_linux::dm::{self, RemoveMode, Role, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
 use hyperrs_process::privilege::Root;
-pub use message::{parse_message, MessageError, ThinMessage};
-pub use name::{parse_dm_device, parse_dm_name, NameError};
+pub use name::{HyperDmName, NameError};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
-pub use table::{parse_table, resolve_table, Slot, Source, TableError, TableSpec};
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -30,36 +26,27 @@ pub struct DmsetupArgs {
 #[derive(Subcommand)]
 enum DmOp {
     Create {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
+        name: HyperDmName,
         #[arg(long)]
         readonly: bool,
-        #[arg(long, value_parser = resolve_table)]
-        table: TableSpec<BackingFile>,
+        #[arg(long, value_parser = HyperDmTable::resolve)]
+        table: HyperDmTable,
     },
     Remove {
         #[arg(long)]
         retry: bool,
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
+        name: HyperDmName,
     },
     Message {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
-        #[arg(long, value_parser = parse_message)]
+        name: HyperDmName,
+        #[arg(long)]
         message: ThinMessage,
     },
     /// Suspend a dm device (flushes queued I/O; required before `create_snap`
     /// of the device's thin id).
-    Suspend {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
-    },
+    Suspend { name: HyperDmName },
     /// Resume a suspended dm device.
-    Resume {
-        #[arg(value_parser = parse_dm_name)]
-        name: DmName,
-    },
+    Resume { name: HyperDmName },
     /// List the target types the kernel device-mapper exposes. Read-only, but
     /// still needs root: it opens `/dev/mapper/control`.
     Targets,
@@ -72,7 +59,7 @@ enum DmOp {
 pub enum DmsetupOut {
     Created {
         device: PathBuf,
-        loops: BTreeMap<Slot, PathBuf>,
+        loops: BTreeMap<Role, PathBuf>,
     },
     Removed,
     Messaged,
@@ -120,19 +107,23 @@ impl IsTool for Dmsetup {
                 };
                 let control = LoopControl::open()?;
                 let mut loops = BTreeMap::new();
-                let attached = table.try_map(|backing, slot| {
-                    let slot_access = match slot {
-                        Slot::Origin => Access::ReadOnly,
-                        Slot::Cow => access,
-                        Slot::Metadata | Slot::Data => Access::ReadWrite,
+                let attached = table.attach(|role, backing| {
+                    let role_access = match role {
+                        Role::Origin => Access::ReadOnly,
+                        Role::Cow => access,
+                        Role::Metadata | Role::Data => Access::ReadWrite,
                     };
-                    let device = control.attach(backing.file(), slot_access, ATTACH_TIMEOUT)?;
-                    loops.insert(slot, device.path().as_ref().to_path_buf());
-                    Ok::<_, Box<dyn std::error::Error>>(device)
+                    let device = control.attach(backing.file(), role_access, ATTACH_TIMEOUT)?;
+                    let path = device.path().to_owned();
+                    loops.insert(role, device);
+                    Ok::<_, Box<dyn std::error::Error>>(path)
                 })?;
                 DmsetupOut::Created {
-                    device: dm.create(name, &attached.to_dm(), access)?.path().into(),
-                    loops,
+                    device: dm.create(name, &attached, access)?.path().into(),
+                    loops: loops
+                        .iter()
+                        .map(|(&role, device)| (role, device.path().as_ref().to_path_buf()))
+                        .collect(),
                 }
             }
             DmOp::Remove { retry, name } => {
@@ -145,14 +136,7 @@ impl IsTool for Dmsetup {
                 DmsetupOut::Removed
             }
             DmOp::Message { name, message } => {
-                let pool = dm.thin_pool(name)?;
-                match *message {
-                    ThinMessage::CreateThin(id) => pool.create_thin(id).map(drop)?,
-                    ThinMessage::CreateSnap { id, origin } => pool.create_snap(id, origin)?,
-                    ThinMessage::Delete(id) => pool.delete_thin(id)?,
-                    ThinMessage::ReserveMetadataSnap => pool.reserve_metadata_snap()?,
-                    ThinMessage::ReleaseMetadataSnap => pool.release_metadata_snap()?,
-                }
+                dm.thin_pool(name)?.send(*message)?;
                 DmsetupOut::Messaged
             }
             DmOp::Suspend { name } => {

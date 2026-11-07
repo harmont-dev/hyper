@@ -1,10 +1,8 @@
 //! Contracts of `BackingFile::open`, the confinement gate for every file a dm
 //! table names. Laws:
-//!   * a path that does not canonicalize (absent file) is refused as
-//!     `Canonicalize`, never accepted;
-//!   * an existing path whose resolved real location is outside the base is
-//!     ALWAYS refused as `OutsideBase`, regardless of the spelling used to
-//!     reach it (direct, symlink, `..` traversal, in-base symlink);
+//!   * a path not lexically under the base is ALWAYS refused as `OutsideBase`;
+//!   * an in-base path that is absent, or reaches through any symlink, is
+//!     refused as `Open`, never followed;
 //!   * an in-base regular file is accepted as a handle to exactly that inode;
 //!   * anything in-base that is not a regular file is refused.
 
@@ -37,45 +35,43 @@ proptest! {
         let p = outside.join(&name);
         std::fs::write(&p, b"x").unwrap();
 
-        let err = BackingFile::open(&p, &strict(&base)).expect_err("out-of-base backing file accepted");
+        let err = BackingFile::open(&strict(&p), &strict(&base)).expect_err("out-of-base backing file accepted");
         prop_assert!(matches!(err, BackingError::OutsideBase { .. }), "got {err:?}");
     }
 }
 
 #[test]
-fn absent_path_is_refused_as_canonicalize() {
+fn absent_path_is_refused_as_open() {
     let (_base_dir, base) = real_tempdir();
 
-    let err = BackingFile::open(&base.join("nope.img"), &strict(&base))
+    let err = BackingFile::open(&strict(base.join("nope.img")), &strict(&base))
         .expect_err("absent file accepted");
-    assert!(
-        matches!(err, BackingError::Canonicalize { .. }),
-        "got {err:?}"
-    );
+    assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
 }
 
 #[test]
-fn refusal_is_decided_on_the_resolved_path() {
+fn a_symlink_is_never_followed() {
     let (_base_dir, base) = real_tempdir();
     let (_outside_dir, outside) = real_tempdir();
     let target = outside.join("target.img");
     std::fs::write(&target, b"x").unwrap();
-
-    let outer_link = outside.join("link.img");
-    std::os::unix::fs::symlink(&target, &outer_link).unwrap();
-    let inner_link = base.join("innocent.img");
-    std::os::unix::fs::symlink(&target, &inner_link).unwrap();
+    let inner = base.join("inner.img");
+    std::fs::write(&inner, b"x").unwrap();
     std::fs::create_dir(base.join("sub")).unwrap();
-    let dotdot = base
-        .join("sub/../..")
-        .join(outside.file_name().unwrap())
-        .join("target.img");
 
-    for spelling in [outer_link, inner_link, dotdot] {
-        let err = BackingFile::open(&spelling, &strict(&base))
-            .expect_err("out-of-base spelling accepted");
+    let escaping = base.join("escaping.img");
+    std::os::unix::fs::symlink(&target, &escaping).unwrap();
+    let in_base = base.join("in-base.img");
+    std::os::unix::fs::symlink(&inner, &in_base).unwrap();
+    let dir_link = base.join("dir-link");
+    std::os::unix::fs::symlink(base.join("sub"), &dir_link).unwrap();
+    std::fs::write(base.join("sub/disk.img"), b"x").unwrap();
+
+    for spelling in [escaping, in_base, dir_link.join("disk.img")] {
+        let err = BackingFile::open(&strict(&spelling), &strict(&base))
+            .expect_err("symlinked spelling accepted");
         assert!(
-            matches!(err, BackingError::OutsideBase { .. }),
+            matches!(err, BackingError::Open(_)),
             "{}: got {err:?}",
             spelling.display(),
         );
@@ -88,7 +84,8 @@ fn in_base_file_is_accepted_as_that_inode() {
     let backing = base.join("disk.img");
     std::fs::write(&backing, b"data").unwrap();
 
-    let got = BackingFile::open(&backing, &strict(&base)).expect("in-base regular file refused");
+    let got =
+        BackingFile::open(&strict(&backing), &strict(&base)).expect("in-base regular file refused");
 
     let held = fstat(got.file().as_raw_fd()).unwrap();
     let on_disk = std::fs::metadata(&backing).unwrap();
@@ -101,7 +98,7 @@ fn directory_under_base_is_refused() {
     let dir = base.join("subdir");
     std::fs::create_dir(&dir).unwrap();
 
-    let err =
-        BackingFile::open(&dir, &strict(&base)).expect_err("directory accepted as backing file");
+    let err = BackingFile::open(&strict(&dir), &strict(&base))
+        .expect_err("directory accepted as backing file");
     assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
 }

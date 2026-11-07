@@ -6,10 +6,9 @@
 //! ranges are trusted as the exact divergence.
 
 use super::IsTool;
-use crate::tools::parse_dm_device;
+use crate::tools::HyperDmName;
 use clap::Args;
 use derive_more::Constructor;
-use hyperrs_linux::dm::DmName;
 use hyperrs_process::privilege::Root;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
@@ -38,11 +37,11 @@ fn range_spec_from_file(path: &str) -> Result<RangeSpec, String> {
 #[derive(Args)]
 pub struct BlockcopyArgs {
     /// Device to copy from (the fork's point-in-time snapshot).
-    #[arg(long, value_parser = parse_dm_device)]
-    src: DmName,
+    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    src: HyperDmName,
     /// Device to copy into (a writable dm-snapshot over the origin).
-    #[arg(long, value_parser = parse_dm_device)]
-    dst: DmName,
+    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    dst: HyperDmName,
     /// Copy only these block ranges (JSON file from `thin-dump`).
     #[arg(long, value_parser = range_spec_from_file)]
     ranges: RangeSpec,

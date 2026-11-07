@@ -32,11 +32,11 @@
 //! the controller keeps probing.
 
 use crate::config::Config;
-use crate::tools::chroot_jail::grant::{caller, grant_socket, GrantSocketError};
 use crate::tools::IsTool;
 use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
 use hyperrs_firecracker::VmId;
+use hyperrs_fs::file::Owner;
 use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{Root, Unprivileged};
 
@@ -64,15 +64,11 @@ struct GrantApi {
 impl IsTool for GrantApi {
     type Args = GrantApiArgs;
     type Output = ();
-    type RunT = Result<(), GrantSocketError>;
+    type RunT = Result<(), GrantError>;
 
     fn run_privileged(&self, _root: &Root<'_>) -> Self::RunT {
         let jail_base = Config::get().jail_base();
-        grant_socket(
-            &JailLayout::new(&jail_base, &self.args.id),
-            SOCKET_NAME,
-            caller(),
-        )
+        JailLayout::new(&jail_base, &self.args.id).grant_socket(SOCKET_NAME, Owner::caller())
     }
 
     fn parse(&self, res: Self::RunT) -> Result<(), Box<dyn std::error::Error>> {
@@ -80,6 +76,6 @@ impl IsTool for GrantApi {
     }
 
     fn is_retryable(&self, res: &Self::RunT) -> bool {
-        matches!(res, Err(GrantSocketError::Grant(GrantError::Missing)))
+        matches!(res, Err(GrantError::Missing))
     }
 }

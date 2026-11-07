@@ -1,7 +1,6 @@
-use super::{Device, DmName, DmTable, Dmsetup, RemoveMode, RunError, ThinTable};
+use super::{DevPath, Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
 use crate::Access;
 use derive_more::{Display, Into};
-use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use std::ffi::OsStr;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -43,6 +42,47 @@ impl FromStr for ThinId {
     }
 }
 
+/// A thin-pool message we permit: provision, snapshot, or drop a thin device by id, or pin/unpin the pool's metadata snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+pub enum ThinMessage {
+    #[display("create_thin {_0}")]
+    CreateThin(ThinId),
+    #[display("create_snap {id} {origin}")]
+    CreateSnap { id: ThinId, origin: ThinId },
+    #[display("delete {_0}")]
+    Delete(ThinId),
+    #[display("reserve_metadata_snap")]
+    ReserveMetadataSnap,
+    #[display("release_metadata_snap")]
+    ReleaseMetadataSnap,
+}
+
+#[derive(Debug, ThisError)]
+pub enum ParseThinMessageError {
+    #[error("unsupported thin-pool message: {0}")]
+    Malformed(String),
+    #[error(transparent)]
+    ThinId(#[from] ParseThinIdError),
+}
+
+impl FromStr for ThinMessage {
+    type Err = ParseThinMessageError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["create_thin", i] => Ok(ThinMessage::CreateThin(i.parse()?)),
+            ["create_snap", new, orig] => Ok(ThinMessage::CreateSnap {
+                id: new.parse()?,
+                origin: orig.parse()?,
+            }),
+            ["delete", i] => Ok(ThinMessage::Delete(i.parse()?)),
+            ["reserve_metadata_snap"] => Ok(ThinMessage::ReserveMetadataSnap),
+            ["release_metadata_snap"] => Ok(ThinMessage::ReleaseMetadataSnap),
+            _ => Err(ParseThinMessageError::Malformed(s.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, ThisError)]
 pub enum ThinPoolError {
     #[error(transparent)]
@@ -81,7 +121,7 @@ pub struct Thin<'a, S> {
 
 impl<'a> ThinPool<'a> {
     pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
-        let table = dmsetup.run([OsStr::new("table"), name.as_os_str()])?;
+        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
         match table.lines().collect::<Vec<_>>().as_slice() {
             [line] if line.split_whitespace().nth(2) == Some("thin-pool") => Ok(Self {
                 device: dmsetup.device(name),
@@ -98,7 +138,7 @@ impl<'a> ThinPool<'a> {
     }
 
     pub fn create_thin(&self, id: ThinId) -> Result<Thin<'a, Inactive>, RunError> {
-        self.message(&format!("create_thin {id}"))?;
+        self.send(ThinMessage::CreateThin(id))?;
         Ok(Thin {
             pool: self.clone(),
             id,
@@ -107,29 +147,30 @@ impl<'a> ThinPool<'a> {
     }
 
     pub fn create_snap(&self, id: ThinId, origin: ThinId) -> Result<(), RunError> {
-        self.message(&format!("create_snap {id} {origin}"))
+        self.send(ThinMessage::CreateSnap { id, origin })
     }
 
     pub fn delete_thin(&self, id: ThinId) -> Result<(), RunError> {
-        self.message(&format!("delete {id}"))
+        self.send(ThinMessage::Delete(id))
     }
 
     pub fn reserve_metadata_snap(&self) -> Result<(), RunError> {
-        self.message("reserve_metadata_snap")
+        self.send(ThinMessage::ReserveMetadataSnap)
     }
 
     pub fn release_metadata_snap(&self) -> Result<(), RunError> {
-        self.message("release_metadata_snap")
+        self.send(ThinMessage::ReleaseMetadataSnap)
     }
 
-    fn message(&self, message: &str) -> Result<(), RunError> {
+    pub fn send(&self, message: ThinMessage) -> Result<(), RunError> {
+        let message = message.to_string();
         self.device
             .dmsetup
             .run([
                 OsStr::new("message"),
-                self.device.name().as_os_str(),
+                self.device.name().as_ref(),
                 OsStr::new("0"),
-                OsStr::new(message),
+                OsStr::new(&message),
             ])
             .map(drop)
     }
@@ -146,13 +187,13 @@ impl<'a> Thin<'a, Inactive> {
         self,
         name: &DmName,
         sectors: u64,
-        origin: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
+        origin: Option<DevPath>,
     ) -> Result<Thin<'a, Active<'a>>, RunError> {
         let table = DmTable::Thin(ThinTable {
             sectors,
             pool: self.pool.device.name().clone(),
             id: self.id,
-            origin,
+            origin: origin.map(Origin::Path),
         });
         let device = self
             .pool
@@ -201,7 +242,9 @@ impl<'a> Thin<'a, Active<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Inactive, SnapshotError, Thin, ThinId, ThinPoolError};
+    use super::{
+        Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError,
+    };
     use crate::dm::{DmName, Dmsetup};
     use hyperrs_process::binary::RootSafeBin;
     use proptest::prelude::*;
@@ -231,6 +274,63 @@ mod tests {
         #[test]
         fn thin_id_parse_rejects_non_integers(s in "[^0-9+]*|[0-9]+[^0-9]+[0-9]*") {
             prop_assert!(s.parse::<ThinId>().is_err());
+        }
+
+        #[test]
+        fn message_parse_is_the_inverse_of_render(m in message()) {
+            prop_assert_eq!(m.to_string().parse::<ThinMessage>().unwrap(), m);
+        }
+
+        #[test]
+        fn message_parse_ignores_surrounding_and_inner_spacing(m in message(), pad in "[ \t]{1,3}") {
+            let spaced = format!("{pad}{}{pad}", m.to_string().split(' ').collect::<Vec<_>>().join(&pad));
+            prop_assert_eq!(spaced.parse::<ThinMessage>().unwrap(), m);
+        }
+
+        #[test]
+        fn message_with_an_extra_operand_is_refused(m in message(), extra in "[0-9]{1,4}") {
+            let s = format!("{m} {extra}");
+            prop_assert!(
+                matches!(s.parse::<ThinMessage>(), Err(ParseThinMessageError::Malformed(_))),
+                "accepted {:?}", s
+            );
+        }
+    }
+
+    fn thin_id() -> impl Strategy<Value = ThinId> {
+        (0..=ThinId::MAX).prop_map(|n| ThinId::new(n).unwrap())
+    }
+
+    fn message() -> impl Strategy<Value = ThinMessage> {
+        prop_oneof![
+            thin_id().prop_map(ThinMessage::CreateThin),
+            (thin_id(), thin_id()).prop_map(|(id, origin)| ThinMessage::CreateSnap { id, origin }),
+            thin_id().prop_map(ThinMessage::Delete),
+            Just(ThinMessage::ReserveMetadataSnap),
+            Just(ThinMessage::ReleaseMetadataSnap),
+        ]
+    }
+
+    #[test]
+    fn message_rejects_strings_outside_the_grammar() {
+        for bad in [
+            "resize 10",
+            "create_thin",
+            "delete",
+            "delete x",
+            "",
+            "create_thin -1",
+            "create_snap",
+            "create_snap 1",
+            "create_snap x 2",
+            "create_snap 1 y",
+            "create_snap -1 2",
+            "reserve_metadata",
+            "create_thin 16777216",
+            "delete 16777216",
+            "create_snap 1 16777216",
+        ] {
+            assert!(bad.parse::<ThinMessage>().is_err(), "accepted {bad:?}");
         }
     }
 

@@ -8,13 +8,14 @@ license = "MIT"
 redundant_field_names = "allow"
 
 [dependencies]
-derive_more = { version = "2.1.1", features = ["display", "constructor", "from", "into"] }
+derive_more = { version = "2.1.1", features = ["display", "constructor", "from", "into", "try_unwrap"] }
 hyperrs-fs = { path = "../hyperrs-fs" }
 hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["fs", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 smart-default = "0.7.1"
+strum = { version = "0.27", features = ["derive"] }
 thiserror = "1"
 
 [dev-dependencies]

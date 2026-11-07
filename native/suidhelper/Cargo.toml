@@ -28,10 +28,6 @@ name = "config_seam"
 path = "tests/config_seam.rs"
 
 [[test]]
-name = "tools_dmsetup_parsers"
-path = "tests/tools/dmsetup_parsers.rs"
-
-[[test]]
 name = "tools_blockcopy"
 path = "tests/tools/blockcopy.rs"
 
@@ -96,14 +92,13 @@ redundant_field_names = "allow"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "deref", "from", "into", "add", "debug"] }
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
 hyperrs-firecracker = { path = "../hyperrs-firecracker" }
 hyperrs-fs = { path = "../hyperrs-fs" }
 hyperrs-linux = { path = "../hyperrs-linux" }
 hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
-quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 smart-default = "0.7.1"

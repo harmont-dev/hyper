@@ -10,13 +10,16 @@ use super::Access;
 use derive_more::Constructor;
 pub use device::Device;
 use hyperrs_process::binary::RootSafeBin;
-pub use name::{DmName, InvalidDmName, OpenDeviceError};
+pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::io;
-pub use table::{DmTable, LinearTable, Persistence, SnapshotTable, ThinPoolTable, ThinTable};
+pub use table::{
+    DevPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable,
+    ThinPoolTable, ThinTable,
+};
 pub use thin::{
-    Active, Inactive, ParseThinIdError, SnapshotError, Thin, ThinId, ThinIdOutOfRange, ThinPool,
-    ThinPoolError,
+    Active, Inactive, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin, ThinId,
+    ThinIdOutOfRange, ThinMessage, ThinPool, ThinPoolError,
 };
 use thiserror::Error;
 
@@ -62,7 +65,7 @@ impl Dmsetup {
         access: Access,
     ) -> Result<Device<'_>, RunError> {
         let table = table.to_string();
-        let mut args = vec![OsStr::new("create"), name.as_os_str()];
+        let mut args = vec![OsStr::new("create"), name.as_ref()];
         if access == Access::ReadOnly {
             args.push(OsStr::new("--readonly"));
         }
