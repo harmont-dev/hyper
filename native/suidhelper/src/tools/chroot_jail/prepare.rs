@@ -67,12 +67,10 @@ pub fn run(
     };
     let kernel = KernelImage::open(&args.kernel)
         .map_err(|e| crate::tools::DispatchError::Tool(Box::new(e)))?;
-    let tun = config.network().is_some();
     Prepare {
         args,
         kernel,
         owner,
-        tun,
     }
     .run(token)
 }
@@ -81,7 +79,6 @@ struct Prepare {
     args: PrepareArgs,
     kernel: KernelImage,
     owner: JailOwner,
-    tun: bool,
 }
 
 impl IsTool for Prepare {
@@ -97,7 +94,6 @@ impl IsTool for Prepare {
         root.builder(self.owner.into())
             .kernel(&self.kernel)
             .rootfs(&device)
-            .tun(self.tun)
             .build()?;
         Ok(())
     }

@@ -9,7 +9,7 @@ mod blockdev;
 pub mod chroot_jail;
 mod dmsetup;
 pub mod jailer;
-pub mod network;
+pub mod net;
 pub mod thin_dump;
 
 pub use blockcopy::{Blockcopy, BlockcopyArgs};
@@ -19,7 +19,7 @@ pub use dmsetup::{
     parse_dm_device, parse_dm_name, parse_message, parse_table, BackingError, BackingFile, Dmsetup,
     DmsetupArgs, MessageError, NameError, Slot, Source, TableError, TableSpec, ThinMessage,
 };
-pub use network::NetworkOp;
+pub use net::NetOp;
 pub use thin_dump::{ThinDump, ThinDumpArgs};
 
 use crate::config::Config;
@@ -124,10 +124,10 @@ pub enum Tool {
         #[command(subcommand)]
         op: ChrootJailOp,
     },
-    /// Per-VM egress networking (netns + veth + TAP + NAT).
-    Network {
+    /// VM networking.
+    Net {
         #[command(subcommand)]
-        op: NetworkOp,
+        op: NetOp,
     },
     /// Dump a thin device's provisioned ranges from the pool metadata.
     ThinDump {
@@ -153,7 +153,7 @@ impl Tool {
             Tool::Blockdev { args } => Blockdev::new(args).run(token),
             Tool::Blockcopy { args } => Blockcopy::new(args).run(token),
             Tool::ChrootJail { op } => op.run(token),
-            Tool::Network { op } => op.run(token),
+            Tool::Net { op } => op.run(),
             Tool::ThinDump { args } => {
                 let bin = config
                     .thin_dump()
