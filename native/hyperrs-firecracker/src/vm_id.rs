@@ -16,6 +16,7 @@ pub enum VmIdError {
 
 /// A VM name that can be accepted by Firecracker.
 #[derive(Debug, Clone, Display)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[display("{}", _0.as_os_str().display())]
 pub struct VmId(
     // This needs to be a path because jailer will expect to chroot into a directory of this name.

@@ -68,11 +68,11 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
 
     assert Map.keys(request()) |> Enum.sort() ==
-             ~w(cpu_max device gid id kernel memory_max op uid)
+             ~w(device gid id kernel limits op uid)
 
-    assert request()["memory_max"] == cgroup.memory_max
+    assert request()["limits"]["memory_max"] == cgroup.memory_max
 
-    assert request()["cpu_max"] == %{
+    assert request()["limits"]["cpu_max"] == %{
              "quota_us" => cgroup.cpu_max.quota_us,
              "period_us" => cgroup.cpu_max.period_us
            }

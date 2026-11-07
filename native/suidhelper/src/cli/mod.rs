@@ -11,7 +11,6 @@ pub mod vm;
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use enum_dispatch::enum_dispatch;
-use hyperrs_linux::dm::ThinId;
 use hyperrs_process::privilege::Unprivileged;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
@@ -47,14 +46,6 @@ impl<'de> DeserializeAs<'de, HyperDmName> for MapperPath {
     fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<HyperDmName, D::Error> {
         HyperDmName::from_device_path(&String::deserialize(deserializer)?)
             .map_err(de::Error::custom)
-    }
-}
-
-pub struct ThinIdNumber;
-
-impl<'de> DeserializeAs<'de, ThinId> for ThinIdNumber {
-    fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<ThinId, D::Error> {
-        ThinId::new(u32::deserialize(deserializer)?).map_err(de::Error::custom)
     }
 }
 
@@ -144,7 +135,8 @@ mod tests {
     fn valid_requests() -> Vec<Value> {
         vec![
             json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
-                   "kernel": "/srv/hyper/vmlinux", "device": "/dev/mapper/hyper-v1"}),
+                   "kernel": "/srv/hyper/vmlinux", "device": "/dev/mapper/hyper-v1",
+                   "limits": {"memory_max": 1, "cpu_max": {"quota_us": 1, "period_us": 1}}}),
             json!({"op": "vm_grant_api", "id": "v1"}),
             json!({"op": "vm_grant_vsock", "id": "v1"}),
             json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
@@ -223,9 +215,9 @@ mod tests {
     #[case::foreign_dm_name(json!({"op": "dm_remove", "name": "sda1", "retry": false}))]
     #[case::traversing_vm_id(json!({"op": "vm_grant_api", "id": "../v1"}))]
     #[case::relative_kernel(json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
-        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1"}))]
+        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}}))]
     #[case::rootfs_device_by_name(json!({"op": "vm_launch", "id": "v1", "uid": 900_001,
-        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1"}))]
+        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1", "limits": {}}))]
     #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]

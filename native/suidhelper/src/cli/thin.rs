@@ -1,12 +1,12 @@
 use crate::cli::dm::{self as dm_op, DmError};
-use crate::cli::{MapperPath, Op, ThinIdNumber};
+use crate::cli::{MapperPath, Op};
 use crate::dm::HyperDmName;
 use hyperrs_linux::dm::{
     Active, OpenThinError, Origin, RunError, SnapshotError, Thin, ThinId, ThinPool, ThinPoolError,
 };
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::serde_as;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
@@ -37,11 +37,8 @@ pub enum ThinOut {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinCreate {
-    #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
-    #[serde_as(as = "ThinIdNumber")]
     thin_id: ThinId,
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
     #[serde_as(as = "MapperPath")]
     origin: HyperDmName,
@@ -51,25 +48,18 @@ pub struct ThinCreate {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinSnapshot {
-    #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     parent: HyperDmName,
-    #[serde_as(as = "ThinIdNumber")]
     thin_id: ThinId,
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
     #[serde_as(as = "MapperPath")]
     origin: HyperDmName,
 }
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinDestroy {
-    #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
 }
 

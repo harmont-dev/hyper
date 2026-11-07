@@ -25,7 +25,6 @@ use hyperrs_linux::cgroup::{self, Cgroup};
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::errno::Errno;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
 use std::time::Duration;
 use thiserror::Error as ThisError;
 
@@ -61,11 +60,9 @@ pub enum CgroupError {
     Remove(#[source] Errno),
 }
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Teardown {
-    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
     uid: Option<u32>,
 }

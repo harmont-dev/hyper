@@ -15,7 +15,15 @@ pub enum NameError {
     NotHyper(DmName),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display, derive_more::Deref)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    derive_more::Display,
+    derive_more::Deref,
+    serde_with::DeserializeFromStr,
+)]
 pub struct HyperDmName(DmName);
 
 impl HyperDmName {

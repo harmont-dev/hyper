@@ -39,6 +39,7 @@ pub enum OpenDeviceError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[display("{}", _0.as_os_str().to_string_lossy())]
 pub struct DmName(StrictComponentBuf);
 

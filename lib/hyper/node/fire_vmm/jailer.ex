@@ -133,18 +133,15 @@ defmodule Hyper.Node.FireVMM.Jailer do
 
   @spec command(FireVMM.Opts.t(), Path.t()) :: t()
   def command(opts, rootfs_device) do
-    request =
-      Map.merge(
-        %{
-          op: "vm_launch",
-          id: opts.vm_id,
-          uid: opts.uid,
-          gid: opts.gid,
-          kernel: opts.kernel,
-          device: rootfs_device
-        },
-        opts.type |> Instance.spec() |> Instance.Spec.cgroup_v2()
-      )
+    request = %{
+      op: "vm_launch",
+      id: opts.vm_id,
+      uid: opts.uid,
+      gid: opts.gid,
+      kernel: opts.kernel,
+      device: rootfs_device,
+      limits: opts.type |> Instance.spec() |> Instance.Spec.cgroup_v2()
+    }
 
     %{
       binary: Hyper.Cfg.Tools.suidhelper(),

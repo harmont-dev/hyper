@@ -90,9 +90,9 @@ redundant_field_names = "allow"
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "deref", "from", "into", "add", "debug"] }
 enum_dispatch = "0.3"
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
-hyperrs-firecracker = { path = "../hyperrs-firecracker" }
-hyperrs-fs = { path = "../hyperrs-fs" }
-hyperrs-linux = { path = "../hyperrs-linux" }
+hyperrs-firecracker = { path = "../hyperrs-firecracker", features = ["serde"] }
+hyperrs-fs = { path = "../hyperrs-fs", features = ["serde"] }
+hyperrs-linux = { path = "../hyperrs-linux", features = ["serde"] }
 hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["user", "fs", "dir", "process", "ioctl", "poll"] }
 serde = { version = "1", features = ["derive"] }

@@ -12,7 +12,6 @@ use hyperrs_process::binary::RootSafeBinError;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::sys::stat::fstat;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 use std::collections::BTreeMap;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
@@ -22,48 +21,35 @@ use thiserror::Error as ThisError;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 const SECTOR_BYTES: u64 = 512;
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Linear {
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     origin: Origin,
 }
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     origin: Origin,
-    #[serde_as(as = "DisplayFromStr")]
     cow: DevPath,
     chunk_sectors: u64,
 }
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinPool {
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     metadata: DevPath,
-    #[serde_as(as = "DisplayFromStr")]
     data: DevPath,
     block_sectors: u64,
     low_water: u64,
 }
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Remove {
-    #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
     retry: bool,
 }

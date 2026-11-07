@@ -14,9 +14,13 @@ hyperrs-process = { path = "../hyperrs-process" }
 nix = { version = "0.29", features = ["fs", "ioctl", "poll"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
+serde_with = { version = "3", optional = true }
 smart-default = "0.7.1"
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "1"
+
+[features]
+serde = ["dep:serde_with", "hyperrs-fs/serde"]
 
 [dev-dependencies]
 assert_fs = "1"

@@ -11,7 +11,6 @@ use hyperrs_fs::file::Owner;
 use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -25,11 +24,9 @@ pub enum GrantOpError {
 pub type GrantApi = Grant<API_SOCKET>;
 pub type GrantVsock = Grant<VSOCK_SOCKET>;
 
-#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Grant<const SOCKET: &'static str> {
-    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
 }
 

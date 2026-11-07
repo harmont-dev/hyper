@@ -38,6 +38,7 @@ pub enum Role {
 
 /// The device a table reads from.
 #[derive(Debug, Clone, PartialEq, Eq, Display, TryUnwrap)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[try_unwrap(ref, ref_mut)]
 pub enum Origin {
     /// An existing dm device, rendered as `/dev/mapper/<name>`.

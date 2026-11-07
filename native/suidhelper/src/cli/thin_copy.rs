@@ -19,7 +19,7 @@ use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::fcntl::{Flock, FlockArg};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::serde_as;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsFd;
@@ -32,15 +32,12 @@ const CHUNK_BYTES: usize = 1 << 20;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThinCopy {
-    #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     meta: LoopDevNum,
     #[serde_as(as = "MapperPath")]
     src: HyperDmName,
     #[serde_as(as = "MapperPath")]
     origin: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
     cow: DevPath,
     chunk_sectors: u64,
 }

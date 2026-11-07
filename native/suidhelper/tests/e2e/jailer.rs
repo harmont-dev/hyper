@@ -69,6 +69,7 @@ impl Launch {
             "gid": 900_002,
             "kernel": self.kernel,
             "device": self.rootfs.path(),
+            "limits": {},
         });
         request
             .as_object_mut()
@@ -175,8 +176,10 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
     run(
         &cfg,
         launch.request(json!({
-            "memory_max": 1_048_576,
-            "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
+            "limits": {
+                "memory_max": 1_048_576,
+                "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
+            },
         })),
     )
     .code(RECORDER_EXIT);

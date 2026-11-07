@@ -7,6 +7,7 @@ use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Into)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(try_from = "u32"))]
 #[into(u64)]
 pub struct ThinId(u32);
 
@@ -26,6 +27,14 @@ impl ThinId {
     pub const MAX: u32 = (1 << 24) - 1;
 
     pub fn new(id: u32) -> Result<Self, ThinIdOutOfRange> {
+        Self::try_from(id)
+    }
+}
+
+impl TryFrom<u32> for ThinId {
+    type Error = ThinIdOutOfRange;
+
+    fn try_from(id: u32) -> Result<Self, ThinIdOutOfRange> {
         if id <= Self::MAX {
             Ok(Self(id))
         } else {
