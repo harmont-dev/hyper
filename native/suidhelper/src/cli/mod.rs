@@ -15,6 +15,7 @@ use enum_dispatch::enum_dispatch;
 use hyperrs_process::privilege::Unprivileged;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Display;
 use thiserror::Error as ThisError;
@@ -88,6 +89,7 @@ impl Request {
             return Err(RequestError::Arity);
         };
         let request = request.into_string().map_err(|_| RequestError::Utf8)?;
+        serde_json::from_str::<BTreeMap<String, de::IgnoredAny>>(&request)?;
         Ok(serde_json::from_str(&request)?)
     }
 
@@ -181,6 +183,17 @@ mod tests {
                     "accepted without {field}: {partial}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn the_positional_array_form_of_every_op_is_refused() {
+        for request in valid_requests() {
+            let positional = Value::Array(request.as_object().unwrap().values().cloned().collect());
+            assert!(
+                matches!(parse(&positional), Err(RequestError::Json(_))),
+                "{positional}"
+            );
         }
     }
 
