@@ -127,12 +127,12 @@ impl BackingPath for LoopDevice {
 
 impl<B> Origin<B> {
     fn try_map<G, E>(
-        &self,
+        self,
         role: Role,
-        f: &mut impl FnMut(&B, Role) -> Result<G, E>,
+        f: &mut impl FnMut(B, Role) -> Result<G, E>,
     ) -> Result<Origin<G>, E> {
         Ok(match self {
-            Origin::Device(dev) => Origin::Device(dev.clone()),
+            Origin::Device(dev) => Origin::Device(dev),
             Origin::File(file) => Origin::File(f(file, role)?),
         })
     }
@@ -147,53 +147,30 @@ impl<B> Origin<B> {
 
 impl<B> DmTable<B> {
     pub fn try_map<G, E>(
-        &self,
-        mut f: impl FnMut(&B, Role) -> Result<G, E>,
+        self,
+        mut f: impl FnMut(B, Role) -> Result<G, E>,
     ) -> Result<DmTable<G>, E> {
         Ok(match self {
-            DmTable::Linear(LinearTable { sectors, origin }) => DmTable::Linear(LinearTable {
-                sectors: *sectors,
-                origin: origin.try_map(Role::Origin, &mut f)?,
+            DmTable::Linear(t) => DmTable::Linear(LinearTable {
+                origin: t.origin.try_map(Role::Origin, &mut f)?,
+                ..t
             }),
-            DmTable::Snapshot(SnapshotTable {
-                sectors,
-                origin,
-                cow,
-                persistence,
-                chunk,
-            }) => DmTable::Snapshot(SnapshotTable {
-                sectors: *sectors,
-                origin: origin.try_map(Role::Origin, &mut f)?,
-                cow: f(cow, Role::Cow)?,
-                persistence: *persistence,
-                chunk: *chunk,
+            DmTable::Snapshot(t) => DmTable::Snapshot(SnapshotTable {
+                origin: t.origin.try_map(Role::Origin, &mut f)?,
+                cow: f(t.cow, Role::Cow)?,
+                ..t
             }),
-            DmTable::ThinPool(ThinPoolTable {
-                sectors,
-                metadata,
-                data,
-                block_sectors,
-                low_water,
-            }) => DmTable::ThinPool(ThinPoolTable {
-                sectors: *sectors,
-                metadata: f(metadata, Role::Metadata)?,
-                data: f(data, Role::Data)?,
-                block_sectors: *block_sectors,
-                low_water: *low_water,
+            DmTable::ThinPool(t) => DmTable::ThinPool(ThinPoolTable {
+                metadata: f(t.metadata, Role::Metadata)?,
+                data: f(t.data, Role::Data)?,
+                ..t
             }),
-            DmTable::Thin(ThinTable {
-                sectors,
-                pool,
-                id,
-                origin,
-            }) => DmTable::Thin(ThinTable {
-                sectors: *sectors,
-                pool: pool.clone(),
-                id: *id,
-                origin: origin
-                    .as_ref()
-                    .map(|origin| origin.try_map(Role::Origin, &mut f))
+            DmTable::Thin(t) => DmTable::Thin(ThinTable {
+                origin: t
+                    .origin
+                    .map(|o| o.try_map(Role::Origin, &mut f))
                     .transpose()?,
+                ..t
             }),
         })
     }
@@ -355,7 +332,8 @@ mod tests {
     }
 
     fn plain(t: &DmTable<FilePath>) -> DmTable<PathBuf> {
-        t.try_map(|f, _| Ok::<_, ()>(f.as_path().to_path_buf()))
+        t.clone()
+            .try_map(|f, _| Ok::<_, ()>(f.as_path().to_path_buf()))
             .unwrap()
     }
 

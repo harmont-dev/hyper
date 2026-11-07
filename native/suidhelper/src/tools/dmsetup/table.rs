@@ -31,7 +31,7 @@ pub fn parse_table(s: &str) -> Result<DmTable<FilePath>, TableError> {
         if path.starts_with(DEV_PREFIX) {
             Err(TableError::NotAFile(path.display().to_string()))
         } else {
-            Ok(file.clone())
+            Ok(file)
         }
     })
 }

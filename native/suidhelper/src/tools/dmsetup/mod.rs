@@ -109,7 +109,7 @@ impl IsTool for Dmsetup {
                 };
                 let control = LoopControl::open()?;
                 let mut loops = BTreeMap::new();
-                let attached = table.try_map(|backing, role| {
+                let attached = table.clone().try_map(|backing, role| {
                     let role_access = match role {
                         Role::Origin => Access::ReadOnly,
                         Role::Cow => access,

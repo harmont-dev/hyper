@@ -4,6 +4,7 @@
 // TODO(markovejnovic): Can we avoid these incomplete features?
 #![feature(adt_const_params)]
 #![feature(unsized_const_params)]
+#![feature(type_changing_struct_update)]
 #![allow(incomplete_features)]
 
 //! Linux-specific utilities
