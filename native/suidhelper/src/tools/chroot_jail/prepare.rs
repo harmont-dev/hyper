@@ -29,10 +29,10 @@ pub enum JailPrepareError {
 pub struct PrepareArgs {
     #[arg(long)]
     id: VmId,
-    /// Host kernel image path (under /srv/hyper); staged as <chroot>/vmlinux.
+    /// Host kernel image path (under /srv/hyper); staged as `<chroot>/vmlinux`.
     #[arg(long)]
     kernel: SafePathBuf<IsAbsolute, StrictComponents>,
-    /// Host block device to mirror as <chroot>/rootfs (e.g. /dev/loop0 or
+    /// Host block device to mirror as `<chroot>/rootfs` (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
     #[arg(long, value_parser = HyperDmName::from_device_path)]
     device: HyperDmName,

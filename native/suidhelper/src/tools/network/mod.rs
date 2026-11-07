@@ -3,7 +3,7 @@
 //!
 //! Each op ([`prepare`], [`teardown`], [`host_init`]) derives its `ip`/`nft`
 //! argv (built in [`args`]) from the validated uid and [`crate::config::Config::network`],
-//! then runs it through [`exec::run_all`], which stops at the first non-zero
+//! then runs it through `exec::run_all`, which stops at the first non-zero
 //! exit. Every refusal — `uid` outside the configured range, a malformed
 //! `clone_pool` CIDR, or `[network]` absent from config — happens while
 //! resolving the op (see `prepare::resolve`), strictly before `run_privileged`

@@ -8,7 +8,7 @@
 //! across the image replacement. There is no output and no return on success.
 //!
 //! The validated newtypes, their refusal contracts, and the `execve` mechanics
-//! live in [`crate::firecracker::jailer`]; this module is only the clap surface plus
+//! live in [`hyperrs_firecracker::jailer`]; this module is only the clap surface plus
 //! the trusted-config resolution that feeds them.
 
 use crate::config::{BinError, Config};

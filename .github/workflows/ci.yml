@@ -198,6 +198,11 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: rustdoc
+        run: cargo doc --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: Install cargo-llvm-cov and nextest
         uses: taiki-e/install-action@v2
         with:
