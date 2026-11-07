@@ -3,8 +3,8 @@ use crate::cli::{MapperPath, Op};
 use crate::dm::{HyperDmName, HyperDmTable};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    Active, DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError,
-    Thin, ThinId, ThinPool, ThinPoolError, ThinPoolTable,
+    DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError, ThinId,
+    ThinPoolError, ThinPoolTable,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -127,8 +127,16 @@ impl Op for ThinVolumeCreate {
                 Err(e) => return Err(e.into()),
             },
         };
-        let activated = thin.activate(&self.name, sectors, origin(&self.origin));
-        activate_or_delete(&pool, self.thin_id, activated)
+        let origin = Origin::Device((*self.origin).clone());
+        match thin.activate(&self.name, sectors, Some(origin)) {
+            Ok(volume) => Ok(ThinOut::Created {
+                device: volume.device().path().as_path().to_path_buf(),
+            }),
+            Err(e) => {
+                let _ = pool.delete_thin(self.thin_id);
+                Err(e.into())
+            }
+        }
     }
 }
 
@@ -144,25 +152,5 @@ impl Op for ThinDestroy {
             .deactivate()?
             .delete()?;
         Ok(ThinOut::Destroyed)
-    }
-}
-
-fn origin(device: &HyperDmName) -> Option<Origin> {
-    Some(Origin::Device((**device).clone()))
-}
-
-fn activate_or_delete(
-    pool: &ThinPool<'_>,
-    id: ThinId,
-    activated: Result<Thin<'_, Active<'_>>, RunError>,
-) -> Result<ThinOut, ThinError> {
-    match activated {
-        Ok(thin) => Ok(ThinOut::Created {
-            device: thin.device().path().as_path().to_path_buf(),
-        }),
-        Err(e) => {
-            let _ = pool.delete_thin(id);
-            Err(e.into())
-        }
     }
 }
