@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 mod support;
 use serde_json::{json, Value};
-use support::{is_root, run, run_args, stdout_json, MapperDevice};
+use support::{is_root, run, run_args};
 
 /// Install a root-owned fake tool named `basename` that records its argv (minus
 /// argv[0]) into `record` as a JSON array, then exits 0 with valid stdout for
@@ -68,15 +68,6 @@ impl FakeDmsetup {
         write_root_config_in(&self.base, &self.base, &[("dmsetup", &bin)])
     }
 
-    fn backing(&self, name: &str) -> String {
-        let path = self.base.join(name);
-        fs::File::create(&path)
-            .unwrap()
-            .set_len(1024 * 1024)
-            .unwrap();
-        path.display().to_string()
-    }
-
     fn ran(&self) -> bool {
         self.rec.exists()
     }
@@ -92,119 +83,6 @@ fn fake() -> FakeDmsetup {
         base,
         rec,
     }
-}
-
-fn substitute(value: &Value, f: &impl Fn(&str) -> Option<String>) -> Value {
-    match value {
-        Value::String(s) => f(s).map_or_else(|| value.clone(), Value::String),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(k, v)| (k.clone(), substitute(v, f)))
-                .collect(),
-        ),
-        _ => value.clone(),
-    }
-}
-
-#[rstest]
-#[case::linear_over_a_file(
-    json!({"op": "dm_linear", "name": "hyper-img", "origin": "{file:base.img}"}),
-    "0 2048 linear {origin} 0"
-)]
-#[case::linear_over_a_dm_device(
-    json!({"op": "dm_linear", "name": "hyper-img", "origin": "{dm}"}),
-    "0 2048 linear {dm} 0"
-)]
-#[case::readonly_snapshot_over_a_dm_device(
-    json!({"op": "dm_snapshot", "name": "hyper-vm1", "origin": "{dm}",
-           "cow": "{file:cow.img}", "chunk_sectors": 8}),
-    "0 2048 snapshot {dm} {cow} P 8"
-)]
-#[case::snapshot_over_a_file(
-    json!({"op": "dm_snapshot", "name": "hyper-fork", "origin": "{file:base.img}",
-           "cow": "{file:cow.img}", "chunk_sectors": 16}),
-    "0 2048 snapshot {origin} {cow} P 16"
-)]
-#[case::thin_pool_sized_by_its_data_file(
-    json!({"op": "dm_thin_pool", "name": "hyper-pool", "metadata": "{file:meta.img}",
-           "data": "{file:data.img}", "block_sectors": 128, "low_water": 0}),
-    "0 2048 thin-pool {metadata} {data} 128 0"
-)]
-fn dm_create_sizes_and_renders_the_table_over_the_attached_loops_as_root(
-    fake: FakeDmsetup,
-    #[case] request: Value,
-    #[case] table: &str,
-) {
-    if !is_root() {
-        eprintln!("SKIP dm create: needs root to attach loops + own the fake bin");
-        return;
-    }
-    let cfg = fake.printing("");
-    let origin_file = fake.base.join("origin-dev.img");
-    fs::write(&origin_file, vec![0u8; 1024 * 1024]).unwrap();
-    let Some(origin) = MapperDevice::linear(
-        &format!("hyper-e2e-origin-{}", std::process::id()),
-        &origin_file,
-    ) else {
-        eprintln!("SKIP dm create: losetup/dmsetup unavailable");
-        return;
-    };
-    let dm = origin.path();
-    let request = substitute(&request, &|s| match s.strip_prefix("{file:") {
-        Some(name) => Some(fake.backing(name.strip_suffix('}')?)),
-        None => (s == "{dm}").then(|| dm.clone()),
-    });
-
-    let json = stdout_json(&run(&cfg, request.clone()).success());
-
-    let loops = json["loops"].as_object().unwrap();
-    let table = loops
-        .iter()
-        .fold(table.replace("{dm}", &dm), |table, (role, path)| {
-            let path = path.as_str().unwrap();
-            assert!(path.starts_with("/dev/loop"), "{role} loop: {path}");
-            table.replace(&format!("{{{role}}}"), path)
-        });
-    assert!(
-        !table.contains('{'),
-        "a backing file was not attached: {table}"
-    );
-    let name = request["name"].as_str().unwrap();
-    let readonly = request["op"] != "dm_thin_pool";
-    let expected: Vec<String> = ["create".to_string(), name.to_string()]
-        .into_iter()
-        .chain(readonly.then(|| "--readonly".to_string()))
-        .chain(["--table".to_string(), table])
-        .collect();
-    assert_eq!(recorded_argv(&fake.rec), expected);
-    assert_eq!(json["device"], format!("/dev/mapper/{name}"));
-}
-
-#[rstest]
-#[case::foreign_origin_device(json!({"op": "dm_linear", "name": "hyper-img", "origin": "/dev/mapper/root"}))]
-#[case::backing_file_outside_the_work_dir(json!({"op": "dm_linear", "name": "hyper-img",
-    "origin": "/etc/passwd"}))]
-#[case::missing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "origin": "{base}/absent.img"}))]
-#[case::traversing_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "origin": "{base}/../etc/passwd"}))]
-#[case::symlinked_backing_file(json!({"op": "dm_linear", "name": "hyper-img", "origin": "{base}/link.img"}))]
-#[case::directory_as_backing_file(json!({"op": "dm_snapshot", "name": "hyper-vm1", "origin": "/dev/mapper/hyper-img", "cow": "{base}", "chunk_sectors": 8}))]
-#[case::absent_origin_device(json!({"op": "dm_linear", "name": "hyper-img", 
-    "origin": "/dev/mapper/hyper-e2e-absent"}))]
-#[case::foreign_name(json!({"op": "dm_linear", "name": "sda1", 
-    "origin": "/dev/mapper/hyper-img"}))]
-#[case::foreign_remove(json!({"op": "dm_remove", "name": "root", "retry": false}))]
-fn dm_refuses_before_running_dmsetup_as_root(fake: FakeDmsetup, #[case] request: Value) {
-    if !is_root() {
-        eprintln!("SKIP dm refusal: needs root to own the config");
-        return;
-    }
-    let cfg = fake.printing("");
-    std::os::unix::fs::symlink("/etc/passwd", fake.base.join("link.img")).unwrap();
-    let base = fake.base.display().to_string();
-    let request = substitute(&request, &|s| Some(s.replace("{base}", &base)));
-
-    run(&cfg, request.clone()).failure();
-    assert!(!fake.ran(), "dmsetup ran for a refused request: {request}");
 }
 
 #[rstest]

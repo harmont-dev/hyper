@@ -57,12 +57,17 @@ defmodule Hyper.Node.Img.ThinPool do
     GenServer.call(__MODULE__, {:snapshot, name, origin_name, origin_dev}, :timer.seconds(30))
   end
 
-  @spec copy_provisioned(Path.t(), Path.t(), Path.t()) ::
+  @spec fork_delta(String.t(), Path.t(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.copy_provisioned", include: [:src, :cow])
-  def copy_provisioned(src, origin, cow) do
-    meta_loop = GenServer.call(__MODULE__, :meta_loop)
-    SuidHelper.ThinCopy.copy(@pool_name, meta_loop, src, origin, cow)
+  @decorate with_span("Hyper.Node.Img.ThinPool.fork_delta", include: [:parent, :cow])
+  def fork_delta(parent, origin, cow) do
+    {scratch_id, meta_loop} = GenServer.call(__MODULE__, :reserve_scratch)
+
+    try do
+      SuidHelper.ForkDelta.run(@pool_name, meta_loop, parent, scratch_id, origin, cow)
+    after
+      GenServer.call(__MODULE__, {:release_scratch, scratch_id})
+    end
   end
 
   @doc "Remove thin volume `name` and free its thin device `id`."
@@ -78,16 +83,8 @@ defmodule Hyper.Node.Img.ThinPool do
     with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
-         :ok <- reclaim_stale_pool(),
-         :ok <- zero_metadata(meta),
          {:ok, _pool_dev, meta_loop} <-
-           SuidHelper.Dmsetup.create_thin_pool(
-             @pool_name,
-             meta,
-             data,
-             ImgConfig.thin_block_sectors(),
-             0
-           ) do
+           SuidHelper.Thin.create_pool(@pool_name, meta, data, ImgConfig.thin_block_sectors(), 0) do
       {:ok, %State{meta_loop: meta_loop}}
     else
       {:error, reason} -> {:stop, reason}
@@ -115,7 +112,13 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call(:meta_loop, _from, state), do: {:reply, state.meta_loop, state}
+  def handle_call(:reserve_scratch, _from, state) do
+    {id, state} = id_alloc(state)
+    {:reply, {id, state.meta_loop}, state}
+  end
+
+  @impl true
+  def handle_call({:release_scratch, id}, _from, state), do: {:reply, :ok, id_free(state, id)}
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
@@ -152,17 +155,6 @@ defmodule Hyper.Node.Img.ThinPool do
   @spec id_free(map(), non_neg_integer()) :: map()
   def id_free(%{freed: freed} = s, id), do: %{s | freed: [id | freed]}
 
-  # A run that did not shut down cleanly (e.g. SIGKILL, so `terminate/2` never
-  # ran) leaves the dm pool behind, and recreating it fails with "Device or
-  # resource busy". Best-effort remove any stale pool of our name so this boot
-  # can build a fresh one. Runs before `zero_metadata`, which would otherwise
-  # corrupt a still-live pool.
-  @spec reclaim_stale_pool() :: :ok
-  defp reclaim_stale_pool do
-    _ = SuidHelper.Dmsetup.remove(@pool_name)
-    :ok
-  end
-
   # Create a sparse file of `size` if absent; reuse it if already present.
   @spec ensure_backing(String.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
   defp ensure_backing(file, size) do
@@ -180,16 +172,6 @@ defmodule Hyper.Node.Img.ThinPool do
 
       {:error, reason} ->
         {:error, {:backing_file, file, reason}}
-    end
-  end
-
-  # Wipe the metadata header so the kernel treats the pool as freshly created.
-  @spec zero_metadata(Path.t()) :: :ok | {:error, term()}
-  defp zero_metadata(path) do
-    case File.open(path, [:write, :read, :binary], fn io -> IO.binwrite(io, <<0::4096*8>>) end) do
-      {:ok, :ok} -> :ok
-      {:ok, other} -> other
-      {:error, reason} -> {:error, {:zero_metadata, reason}}
     end
   end
 end

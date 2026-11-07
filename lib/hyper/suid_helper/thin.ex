@@ -7,6 +7,28 @@ defmodule Hyper.SuidHelper.Thin do
 
   @type err :: SuidHelper.err()
 
+  @spec create_pool(String.t(), Path.t(), Path.t(), pos_integer(), non_neg_integer()) ::
+          {:ok, Path.t(), Path.t()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Thin.create_pool", include: [:name])
+  def create_pool(name, meta_file, data_file, block_sectors, low_water) do
+    request = %{
+      op: "thin_pool_create",
+      name: name,
+      metadata: meta_file,
+      data: data_file,
+      block_sectors: block_sectors,
+      low_water: low_water
+    }
+
+    case SuidHelper.exec(request) do
+      {:ok, %{"result" => "created", "device" => dev, "loops" => %{"metadata" => meta_loop}}} ->
+        {:ok, dev, meta_loop}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   @spec create(String.t(), non_neg_integer(), String.t(), Path.t()) ::
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Thin.create", include: [:name, :thin_id])

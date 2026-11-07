@@ -1,4 +1,4 @@
-defmodule Hyper.SuidHelper.ThinCopy do
+defmodule Hyper.SuidHelper.ForkDelta do
   @moduledoc false
 
   use OpenTelemetryDecorator
@@ -7,15 +7,16 @@ defmodule Hyper.SuidHelper.ThinCopy do
 
   @type err :: SuidHelper.err()
 
-  @spec copy(String.t(), Path.t(), Path.t(), Path.t(), Path.t()) ::
+  @spec run(String.t(), Path.t(), String.t(), non_neg_integer(), Path.t(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.ThinCopy.copy", include: [:src, :cow])
-  def copy(pool, meta_dev, src, origin, cow) do
+  @decorate with_span("Hyper.SuidHelper.ForkDelta.run", include: [:parent, :cow])
+  def run(pool, meta_dev, parent, scratch_id, origin, cow) do
     request = %{
-      op: "thin_copy",
+      op: "thin_fork_delta",
       pool: pool,
       meta: meta_dev,
-      src: src,
+      parent: parent,
+      scratch_id: scratch_id,
       origin: origin,
       cow: cow,
       chunk_sectors: Hyper.Cfg.Img.chunk_sectors()

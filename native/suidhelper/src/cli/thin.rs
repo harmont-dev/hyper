@@ -1,14 +1,20 @@
-use crate::cli::dm::{self as dm_op, DmError};
+use crate::cli::dm::{self as dm_op, Created, DmError};
 use crate::cli::{MapperPath, Op};
-use crate::dm::HyperDmName;
+use crate::dm::{HyperDmName, HyperDmTable};
+use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    Active, OpenThinError, Origin, RunError, SnapshotError, Thin, ThinId, ThinPool, ThinPoolError,
+    Active, DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError,
+    Thin, ThinId, ThinPool, ThinPoolError, ThinPoolTable,
 };
+use hyperrs_linux::Access;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use std::io::Write;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
+
+const METADATA_HEADER_BYTES: usize = 4096;
 
 #[derive(Debug, ThisError)]
 pub enum ThinError {
@@ -24,6 +30,12 @@ pub enum ThinError {
     Snapshot(#[from] SnapshotError),
     #[error(transparent)]
     Privilege(#[from] PrivilegeError),
+    #[error("opening the pool metadata: {0}")]
+    Metadata(#[from] file::ValidationError),
+    #[error("zeroing the pool metadata header: {0}")]
+    Zero(#[source] std::io::Error),
+    #[error("the pool table has no metadata device")]
+    NoMetadata,
 }
 
 #[derive(Serialize)]
@@ -31,6 +43,16 @@ pub enum ThinError {
 pub enum ThinOut {
     Created { device: PathBuf },
     Destroyed,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThinPoolCreate {
+    name: HyperDmName,
+    metadata: DevPath,
+    data: DevPath,
+    block_sectors: u64,
+    low_water: u64,
 }
 
 #[serde_as]
@@ -61,6 +83,39 @@ pub struct ThinSnapshot {
 pub struct ThinDestroy {
     pool: HyperDmName,
     name: HyperDmName,
+}
+
+impl Op for ThinPoolCreate {
+    type Output = Created;
+    type Error = ThinError;
+
+    fn run(self, mut token: Unprivileged) -> Result<Created, ThinError> {
+        let table = HyperDmTable::new(DmTable::ThinPool(ThinPoolTable {
+            sectors: 0,
+            metadata: self.metadata,
+            data: self.data,
+            block_sectors: self.block_sectors,
+            low_water: self.low_water,
+        }))
+        .map_err(DmError::from)?;
+        let dm = dm_op::dmsetup().map_err(DmError::from)?;
+        {
+            let _root = token.elevate()?;
+            let _ = dm.device(&self.name).remove(RemoveMode::Retry);
+            let metadata = table.backing(Role::Metadata).ok_or(ThinError::NoMetadata)?;
+            metadata
+                .file()
+                .reopen(OpenFlags::WRONLY)?
+                .write_all(&[0; METADATA_HEADER_BYTES])
+                .map_err(ThinError::Zero)?;
+        }
+        Ok(dm_op::create(
+            &self.name,
+            Access::ReadWrite,
+            table,
+            &mut token,
+        )?)
+    }
 }
 
 impl Op for ThinCreate {

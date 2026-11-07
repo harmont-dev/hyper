@@ -44,20 +44,6 @@ defmodule Hyper.SuidHelper do
   def argv(request), do: [Jason.encode!(request)]
 
   @doc """
-  Run the helper's `sys-test` subcommand (proves it can promote to root). Returns
-  `{:ok, hyper_base}` where `hyper_base` is the work-dir the helper was compiled
-  against.
-  """
-  @spec sys_test() :: {:ok, Path.t()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.sys_test")
-  def sys_test do
-    case exec(%{op: "sys_test"}) do
-      {:ok, %{"hyper_base" => base}} -> {:ok, base}
-      {:error, _} = err -> err
-    end
-  end
-
-  @doc """
   Check that the setuid helper is usable on this machine: the helper binary is
   present, is the build this release expects (`verify_version/0`), and the kernel
   exposes the device-mapper targets we need (`Dmsetup.test_system/0`, which also
@@ -75,11 +61,11 @@ defmodule Hyper.SuidHelper do
     end
   end
 
-  @spec host_init() :: :ok | {:error, err()}
+  @spec host_init() :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.host_init")
   def host_init do
     case exec(%{op: "host_init"}) do
-      {:ok, _} -> :ok
+      {:ok, %{"result" => "host_ready", "hyper_base" => base}} -> {:ok, base}
       {:error, _} = err -> err
     end
   end

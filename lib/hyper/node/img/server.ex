@@ -220,51 +220,13 @@ defmodule Hyper.Node.Img.Server do
 
   defp build_chain(img_id, [base | deltas]) do
     with {:ok, %File.Stat{size: bytes}} <- File.stat(base),
-         {:ok, chain} <- build_layers(img_id, base, deltas) do
+         {:ok, chain} <- SuidHelper.Img.activate(dm_prefix(img_id), base, deltas) do
       {:ok, Map.put(chain, :size, Information.bytes(bytes))}
     end
   end
 
-  @spec build_layers(Hyper.Img.id(), Path.t(), [Path.t()]) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_layers(img_id, base, []), do: build_linear(img_id, base)
-  defp build_layers(img_id, base, deltas), do: build_snapshots(img_id, base, deltas)
-
-  @spec build_linear(Hyper.Img.id(), Path.t()) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_linear(img_id, base) do
-    name = dm_name(img_id, 0)
-
-    with {:ok, dev} <- SuidHelper.Dmsetup.create_linear(name, base) do
-      {:ok, %{blk_path: dev, dm_names: [name]}}
-    end
-  end
-
-  @spec build_snapshots(Hyper.Img.id(), Path.t(), [Path.t()]) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_snapshots(img_id, base, deltas) do
-    deltas
-    |> Enum.with_index(1)
-    |> Enum.reduce_while({:ok, base, []}, fn {cow_file, idx}, {:ok, origin, names} ->
-      name = dm_name(img_id, idx)
-
-      case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_file) do
-        {:ok, dev} ->
-          {:cont, {:ok, dev, [name | names]}}
-
-        {:error, reason} ->
-          Enum.each(names, &remove_quietly/1)
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, blk_path, names} -> {:ok, %{blk_path: blk_path, dm_names: Enum.reverse(names)}}
-      {:error, _} = err -> err
-    end
-  end
-
-  @spec dm_name(Hyper.Img.id(), non_neg_integer()) :: String.t()
-  defp dm_name(img_id, idx), do: "hyper-img-#{sanitize(img_id)}-#{idx}"
+  @spec dm_prefix(Hyper.Img.id()) :: String.t()
+  defp dm_prefix(img_id), do: "hyper-img-#{sanitize(img_id)}"
 
   @spec sanitize(String.t()) :: String.t()
   defp sanitize(id), do: String.replace(id, ~r/[^A-Za-z0-9._-]/, "_")

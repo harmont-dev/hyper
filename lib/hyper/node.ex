@@ -309,9 +309,8 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
-         {:ok, base} <- Hyper.SuidHelper.sys_test(),
-         :ok <- check_helper_base(base),
-         :ok <- init_network() do
+         {:ok, base} <- init_network(),
+         :ok <- check_helper_base(base) do
       Hyper.Node.FireVMM.test_system()
     end
   end
@@ -320,7 +319,7 @@ defmodule Hyper.Node do
   # configured, then idempotently reconcile the host-wide `hyper` nftables
   # table. Runs after `Hyper.SuidHelper.test_system/0` so the helper is
   # confirmed present first.
-  @spec init_network :: :ok | {:error, term()}
+  @spec init_network :: {:ok, Path.t()} | {:error, term()}
   defp init_network do
     if Hyper.Cfg.Network.configured?() do
       Hyper.SuidHelper.host_init()

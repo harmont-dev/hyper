@@ -64,8 +64,12 @@ name = "e2e_thin"
 path = "tests/e2e/thin.rs"
 
 [[test]]
-name = "e2e_thin_copy"
-path = "tests/e2e/thin_copy.rs"
+name = "e2e_fork_delta"
+path = "tests/e2e/fork_delta.rs"
+
+[[test]]
+name = "e2e_img"
+path = "tests/e2e/img.rs"
 
 [[test]]
 name = "config_uid_gid_range"

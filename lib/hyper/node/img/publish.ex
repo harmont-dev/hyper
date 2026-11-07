@@ -66,33 +66,25 @@ defmodule Hyper.Node.Img.Publish do
          img_id
        ) do
     tmp = Hyper.Vm.Id.generate()
-
-    with {:ok, %{dev: snap_dev, id: snap_id}} <-
-           ThinPool.snapshot(snap_name(tmp), origin_name, ro_dev) do
-      try do
-        write_delta(tmp, ro_dev, snap_dev, Img.Server.size(img_server), img_id)
-      after
-        :ok = ThinPool.destroy(snap_name(tmp), snap_id)
-      end
-    end
+    write_delta(tmp, origin_name, ro_dev, Img.Server.size(img_server), img_id)
   end
 
   # Build the writable dm-snapshot, fill its COW store with the divergence, then
   # collapse it back to the plain file and ingest that as the delta layer.
   @spec write_delta(
           String.t(),
-          Path.t(),
+          String.t(),
           Path.t(),
           Information.t(),
           Hyper.Img.id()
         ) ::
           {:ok, Hyper.Img.id()} | {:error, term()}
-  defp write_delta(tmp, ro_dev, snap_dev, size, parent_img_id) do
+  defp write_delta(tmp, parent, ro_dev, size, parent_img_id) do
     cow_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-delta-#{tmp}.img")
 
     with :ok <- create_sparse(cow_path, cow_size(size)) do
       try do
-        with {:ok, _stats} <- ThinPool.copy_provisioned(snap_dev, ro_dev, cow_path) do
+        with {:ok, _stats} <- ThinPool.fork_delta(parent, ro_dev, cow_path) do
           Hyper.Img.create_derived(parent_img_id, cow_path, label: "fork of #{parent_img_id}")
         end
       after
@@ -126,7 +118,4 @@ defmodule Hyper.Node.Img.Publish do
       end
     end
   end
-
-  @spec snap_name(String.t()) :: String.t()
-  defp snap_name(tmp), do: "hyper-fork-#{tmp}"
 end

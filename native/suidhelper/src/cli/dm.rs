@@ -4,7 +4,7 @@ use crate::dm::{HyperDmName, HyperDmTable, TableError};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
     self, DevPath, DmName, DmTable, LinearTable, Origin, Persistence, RemoveMode, Role,
-    SnapshotTable, ThinPoolTable, ThinTable,
+    SnapshotTable, ThinTable,
 };
 use hyperrs_linux::loopdev::{self, LoopControl};
 use hyperrs_linux::Access;
@@ -23,32 +23,6 @@ const SECTOR_BYTES: u64 = 512;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Linear {
-    name: HyperDmName,
-    origin: Origin,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Snapshot {
-    name: HyperDmName,
-    origin: Origin,
-    cow: DevPath,
-    chunk_sectors: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ThinPool {
-    name: HyperDmName,
-    metadata: DevPath,
-    data: DevPath,
-    block_sectors: u64,
-    low_water: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Remove {
     name: HyperDmName,
     retry: bool,
@@ -57,11 +31,14 @@ pub struct Remove {
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum DmOut {
-    Created {
-        device: PathBuf,
-        loops: BTreeMap<Role, PathBuf>,
-    },
     Removed,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "result", rename = "created")]
+pub struct Created {
+    pub device: PathBuf,
+    pub loops: BTreeMap<Role, PathBuf>,
 }
 
 #[derive(Debug, ThisError)]
@@ -88,66 +65,6 @@ pub enum DmError {
     Size(#[source] nix::Error),
     #[error("the table has no device to size it from")]
     Unsized,
-}
-
-impl Op for Linear {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Linear { name, origin } = self;
-        let table = DmTable::Linear(LinearTable { sectors: 0, origin });
-        create(
-            &name,
-            Access::ReadOnly,
-            HyperDmTable::new(table)?,
-            &mut token,
-        )
-    }
-}
-
-impl Op for Snapshot {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Snapshot {
-            name,
-            origin,
-            cow,
-            chunk_sectors,
-        } = self;
-        let table = HyperDmTable::new(snapshot_table(origin, cow, chunk_sectors))?;
-        create(&name, Access::ReadOnly, table, &mut token)
-    }
-}
-
-impl Op for ThinPool {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let ThinPool {
-            name,
-            metadata,
-            data,
-            block_sectors,
-            low_water,
-        } = self;
-        let table = DmTable::ThinPool(ThinPoolTable {
-            sectors: 0,
-            metadata,
-            data,
-            block_sectors,
-            low_water,
-        });
-        create(
-            &name,
-            Access::ReadWrite,
-            HyperDmTable::new(table)?,
-            &mut token,
-        )
-    }
 }
 
 impl Op for Remove {
@@ -177,11 +94,24 @@ pub(super) fn create(
     access: Access,
     table: HyperDmTable,
     token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
+) -> Result<Created, DmError> {
+    let sectors = {
+        let _root = token.elevate()?;
+        source_sectors(&table)?
+    };
+    create_sized(name, access, table, sectors, token)
+}
+
+pub(super) fn create_sized(
+    name: &HyperDmName,
+    access: Access,
+    table: HyperDmTable,
+    sectors: u64,
+    token: &mut Unprivileged,
+) -> Result<Created, DmError> {
     let dm = dmsetup()?;
     let (device, loops) = {
         let _root = token.elevate()?;
-        let sectors = source_sectors(&table)?;
         let control = LoopControl::open()?;
         let mut loops = BTreeMap::new();
         let mut attached = table.attach(|role, backing| {
@@ -198,7 +128,7 @@ pub(super) fn create(
         set_sectors(&mut attached, sectors);
         (dm.create(name, &attached, access)?.path().into(), loops)
     };
-    Ok(DmOut::Created {
+    Ok(Created {
         device,
         loops: loops
             .iter()
@@ -239,7 +169,7 @@ pub(super) fn snapshot_table(origin: Origin, cow: DevPath, chunk_sectors: u64) -
     })
 }
 
-fn file_sectors(table: &HyperDmTable, role: Role) -> Result<u64, DmError> {
+pub(super) fn file_sectors(table: &HyperDmTable, role: Role) -> Result<u64, DmError> {
     let backing = table.backing(role).ok_or(DmError::Unsized)?;
     let stat = fstat(backing.file().as_raw_fd()).map_err(DmError::Size)?;
     Ok(stat.st_size as u64 / SECTOR_BYTES)
