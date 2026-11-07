@@ -4,20 +4,20 @@ defmodule Hyper.Node.Net.Ip do
   `Hyper.Node.Net`.
   """
 
-  alias Hyper.Node.Net.Ip.{Host, Lease}
+  alias Hyper.Node.Net.Ip.Lease
 
   @doc "Get the IP layer's host-wide facts."
-  @spec host() :: Host.t()
+  @spec host() :: no_return()
   def host,
     do: raise("Hyper.Node.Net.Ip.host/0 is unimplemented: VM networking is being rewritten")
 
   @doc "Kernel cmdline fragments configuring the guest's IP (`ip=`, `hyper.ip6=`)."
-  @spec guest_args(Lease.t()) :: [String.t()]
+  @spec guest_args(Lease.t()) :: no_return()
   def guest_args(_lease),
     do: raise("Hyper.Node.Net.Ip.guest_args/1 is unimplemented: VM networking is being rewritten")
 
   @doc "Addresses the VM is reachable at."
-  @spec addresses(Lease.t()) :: [:inet.ip_address()]
+  @spec addresses(Lease.t()) :: no_return()
   def addresses(_lease),
     do: raise("Hyper.Node.Net.Ip.addresses/1 is unimplemented: VM networking is being rewritten")
 end
