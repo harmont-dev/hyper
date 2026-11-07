@@ -64,10 +64,6 @@ name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
 [[test]]
-name = "config_network"
-path = "tests/config_network.rs"
-
-[[test]]
 name = "config_paths"
 path = "tests/config_paths.rs"
 

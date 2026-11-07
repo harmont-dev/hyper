@@ -50,19 +50,6 @@ impl Launch {
         p
     }
 
-    fn legacy_network_config(&self) -> PathBuf {
-        let tools: String = ["ip", "nft", "sysctl"]
-            .map(|name| {
-                let fake = self.tmp.path().join(name);
-                fs::copy("/bin/true", &fake).unwrap();
-                format!("{name} = \"{}\"\n", fake.display())
-            })
-            .concat();
-        self.config(&format!(
-            "{tools}[network]\nuplink = \"eth0\"\nclone_pool = \"172.31.0.0/16\"\n"
-        ))
-    }
-
     fn request(&self, overrides: Value) -> Value {
         let mut request = json!({
             "op": "vm_launch",
@@ -238,20 +225,6 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
     assert!(
         leaked.is_empty(),
         "caller environment leaked to the jailer (only shell-set PWD/_/SHLVL allowed): {leaked:?}",
-    );
-}
-
-#[rstest]
-fn execs_jailer_without_netns_with_legacy_network_table_as_root(launch: Option<Launch>) {
-    let launch = require!(launch);
-    let cfg = launch.legacy_network_config();
-
-    run(&cfg, launch.request(json!({}))).code(RECORDER_EXIT);
-
-    let argv = launch.recorded_argv().expect("the jailer was exec'd");
-    assert!(
-        !argv.iter().any(|a| a == "--netns"),
-        "a legacy [network] table must not enable --netns: {argv:?}"
     );
 }
 

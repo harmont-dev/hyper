@@ -196,8 +196,7 @@ For more details on configuring and tuning Hyper, we suggest you see the
 
 VM networking is being rewritten from the ground up and is currently
 unavailable: VMs boot with no NIC, so guests have no egress. No `[network]`
-table, `nftables`, `iproute2` or IPv4 forwarding is needed on the host. An
-existing `[network]` table in `/etc/hyper/config.toml` is accepted but ignored.
+table, `nftables`, `iproute2` or IPv4 forwarding is needed on the host.
 
 ### Cgroups
 

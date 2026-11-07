@@ -110,8 +110,7 @@ uid_gid_range = [900000, 999999]
 
 VM networking is being rewritten from the ground up and is currently
 unavailable: VMs boot with no NIC, and a node no longer requires or reads a
-`[network]` table. An existing `[network]` table in `config.toml` is accepted
-but ignored (see the [install guide](install.md#vm-networking)).
+`[network]` table (see the [install guide](install.md#vm-networking)).
 
 ## gRPC Configuration
 
