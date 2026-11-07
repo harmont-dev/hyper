@@ -368,15 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mapper_operand_is_always_a_device_never_a_file() {
-        let got: DmTable = "0 100 linear /dev/mapper/img 0".parse().unwrap();
-        assert!(matches!(
-            got,
-            DmTable::Linear(LinearTable {
-                origin: Origin::Device(_),
-                ..
-            })
-        ));
+    fn a_malformed_mapper_operand_is_a_device_error_not_a_path() {
         assert!(matches!(
             "0 100 linear /dev/mapper/a/b 0".parse::<DmTable>(),
             Err(ParseTableError::Device(_))

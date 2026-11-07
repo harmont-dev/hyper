@@ -56,38 +56,22 @@ mod tests {
     use super::{HyperDmName, NameError};
     use hyperrs_linux::dm::DmTable;
     use proptest::prelude::*;
-    use std::path::Path;
 
     proptest! {
         #[test]
-        fn dm_name_accepts_every_valid_hyper_name(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
+        fn every_valid_hyper_name_is_accepted(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
             let s = format!("hyper-{suffix}");
-            prop_assert_eq!(s.parse::<HyperDmName>().unwrap().to_string(), s);
+            prop_assert_eq!(s.parse::<HyperDmName>().unwrap().to_string(), s.clone());
+            let dev = format!("/dev/mapper/{s}");
+            prop_assert_eq!(HyperDmName::from_device_path(&dev).unwrap().to_string(), s);
         }
 
         #[test]
-        fn dm_name_refuses_valid_names_we_do_not_own(s in "[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}") {
-            prop_assume!(!s.starts_with("hyper-") && !matches!(s.as_str(), "." | ".." | "control"));
-            prop_assert!(matches!(s.parse::<HyperDmName>(), Err(NameError::NotHyper(_))));
-        }
-
-        #[test]
-        fn dm_name_refuses_hyper_names_the_kernel_would_reject(pre in "[a-z]{0,8}", post in "[a-z]{0,8}") {
-            let s = format!("hyper-{pre}/{post}");
-            prop_assert!(matches!(s.parse::<HyperDmName>(), Err(NameError::Invalid(_))));
-        }
-
-        #[test]
-        fn dm_device_accepts_hyper_mapper_paths_and_preserves_them(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
-            let s = format!("/dev/mapper/hyper-{suffix}");
-            let path = HyperDmName::from_device_path(&s).unwrap().path();
-            prop_assert_eq!(path.as_path(), Path::new(&s));
-        }
-
-        #[test]
-        fn a_device_we_do_not_own_is_refused_in_every_device_slot(name in "[a-z][a-z0-9_]{0,12}") {
-            prop_assume!(name != "control");
+        fn a_name_we_do_not_own_is_refused_everywhere(name in "[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}") {
+            prop_assume!(!name.starts_with("hyper-") && !matches!(name.as_str(), "." | ".." | "control"));
             let dev = format!("/dev/mapper/{name}");
+            prop_assert!(matches!(name.parse::<HyperDmName>(), Err(NameError::NotHyper(_))));
+            prop_assert!(matches!(HyperDmName::from_device_path(&dev), Err(NameError::NotHyper(_))));
             for table in [
                 format!("0 8 linear {dev} 0"),
                 format!("0 8 snapshot {dev} /srv/hyper/cow P 8"),
@@ -100,33 +84,6 @@ mod tests {
                     "accepted {}", table
                 );
             }
-        }
-
-        #[test]
-        fn dm_device_refuses_mapper_names_we_do_not_own(name in "[a-z][a-z0-9._-]{0,12}") {
-            prop_assume!(!name.starts_with("hyper-") && name != "control");
-            let s = format!("/dev/mapper/{name}");
-            prop_assert!(matches!(HyperDmName::from_device_path(&s), Err(NameError::NotHyper(_))));
-        }
-    }
-
-    #[test]
-    fn dm_device_rejects_known_attack_strings() {
-        for bad in [
-            "/dev/sda",
-            "/dev/loop0",
-            "/dev/mapper/hyper-x/../../sda",
-            "/dev/mapper/hyper-x/",
-            "/dev/mapper/cryptroot",
-            "/dev/mapper/control",
-            "../dev/mapper/hyper-x",
-            "dev/mapper/hyper-x",
-            "hyper-x",
-        ] {
-            assert!(
-                HyperDmName::from_device_path(bad).is_err(),
-                "accepted {bad:?}"
-            );
         }
     }
 

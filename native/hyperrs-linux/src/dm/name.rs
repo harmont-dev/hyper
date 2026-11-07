@@ -119,20 +119,13 @@ mod tests {
 
     proptest! {
         #[test]
-        fn round_trips_and_lives_under_dev_mapper(s in dm_name()) {
+        fn round_trips_through_its_string_and_its_mapper_path(s in dm_name()) {
             let dm: DmName = s.parse().unwrap();
             prop_assert_eq!(dm.to_string(), s.clone());
+            let path = dm.path();
             let expected = format!("/dev/mapper/{s}");
-            let path = dm.path();
             prop_assert_eq!(path.as_path(), Path::new(&expected));
-        }
-
-        #[test]
-        fn device_path_is_the_inverse_of_path(s in dm_name()) {
-            let dm: DmName = s.parse().unwrap();
-            let path = dm.path();
-            let back = DmName::from_device_path(path.as_path().to_str().unwrap()).unwrap();
-            prop_assert_eq!(back, dm);
+            prop_assert_eq!(DmName::from_device_path(path.as_path()).unwrap(), dm);
         }
 
         #[test]

@@ -733,7 +733,6 @@ dependencies = [
  "nix 0.29.0",
  "predicates",
  "proptest",
- "quick-xml",
  "serde",
  "serde_json",
  "smart-default",

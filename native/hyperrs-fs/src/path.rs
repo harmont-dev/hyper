@@ -34,11 +34,13 @@ pub enum ComponentError {
     Separator,
     #[error("contains a NUL byte")]
     Nul,
+    #[error("contains whitespace")]
+    Whitespace,
     #[error("{0} bytes, longer than NAME_MAX ({NAME_MAX})")]
     TooLong(usize),
 }
 
-/// A path component that isn't `.`, nor `..`, nor `/`.
+/// A path component that isn't `.`, nor `..`, and has no `/` or whitespace.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
 #[repr(transparent)]
@@ -67,6 +69,9 @@ impl StrictComponent {
             match bytes[i] {
                 b'/' => return Err(ComponentError::Separator),
                 0 => return Err(ComponentError::Nul),
+                b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' => {
+                    return Err(ComponentError::Whitespace)
+                }
                 _ => i += 1,
             }
         }
@@ -371,8 +376,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent, StrictComponents,
-        ValidationError,
+        ComponentError, IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent,
+        StrictComponents, ValidationError,
     };
     use proptest::prelude::*;
     use std::path::{Path, PathBuf};
@@ -430,6 +435,25 @@ mod tests {
             prop_assert!(matches!(
                 Strict::try_from(path),
                 Err(ValidationError::Component(_))
+            ));
+        }
+
+        #[test]
+        fn rejects_whitespace_anywhere_in_any_component(
+            prefix in prop::collection::vec(safe_component(), 0..4),
+            (head, tail) in (safe_component(), safe_component()),
+            ws in prop::sample::select(vec![' ', '\t', '\n', '\x0b', '\x0c', '\r']),
+            at in 0usize..3,
+        ) {
+            let bad = match at {
+                0 => format!("{ws}{head}"),
+                1 => format!("{head}{ws}{tail}"),
+                _ => format!("{head}{ws}"),
+            };
+            let path = PathBuf::from(format!("/{}", prefix.iter().chain([&bad]).cloned().collect::<Vec<_>>().join("/")));
+            prop_assert!(matches!(
+                Strict::try_from(path),
+                Err(ValidationError::Component(ComponentError::Whitespace))
             ));
         }
 

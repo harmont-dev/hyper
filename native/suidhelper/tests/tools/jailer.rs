@@ -75,10 +75,18 @@ fn cgroup_limits_refused() {
 
 #[test]
 fn api_sock_must_be_a_strict_absolute_path() {
-    for ok in ["/api.socket", "/run/fc/api.socket", "/-dash", "/a b"] {
+    for ok in ["/api.socket", "/run/fc/api.socket", "/-dash"] {
         assert!(parse_with_sock(ok, &[]).is_ok(), "{ok:?} refused");
     }
-    for bad in ["", "api.socket", "/../etc/x", "/a/./b", "//x", "/a/"] {
+    for bad in [
+        "",
+        "api.socket",
+        "/../etc/x",
+        "/a/./b",
+        "//x",
+        "/a/",
+        "/a b",
+    ] {
         assert!(parse_with_sock(bad, &[]).is_err(), "{bad:?} accepted");
     }
 }
