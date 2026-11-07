@@ -24,7 +24,7 @@ defmodule Hyper.SuidHelper.Blockcopy do
           block_sectors: pos_integer(),
           ranges: [[non_neg_integer()]]
         }) ::
-          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}}
+          {:ok, %{copied_bytes: non_neg_integer()}}
           | {:error, err() | File.posix()}
   @decorate with_span("Hyper.SuidHelper.Blockcopy.copy", include: [:src, :dst])
   def copy(src, dst, %{block_sectors: _, ranges: _} = ranges_spec) do
@@ -36,13 +36,13 @@ defmodule Hyper.SuidHelper.Blockcopy do
   end
 
   @spec run(Path.t(), Path.t(), Path.t()) ::
-          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, err()}
+          {:ok, %{copied_bytes: non_neg_integer()}} | {:error, err()}
   defp run(src, dst, ranges_path) do
     argv = ["blockcopy", "--src", src, "--dst", dst, "--ranges", ranges_path]
 
     case SuidHelper.exec(argv) do
-      {:ok, %{"scanned_chunks" => scanned, "written_chunks" => written}} ->
-        {:ok, %{scanned: scanned, written: written}}
+      {:ok, %{"copied_bytes" => copied_bytes}} ->
+        {:ok, %{copied_bytes: copied_bytes}}
 
       {:error, _} = err ->
         err

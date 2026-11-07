@@ -1,5 +1,6 @@
 //! Laws of `copy_ranges`:
 //!   * ranged copy: dst equals src exactly on the listed block ranges and is untouched elsewhere; empty ranges write nothing.
+//!   * `copied_bytes` is the total byte length of the listed ranges.
 
 use hyper_suidhelper::tools::blockcopy::{copy_ranges, RangeSpec};
 use proptest::prelude::*;
@@ -11,7 +12,6 @@ proptest! {
         src in proptest::collection::vec(any::<u8>(), 512..8192),
         cuts in proptest::collection::vec((0usize..16, 1usize..4), 0..6),
         block_sectors in prop_oneof![Just(1u64), Just(2u64)],
-        chunk in 64u64..600,
     ) {
         let block_bytes = (block_sectors * 512) as usize;
         let n_blocks = src.len() / block_bytes;
@@ -31,7 +31,7 @@ proptest! {
         let sentinel = vec![0xAAu8; src.len()];
         let mut dst = Cursor::new(sentinel.clone());
 
-        copy_ranges(&mut Cursor::new(&src), &mut dst, &spec, chunk as usize).unwrap();
+        let stats = copy_ranges(&mut Cursor::new(&src), &mut dst, &spec).unwrap();
         let out = dst.into_inner();
 
         // Oracle: build the expected image byte-by-byte from the range list.
@@ -43,19 +43,20 @@ proptest! {
         }
 
         prop_assert_eq!(out, expected);
+        let listed: u64 = ranges.iter().map(|&(_, len)| len * block_bytes as u64).sum();
+        prop_assert_eq!(stats.copied_bytes, listed);
     }
 
     #[test]
     fn empty_ranges_write_nothing(
         src in proptest::collection::vec(any::<u8>(), 1..4096),
-        chunk in 1u64..600,
     ) {
         let spec = RangeSpec { block_sectors: 1, ranges: vec![] };
         let mut dst = Cursor::new(vec![0xAAu8; src.len()]);
 
-        let stats = copy_ranges(&mut Cursor::new(&src), &mut dst, &spec, chunk as usize).unwrap();
+        let stats = copy_ranges(&mut Cursor::new(&src), &mut dst, &spec).unwrap();
 
-        prop_assert_eq!(stats.written_chunks, 0);
+        prop_assert_eq!(stats.copied_bytes, 0);
         prop_assert_eq!(dst.into_inner(), vec![0xAAu8; src.len()]);
     }
 }
