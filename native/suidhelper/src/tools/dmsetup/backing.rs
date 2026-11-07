@@ -1,26 +1,19 @@
 use super::name::{HyperDmName, NameError};
 use crate::config::Config;
+use hyperrs_fs::dir::SafeDir;
 use hyperrs_fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
-use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponents};
+use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
 use hyperrs_linux::dm::{DevPath, DmTable, ParseTableError, Role};
+use nix::sys::stat::Mode;
 use std::collections::BTreeMap;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum BackingError {
-    #[error("backing file {path}: {source}")]
-    Canonicalize {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
     #[error("backing file must be under {}: {}", .base.display(), .path.display())]
     OutsideBase { base: PathBuf, path: PathBuf },
-    #[error("backing path: {0}")]
-    Path(#[from] path::ValidationError),
     #[error("backing file: {0}")]
     Open(#[from] file::ValidationError),
 }
@@ -30,21 +23,17 @@ pub struct BackingFile(Arc<SafeFile<IsRegularFile, Any, Any>>);
 
 impl BackingFile {
     pub fn open(
-        path: &Path,
+        path: &SafePath<IsAbsolute, StrictComponents>,
         base: &SafePath<IsAbsolute, StrictComponents>,
     ) -> Result<Self, BackingError> {
-        let real = std::fs::canonicalize(path).map_err(|source| BackingError::Canonicalize {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if !real.starts_with(base.as_path()) {
-            return Err(BackingError::OutsideBase {
+        let rel = path
+            .strip_base(base)
+            .map_err(|_| BackingError::OutsideBase {
                 base: base.as_path().to_path_buf(),
-                path: real,
-            });
-        }
-        let safe: &SafePath<IsAbsolute, StrictComponents> = real.as_path().try_into()?;
-        let file = SafeFile::open(safe, OpenFlags::PATH)?;
+                path: path.as_path().to_path_buf(),
+            })?;
+        let dir: SafeDir = SafeFile::open(base, OpenFlags::PATH)?;
+        let file = dir.openat(rel.as_path(), OpenFlags::PATH, Mode::empty())?;
         Ok(Self(Arc::new(file)))
     }
 
@@ -76,7 +65,7 @@ impl HyperDmTable {
         let base = Config::get().hyper_base();
         let backing = table
             .paths()
-            .map(|(role, path)| Ok((role, BackingFile::open(path.as_path(), base)?)))
+            .map(|(role, path)| Ok((role, BackingFile::open(path, base)?)))
             .collect::<Result<_, BackingError>>()?;
         Ok(Self { table, backing })
     }
