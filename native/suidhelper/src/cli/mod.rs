@@ -16,10 +16,9 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
 use std::ffi::OsString;
 use std::fmt::Display;
-use std::process::ExitCode;
 use thiserror::Error as ThisError;
 
-const EXIT_FAILURE: u8 = 2;
+const EXIT_FAILURE: i32 = 2;
 
 pub trait Op {
     type Output: Serialize;
@@ -86,7 +85,7 @@ impl Request {
         Ok(serde_json::from_str(&request)?)
     }
 
-    pub fn main(token: Unprivileged) -> ExitCode {
+    pub fn main(token: Unprivileged) -> ! {
         let output = Request::from_args(std::env::args_os().skip(1))
             .map_err(|e| e.to_string())
             .and_then(|request| {
@@ -103,11 +102,11 @@ impl Request {
         match output {
             Ok(json) => {
                 println!("{json}");
-                ExitCode::SUCCESS
+                std::process::exit(0)
             }
             Err(e) => {
                 eprintln!("{e}");
-                ExitCode::from(EXIT_FAILURE)
+                std::process::exit(EXIT_FAILURE)
             }
         }
     }
