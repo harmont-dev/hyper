@@ -297,6 +297,9 @@ type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
 mod tests {
     use super::{GrantError, JailLayout, JailRoot, KernelError, KernelImage};
     use crate::VmId;
+    use assert_fs::fixture::ChildPath;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
@@ -304,14 +307,17 @@ mod tests {
     use nix::errno::Errno;
     use nix::sys::stat::{makedev, mknod, Mode, SFlag};
     use nix::unistd::{Gid, Uid};
+    use predicates::prelude::*;
+    use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::{fixture, rstest};
+    use std::assert_matches;
     use std::fs;
-    use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use tempfile::TempDir;
+    use test_strategy::proptest;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
@@ -336,12 +342,12 @@ mod tests {
 
     #[fixture]
     fn tmp() -> TempDir {
-        tempfile::tempdir().unwrap()
+        TempDir::new().unwrap()
     }
 
     struct Jail {
         base: TempDir,
-        root_dir: PathBuf,
+        root_dir: ChildPath,
     }
 
     impl Jail {
@@ -355,17 +361,17 @@ mod tests {
                 .unwrap()
         }
 
-        fn kernel_source(&self, name: &str, contents: &[u8]) -> PathBuf {
-            let src = self.base().join(name);
-            fs::write(&src, contents).unwrap();
+        fn kernel_source(&self, name: &str, contents: &str) -> ChildPath {
+            let src = self.base.child(name);
+            src.write_str(contents).unwrap();
             src
         }
     }
 
     #[fixture]
     fn jail(tmp: TempDir) -> Jail {
-        let root_dir = tmp.path().join("firecracker").join("id").join("root");
-        fs::create_dir_all(&root_dir).unwrap();
+        let root_dir = tmp.child("firecracker/id/root");
+        root_dir.create_dir_all().unwrap();
         Jail {
             base: tmp,
             root_dir,
@@ -379,41 +385,42 @@ mod tests {
             .is_ok());
     }
 
-    proptest! {
-        #[test]
-        fn layout_root_is_exactly_firecracker_id_root_below_base(
-            id in "[A-Za-z0-9][A-Za-z0-9-]{0,63}"
-        ) {
-            let base = strict("/srv/jails");
-            let id: VmId = id.parse().unwrap();
-            let root = JailLayout::new(&base, &id).root();
-            let segments: Vec<_> = root
-                .strip_base(&base)
-                .unwrap()
-                .segments()
-                .map(|c| c.as_os_str().to_owned())
-                .collect();
-            prop_assert_eq!(
-                segments,
-                ["firecracker", &id.to_string(), "root"].map(std::ffi::OsString::from).to_vec()
-            );
-        }
+    #[proptest]
+    fn layout_root_is_exactly_firecracker_id_root_below_base(
+        #[strategy("[A-Za-z0-9][A-Za-z0-9-]{0,63}")] id: String,
+    ) {
+        let base = strict("/srv/jails");
+        let id: VmId = id.parse().unwrap();
+        let root = JailLayout::new(&base, &id).root();
+        let segments: Vec<_> = root
+            .strip_base(&base)
+            .unwrap()
+            .segments()
+            .map(|c| c.as_os_str().to_owned())
+            .collect();
+        prop_assert_eq!(
+            segments,
+            ["firecracker", &id.to_string(), "root"]
+                .map(std::ffi::OsString::from)
+                .to_vec()
+        );
     }
 
     struct Escape {
         _tmp: TempDir,
-        jail: PathBuf,
-        sentinel_root: PathBuf,
+        jail: ChildPath,
+        sentinel_root: ChildPath,
     }
 
     #[fixture]
     fn escape(tmp: TempDir) -> Escape {
-        let jail = tmp.path().join("jail");
-        fs::create_dir(&jail).unwrap();
-        let sentinel = tmp.path().join("sentinel");
-        let sentinel_root = sentinel.join("id").join("root");
-        fs::create_dir_all(&sentinel_root).unwrap();
-        symlink(&sentinel, jail.join("firecracker")).unwrap();
+        let jail = tmp.child("jail");
+        jail.create_dir_all().unwrap();
+        let sentinel_root = tmp.child("sentinel/id/root");
+        sentinel_root.create_dir_all().unwrap();
+        jail.child("firecracker")
+            .symlink_to_dir(tmp.child("sentinel"))
+            .unwrap();
         Escape {
             _tmp: tmp,
             jail,
@@ -426,10 +433,7 @@ mod tests {
         let err = JailLayout::new(&strict(&escape.jail), &vm())
             .open_root()
             .err();
-        assert!(
-            matches!(err, Some(file::ValidationError::Open(Errno::ELOOP))),
-            "got {err:?}"
-        );
+        assert_matches!(err, Some(file::ValidationError::Open(Errno::ELOOP)));
     }
 
     #[rstest]
@@ -438,59 +442,48 @@ mod tests {
             eprintln!("SKIP kernel_the_caller_cannot_read_is_refused: root reads everything");
             return;
         }
-        let src = tmp.path().join("vmlinux");
-        fs::write(&src, b"kernel").unwrap();
+        let src = tmp.child("vmlinux");
+        src.write_str("kernel").unwrap();
         fs::set_permissions(&src, fs::Permissions::from_mode(0o000)).unwrap();
 
         let err = KernelImage::open(&strict(&src)).err();
-        assert!(
-            matches!(
-                err,
-                Some(KernelError::Open {
-                    source: file::ValidationError::Open(Errno::EACCES),
-                    ..
-                })
-            ),
-            "got {err:?}"
+        assert_matches!(
+            err,
+            Some(KernelError::Open {
+                source: file::ValidationError::Open(Errno::EACCES),
+                ..
+            })
         );
     }
 
     #[rstest]
     fn kernel_symlink_stages_its_target(jail: Jail) {
-        let real = jail.kernel_source("vmlinux-6.1", b"real kernel");
-        let link = jail.base().join("vmlinux");
-        symlink(&real, &link).unwrap();
+        let real = jail.kernel_source("vmlinux-6.1", "real kernel");
+        let link = jail.base.child("vmlinux");
+        link.symlink_to_file(&real).unwrap();
 
         jail.open_root()
             .stage_kernel(&KernelImage::open(&strict(&link)).unwrap())
             .unwrap();
-        assert_eq!(
-            fs::read(jail.root_dir.join("vmlinux")).unwrap(),
-            b"real kernel"
-        );
+        jail.root_dir.child("vmlinux").assert("real kernel");
     }
 
     #[rstest]
     fn missing_kernel_is_a_resolve_error(tmp: TempDir) {
-        let missing = tmp.path().join("nope");
-        let err = KernelImage::open(&strict(&missing)).err();
-        assert!(
-            matches!(err, Some(KernelError::Resolve { .. })),
-            "got {err:?}"
-        );
+        let err = KernelImage::open(&strict(tmp.child("nope"))).err();
+        assert_matches!(err, Some(KernelError::Resolve { .. }));
     }
 
     #[rstest]
     fn stage_kernel_materializes_then_refuses_overwrite(jail: Jail) {
-        let src = jail.kernel_source("vmlinux-src", b"\x7fELF fake kernel bytes");
+        let src = jail.kernel_source("vmlinux-src", "\x7fELF fake kernel bytes");
         let root = jail.open_root();
 
         let kernel = KernelImage::open(&strict(&src)).unwrap();
         root.stage_kernel(&kernel).expect("first stage");
-        assert_eq!(
-            fs::read(jail.root_dir.join("vmlinux")).unwrap(),
-            b"\x7fELF fake kernel bytes"
-        );
+        jail.root_dir
+            .child("vmlinux")
+            .assert("\x7fELF fake kernel bytes");
 
         let err = root.stage_kernel(&kernel).unwrap_err();
         assert_eq!(err.errno(), Some(Errno::EEXIST), "got {err:?}");
@@ -498,7 +491,7 @@ mod tests {
 
     #[rstest]
     fn stage_kernel_never_changes_the_source(jail: Jail) {
-        let src = jail.kernel_source("vmlinux-src", b"kernel");
+        let src = jail.kernel_source("vmlinux-src", "kernel");
         let before = fs::metadata(&src).unwrap();
 
         let kernel = KernelImage::open(&strict(&src)).unwrap();
@@ -587,10 +580,10 @@ mod tests {
             eprintln!("SKIP add_tun_refuses_a_preexisting_node: needs root for mknod");
             return;
         }
-        fs::create_dir_all(jail.root_dir.join("dev/net")).unwrap();
-        let planted = jail.root_dir.join("dev/net/tun");
+        jail.root_dir.child("dev/net").create_dir_all().unwrap();
+        let planted = jail.root_dir.child("dev/net/tun");
         mknod(
-            &planted,
+            planted.path(),
             SFlag::S_IFCHR,
             Mode::from_bits_truncate(0o666),
             makedev(1, 3),
@@ -598,10 +591,7 @@ mod tests {
         .unwrap();
 
         let err = jail.open_root().add_tun(owner(12345, 12346)).unwrap_err();
-        assert!(
-            matches!(err, dir::DirError::DeviceMismatch { .. }),
-            "got {err:?}"
-        );
+        assert_matches!(err, dir::DirError::DeviceMismatch { .. });
         assert_eq!(
             fs::metadata(&planted).unwrap().uid(),
             0,
@@ -630,10 +620,9 @@ mod tests {
         #[values(false, true)] create_root: bool,
     ) {
         if create_root {
-            fs::create_dir_all(tmp.path().join("firecracker").join("id").join("root")).unwrap();
+            tmp.child("firecracker/id/root").create_dir_all().unwrap();
         }
-        let res = grant(tmp.path());
-        assert!(matches!(res, Err(GrantError::Missing)), "got {res:?}");
+        assert_matches!(grant(tmp.path()), Err(GrantError::Missing));
     }
 
     #[rstest]
@@ -653,16 +642,19 @@ mod tests {
     }
 
     fn plant_regular_file(jail: &Jail) -> PathBuf {
-        let imposter = jail.root_dir.join("api.socket");
-        fs::write(&imposter, b"not a socket").unwrap();
+        let imposter = jail.root_dir.child("api.socket");
+        imposter.write_str("not a socket").unwrap();
         fs::set_permissions(&imposter, fs::Permissions::from_mode(0o600)).unwrap();
-        imposter
+        imposter.to_path_buf()
     }
 
     fn plant_symlink_to_outside_socket(jail: &Jail) -> PathBuf {
         let outside = jail.base().join("outside.sock");
         socket_with_mode(&outside, 0o600);
-        symlink(&outside, jail.root_dir.join("api.socket")).unwrap();
+        jail.root_dir
+            .child("api.socket")
+            .symlink_to_file(&outside)
+            .unwrap();
         outside
     }
 
@@ -675,18 +667,16 @@ mod tests {
     ) {
         let untouched = plant(&jail);
 
-        let err = grant(jail.base()).unwrap_err();
-        assert!(matches!(err, GrantError::WrongType), "got {err:?}");
+        assert_matches!(grant(jail.base()), Err(GrantError::WrongType));
         assert_eq!(mode_of(&untouched), 0o600);
     }
 
     #[rstest]
     fn grant_through_a_symlinked_component_does_not_escape(escape: Escape) {
-        let outside_socket = escape.sentinel_root.join("api.socket");
+        let outside_socket = escape.sentinel_root.child("api.socket");
         socket_with_mode(&outside_socket, 0o700);
 
-        let res = grant(&escape.jail);
-        assert!(matches!(res, Err(GrantError::Walk(_))), "got {res:?}");
+        assert_matches!(grant(&escape.jail), Err(GrantError::Walk(_)));
         assert_eq!(mode_of(&outside_socket), 0o700);
     }
 
@@ -695,14 +685,14 @@ mod tests {
         if is_root() {
             return;
         }
-        let jail = tmp.path().join("jail");
-        fs::create_dir(&jail).unwrap();
+        let jail = tmp.child("jail");
+        jail.create_dir_all().unwrap();
         fs::set_permissions(&jail, fs::Permissions::from_mode(0o000)).unwrap();
 
         let res = grant(&jail);
         fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
 
-        assert!(matches!(res, Err(GrantError::Walk(_))), "got {res:?}");
+        assert_matches!(res, Err(GrantError::Walk(_)));
     }
 
     #[rstest]
@@ -714,24 +704,24 @@ mod tests {
 
     #[rstest]
     fn remove_deletes_the_chroot_tree_and_spares_siblings(jail: Jail) {
-        fs::write(jail.root_dir.join("vmlinux"), b"kernel").unwrap();
-        let exec = jail.base().join("firecracker");
-        let sibling = exec.join("other");
-        fs::create_dir_all(&sibling).unwrap();
+        jail.root_dir.child("vmlinux").write_str("kernel").unwrap();
+        let exec = jail.base.child("firecracker");
+        let sibling = exec.child("other");
+        sibling.create_dir_all().unwrap();
 
         JailLayout::new(&strict(jail.base()), &vm())
             .remove()
             .unwrap();
-        assert!(!exec.join("id").exists(), "victim chroot must be gone");
-        assert!(sibling.exists(), "sibling chroot must survive");
+        exec.child("id").assert(predicate::path::missing());
+        sibling.assert(predicate::path::exists());
     }
 
     #[rstest]
     fn remove_through_a_symlinked_exec_component_does_not_escape(escape: Escape) {
-        let keep = escape.sentinel_root.join("keep.txt");
-        fs::write(&keep, b"do not delete").unwrap();
+        let keep = escape.sentinel_root.child("keep.txt");
+        keep.write_str("do not delete").unwrap();
 
         let _ = JailLayout::new(&strict(&escape.jail), &vm()).remove();
-        assert!(keep.exists());
+        keep.assert(predicate::path::exists());
     }
 }

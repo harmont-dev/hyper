@@ -235,7 +235,9 @@ mod tests {
     use super::{RootCommandExt, TakeError, Unprivileged};
     use nix::fcntl::{fcntl, FcntlArg, FdFlag};
     use nix::unistd::geteuid;
+    use pretty_assertions::assert_eq;
     use rstest::rstest;
+    use std::assert_matches;
     use std::fs::File;
     use std::os::unix::io::{AsFd, AsRawFd};
     use std::process::Command;
@@ -244,14 +246,16 @@ mod tests {
     fn at_most_one_token_per_process() {
         {
             let first = Unprivileged::take();
-            assert!(first.is_ok(), "first take must yield the token: {first:?}");
-            assert!(
-                matches!(Unprivileged::take(), Err(TakeError::AlreadyTaken)),
+            assert_matches!(first, Ok(_));
+            assert_matches!(
+                Unprivileged::take(),
+                Err(TakeError::AlreadyTaken),
                 "second take while held"
             );
         }
-        assert!(
-            matches!(Unprivileged::take(), Err(TakeError::AlreadyTaken)),
+        assert_matches!(
+            Unprivileged::take(),
+            Err(TakeError::AlreadyTaken),
             "take after the first is dropped"
         );
     }

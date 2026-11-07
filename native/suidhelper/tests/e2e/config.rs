@@ -3,22 +3,24 @@
 //! tempfile instead of /etc/hyper, so tests never touch the real host.
 #![cfg(feature = "insecure_mode")]
 
+use assert_fs::TempDir;
 use hyper_suidhelper::config::{BinError, Config};
 use hyperrs_process::binary;
 use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
+use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use std::assert_matches;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
 
 #[fixture]
 fn tmp() -> TempDir {
-    tempfile::tempdir().unwrap()
+    TempDir::new().unwrap()
 }
 
 /// Write a config file owned root:root, 0644. Requires the test run as root.
@@ -99,10 +101,7 @@ fn tool_unconfigured_when_absent(
     #[case] accessor: fn(&Config) -> Result<(), BinError>,
 ) {
     let err = accessor(&Config::default()).expect_err("absent tool must return Unconfigured");
-    assert!(
-        matches!(err, BinError::Unconfigured(name) if name == tool),
-        "expected Unconfigured({tool:?}), got {err:?}",
-    );
+    assert_matches!(err, BinError::Unconfigured(name) if name == tool);
 }
 
 #[rstest]
@@ -114,10 +113,7 @@ fn jailer_basename_mismatch_rejected() {
     let err = config
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
-    assert!(
-        matches!(err, BinError::Bin(binary::RootSafeBinError::Name { .. })),
-        "expected a Name error, got {err:?}",
-    );
+    assert_matches!(err, BinError::Bin(binary::RootSafeBinError::Name { .. }));
 }
 
 #[rstest]

@@ -148,10 +148,14 @@ impl Cgroup {
 #[cfg(test)]
 mod tests {
     use super::{Cgroup, OpenError, ROOT};
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use nix::errno::Errno;
     use nix::libc::SIGKILL;
+    use pretty_assertions::assert_eq;
     use rstest::rstest;
+    use std::assert_matches;
     use std::fs;
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
@@ -204,16 +208,13 @@ mod tests {
 
     #[rstest]
     fn open_refuses_a_directory_that_is_not_on_cgroup2() {
-        let dir = tempfile::tempdir().unwrap();
-        let leaf = dir.path().join("leaf");
-        fs::create_dir(&leaf).unwrap();
+        let dir = TempDir::new().unwrap();
+        let leaf = dir.child("leaf");
+        leaf.create_dir_all().unwrap();
 
-        let got = open(&leaf);
-
-        assert!(
-            matches!(got, Err(OpenError::NotCgroup(ref p)) if *p == leaf),
-            "{:?}",
-            got.err()
+        assert_matches!(
+            open(leaf.path()).err(),
+            Some(OpenError::NotCgroup(p)) if p == leaf.path()
         );
     }
 

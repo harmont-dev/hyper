@@ -112,10 +112,11 @@ pub fn remove_cgroup(parent: &LexicalPath, id: &VmId) -> Result<(), CgroupError>
 #[cfg(test)]
 mod tests {
     use super::remove_cgroup;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use hyperrs_firecracker::VmId;
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
     use rstest::rstest;
-    use std::fs;
     use std::path::Path;
 
     fn strict(p: &Path) -> SafePathBuf<IsAbsolute, StrictComponents> {
@@ -124,11 +125,11 @@ mod tests {
 
     #[rstest]
     fn missing_cgroup_targets_are_ok() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = TempDir::new().unwrap();
         let id: VmId = "id".parse().unwrap();
-        let parent = tmp.path().join("hyper");
+        let parent = tmp.child("hyper");
         remove_cgroup(&strict(&parent), &id).expect("missing parent must be Ok");
-        fs::create_dir(&parent).unwrap();
+        parent.create_dir_all().unwrap();
         remove_cgroup(&strict(&parent), &id).expect("missing leaf must be Ok");
         assert!(parent.exists(), "cgroup parent must survive");
     }

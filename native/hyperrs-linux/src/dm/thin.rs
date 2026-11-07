@@ -246,56 +246,68 @@ mod tests {
         Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError,
     };
     use crate::dm::{DmName, Dmsetup};
+    use assert_fs::fixture::ChildPath;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use hyperrs_process::binary::RootSafeBin;
+    use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
+    use test_strategy::proptest;
 
-    proptest! {
-        #[test]
-        fn thin_id_accepts_exactly_24_bit_values(
-            n in prop_oneof![0..=ThinId::MAX, (ThinId::MAX + 1)..=u32::MAX]
-        ) {
-            match ThinId::new(n) {
-                Ok(id) => {
-                    prop_assert!(n <= ThinId::MAX);
-                    prop_assert_eq!(id.to_string(), n.to_string());
-                    prop_assert_eq!(n.to_string().parse::<ThinId>().unwrap(), id);
-                }
-                Err(_) => {
-                    prop_assert!(n > ThinId::MAX);
-                    prop_assert!(n.to_string().parse::<ThinId>().is_err());
-                }
+    #[proptest]
+    fn thin_id_accepts_exactly_24_bit_values(
+        #[strategy(prop_oneof![0..=ThinId::MAX, (ThinId::MAX + 1)..=u32::MAX])] n: u32,
+    ) {
+        match ThinId::new(n) {
+            Ok(id) => {
+                prop_assert!(n <= ThinId::MAX);
+                prop_assert_eq!(id.to_string(), n.to_string());
+                prop_assert_eq!(n.to_string().parse::<ThinId>().unwrap(), id);
+            }
+            Err(_) => {
+                prop_assert!(n > ThinId::MAX);
+                prop_assert!(n.to_string().parse::<ThinId>().is_err());
             }
         }
+    }
 
-        #[test]
-        fn thin_id_parse_rejects_non_integers(s in "[^0-9+]*|[0-9]+[^0-9]+[0-9]*") {
-            prop_assert!(s.parse::<ThinId>().is_err());
-        }
+    #[proptest]
+    fn thin_id_parse_rejects_non_integers(#[strategy("[^0-9+]*|[0-9]+[^0-9]+[0-9]*")] s: String) {
+        prop_assert!(s.parse::<ThinId>().is_err());
+    }
 
-        #[test]
-        fn message_parse_is_the_inverse_of_render(m in message()) {
-            prop_assert_eq!(m.to_string().parse::<ThinMessage>().unwrap(), m);
-        }
+    #[proptest]
+    fn message_parse_is_the_inverse_of_render(#[strategy(message())] m: ThinMessage) {
+        prop_assert_eq!(m.to_string().parse::<ThinMessage>().unwrap(), m);
+    }
 
-        #[test]
-        fn message_parse_ignores_surrounding_and_inner_spacing(m in message(), pad in "[ \t]{1,3}") {
-            let spaced = format!("{pad}{}{pad}", m.to_string().split(' ').collect::<Vec<_>>().join(&pad));
-            prop_assert_eq!(spaced.parse::<ThinMessage>().unwrap(), m);
-        }
+    #[proptest]
+    fn message_parse_ignores_surrounding_and_inner_spacing(
+        #[strategy(message())] m: ThinMessage,
+        #[strategy("[ \t]{1,3}")] pad: String,
+    ) {
+        let spaced = format!(
+            "{pad}{}{pad}",
+            m.to_string().split(' ').collect::<Vec<_>>().join(&pad)
+        );
+        prop_assert_eq!(spaced.parse::<ThinMessage>().unwrap(), m);
+    }
 
-        #[test]
-        fn message_with_an_extra_operand_is_refused(m in message(), extra in "[0-9]{1,4}") {
-            let s = format!("{m} {extra}");
-            prop_assert!(
-                matches!(s.parse::<ThinMessage>(), Err(ParseThinMessageError::Malformed(_))),
-                "accepted {:?}", s
-            );
-        }
+    #[proptest]
+    fn message_with_an_extra_operand_is_refused(
+        #[strategy(message())] m: ThinMessage,
+        #[strategy("[0-9]{1,4}")] extra: String,
+    ) {
+        let s = format!("{m} {extra}");
+        assert_matches!(
+            s.parse::<ThinMessage>(),
+            Err(ParseThinMessageError::Malformed(_)),
+            "accepted {s:?}"
+        );
     }
 
     fn thin_id() -> impl Strategy<Value = ThinId> {
@@ -344,15 +356,15 @@ mod tests {
 
     struct Fake {
         _dir: TempDir,
-        log: PathBuf,
+        log: ChildPath,
         dmsetup: Dmsetup,
     }
 
     impl Fake {
         fn new(table: &str, failing_message: &str) -> Self {
-            let dir = tempfile::tempdir().unwrap();
-            let log = dir.path().join("calls");
-            let bin = dir.path().join("dmsetup");
+            let dir = TempDir::new().unwrap();
+            let log = dir.child("calls");
+            let bin = dir.child("dmsetup");
             let script = format!(
                 "#!/bin/sh\n\
                  printf '%s\\n' \"$*\" >> '{log}'\n\
@@ -363,7 +375,7 @@ mod tests {
                  exit 0\n",
                 log = log.display(),
             );
-            fs::write(&bin, script).unwrap();
+            bin.write_str(&script).unwrap();
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
             let dmsetup = Dmsetup::new(RootSafeBin::open(&bin).unwrap());
             Self {
@@ -402,10 +414,7 @@ mod tests {
         }
         let fake = Fake::new(table, "");
         let got = fake.dmsetup.thin_pool(&name("hyper-x"));
-        assert!(
-            matches!(got, Err(ThinPoolError::NotAThinPool { .. })),
-            "{got:?}"
-        );
+        assert_matches!(got, Err(ThinPoolError::NotAThinPool { .. }));
         assert_eq!(fake.calls(), ["table hyper-x"]);
     }
 

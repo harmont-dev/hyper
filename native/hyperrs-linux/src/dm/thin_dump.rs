@@ -180,8 +180,11 @@ impl Mapping {
 #[cfg(test)]
 mod tests {
     use super::{BlockRange, MappingsError, MetadataDump, ParseError, ThinId, ThinMappings};
+    use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
+    use test_strategy::proptest;
 
     #[derive(Debug, Clone)]
     enum M {
@@ -269,58 +272,59 @@ mod tests {
         dump(xml).parse().unwrap().mappings(id(n))
     }
 
-    proptest! {
-        #[test]
-        fn extracts_exactly_the_target_devices_ranges(
-            block_sectors in 1u64..4096,
-            target in proptest::collection::vec(mapping(), 0..64),
-            sibling in proptest::collection::vec(mapping(), 0..64),
-        ) {
-            let xml = render(
-                block_sectors,
-                &[device(1, sibling.clone()), device(3, target.clone()), device(5, sibling)],
-            );
+    #[proptest]
+    fn extracts_exactly_the_target_devices_ranges(
+        #[strategy(1u64..4096)] block_sectors: u64,
+        #[strategy(proptest::collection::vec(mapping(), 0..64))] target: Vec<M>,
+        #[strategy(proptest::collection::vec(mapping(), 0..64))] sibling: Vec<M>,
+    ) {
+        let xml = render(
+            block_sectors,
+            &[
+                device(1, sibling.clone()),
+                device(3, target.clone()),
+                device(5, sibling),
+            ],
+        );
 
-            let got = mappings(&xml, 3).unwrap();
+        let got = mappings(&xml, 3).unwrap();
 
-            prop_assert_eq!(got.block_sectors, block_sectors);
-            prop_assert_eq!(got.ranges, target.iter().map(M::range).collect::<Vec<_>>());
-        }
+        prop_assert_eq!(got.block_sectors, block_sectors);
+        prop_assert_eq!(got.ranges, target.iter().map(M::range).collect::<Vec<_>>());
+    }
 
-        #[test]
-        fn absent_device_is_an_error_not_empty(
-            maps in proptest::collection::vec(mapping(), 0..16),
-        ) {
-            let xml = render(128, &[device(1, maps)]);
-            prop_assert!(matches!(mappings(&xml, 99), Err(MappingsError::DeviceNotFound(got)) if got == id(99)));
-        }
+    #[proptest]
+    fn absent_device_is_an_error_not_empty(
+        #[strategy(proptest::collection::vec(mapping(), 0..16))] maps: Vec<M>,
+    ) {
+        let xml = render(128, &[device(1, maps)]);
+        assert_matches!(
+            mappings(&xml, 99),
+            Err(MappingsError::DeviceNotFound(got)) if got == id(99)
+        );
+    }
 
-        #[test]
-        fn mapped_blocks_disagreeing_with_the_mappings_is_an_error(
-            target in proptest::collection::vec(mapping(), 0..64),
-            skew in prop_oneof![1i64..64, -64i64..0],
-        ) {
-            let actual = mapped_blocks(&target);
-            let claimed = actual.saturating_add_signed(skew);
-            prop_assume!(claimed != actual);
-            let xml = render(128, &[(3, claimed, target)]);
+    #[proptest]
+    fn mapped_blocks_disagreeing_with_the_mappings_is_an_error(
+        #[strategy(proptest::collection::vec(mapping(), 0..64))] target: Vec<M>,
+        #[strategy(prop_oneof![1i64..64, -64i64..0])] skew: i64,
+    ) {
+        let actual = mapped_blocks(&target);
+        let claimed = actual.saturating_add_signed(skew);
+        prop_assume!(claimed != actual);
+        let xml = render(128, &[(3, claimed, target)]);
 
-            let got = mappings(&xml, 3);
-
-            let is_truncated = matches!(
-                got,
-                Err(MappingsError::Truncated { expected, got }) if expected == claimed && got == actual
-            );
-            prop_assert!(is_truncated);
-        }
+        assert_matches!(
+            mappings(&xml, 3),
+            Err(MappingsError::Truncated { expected, got }) if expected == claimed && got == actual
+        );
     }
 
     #[rstest]
     fn non_utf8_output_is_an_error() {
         let mut xml = render(128, &[device(3, vec![])]).into_bytes();
         xml.insert(1, 0xff);
-        let got = dump(xml).parse();
-        assert!(matches!(got, Err(ParseError::Utf8(_))), "{got:?}");
+        assert_matches!(dump(xml).parse(), Err(ParseError::Utf8(_)));
     }
 
     #[rstest]
@@ -380,7 +384,10 @@ mod tests {
     )]
     #[case::cut_mid_document(cut_after_first_device_line())]
     fn malformed_or_cut_xml_is_an_error_not_a_guess(#[case] xml: String) {
-        let got = dump(xml.as_str()).parse();
-        assert!(matches!(got, Err(ParseError::Xml(_))), "{xml:?}: {got:?}");
+        assert_matches!(
+            dump(xml.as_str()).parse(),
+            Err(ParseError::Xml(_)),
+            "{xml:?}"
+        );
     }
 }

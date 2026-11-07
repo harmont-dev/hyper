@@ -4,12 +4,13 @@
 //! JSON, then assert on the reconstructed command line.
 #![cfg(feature = "insecure_mode")]
 
+use assert_fs::TempDir;
 use predicates::str::contains;
+use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -60,7 +61,7 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
         eprintln!("SKIP dmsetup_create: needs root to acquire + own the fake bin");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     let base = fs::canonicalize(tmp.path()).unwrap();
     let rec = base.join("argv.json");
     let bin = install_fake(&base, "dmsetup", &rec, "");
@@ -123,7 +124,7 @@ impl FakeDmsetup {
 
 #[fixture]
 fn fake() -> FakeDmsetup {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     let rec = tmp.path().join("argv.json");
     FakeDmsetup { tmp, rec }
 }
@@ -186,7 +187,7 @@ fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
         eprintln!("SKIP dmsetup_rejects_bin: needs root to own the config file");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     // A real, root-owned system file, but the wrong basename for `dmsetup`.
     let cfg = write_root_config(tmp.path(), &[("dmsetup", Path::new("/usr/bin/env"))]);
 
@@ -264,7 +265,7 @@ fn blockdev_getsz_reports_a_dm_devices_size_as_root() {
         eprintln!("SKIP blockdev: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     let backing = tmp.path().join("backing");
     fs::File::create(&backing)
         .unwrap()

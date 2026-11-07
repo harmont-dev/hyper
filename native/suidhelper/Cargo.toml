@@ -107,7 +107,9 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
+assert_fs = "1"
 predicates = "3.1.4"
+pretty_assertions = "1"
 proptest = "1"
 rstest = "0.28"
-tempfile = "3"
+test-strategy = "0.4"

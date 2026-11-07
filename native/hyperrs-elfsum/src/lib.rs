@@ -103,25 +103,27 @@ macro_rules! checksum {
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use rstest::rstest;
+    use test_strategy::proptest;
 
-    proptest! {
-        #[test]
-        fn hex_round_trips_to_lowercase(digest in any::<Digest>()) {
-            let rendered = Slot(digest).hex();
-            prop_assert_eq!(rendered.len(), 2 * LEN);
-            prop_assert!(rendered.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+    #[proptest]
+    fn hex_round_trips_to_lowercase(digest: Digest) {
+        let rendered = Slot(digest).hex();
+        prop_assert_eq!(rendered.len(), 2 * LEN);
+        prop_assert!(rendered
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
 
-            let decoded: Vec<u8> = (0..LEN)
-                .map(|i| u8::from_str_radix(&rendered[2 * i..2 * i + 2], 16).unwrap())
-                .collect();
-            prop_assert_eq!(decoded.as_slice(), digest.as_slice());
-        }
+        let decoded: Vec<u8> = (0..LEN)
+            .map(|i| u8::from_str_radix(&rendered[2 * i..2 * i + 2], 16).unwrap())
+            .collect();
+        prop_assert_eq!(decoded.as_slice(), digest.as_slice());
     }
 
     #[cfg(all(target_os = "linux", feature = "stamp"))]
-    #[rstest]
+    #[rstest::rstest]
     fn checksum_macro_lands_in_the_stamped_section() {
+        use pretty_assertions::assert_eq;
+
         let slot: &'static Slot = crate::checksum!();
         assert!(std::ptr::eq(slot, crate::checksum!()));
 

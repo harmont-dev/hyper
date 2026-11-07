@@ -3,8 +3,10 @@
 //! test: it is `true` exactly for `"1"` modulo surrounding whitespace, and
 //! `false` for everything else (kernel default `"0"`, empty, garbage).
 use hyper_suidhelper::tools::network::host_init::ip_forward_enabled;
+use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use rstest::rstest;
+use test_strategy::proptest;
 
 #[rstest]
 #[case::bare_one("1", true)]
@@ -16,19 +18,17 @@ fn ip_forward_enabled_reads_the_proc_value(#[case] contents: &str, #[case] enabl
     assert_eq!(ip_forward_enabled(contents), enabled);
 }
 
-proptest! {
-    #[test]
-    fn whitespace_padding_around_one_is_still_enabled(
-        leading in "[ \t\n]{0,4}",
-        trailing in "[ \t\n]{0,4}",
-    ) {
-        let contents = format!("{leading}1{trailing}");
-        prop_assert!(ip_forward_enabled(&contents));
-    }
+#[proptest]
+fn whitespace_padding_around_one_is_still_enabled(
+    #[strategy("[ \t\n]{0,4}")] leading: String,
+    #[strategy("[ \t\n]{0,4}")] trailing: String,
+) {
+    let contents = format!("{leading}1{trailing}");
+    prop_assert!(ip_forward_enabled(&contents));
+}
 
-    #[test]
-    fn anything_but_one_after_trim_is_disabled(digits in "[0-9]{2,4}") {
-        // Multi-digit strings never equal the literal "1" after trimming.
-        prop_assert!(!ip_forward_enabled(&digits));
-    }
+#[proptest]
+fn anything_but_one_after_trim_is_disabled(#[strategy("[0-9]{2,4}")] digits: String) {
+    // Multi-digit strings never equal the literal "1" after trimming.
+    prop_assert!(!ip_forward_enabled(&digits));
 }

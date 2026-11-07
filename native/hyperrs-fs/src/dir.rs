@@ -244,17 +244,19 @@ mod tests {
     use super::SafeDir;
     use crate::file::{Any, IsRegularFile, OpenFlags, ValidationError};
     use crate::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use nix::dir::Type;
     use nix::errno::Errno;
     use nix::sys::stat::Mode;
+    use predicates::prelude::*;
+    use pretty_assertions::assert_eq;
     use rstest::{fixture, rstest};
+    use std::assert_matches;
     use std::collections::BTreeMap;
     use std::ffi::OsString;
-    use std::fs;
-    use std::os::unix::fs::symlink;
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
-    use tempfile::TempDir;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
@@ -270,7 +272,7 @@ mod tests {
 
     #[fixture]
     fn tmp() -> TempDir {
-        tempfile::tempdir().unwrap()
+        TempDir::new().unwrap()
     }
 
     struct Anchored {
@@ -280,11 +282,13 @@ mod tests {
 
     #[fixture]
     fn anchored(tmp: TempDir) -> Anchored {
-        fs::write(tmp.path().join("outside"), b"x").unwrap();
-        let anchor_dir = tmp.path().join("anchor");
-        fs::create_dir_all(anchor_dir.join("real")).unwrap();
-        fs::write(anchor_dir.join("real/f"), b"x").unwrap();
-        symlink(anchor_dir.join("real"), anchor_dir.join("link")).unwrap();
+        tmp.child("outside").write_str("x").unwrap();
+        let anchor_dir = tmp.child("anchor");
+        anchor_dir.child("real/f").write_str("x").unwrap();
+        anchor_dir
+            .child("link")
+            .symlink_to_dir(anchor_dir.child("real"))
+            .unwrap();
         Anchored {
             anchor: open(&anchor_dir),
             tmp,
@@ -293,25 +297,23 @@ mod tests {
 
     #[rstest]
     fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree(tmp: TempDir) {
-        let sentinel = tmp.path().join("sentinel");
-        fs::create_dir(&sentinel).unwrap();
-        fs::write(sentinel.join("keep.txt"), b"do not delete me").unwrap();
+        let sentinel = tmp.child("sentinel");
+        sentinel
+            .child("keep.txt")
+            .write_str("do not delete me")
+            .unwrap();
 
-        let tree = tmp.path().join("tree");
-        fs::create_dir(&tree).unwrap();
-        fs::write(tree.join("a.txt"), b"x").unwrap();
-        symlink(&sentinel, tree.join("escape")).unwrap();
+        let tree = tmp.child("tree");
+        tree.child("a.txt").write_str("x").unwrap();
+        tree.child("escape").symlink_to_dir(&sentinel).unwrap();
 
         open(tmp.path())
             .rmdirat_recursive(StrictComponent::from_static("tree"))
             .unwrap();
 
-        assert!(!tree.exists(), "tree must be gone");
-        assert!(sentinel.exists(), "sentinel dir must survive");
-        assert!(
-            sentinel.join("keep.txt").exists(),
-            "sentinel contents must survive"
-        );
+        tree.assert(predicate::path::missing());
+        sentinel.assert(predicate::path::is_dir());
+        sentinel.child("keep.txt").assert("do not delete me");
     }
 
     #[rstest]
@@ -325,13 +327,12 @@ mod tests {
         #[case] expected: Errno,
     ) {
         let name = name(anchored.tmp.path());
-        let err = anchored
-            .anchor
-            .openat::<Any, Any, Any>(&name, OpenFlags::PATH, Mode::empty())
-            .unwrap_err();
-        assert!(
-            matches!(err, ValidationError::Open(errno) if errno == expected),
-            "{name:?}: {err:?}"
+        assert_matches!(
+            anchored
+                .anchor
+                .openat::<Any, Any, Any>(&name, OpenFlags::PATH, Mode::empty()),
+            Err(ValidationError::Open(errno)) if errno == expected,
+            "{name:?}"
         );
     }
 
@@ -345,23 +346,22 @@ mod tests {
 
     #[rstest]
     fn rmdirat_recursive_clears_nested_tree(tmp: TempDir) {
-        let tree = tmp.path().join("tree");
-        fs::create_dir_all(tree.join("a/b/c")).unwrap();
-        fs::write(tree.join("a/b/c/deep.txt"), b"x").unwrap();
-        fs::write(tree.join("a/top.txt"), b"y").unwrap();
+        let tree = tmp.child("tree");
+        tree.child("a/b/c/deep.txt").write_str("x").unwrap();
+        tree.child("a/top.txt").write_str("y").unwrap();
 
         open(tmp.path())
             .rmdirat_recursive(StrictComponent::from_static("tree"))
             .unwrap();
-        assert!(!tree.exists());
+        tree.assert(predicate::path::missing());
     }
 
     #[rstest]
     fn entries_reports_each_child_with_its_own_type(tmp: TempDir) {
-        fs::write(tmp.path().join("file"), b"x").unwrap();
-        fs::create_dir(tmp.path().join("dir")).unwrap();
-        symlink(tmp.path().join("dir"), tmp.path().join("link")).unwrap();
-        let _sock = UnixListener::bind(tmp.path().join("sock")).unwrap();
+        tmp.child("file").touch().unwrap();
+        tmp.child("dir").create_dir_all().unwrap();
+        tmp.child("link").symlink_to_dir(tmp.child("dir")).unwrap();
+        let _sock = UnixListener::bind(tmp.child("sock")).unwrap();
 
         let got: BTreeMap<OsString, Type> = open(tmp.path())
             .entries()

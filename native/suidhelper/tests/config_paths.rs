@@ -1,4 +1,5 @@
 use hyper_suidhelper::config::Config;
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 use std::path::Path;
 

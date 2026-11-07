@@ -345,14 +345,18 @@ mod tests {
     };
     use crate::dir::SafeDir;
     use crate::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use assert_fs::fixture::ChildPath;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use nix::errno::Errno;
     use nix::sys::stat::Mode;
+    use pretty_assertions::assert_eq;
     use rstest::{fixture, rstest};
+    use std::assert_matches;
     use std::fs;
     use std::io::Write;
-    use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::path::{Path, PathBuf};
-    use tempfile::TempDir;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
@@ -368,20 +372,20 @@ mod tests {
 
     #[fixture]
     fn tmp() -> TempDir {
-        tempfile::tempdir().unwrap()
+        TempDir::new().unwrap()
     }
 
     #[fixture]
-    fn plain(tmp: TempDir) -> (TempDir, PathBuf) {
-        let f = tmp.path().join("plain");
-        fs::write(&f, b"data").unwrap();
+    fn plain(tmp: TempDir) -> (TempDir, ChildPath) {
+        let f = tmp.child("plain");
+        f.write_str("data").unwrap();
         (tmp, f)
     }
 
     #[fixture]
-    fn file_and_dir(plain: (TempDir, PathBuf)) -> TempDir {
+    fn file_and_dir(plain: (TempDir, ChildPath)) -> TempDir {
         let (tmp, _) = plain;
-        fs::create_dir(tmp.path().join("dir")).unwrap();
+        tmp.child("dir").create_dir_all().unwrap();
         tmp
     }
 
@@ -397,15 +401,11 @@ mod tests {
         #[case] opens: fn(&Strict) -> bool,
         #[case] expected: bool,
     ) {
-        assert_eq!(
-            opens(&safe(&file_and_dir.path().join(name))),
-            expected,
-            "{name}"
-        );
+        assert_eq!(opens(&safe(&file_and_dir.child(name))), expected, "{name}");
     }
 
     #[rstest]
-    fn safefile_owner_axis_rejects_non_root_file(plain: (TempDir, PathBuf)) {
+    fn safefile_owner_axis_rejects_non_root_file(plain: (TempDir, ChildPath)) {
         let (_tmp, f) = plain;
         assert!(
             SafeFile::<IsRegularFile, RootOwner, Any>::open(&safe(&f), OpenFlags::PATH).is_err()
@@ -416,7 +416,7 @@ mod tests {
     #[case::group_and_other_writable(0o666, false)]
     #[case::owner_only_writable(0o644, true)]
     fn safefile_mode_axis_rejects_group_writable(
-        plain: (TempDir, PathBuf),
+        plain: (TempDir, ChildPath),
         #[case] mode: u32,
         #[case] accepted: bool,
     ) {
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[rstest]
-    fn safefile_write_all_writes_through_the_fd(plain: (TempDir, PathBuf)) {
+    fn safefile_write_all_writes_through_the_fd(plain: (TempDir, ChildPath)) {
         let (tmp, f) = plain;
         let dir = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
         let mut file: SafeFile<Any, Any, Any> = dir
@@ -439,16 +439,17 @@ mod tests {
             )
             .unwrap();
         file.write_all(b"hello").unwrap();
-        assert_eq!(fs::read(&f).unwrap(), b"hello");
+        f.assert("hello");
     }
 
     #[fixture]
     fn symlinked(tmp: TempDir) -> TempDir {
-        let dir = tmp.path().join("dir");
-        fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("target"), b"data").unwrap();
-        symlink(dir.join("target"), tmp.path().join("final_link")).unwrap();
-        symlink(&dir, tmp.path().join("parent_link")).unwrap();
+        let dir = tmp.child("dir");
+        dir.child("target").write_str("data").unwrap();
+        tmp.child("final_link")
+            .symlink_to_file(dir.child("target"))
+            .unwrap();
+        tmp.child("parent_link").symlink_to_dir(&dir).unwrap();
         tmp
     }
 
@@ -458,10 +459,10 @@ mod tests {
         #[values("final_link", "parent_link/target")] path: &str,
         #[values(OpenFlags::PATH, OpenFlags::RDONLY)] flags: OpenFlags,
     ) {
-        let res = SafeFile::<Any, Any, Any>::open(&safe(&symlinked.path().join(path)), flags);
-        assert!(
-            matches!(res, Err(ValidationError::Open(Errno::ELOOP))),
-            "{path} with {flags:?}: {res:?}"
+        assert_matches!(
+            SafeFile::<Any, Any, Any>::open(&safe(&symlinked.child(path)), flags),
+            Err(ValidationError::Open(Errno::ELOOP)),
+            "{path} with {flags:?}"
         );
     }
 }

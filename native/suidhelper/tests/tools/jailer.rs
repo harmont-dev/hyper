@@ -6,6 +6,7 @@
 
 use clap::{Args, FromArgMatches};
 use hyper_suidhelper::tools::jailer::JailerArgs;
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 
 fn parse(limits: &[&str]) -> Result<JailerArgs, clap::Error> {

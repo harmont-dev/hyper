@@ -52,33 +52,31 @@ mod tests {
     use proptest::prelude::*;
     use rstest::rstest;
     use std::str::FromStr;
+    use test_strategy::proptest;
 
-    proptest! {
-        /// Every string over the allowed charset/length with a non-dash leader parses
-        /// and renders back to itself.
-        #[test]
-        fn vmid_valid_round_trips(s in "[A-Za-z0-9][A-Za-z0-9-]{0,63}") {
-            prop_assert_eq!(VmId::from_str(&s).unwrap().to_string(), s);
-        }
+    /// Every string over the allowed charset/length with a non-dash leader parses
+    /// and renders back to itself.
+    #[proptest]
+    fn vmid_valid_round_trips(#[strategy("[A-Za-z0-9][A-Za-z0-9-]{0,63}")] s: String) {
+        prop_assert_eq!(VmId::from_str(&s).unwrap().to_string(), s);
+    }
 
-        /// A leading dash is always rejected (no flag injection via `--id`).
-        #[test]
-        fn vmid_leading_dash_rejected(s in "-[A-Za-z0-9-]{0,63}") {
-            prop_assert!(VmId::from_str(&s).is_err());
-        }
+    /// A leading dash is always rejected (no flag injection via `--id`).
+    #[proptest]
+    fn vmid_leading_dash_rejected(#[strategy("-[A-Za-z0-9-]{0,63}")] s: String) {
+        prop_assert!(VmId::from_str(&s).is_err());
+    }
 
-        /// Any embedded path separator is rejected (no chroot traversal via `--id`).
-        #[test]
-        fn vmid_slash_rejected(s in "[A-Za-z0-9_]{0,10}/[A-Za-z0-9_]{0,10}") {
-            prop_assert!(VmId::from_str(&s).is_err());
-        }
+    /// Any embedded path separator is rejected (no chroot traversal via `--id`).
+    #[proptest]
+    fn vmid_slash_rejected(#[strategy("[A-Za-z0-9_]{0,10}/[A-Za-z0-9_]{0,10}")] s: String) {
+        prop_assert!(VmId::from_str(&s).is_err());
+    }
 
-        /// Over-length ids (>64) are rejected.
-        #[test]
-        fn vmid_too_long_rejected(s in "[A-Za-z][A-Za-z0-9-]{64,90}") {
-            prop_assert!(VmId::from_str(&s).is_err());
-        }
-
+    /// Over-length ids (>64) are rejected.
+    #[proptest]
+    fn vmid_too_long_rejected(#[strategy("[A-Za-z][A-Za-z0-9-]{64,90}")] s: String) {
+        prop_assert!(VmId::from_str(&s).is_err());
     }
 
     #[rstest]

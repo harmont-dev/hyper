@@ -245,6 +245,46 @@ jobs:
           flags: rust
           fail_ci_if_error: true
 
+  mutants:
+    name: Rust mutants (changed code)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: rustup show
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Install cargo-mutants and nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,nextest
+
+      - name: Diff against the base branch
+        run: git diff --relative "origin/${{ github.base_ref }}...HEAD" > mutants.diff
+
+      - name: cargo mutants
+        run: cargo mutants --in-diff mutants.diff --no-shuffle
+
+      - name: Upload mutants report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-out
+          path: native/mutants.out
+
   suidhelper-privileged:
     name: Rust suidhelper (privileged E2E)
     runs-on: ubuntu-latest

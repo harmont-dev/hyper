@@ -5,11 +5,12 @@
 //! code. Root-only: `become_root_permanently` requires we are already root.
 #![cfg(feature = "insecure_mode")]
 
+use assert_fs::TempDir;
+use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run};
@@ -63,7 +64,7 @@ impl Recorded {
 
 #[fixture]
 fn recorded() -> Recorded {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     let firecracker = install_firecracker(tmp.path());
     let argv = tmp.path().join("argv.json");
     Recorded {

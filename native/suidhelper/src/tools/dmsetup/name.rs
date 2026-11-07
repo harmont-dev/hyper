@@ -57,34 +57,42 @@ mod tests {
     use hyperrs_linux::dm::DmTable;
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
+    use test_strategy::proptest;
 
-    proptest! {
-        #[test]
-        fn every_valid_hyper_name_is_accepted(suffix in "[0-9A-Za-z#+.:=@_-]{0,32}") {
-            let s = format!("hyper-{suffix}");
-            prop_assert_eq!(s.parse::<HyperDmName>().unwrap().to_string(), s.clone());
-            let dev = format!("/dev/mapper/{s}");
-            prop_assert_eq!(HyperDmName::from_device_path(&dev).unwrap().to_string(), s);
-        }
+    #[proptest]
+    fn every_valid_hyper_name_is_accepted(#[strategy("[0-9A-Za-z#+.:=@_-]{0,32}")] suffix: String) {
+        let s = format!("hyper-{suffix}");
+        prop_assert_eq!(s.parse::<HyperDmName>().unwrap().to_string(), s.clone());
+        let dev = format!("/dev/mapper/{s}");
+        prop_assert_eq!(HyperDmName::from_device_path(&dev).unwrap().to_string(), s);
+    }
 
-        #[test]
-        fn a_name_we_do_not_own_is_refused_everywhere(name in "[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}") {
-            prop_assume!(!name.starts_with("hyper-") && !matches!(name.as_str(), "." | ".." | "control"));
-            let dev = format!("/dev/mapper/{name}");
-            prop_assert!(matches!(name.parse::<HyperDmName>(), Err(NameError::NotHyper(_))));
-            prop_assert!(matches!(HyperDmName::from_device_path(&dev), Err(NameError::NotHyper(_))));
-            for table in [
-                format!("0 8 linear {dev} 0"),
-                format!("0 8 snapshot {dev} /srv/hyper/cow P 8"),
-                format!("0 8 thin {dev} 1"),
-                format!("0 8 thin /dev/mapper/hyper-pool 1 {dev}"),
-            ] {
-                let table: DmTable = table.parse().unwrap();
-                prop_assert!(
-                    matches!(HyperDmName::check_table(&table), Err(NameError::NotHyper(_))),
-                    "accepted {}", table
-                );
-            }
+    #[proptest]
+    fn a_name_we_do_not_own_is_refused_everywhere(
+        #[strategy("[0-9A-Za-z#+.:=@_][0-9A-Za-z#+.:=@_-]{0,32}")] name: String,
+    ) {
+        prop_assume!(
+            !name.starts_with("hyper-") && !matches!(name.as_str(), "." | ".." | "control")
+        );
+        let dev = format!("/dev/mapper/{name}");
+        assert_matches!(name.parse::<HyperDmName>(), Err(NameError::NotHyper(_)));
+        assert_matches!(
+            HyperDmName::from_device_path(&dev),
+            Err(NameError::NotHyper(_))
+        );
+        for table in [
+            format!("0 8 linear {dev} 0"),
+            format!("0 8 snapshot {dev} /srv/hyper/cow P 8"),
+            format!("0 8 thin {dev} 1"),
+            format!("0 8 thin /dev/mapper/hyper-pool 1 {dev}"),
+        ] {
+            let table: DmTable = table.parse().unwrap();
+            assert_matches!(
+                HyperDmName::check_table(&table),
+                Err(NameError::NotHyper(_)),
+                "accepted {table}"
+            );
         }
     }
 

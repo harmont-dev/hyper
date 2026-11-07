@@ -73,6 +73,8 @@ mod tests {
     use proptest::prelude::*;
     use proptest::sample::Index;
     use rstest::rstest;
+    use std::assert_matches;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -110,74 +112,74 @@ mod tests {
             .prop_map(|(before, slot, after)| image(&before, &slot, &after))
     }
 
-    proptest! {
-        #[test]
-        fn stamp_writes_only_its_digest_into_the_slot(
-            before in any_bytes(),
-            slot in any::<Digest>(),
-            after in any_bytes(),
-        ) {
-            let bytes = image(&before, &slot, &after);
-            let at = position(&bytes, &slot);
-            let (stamped, digest) = stamped(bytes.clone());
+    #[proptest]
+    fn stamp_writes_only_its_digest_into_the_slot(
+        #[strategy(any_bytes())] before: Vec<u8>,
+        slot: Digest,
+        #[strategy(any_bytes())] after: Vec<u8>,
+    ) {
+        let bytes = image(&before, &slot, &after);
+        let at = position(&bytes, &slot);
+        let (stamped, digest) = stamped(bytes.clone());
 
-            let mut expected = bytes;
-            expected[at..at + LEN].copy_from_slice(&digest);
-            prop_assert_eq!(stamped, expected);
-        }
+        let mut expected = bytes;
+        expected[at..at + LEN].copy_from_slice(&digest);
+        prop_assert_eq!(stamped, expected);
+    }
 
-        #[test]
-        fn stamp_is_idempotent(bytes in any_image()) {
-            let (once, digest) = stamped(bytes);
-            let (twice, again) = stamped(once.clone());
-            prop_assert_eq!(twice, once);
-            prop_assert_eq!(again, digest);
-        }
+    #[proptest]
+    fn stamp_is_idempotent(#[strategy(any_image())] bytes: Vec<u8>) {
+        let (once, digest) = stamped(bytes);
+        let (twice, again) = stamped(once.clone());
+        prop_assert_eq!(twice, once);
+        prop_assert_eq!(again, digest);
+    }
 
-        #[test]
-        fn digest_equals_hash_of_zeroed_image(
-            before in any_bytes(),
-            slot in any::<Digest>(),
-            after in any_bytes(),
-        ) {
-            let bytes = image(&before, &slot, &after);
-            let mut zeroed = bytes.clone();
-            let at = position(&bytes, &slot);
-            zeroed[at..at + LEN].fill(0);
-            prop_assert_eq!(stamped(bytes).1, *blake3::hash(&zeroed).as_bytes());
-        }
+    #[proptest]
+    fn digest_equals_hash_of_zeroed_image(
+        #[strategy(any_bytes())] before: Vec<u8>,
+        slot: Digest,
+        #[strategy(any_bytes())] after: Vec<u8>,
+    ) {
+        let bytes = image(&before, &slot, &after);
+        let mut zeroed = bytes.clone();
+        let at = position(&bytes, &slot);
+        zeroed[at..at + LEN].fill(0);
+        prop_assert_eq!(stamped(bytes).1, *blake3::hash(&zeroed).as_bytes());
+    }
 
-        #[test]
-        fn digest_ignores_slot_contents(
-            before in any_bytes(),
-            after in any_bytes(),
-            a in any::<Digest>(),
-            b in any::<Digest>(),
-        ) {
-            let a = stamped(image(&before, &a, &after)).1;
-            let b = stamped(image(&before, &b, &after)).1;
-            prop_assert_eq!(a, b);
-        }
+    #[proptest]
+    fn digest_ignores_slot_contents(
+        #[strategy(any_bytes())] before: Vec<u8>,
+        #[strategy(any_bytes())] after: Vec<u8>,
+        a: Digest,
+        b: Digest,
+    ) {
+        let a = stamped(image(&before, &a, &after)).1;
+        let b = stamped(image(&before, &b, &after)).1;
+        prop_assert_eq!(a, b);
+    }
 
-        #[test]
-        fn tampering_outside_the_slot_breaks_the_stamp(
-            bytes in any_image(),
-            at in any::<Index>(),
-            flip in 1..=u8::MAX,
-        ) {
-            let (mut bytes, digest) = stamped(bytes);
-            let slot = position(&bytes, &digest);
-            let i = at.index(bytes.len() - LEN);
-            bytes[if i >= slot { i + LEN } else { i }] ^= flip;
-            let restamped = Elf::read(&mut bytes[..]).map(|mut elf| elf.stamp());
-            prop_assert!(!matches!(restamped, Ok(d) if d == digest));
-        }
+    #[proptest]
+    fn tampering_outside_the_slot_breaks_the_stamp(
+        #[strategy(any_image())] bytes: Vec<u8>,
+        at: Index,
+        #[strategy(1..=u8::MAX)] flip: u8,
+    ) {
+        let (mut bytes, digest) = stamped(bytes);
+        let slot = position(&bytes, &digest);
+        let i = at.index(bytes.len() - LEN);
+        bytes[if i >= slot { i + LEN } else { i }] ^= flip;
+        let restamped = Elf::read(&mut bytes[..]).map(|mut elf| elf.stamp());
+        prop_assert!(!matches!(restamped, Ok(d) if d == digest));
+    }
 
-        #[test]
-        fn rejects_any_slot_that_is_not_digest_sized(len in (0..128usize).prop_filter("not LEN", |&n| n != LEN)) {
-            let bytes = image(b"before", &vec![0; len], b"after");
-            prop_assert!(matches!(Elf::read(bytes), Err(StampError::WrongSize(n)) if n == len as u64));
-        }
+    #[proptest]
+    fn rejects_any_slot_that_is_not_digest_sized(
+        #[strategy((0..128usize).prop_filter("not LEN", |&n| n != LEN))] len: usize,
+    ) {
+        let bytes = image(b"before", &vec![0; len], b"after");
+        assert_matches!(Elf::read(bytes).err(), Some(StampError::WrongSize(n)) if n == len as u64);
     }
 
     #[rstest]
@@ -186,17 +188,14 @@ mod tests {
         let id = obj.add_section(Vec::new(), b".data".to_vec(), SectionKind::Data);
         obj.append_section_data(id, b"payload", 1);
 
-        assert!(matches!(
-            Elf::read(obj.write().unwrap()),
-            Err(StampError::MissingSection)
-        ));
+        assert_matches!(
+            Elf::read(obj.write().unwrap()).err(),
+            Some(StampError::MissingSection)
+        );
     }
 
     #[rstest]
     fn rejects_bytes_that_are_not_an_object_file() {
-        assert!(matches!(
-            Elf::read(b"not an elf"),
-            Err(StampError::Parse(_))
-        ));
+        assert_matches!(Elf::read(b"not an elf").err(), Some(StampError::Parse(_)));
     }
 }
