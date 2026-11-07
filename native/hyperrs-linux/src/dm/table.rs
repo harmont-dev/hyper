@@ -1,14 +1,15 @@
 use super::name::MAPPER_PREFIX;
 use super::{DmName, ParseDmDeviceError, ParseThinIdError, ThinId};
 use crate::loopdev::LoopDevice;
+use derive_more::Display;
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, SafePathBuf, StrictComponents};
-use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(bound(F: SlotPath))]
 pub enum DmTable<F> {
     Linear(LinearTable<F>),
     Snapshot(SnapshotTable<F>),
@@ -25,13 +26,16 @@ pub enum Slot {
     Data,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Source<F> {
+    #[display("{}", _0.path().as_path().display())]
     Device(DmName),
+    #[display(bound(F: SlotPath))]
+    #[display("{}", _0.slot_path().as_path().display())]
     File(F),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
 pub enum Persistence {
     #[display("P")]
     Persistent,
@@ -39,14 +43,21 @@ pub enum Persistence {
     Transient,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(bound(F: SlotPath))]
+#[display("0 {sectors} linear {origin} 0")]
 pub struct LinearTable<F> {
     pub sectors: u64,
     pub origin: Source<F>,
 }
 
 /// `dm-snapshot` table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(bound(F: SlotPath))]
+#[display(
+    "0 {sectors} snapshot {origin} {} {persistence} {chunk}",
+    cow.slot_path().as_path().display()
+)]
 pub struct SnapshotTable<F> {
     pub sectors: u64,
     pub origin: Source<F>,
@@ -56,7 +67,13 @@ pub struct SnapshotTable<F> {
 }
 
 /// `dm-thin` pool table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(bound(F: SlotPath))]
+#[display(
+    "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
+    metadata.slot_path().as_path().display(),
+    data.slot_path().as_path().display()
+)]
 pub struct ThinPoolTable<F> {
     pub sectors: u64,
     pub metadata: F,
@@ -66,7 +83,13 @@ pub struct ThinPoolTable<F> {
 }
 
 /// `dm-thin` tables.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(bound(F: SlotPath))]
+#[display(
+    "0 {sectors} thin {} {id}{}",
+    pool.path().as_path().display(),
+    origin.as_ref().map(|o| format!(" {o}")).unwrap_or_default()
+)]
 pub struct ThinTable<F> {
     pub sectors: u64,
     pub pool: DmName,
@@ -185,67 +208,6 @@ impl<F> DmTable<F> {
             }
         };
         first.into_iter().chain(second)
-    }
-}
-
-impl<F: SlotPath> fmt::Display for Source<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Source::Device(dev) => write!(f, "{}", dev.path().as_path().display()),
-            Source::File(file) => write!(f, "{}", file.slot_path().as_path().display()),
-        }
-    }
-}
-
-impl<F: SlotPath> fmt::Display for DmTable<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn path<F: SlotPath>(p: &F) -> std::path::Display<'_> {
-            p.slot_path().as_path().display()
-        }
-        match self {
-            DmTable::Linear(LinearTable { sectors, origin }) => {
-                write!(f, "0 {sectors} linear {origin} 0")
-            }
-            DmTable::Snapshot(SnapshotTable {
-                sectors,
-                origin,
-                cow,
-                persistence,
-                chunk,
-            }) => write!(
-                f,
-                "0 {sectors} snapshot {origin} {} {persistence} {chunk}",
-                path(cow)
-            ),
-            DmTable::ThinPool(ThinPoolTable {
-                sectors,
-                metadata,
-                data,
-                block_sectors,
-                low_water,
-            }) => write!(
-                f,
-                "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
-                path(metadata),
-                path(data)
-            ),
-            DmTable::Thin(ThinTable {
-                sectors,
-                pool,
-                id,
-                origin,
-            }) => {
-                write!(
-                    f,
-                    "0 {sectors} thin {} {id}",
-                    pool.path().as_path().display()
-                )?;
-                match origin {
-                    Some(origin) => write!(f, " {origin}"),
-                    None => Ok(()),
-                }
-            }
-        }
     }
 }
 

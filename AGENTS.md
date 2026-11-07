@@ -209,6 +209,18 @@ If a case needs its own assertions, it is a separate test, not a row.
 - Add `@spec` to public functions. Dialyzer runs with `:unmatched_returns`,
   `:extra_return`, `:missing_return` and will fail the gate on a missing/wrong
   spec.
+- **Rust: derive, don't hand-write, boilerplate impls.** Use `derive_more`
+  (`Display`, `Deref`,
+  `AsRef`, `Into`, `Constructor`, …) instead of hand-written impls whose body
+  is mechanical — including format-string `Display` (`#[display("0 {sectors}
+  linear {origin} 0")]`) over a manual `fmt`. Add the dependency, or the
+  feature you need, to that crate's `Cargo.toml`. Gotchas:
+    - extra bounds go in their own attribute — `#[display(bound(F: Trait))]`
+      above `#[display("…", expr)]`, never combined in one;
+    - on an enum, put the `bound(...)` on the variant whose format uses it;
+    - never derive a constructor (`From`, `Constructor`) on a validated
+      newtype — its only way in must be the checked `TryFrom`/`FromStr`.
+  Hand-write an impl only when its body carries real logic.
 - Zero compiler warnings — `--warnings-as-errors` is enforced.
 - Conventional Commits, scoped to subsystem: `feat(fire_vmm): ...`,
   `fix(redist): ...`, `test(unit): ...`, `docs: ...`.

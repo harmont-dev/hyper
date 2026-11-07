@@ -1,6 +1,5 @@
 use hyperrs_linux::dm::{DmName, InvalidDmName, ParseDmDeviceError};
 use std::ffi::OsStr;
-use std::ops::Deref;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
@@ -16,7 +15,7 @@ pub enum NameError {
     NotHyper(DmName),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display, derive_more::Deref)]
 pub struct HyperDmName(DmName);
 
 impl HyperDmName {
@@ -43,14 +42,6 @@ impl FromStr for HyperDmName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse::<DmName>()?.try_into()
-    }
-}
-
-impl Deref for HyperDmName {
-    type Target = DmName;
-
-    fn deref(&self) -> &DmName {
-        &self.0
     }
 }
 

@@ -92,7 +92,7 @@ redundant_field_names = "allow"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "from", "into", "add", "debug"] }
+derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "deref", "from", "into", "add", "debug"] }
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
 hyperrs-firecracker = { path = "../hyperrs-firecracker" }
 hyperrs-fs = { path = "../hyperrs-fs" }
