@@ -113,7 +113,7 @@ defmodule Hyper.Node.Img.Publish do
   # (thin-provisioning-tools missing/broken) must fail the publish loudly
   # rather than degrade to an O(device) scan.
   @spec copy_divergence(Path.t(), non_neg_integer(), Path.t()) ::
-          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
+          {:ok, %{copied_bytes: non_neg_integer()}} | {:error, term()}
   defp copy_divergence(snap_dev, snap_id, write_dev) do
     with {:ok, spec} <- ThinPool.mappings(snap_id) do
       SuidHelper.Blockcopy.copy(snap_dev, write_dev, spec)

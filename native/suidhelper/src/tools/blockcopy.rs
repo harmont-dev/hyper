@@ -12,11 +12,13 @@ use derive_more::Constructor;
 use hyperrs_process::privilege::Root;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 
 /// A disk sector is 512 bytes by kernel convention, independent of the
 /// device's physical sector size.
 const SECTOR_BYTES: u64 = 512;
+
+const COPY_BUF_BYTES: usize = 1 << 20;
 
 /// A provisioned-range list, the JSON `thin-dump` emits: pool block size in
 /// 512-byte sectors, and `(begin, length)` ranges in pool blocks.
@@ -45,15 +47,11 @@ pub struct BlockcopyArgs {
     /// Copy only these block ranges (JSON file from `thin-dump`).
     #[arg(long, value_parser = range_spec_from_file)]
     ranges: RangeSpec,
-    /// Copy granularity in bytes.
-    #[arg(long, default_value_t = 1 << 20, value_parser = clap::value_parser!(u64).range(SECTOR_BYTES..))]
-    chunk_bytes: u64,
 }
 
 #[derive(Serialize)]
 pub struct CopyStats {
-    pub scanned_chunks: u64,
-    pub written_chunks: u64,
+    pub copied_bytes: u64,
 }
 
 /// Copy exactly `spec`'s block ranges from `src` into `dst` at identical
@@ -63,56 +61,27 @@ pub fn copy_ranges(
     src: &mut (impl Read + Seek),
     dst: &mut (impl Write + Seek),
     spec: &RangeSpec,
-    chunk_bytes: usize,
 ) -> io::Result<CopyStats> {
     let overflow = || io::Error::new(io::ErrorKind::InvalidInput, "range offset overflows u64");
     let block_bytes = spec
         .block_sectors
         .checked_mul(SECTOR_BYTES)
         .ok_or_else(overflow)?;
-    let mut buf = vec![0u8; chunk_bytes];
-    let mut stats = CopyStats {
-        scanned_chunks: 0,
-        written_chunks: 0,
-    };
-
-    for &(begin, len) in &spec.ranges {
-        let offset = begin.checked_mul(block_bytes).ok_or_else(overflow)?;
-        let mut remaining = len.checked_mul(block_bytes).ok_or_else(overflow)?;
-        src.seek(SeekFrom::Start(offset))?;
-        dst.seek(SeekFrom::Start(offset))?;
-
-        while remaining > 0 {
-            let want = remaining.min(chunk_bytes as u64) as usize;
-            let n = read_full(src, &mut buf[..want])?;
-            if n == 0 {
-                // Device shorter than the mapping claims: stop this range.
-                break;
-            }
-            dst.write_all(&buf[..n])?;
-            stats.scanned_chunks += 1;
-            stats.written_chunks += 1;
-            remaining -= n as u64;
-            if n < want {
-                break;
-            }
-        }
-    }
+    let mut dst = BufWriter::with_capacity(COPY_BUF_BYTES, dst);
+    let copied_bytes = spec
+        .ranges
+        .iter()
+        .map(|&(begin, len)| {
+            let offset = begin.checked_mul(block_bytes).ok_or_else(overflow)?;
+            let len = len.checked_mul(block_bytes).ok_or_else(overflow)?;
+            src.seek(SeekFrom::Start(offset))?;
+            dst.seek(SeekFrom::Start(offset))?;
+            io::copy(&mut src.by_ref().take(len), &mut dst)
+        })
+        .sum::<io::Result<u64>>()?;
 
     dst.flush()?;
-    Ok(stats)
-}
-
-// `Read::read` may return short counts on block devices; fill the buffer or hit EOF.
-fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match r.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
-        }
-    }
-    Ok(filled)
+    Ok(CopyStats { copied_bytes })
 }
 
 #[derive(Constructor)]
@@ -130,9 +99,7 @@ impl IsTool for Blockcopy {
         let mut dst = OpenOptions::new()
             .write(true)
             .open(self.args.dst.path().as_path())?;
-        let chunk = self.args.chunk_bytes as usize;
-
-        copy_ranges(&mut src, &mut dst, &self.args.ranges, chunk)
+        copy_ranges(&mut src, &mut dst, &self.args.ranges)
     }
 
     fn parse(&self, res: Self::RunT) -> Result<CopyStats, Box<dyn std::error::Error>> {
