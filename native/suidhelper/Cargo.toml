@@ -84,6 +84,7 @@ redundant_field_names = "allow"
 
 [dependencies]
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "deref", "from", "into", "add", "debug"] }
+enum_dispatch = "0.3"
 hyperrs-elfsum = { path = "../hyperrs-elfsum" }
 hyperrs-firecracker = { path = "../hyperrs-firecracker" }
 hyperrs-fs = { path = "../hyperrs-fs" }

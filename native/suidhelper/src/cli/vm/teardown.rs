@@ -14,7 +14,7 @@
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
 use super::VmOut;
-use crate::cli::DispatchError;
+use crate::cli::{DispatchError, Op};
 use crate::config::Config;
 use crate::network;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
@@ -56,18 +56,21 @@ pub enum CgroupError {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TeardownArgs {
+pub struct Teardown {
     #[serde_as(as = "DisplayFromStr")]
     id: VmId,
     uid: Option<u32>,
 }
 
-pub fn run(
-    TeardownArgs { id, uid }: TeardownArgs,
-    token: &mut Unprivileged,
-) -> Result<VmOut, DispatchError> {
-    teardown(&id, uid, token)?;
-    Ok(VmOut::ToreDown)
+impl Op for Teardown {
+    type Output = VmOut;
+    type Error = DispatchError;
+
+    fn run(self, mut token: Unprivileged) -> Result<VmOut, DispatchError> {
+        let Teardown { id, uid } = self;
+        teardown(&id, uid, &mut token)?;
+        Ok(VmOut::ToreDown)
+    }
 }
 
 pub fn teardown(

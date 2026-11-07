@@ -11,6 +11,8 @@
 //! live in [`hyperrs_firecracker::jailer`]; this module is only the clap surface plus
 //! the trusted-config resolution that feeds them.
 
+use super::VmOut;
+use crate::cli::{Op, OpError};
 use crate::config::{BinError, Config};
 use crate::id::IdError;
 use hyperrs_firecracker::jailer::chroot::JailLayout;
@@ -38,7 +40,7 @@ pub enum JailerError {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LaunchArgs {
+pub struct Launch {
     /// Microvm id; becomes the chroot subdirectory name.
     #[serde_as(as = "DisplayFromStr")]
     id: VmId,
@@ -76,13 +78,16 @@ impl From<CpuMaxArgs> for CpuMax {
 /// On success this never returns (the process image is replaced); the `Ok` arm
 /// is therefore [`std::convert::Infallible`]. Every failure is returned as
 /// [`JailerError`] for the caller to print and exit non-zero.
-pub fn run(args: LaunchArgs, token: Unprivileged) -> ! {
-    let Err(e) = try_run(args, token);
-    eprintln!("{e}");
-    std::process::exit(2)
+impl Op for Launch {
+    type Output = VmOut;
+    type Error = JailerError;
+
+    fn run(self, token: Unprivileged) -> Result<VmOut, JailerError> {
+        try_run(self, token).map(|never| match never {})
+    }
 }
 
-fn try_run(args: LaunchArgs, token: Unprivileged) -> Result<Infallible, JailerError> {
+fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError> {
     let config = Config::get();
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
@@ -125,14 +130,16 @@ fn try_run(args: LaunchArgs, token: Unprivileged) -> Result<Infallible, JailerEr
         .invoke(token)
 }
 
+impl OpError for JailerError {}
+
 #[cfg(test)]
 mod tests {
-    use super::LaunchArgs;
+    use super::Launch;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
     use serde_json::{json, Value};
 
-    fn parse(id: &str, extra: Value) -> Result<LaunchArgs, serde_json::Error> {
+    fn parse(id: &str, extra: Value) -> Result<Launch, serde_json::Error> {
         let mut request = json!({"id": id, "uid": 900_001, "gid": 900_001});
         request
             .as_object_mut()

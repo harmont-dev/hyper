@@ -1,7 +1,11 @@
-use crate::cli::OpError;
+use crate::cli::{Op, OpError};
 use crate::network::{self, host_init::HostInitError};
 use hyperrs_process::privilege::Unprivileged;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostInit {}
 
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
@@ -9,9 +13,14 @@ pub enum HostInitOut {
     HostReady,
 }
 
-pub fn run(token: &mut Unprivileged) -> Result<HostInitOut, HostInitError> {
-    network::host_init(token)?;
-    Ok(HostInitOut::HostReady)
+impl Op for HostInit {
+    type Output = HostInitOut;
+    type Error = HostInitError;
+
+    fn run(self, mut token: Unprivileged) -> Result<HostInitOut, HostInitError> {
+        network::host_init(&mut token)?;
+        Ok(HostInitOut::HostReady)
+    }
 }
 
 impl OpError for HostInitError {}

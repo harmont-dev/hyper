@@ -1,5 +1,5 @@
-use crate::cli::OpError;
 use crate::cli::ThinIdNumber;
+use crate::cli::{Op, OpError};
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, TableError};
 use hyperrs_linux::dm::{
@@ -89,7 +89,15 @@ pub struct Remove {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Device {
+pub struct Suspend {
+    #[serde_as(as = "DisplayFromStr")]
+    name: HyperDmName,
+}
+
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Resume {
     #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
 }
@@ -135,114 +143,147 @@ pub enum DmError {
     Bin(#[from] RootSafeBinError),
 }
 
-pub fn linear(
-    Linear {
-        name,
-        readonly,
-        sectors,
-        origin,
-    }: Linear,
-    token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
-    let table = DmTable::Linear(LinearTable { sectors, origin });
-    create(&name, access(readonly), table, token)
+impl Op for Linear {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Linear {
+            name,
+            readonly,
+            sectors,
+            origin,
+        } = self;
+        let table = DmTable::Linear(LinearTable { sectors, origin });
+        create(&name, access(readonly), table, &mut token)
+    }
 }
 
-pub fn snapshot(
-    Snapshot {
-        name,
-        readonly,
-        sectors,
-        origin,
-        cow,
-        chunk_sectors,
-    }: Snapshot,
-    token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
-    let table = DmTable::Snapshot(SnapshotTable {
-        sectors,
-        origin,
-        cow,
-        persistence: Persistence::Persistent,
-        chunk: chunk_sectors,
-    });
-    create(&name, access(readonly), table, token)
+impl Op for Snapshot {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Snapshot {
+            name,
+            readonly,
+            sectors,
+            origin,
+            cow,
+            chunk_sectors,
+        } = self;
+        let table = DmTable::Snapshot(SnapshotTable {
+            sectors,
+            origin,
+            cow,
+            persistence: Persistence::Persistent,
+            chunk: chunk_sectors,
+        });
+        create(&name, access(readonly), table, &mut token)
+    }
 }
 
-pub fn thin_pool(
-    ThinPool {
-        name,
-        sectors,
-        metadata,
-        data,
-        block_sectors,
-        low_water,
-    }: ThinPool,
-    token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
-    let table = DmTable::ThinPool(ThinPoolTable {
-        sectors,
-        metadata,
-        data,
-        block_sectors,
-        low_water,
-    });
-    create(&name, Access::ReadWrite, table, token)
+impl Op for ThinPool {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let ThinPool {
+            name,
+            sectors,
+            metadata,
+            data,
+            block_sectors,
+            low_water,
+        } = self;
+        let table = DmTable::ThinPool(ThinPoolTable {
+            sectors,
+            metadata,
+            data,
+            block_sectors,
+            low_water,
+        });
+        create(&name, Access::ReadWrite, table, &mut token)
+    }
 }
 
-pub fn thin(
-    Thin {
-        name,
-        sectors,
-        pool,
-        thin_id,
-        origin,
-    }: Thin,
-    token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
-    let table = DmTable::Thin(ThinTable {
-        sectors,
-        pool: (*pool).clone(),
-        id: thin_id,
-        origin,
-    });
-    create(&name, Access::ReadWrite, table, token)
+impl Op for Thin {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Thin {
+            name,
+            sectors,
+            pool,
+            thin_id,
+            origin,
+        } = self;
+        let table = DmTable::Thin(ThinTable {
+            sectors,
+            pool: (*pool).clone(),
+            id: thin_id,
+            origin,
+        });
+        create(&name, Access::ReadWrite, table, &mut token)
+    }
 }
 
-pub fn remove(Remove { name, retry }: Remove, token: &mut Unprivileged) -> Result<DmOut, DmError> {
-    let mode = if retry {
-        RemoveMode::Retry
-    } else {
-        RemoveMode::Once
-    };
-    let dm = dmsetup()?;
-    let _root = token.elevate()?;
-    dm.device(&name).remove(mode)?;
-    Ok(DmOut::Removed)
+impl Op for Remove {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Remove { name, retry } = self;
+        let mode = if retry {
+            RemoveMode::Retry
+        } else {
+            RemoveMode::Once
+        };
+        let dm = dmsetup()?;
+        let _root = token.elevate()?;
+        dm.device(&name).remove(mode)?;
+        Ok(DmOut::Removed)
+    }
 }
 
-pub fn suspend(Device { name }: Device, token: &mut Unprivileged) -> Result<DmOut, DmError> {
-    let dm = dmsetup()?;
-    let _root = token.elevate()?;
-    dm.device(&name).suspend()?;
-    Ok(DmOut::Suspended)
+impl Op for Suspend {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Suspend { name } = self;
+        let dm = dmsetup()?;
+        let _root = token.elevate()?;
+        dm.device(&name).suspend()?;
+        Ok(DmOut::Suspended)
+    }
 }
 
-pub fn resume(Device { name }: Device, token: &mut Unprivileged) -> Result<DmOut, DmError> {
-    let dm = dmsetup()?;
-    let _root = token.elevate()?;
-    dm.device(&name).resume()?;
-    Ok(DmOut::Resumed)
+impl Op for Resume {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Resume { name } = self;
+        let dm = dmsetup()?;
+        let _root = token.elevate()?;
+        dm.device(&name).resume()?;
+        Ok(DmOut::Resumed)
+    }
 }
 
-pub fn message(
-    Message { name, message }: Message,
-    token: &mut Unprivileged,
-) -> Result<DmOut, DmError> {
-    let dm = dmsetup()?;
-    let _root = token.elevate()?;
-    dm.thin_pool(&name)?.send(message)?;
-    Ok(DmOut::Messaged)
+impl Op for Message {
+    type Output = DmOut;
+    type Error = DmError;
+
+    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
+        let Message { name, message } = self;
+        let dm = dmsetup()?;
+        let _root = token.elevate()?;
+        dm.thin_pool(&name)?.send(message)?;
+        Ok(DmOut::Messaged)
+    }
 }
 
 fn dmsetup() -> Result<dm::Dmsetup, RootSafeBinError> {

@@ -3,7 +3,7 @@
 //! inside a VM chroot, via the `ChrootJail` builder.
 
 use super::VmOut;
-use crate::cli::{MapperPath, OpError};
+use crate::cli::{MapperPath, Op, OpError};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
@@ -35,7 +35,7 @@ pub enum JailStageError {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StageArgs {
+pub struct Stage {
     #[serde_as(as = "DisplayFromStr")]
     id: VmId,
     /// Host kernel image path (under /srv/hyper); staged as `<chroot>/vmlinux`.
@@ -51,25 +51,31 @@ pub struct StageArgs {
     gid: u32,
 }
 
-pub fn run(args: StageArgs, token: &mut Unprivileged) -> Result<VmOut, JailStageError> {
-    let config = Config::get();
-    let range = config.uid_gid_range();
-    let owner = JailOwner {
-        uid: range.uid(args.uid)?,
-        gid: range.gid(args.gid)?,
-    };
-    let kernel = KernelImage::open(&args.kernel)?;
-    let jail_base = config.jail_base();
-    let layout = JailLayout::new(&jail_base, &args.id);
-    let _root = token.elevate()?;
-    let root = layout.open_root()?;
-    let device = args.device.open()?;
-    root.builder(owner.into())
-        .kernel(&kernel)
-        .rootfs(&device)
-        .tun(config.network().is_some())
-        .build()?;
-    Ok(VmOut::Staged)
+impl Op for Stage {
+    type Output = VmOut;
+    type Error = JailStageError;
+
+    fn run(self, mut token: Unprivileged) -> Result<VmOut, JailStageError> {
+        let args = self;
+        let config = Config::get();
+        let range = config.uid_gid_range();
+        let owner = JailOwner {
+            uid: range.uid(args.uid)?,
+            gid: range.gid(args.gid)?,
+        };
+        let kernel = KernelImage::open(&args.kernel)?;
+        let jail_base = config.jail_base();
+        let layout = JailLayout::new(&jail_base, &args.id);
+        let _root = token.elevate()?;
+        let root = layout.open_root()?;
+        let device = args.device.open()?;
+        root.builder(owner.into())
+            .kernel(&kernel)
+            .rootfs(&device)
+            .tun(config.network().is_some())
+            .build()?;
+        Ok(VmOut::Staged)
+    }
 }
 
 impl OpError for JailStageError {}

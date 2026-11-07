@@ -9,11 +9,13 @@ pub mod vm;
 
 use crate::config::Config;
 use crate::dm::HyperDmName;
+use enum_dispatch::enum_dispatch;
 use hyperrs_linux::dm::ThinId;
 use hyperrs_process::privilege::{self, Unprivileged};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
 use std::ffi::OsString;
+use std::process::ExitCode;
 use thiserror::Error as ThisError;
 
 /// Errors of the dispatch layer: an invalid configured binary (`RootSafeBin`), the
@@ -31,15 +33,15 @@ pub enum DispatchError {
     Retryable(Box<dyn std::error::Error>),
 }
 
-pub const EXIT_FAILURE: i32 = 2;
-pub const EXIT_RETRYABLE: i32 = 75;
+pub const EXIT_FAILURE: u8 = 2;
+pub const EXIT_RETRYABLE: u8 = 75;
 
 impl DispatchError {
     pub fn tool(e: impl std::error::Error + 'static) -> Self {
         DispatchError::Tool(Box::new(e))
     }
 
-    pub fn exit_code(&self) -> i32 {
+    pub fn exit_code(&self) -> u8 {
         match self {
             DispatchError::Retryable(_) => EXIT_RETRYABLE,
             DispatchError::Privilege(_) | DispatchError::Tool(_) => EXIT_FAILURE,
@@ -49,6 +51,26 @@ impl DispatchError {
 
 pub trait OpError: std::error::Error + 'static {}
 
+impl OpError for std::convert::Infallible {}
+
+pub trait Op {
+    type Output: Serialize;
+    type Error: Into<DispatchError>;
+
+    fn run(self, token: Unprivileged) -> Result<Self::Output, Self::Error>;
+}
+
+#[enum_dispatch]
+pub trait Dispatch {
+    fn dispatch(self, token: Unprivileged) -> Result<serde_json::Value, DispatchError>;
+}
+
+impl<T: Op> Dispatch for T {
+    fn dispatch(self, token: Unprivileged) -> Result<serde_json::Value, DispatchError> {
+        to_json(self.run(token).map_err(Into::into)?)
+    }
+}
+
 impl<E: OpError> From<E> for DispatchError {
     fn from(e: E) -> Self {
         DispatchError::tool(e)
@@ -57,12 +79,6 @@ impl<E: OpError> From<E> for DispatchError {
 
 pub fn to_json(out: impl Serialize) -> Result<serde_json::Value, DispatchError> {
     serde_json::to_value(out).map_err(DispatchError::tool)
-}
-
-fn reply<T: Serialize, E: Into<DispatchError>>(
-    result: Result<T, E>,
-) -> Result<serde_json::Value, DispatchError> {
-    to_json(result.map_err(Into::into)?)
 }
 
 pub struct MapperPath;
@@ -82,27 +98,28 @@ impl<'de> DeserializeAs<'de, ThinId> for ThinIdNumber {
     }
 }
 
+#[enum_dispatch(Dispatch)]
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    VmPrepare(vm::prepare::PrepareArgs),
-    VmLaunch(vm::launch::LaunchArgs),
-    VmStage(vm::stage::StageArgs),
-    VmGrantApi(vm::grant::GrantArgs),
-    VmGrantVsock(vm::grant::GrantArgs),
-    VmTeardown(vm::teardown::TeardownArgs),
+    VmPrepare(vm::prepare::Prepare),
+    VmLaunch(vm::launch::Launch),
+    VmStage(vm::stage::Stage),
+    VmGrantApi(vm::grant::GrantApi),
+    VmGrantVsock(vm::grant::GrantVsock),
+    VmTeardown(vm::teardown::Teardown),
     DmLinear(dm::Linear),
     DmSnapshot(dm::Snapshot),
     DmThinPool(dm::ThinPool),
     DmThin(dm::Thin),
     DmRemove(dm::Remove),
-    DmSuspend(dm::Device),
-    DmResume(dm::Device),
+    DmSuspend(dm::Suspend),
+    DmResume(dm::Resume),
     DmMessage(dm::Message),
-    ThinCopy(thin_copy::ThinCopyArgs),
-    HostInit {},
-    SysTest {},
-    Version {},
+    ThinCopy(thin_copy::ThinCopy),
+    HostInit(host_init::HostInit),
+    SysTest(sys_test::SysTest),
+    Version(version::Version),
 }
 
 #[derive(Debug, ThisError)]
@@ -123,50 +140,38 @@ pub fn parse_request(mut args: impl Iterator<Item = OsString>) -> Result<Request
     Ok(serde_json::from_str(&request)?)
 }
 
-pub fn run(mut token: Unprivileged) {
+pub fn run(token: Unprivileged) -> ExitCode {
     let request = match parse_request(std::env::args_os().skip(1)) {
         Ok(request) => request,
-        Err(e) => fail(&DispatchError::tool(e)),
+        Err(e) => return fail(&DispatchError::tool(e)),
     };
 
     // `version` is a pure self-report: it touches neither config nor privileges,
     // so render it before any setup that could fail (e.g. a missing config file).
     // Privileges are already dropped to the real uid by a pre-main constructor
     // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
-    if !matches!(request, Request::Version {}) {
-        Config::init();
+    if !matches!(request, Request::Version(_)) {
+        if let Err(e) = Config::init() {
+            eprintln!("hyper-suidhelper: {e}");
+            return ExitCode::from(EXIT_FAILURE);
+        }
     }
 
-    let output = match request {
-        Request::VmPrepare(args) => reply(vm::prepare::run(args, &mut token)),
-        Request::VmLaunch(args) => vm::launch::run(args, token),
-        Request::VmStage(args) => reply(vm::stage::run(args, &mut token)),
-        Request::VmGrantApi(args) => reply(vm::grant::run(args, vm::API_SOCKET, &mut token)),
-        Request::VmGrantVsock(args) => reply(vm::grant::run(args, vm::VSOCK_SOCKET, &mut token)),
-        Request::VmTeardown(args) => reply(vm::teardown::run(args, &mut token)),
-        Request::DmLinear(args) => reply(dm::linear(args, &mut token)),
-        Request::DmSnapshot(args) => reply(dm::snapshot(args, &mut token)),
-        Request::DmThinPool(args) => reply(dm::thin_pool(args, &mut token)),
-        Request::DmThin(args) => reply(dm::thin(args, &mut token)),
-        Request::DmRemove(args) => reply(dm::remove(args, &mut token)),
-        Request::DmSuspend(args) => reply(dm::suspend(args, &mut token)),
-        Request::DmResume(args) => reply(dm::resume(args, &mut token)),
-        Request::DmMessage(args) => reply(dm::message(args, &mut token)),
-        Request::ThinCopy(args) => reply(thin_copy::run(args, &mut token)),
-        Request::HostInit {} => reply(host_init::run(&mut token)),
-        Request::SysTest {} => reply(sys_test::run(&mut token)),
-        Request::Version {} => to_json(version::render()),
-    };
-
-    match output.and_then(|value| serde_json::to_string(&value).map_err(DispatchError::tool)) {
-        Ok(json) => println!("{json}"),
+    let output = request
+        .dispatch(token)
+        .and_then(|value| serde_json::to_string(&value).map_err(DispatchError::tool));
+    match output {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
         Err(e) => fail(&e),
     }
 }
 
-fn fail(e: &DispatchError) -> ! {
+fn fail(e: &DispatchError) -> ExitCode {
     eprintln!("{e}");
-    std::process::exit(e.exit_code())
+    ExitCode::from(e.exit_code())
 }
 
 #[cfg(test)]

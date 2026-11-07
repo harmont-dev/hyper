@@ -24,15 +24,14 @@ macro_rules! setuid_main {
         #[link_section = ".init_array.00000"]
         static __HYPER_DROP_PRIVILEGES: extern "C" fn() = $crate::privilege::drop_to_real;
 
-        fn main() {
-            let token = match $crate::privilege::Unprivileged::take() {
-                Ok(token) => token,
+        fn main() -> ::std::process::ExitCode {
+            match $crate::privilege::Unprivileged::take() {
+                Ok(token) => $entry(token),
                 Err(e) => {
                     ::std::eprintln!("hyper-suidhelper: {e}");
-                    ::std::process::exit(2);
+                    ::std::process::ExitCode::from(2)
                 }
-            };
-            $entry(token)
+            }
         }
     };
 }

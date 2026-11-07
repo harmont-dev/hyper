@@ -1,6 +1,6 @@
 use crate::cli::MapperPath;
-use crate::cli::OpError;
 use crate::cli::ThinIdNumber;
+use crate::cli::{Op, OpError};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
@@ -27,7 +27,7 @@ const CHUNK_BYTES: usize = 1 << 20;
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ThinCopyArgs {
+pub struct ThinCopy {
     #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
     #[serde_as(as = "DisplayFromStr")]
@@ -74,27 +74,33 @@ pub struct CopyStats {
     pub written_chunks: u64,
 }
 
-pub fn run(args: ThinCopyArgs, token: &mut Unprivileged) -> Result<CopyStats, ThinCopyError> {
-    let config = Config::get();
-    let dmsetup = dm::Dmsetup::new(config.dmsetup()?);
-    let thin_dump = dump::ThinDump::new(config.thin_dump()?);
-    let meta = args.meta.path()?;
+impl Op for ThinCopy {
+    type Output = CopyStats;
+    type Error = ThinCopyError;
 
-    let dumped = {
-        let _root = token.elevate()?;
-        dump_reserved(&dmsetup, &thin_dump, &args.pool, &meta, args.thin_id)?
-    };
-    let mappings = dumped.parse()?.mappings(args.thin_id)?;
+    fn run(self, mut token: Unprivileged) -> Result<CopyStats, ThinCopyError> {
+        let args = self;
+        let config = Config::get();
+        let dmsetup = dm::Dmsetup::new(config.dmsetup()?);
+        let thin_dump = dump::ThinDump::new(config.thin_dump()?);
+        let meta = args.meta.path()?;
 
-    let (mut src, mut dst) = {
-        let _root = token.elevate()?;
-        let src = File::open(args.src.path().as_path())?;
-        let dst = OpenOptions::new()
-            .write(true)
-            .open(args.dst.path().as_path())?;
-        (src, dst)
-    };
-    Ok(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
+        let dumped = {
+            let _root = token.elevate()?;
+            dump_reserved(&dmsetup, &thin_dump, &args.pool, &meta, args.thin_id)?
+        };
+        let mappings = dumped.parse()?.mappings(args.thin_id)?;
+
+        let (mut src, mut dst) = {
+            let _root = token.elevate()?;
+            let src = File::open(args.src.path().as_path())?;
+            let dst = OpenOptions::new()
+                .write(true)
+                .open(args.dst.path().as_path())?;
+            (src, dst)
+        };
+        Ok(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
+    }
 }
 
 fn dump_reserved(
