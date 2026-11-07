@@ -2,15 +2,18 @@
 //! `vm stage`: stage the kernel file and create the rootfs device node
 //! inside a VM chroot, via the `ChrootJail` builder.
 
+use super::VmOut;
+use crate::cli::{MapperPath, OpError};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
-use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::OpenDeviceError;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
+use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -29,26 +32,26 @@ pub enum JailStageError {
     Privilege(#[from] PrivilegeError),
 }
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StageArgs {
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
     /// Host kernel image path (under /srv/hyper); staged as `<chroot>/vmlinux`.
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     kernel: SafePathBuf<IsAbsolute, StrictComponents>,
     /// Host block device to mirror as `<chroot>/rootfs` (e.g. /dev/loop0 or
     /// /dev/mapper/hyper-vm1). Its major:minor are read by the helper.
-    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    #[serde_as(as = "MapperPath")]
     device: HyperDmName,
     /// UID to own the staged files.
-    #[arg(long)]
     uid: u32,
     /// GID to own the staged files.
-    #[arg(long)]
     gid: u32,
 }
 
-pub fn run(args: StageArgs, token: &mut Unprivileged) -> Result<(), JailStageError> {
+pub fn run(args: StageArgs, token: &mut Unprivileged) -> Result<VmOut, JailStageError> {
     let config = Config::get();
     let range = config.uid_gid_range();
     let owner = JailOwner {
@@ -61,10 +64,12 @@ pub fn run(args: StageArgs, token: &mut Unprivileged) -> Result<(), JailStageErr
     let _root = token.elevate()?;
     let root = layout.open_root()?;
     let device = args.device.open()?;
-    Ok(root
-        .builder(owner.into())
+    root.builder(owner.into())
         .kernel(&kernel)
         .rootfs(&device)
         .tun(config.network().is_some())
-        .build()?)
+        .build()?;
+    Ok(VmOut::Staged)
 }
+
+impl OpError for JailStageError {}

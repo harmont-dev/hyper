@@ -26,17 +26,22 @@ defmodule Hyper.SuidHelper do
   @type err :: {non_neg_integer(), String.t()}
 
   @doc false
-  # Run the helper with `argv`. Returns `{:ok, decoded_json}` on exit 0,
-  # `{:error, {code, message}}` otherwise. Shared transport for the tool
-  # submodules; not part of the public API.
-  @spec exec([String.t()]) :: {:ok, map()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.exec", include: [:argv])
-  def exec(argv) do
-    case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv, stderr_to_stdout: true) do
+  # Run the helper with `request` as its single JSON argument. Returns
+  # `{:ok, decoded_json}` on exit 0, `{:error, {code, message}}` otherwise.
+  # Shared transport for the tool submodules; not part of the public API.
+  @spec exec(%{required(:op) => String.t(), optional(atom()) => term()}) ::
+          {:ok, map()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.exec", include: [:request])
+  def exec(request) do
+    case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv(request), stderr_to_stdout: true) do
       {out, 0} -> {:ok, Jason.decode!(out)}
       {out, code} -> {:error, {code, String.trim(out)}}
     end
   end
+
+  @doc false
+  @spec argv(%{required(:op) => String.t(), optional(atom()) => term()}) :: [String.t()]
+  def argv(request), do: [Jason.encode!(request)]
 
   @doc """
   Run the helper's `sys-test` subcommand (proves it can promote to root). Returns
@@ -46,7 +51,7 @@ defmodule Hyper.SuidHelper do
   @spec sys_test() :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.sys_test")
   def sys_test do
-    case exec(["sys-test"]) do
+    case exec(%{op: "sys_test"}) do
       {:ok, %{"hyper_base" => base}} -> {:ok, base}
       {:error, _} = err -> err
     end
@@ -73,7 +78,7 @@ defmodule Hyper.SuidHelper do
   @spec host_init() :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.host_init")
   def host_init do
-    case exec(["host-init"]) do
+    case exec(%{op: "host_init"}) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -99,7 +104,7 @@ defmodule Hyper.SuidHelper do
   @spec verify_version() :: :ok | {:error, :version_mismatch | err()}
   @decorate with_span("Hyper.SuidHelper.verify_version")
   def verify_version do
-    case exec(["version"]) do
+    case exec(%{op: "version"}) do
       {:ok, %{"version" => v, "checksum_blake3" => c}} ->
         if v == Expected.version() and c == Expected.checksum_blake3(),
           do: :ok,

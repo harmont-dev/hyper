@@ -1,6 +1,8 @@
+use crate::cli::MapperPath;
+use crate::cli::OpError;
+use crate::cli::ThinIdNumber;
 use crate::config::Config;
 use crate::dm::HyperDmName;
-use clap::Args;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_fs::path;
 use hyperrs_linux::dm::thin_dump::{
@@ -11,28 +13,31 @@ use hyperrs_linux::loopdev::LoopDevNum;
 use hyperrs_process::binary::RootSafeBinError;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::fcntl::{Flock, FlockArg};
+use serde::Deserialize;
 use serde::Serialize;
+use serde_with::{serde_as, DisplayFromStr};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsFd;
 use thiserror::Error as ThisError;
 
 const SECTOR_BYTES: u64 = 512;
+const CHUNK_BYTES: usize = 1 << 20;
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThinCopyArgs {
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     pool: HyperDmName,
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     meta: LoopDevNum,
-    #[arg(long)]
+    #[serde_as(as = "ThinIdNumber")]
     thin_id: ThinId,
-    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    #[serde_as(as = "MapperPath")]
     src: HyperDmName,
-    #[arg(long, value_parser = HyperDmName::from_device_path)]
+    #[serde_as(as = "MapperPath")]
     dst: HyperDmName,
-    #[arg(long, default_value_t = 1 << 20, value_parser = clap::value_parser!(u64).range(SECTOR_BYTES..))]
-    chunk_bytes: u64,
 }
 
 #[derive(Debug, ThisError)]
@@ -89,12 +94,7 @@ pub fn run(args: ThinCopyArgs, token: &mut Unprivileged) -> Result<CopyStats, Th
             .open(args.dst.path().as_path())?;
         (src, dst)
     };
-    Ok(copy_ranges(
-        &mut src,
-        &mut dst,
-        &mappings,
-        args.chunk_bytes as usize,
-    )?)
+    Ok(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
 }
 
 fn dump_reserved(
@@ -186,6 +186,8 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     }
     Ok(filled)
 }
+
+impl OpError for ThinCopyError {}
 
 #[cfg(test)]
 mod tests {

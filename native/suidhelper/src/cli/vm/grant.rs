@@ -31,14 +31,16 @@
 //! the path) is `Pending`, not an error: firecracker has not created it yet, so
 //! the controller keeps probing.
 
+use super::VmOut;
 use crate::cli::DispatchError;
 use crate::config::Config;
-use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file::Owner;
 use hyperrs_fs::path::StrictComponent;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
+use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -55,34 +57,33 @@ impl GrantOpError {
     }
 }
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GrantArgs {
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
 }
 
-pub fn run(
-    args: &GrantArgs,
-    socket: &StrictComponent,
-    token: &mut Unprivileged,
-) -> Result<(), DispatchError> {
-    grant(&args.id, socket, token).map_err(|e| {
+impl From<GrantOpError> for DispatchError {
+    fn from(e: GrantOpError) -> Self {
         if e.is_pending() {
             DispatchError::Retryable(Box::new(e))
         } else {
             DispatchError::tool(e)
         }
-    })
+    }
 }
 
-fn grant(
-    id: &VmId,
+pub fn run(
+    GrantArgs { id }: GrantArgs,
     socket: &StrictComponent,
     token: &mut Unprivileged,
-) -> Result<(), GrantOpError> {
+) -> Result<VmOut, GrantOpError> {
     let jail_base = Config::get().jail_base();
-    let layout = JailLayout::new(&jail_base, id);
+    let layout = JailLayout::new(&jail_base, &id);
     let owner = Owner::caller();
     let _root = token.elevate()?;
-    Ok(layout.grant_socket(socket, owner)?)
+    layout.grant_socket(socket, owner)?;
+    Ok(VmOut::Granted)
 }

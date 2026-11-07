@@ -16,16 +16,15 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot", include: [:name])
   def create_snapshot(name, origin, cow_file, sectors) do
-    with {:ok, dev, _loops} <-
-           create("snapshot", name, sectors, ["--readonly" | snapshot_flags(origin, cow_file)]),
+    with {:ok, dev, _loops} <- create(snapshot(name, origin, cow_file, sectors, true)),
          do: {:ok, dev}
   end
 
   @spec create_linear(String.t(), Path.t(), pos_integer()) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_linear", include: [:name])
   def create_linear(name, origin, sectors) do
-    with {:ok, dev, _loops} <- create("linear", name, sectors, ["--readonly", "--origin", origin]),
-         do: {:ok, dev}
+    request = %{op: "dm_linear", name: name, readonly: true, sectors: sectors, origin: origin}
+    with {:ok, dev, _loops} <- create(request), do: {:ok, dev}
   end
 
   @doc """
@@ -44,18 +43,17 @@ defmodule Hyper.SuidHelper.Dmsetup do
         ) :: {:ok, Path.t(), Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_pool", include: [:name])
   def create_thin_pool(name, meta_file, data_file, sectors, block_sectors, low_water) do
-    flags = [
-      "--metadata",
-      meta_file,
-      "--data",
-      data_file,
-      "--block-sectors",
-      to_string(block_sectors),
-      "--low-water",
-      to_string(low_water)
-    ]
+    request = %{
+      op: "dm_thin_pool",
+      name: name,
+      sectors: sectors,
+      metadata: meta_file,
+      data: data_file,
+      block_sectors: block_sectors,
+      low_water: low_water
+    }
 
-    with {:ok, dev, %{"metadata" => meta_loop}} <- create("thin-pool", name, sectors, flags),
+    with {:ok, dev, %{"metadata" => meta_loop}} <- create(request),
          do: {:ok, dev, meta_loop}
   end
 
@@ -68,15 +66,23 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_thin_external", include: [:name])
   def create_thin_external(name, pool, dev_id, sectors, origin_dev) do
-    flags = ["--pool", pool, "--thin-id", to_string(dev_id), "--origin", origin_dev]
-    with {:ok, dev, _loops} <- create("thin", name, sectors, flags), do: {:ok, dev}
+    request = %{
+      op: "dm_thin",
+      name: name,
+      sectors: sectors,
+      pool: pool,
+      thin_id: dev_id,
+      origin: origin_dev
+    }
+
+    with {:ok, dev, _loops} <- create(request), do: {:ok, dev}
   end
 
   @doc "Remove the dm device `name`."
   @spec remove(String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.remove", include: [:name])
   def remove(name) do
-    case SuidHelper.exec(["dm", "remove", "--retry", name]) do
+    case SuidHelper.exec(%{op: "dm_remove", name: name, retry: true}) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -86,7 +92,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec suspend(String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.suspend", include: [:name])
   def suspend(name) do
-    case SuidHelper.exec(["dm", "suspend", name]) do
+    case SuidHelper.exec(%{op: "dm_suspend", name: name}) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -96,7 +102,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec resume(String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.resume", include: [:name])
   def resume(name) do
-    case SuidHelper.exec(["dm", "resume", name]) do
+    case SuidHelper.exec(%{op: "dm_resume", name: name}) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
@@ -112,8 +118,7 @@ defmodule Hyper.SuidHelper.Dmsetup do
           {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.create_snapshot_rw", include: [:name])
   def create_snapshot_rw(name, origin_dev, cow_file, sectors) do
-    with {:ok, dev, _loops} <-
-           create("snapshot", name, sectors, snapshot_flags(origin_dev, cow_file)),
+    with {:ok, dev, _loops} <- create(snapshot(name, origin_dev, cow_file, sectors, false)),
          do: {:ok, dev}
   end
 
@@ -121,30 +126,28 @@ defmodule Hyper.SuidHelper.Dmsetup do
   @spec message(String.t(), String.t()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Dmsetup.message", include: [:name, :message])
   def message(name, message) do
-    case SuidHelper.exec(["dm", "message", name, "--message", message]) do
+    case SuidHelper.exec(%{op: "dm_message", name: name, message: message}) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end
   end
 
-  @spec snapshot_flags(Path.t(), Path.t()) :: [String.t()]
-  defp snapshot_flags(origin, cow_file) do
-    [
-      "--origin",
-      origin,
-      "--cow",
-      cow_file,
-      "--chunk-sectors",
-      to_string(Hyper.Cfg.Img.chunk_sectors())
-    ]
+  @spec snapshot(String.t(), Path.t(), Path.t(), pos_integer(), boolean()) :: map()
+  defp snapshot(name, origin, cow_file, sectors, readonly) do
+    %{
+      op: "dm_snapshot",
+      name: name,
+      readonly: readonly,
+      sectors: sectors,
+      origin: origin,
+      cow: cow_file,
+      chunk_sectors: Hyper.Cfg.Img.chunk_sectors()
+    }
   end
 
-  @spec create(String.t(), String.t(), pos_integer(), [String.t()]) ::
-          {:ok, Path.t(), %{String.t() => Path.t()}} | {:error, err()}
-  defp create(target, name, sectors, flags) do
-    argv = ["dm", target, name, "--sectors", to_string(sectors)] ++ flags
-
-    case SuidHelper.exec(argv) do
+  @spec create(map()) :: {:ok, Path.t(), %{String.t() => Path.t()}} | {:error, err()}
+  defp create(request) do
+    case SuidHelper.exec(request) do
       {:ok, %{"device" => dev, "loops" => loops}} -> {:ok, dev, loops}
       {:error, _} = err -> err
     end

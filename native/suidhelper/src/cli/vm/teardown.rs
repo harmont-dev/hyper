@@ -13,10 +13,10 @@
 //! `rmdir` it (non-recursive). Both deletes are idempotent: a missing target
 //! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
 
+use super::VmOut;
 use crate::cli::DispatchError;
 use crate::config::Config;
 use crate::network;
-use clap::Args;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file;
@@ -24,6 +24,8 @@ use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
 use hyperrs_linux::cgroup::{self, Cgroup};
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::errno::Errno;
+use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use std::time::Duration;
 use thiserror::Error as ThisError;
 
@@ -51,15 +53,28 @@ pub enum CgroupError {
     Remove(#[source] Errno),
 }
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeardownArgs {
-    #[arg(long)]
-    pub id: VmId,
-    #[arg(long)]
-    pub uid: Option<u32>,
+    #[serde_as(as = "DisplayFromStr")]
+    id: VmId,
+    uid: Option<u32>,
 }
 
-pub fn run(id: &VmId, uid: Option<u32>, token: &mut Unprivileged) -> Result<(), DispatchError> {
+pub fn run(
+    TeardownArgs { id, uid }: TeardownArgs,
+    token: &mut Unprivileged,
+) -> Result<VmOut, DispatchError> {
+    teardown(&id, uid, token)?;
+    Ok(VmOut::ToreDown)
+}
+
+pub fn teardown(
+    id: &VmId,
+    uid: Option<u32>,
+    token: &mut Unprivileged,
+) -> Result<(), DispatchError> {
     let jail = remove_jail(id, token).map_err(DispatchError::tool);
     let net = if network::enabled() {
         network::teardown(id, uid, token).map_err(DispatchError::tool)

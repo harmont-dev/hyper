@@ -14,6 +14,7 @@ use assert_fs::prelude::*;
 use assert_fs::TempDir;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use serde_json::json;
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -106,29 +107,17 @@ impl Work {
         write_config(self.tmp.path(), &self.dir, tables)
     }
 
-    fn prepare(
-        &self,
-        cfg: &Path,
-        device: &str,
-        uid: &str,
-        gid: &str,
-    ) -> assert_cmd::assert::Assert {
+    fn prepare(&self, cfg: &Path, device: &str, uid: u32, gid: u32) -> assert_cmd::assert::Assert {
         run(
             cfg,
-            &[
-                "vm",
-                "stage",
-                "--id",
-                "id",
-                "--kernel",
-                self.kernel.to_str().unwrap(),
-                "--device",
-                device,
-                "--uid",
-                uid,
-                "--gid",
-                gid,
-            ],
+            json!({
+                "op": "vm_stage",
+                "id": "id",
+                "kernel": self.kernel,
+                "device": device,
+                "uid": uid,
+                "gid": gid,
+            }),
         )
     }
 }
@@ -163,7 +152,7 @@ fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
         return;
     };
 
-    let out = work.prepare(&cfg, &dev.path(), "900000", "900000");
+    let out = work.prepare(&cfg, &dev.path(), 900_000, 900_000);
     let dev_rdev = fs::metadata(dev.path()).map(|m| m.rdev());
     drop(dev);
 
@@ -196,7 +185,7 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root(work: Work) {
 
     let uid = 900_001;
     let gid = 900_002;
-    let out = work.prepare(&cfg, &dev.path(), &uid.to_string(), &gid.to_string());
+    let out = work.prepare(&cfg, &dev.path(), uid, gid);
     drop(dev);
     out.success();
 
@@ -211,11 +200,11 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root(work: Work) {
 }
 
 #[rstest]
-#[case::root_uid("0", "900000")]
-#[case::root_gid("900000", "0")]
-#[case::uid_below_range("1000", "900000")]
-#[case::gid_above_range("900000", "1000000")]
-fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: &str, #[case] gid: &str) {
+#[case::root_uid(0, 900_000)]
+#[case::root_gid(900_000, 0)]
+#[case::uid_below_range(1000, 900_000)]
+#[case::gid_above_range(900_000, 1_000_000)]
+fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: u32, #[case] gid: u32) {
     if !is_root() {
         eprintln!("SKIP prepare_refuses_ids_outside_range: needs root");
         return;
@@ -232,13 +221,13 @@ fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: &str, #[ca
 }
 
 // `vm stage` with a system device (not a loop / hyper-* dm) is
-// rejected by BlockDev parsing at clap parse time — exit 2, nothing built. This
-// case needs no root (clap rejects before the privilege boundary) but also no
+// rejected by BlockDev parsing at request parse time — exit 2, nothing built. This
+// case needs no root (parsing rejects before the privilege boundary) but also no
 // device, so it always runs.
 #[rstest]
 fn prepare_rejects_system_device_operand(work: Work) {
     let cfg = work.config("");
-    work.prepare(&cfg, "/dev/sda", "900000", "900000").failure();
+    work.prepare(&cfg, "/dev/sda", 900_000, 900_000).failure();
 }
 
 // `vm teardown` of a real chroot succeeds; the cgroup leaf is given as a
@@ -254,7 +243,7 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
     let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
 
-    let out = run(&cfg, &["vm", "teardown", "--id", "id"]).success();
+    let out = run(&cfg, json!({"op": "vm_teardown", "id": "id"})).success();
     let json = stdout_json(&out);
     assert_eq!(json["result"], "tore_down");
     assert!(!chroot.exists(), "chroot must be gone");
@@ -270,15 +259,15 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
 fn remove_refuses_an_invalid_id(work: Work, #[case] id: &str) {
     let cfg = work.config("");
 
-    run(&cfg, &["vm", "teardown", "--id", id]).code(2);
+    run(&cfg, json!({"op": "vm_teardown", "id": id})).code(2);
     assert!(work.chroot.exists(), "chroot must survive a refused remove");
 }
 
 #[rstest]
-#[case::api_not_yet("grant-api", "id", 75)]
-#[case::vsock_not_yet("grant-vsock", "id", 75)]
-#[case::api_refused("grant-api", "../id", 2)]
-#[case::vsock_refused("grant-vsock", "a/b", 2)]
+#[case::api_not_yet("vm_grant_api", "id", 75)]
+#[case::vsock_not_yet("vm_grant_vsock", "id", 75)]
+#[case::api_refused("vm_grant_api", "../id", 2)]
+#[case::vsock_refused("vm_grant_vsock", "a/b", 2)]
 fn grant_exit_code_separates_not_yet_from_refused_as_root(
     work: Work,
     #[case] op: &str,
@@ -291,5 +280,5 @@ fn grant_exit_code_separates_not_yet_from_refused_as_root(
     }
     let cfg = work.config("");
 
-    run(&cfg, &["vm", op, "--id", id]).code(code);
+    run(&cfg, json!({"op": op, "id": id})).code(code);
 }

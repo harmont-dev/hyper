@@ -24,7 +24,11 @@ pub fn is_root() -> bool {
 
 /// Run the helper with insecure mode open and the config path redirected
 /// to a per-test file, so tests never touch the real host's /etc/hyper.
-pub fn run(config: &Path, args: &[&str]) -> Assert {
+pub fn run(config: &Path, request: serde_json::Value) -> Assert {
+    run_args(config, &[&request.to_string()])
+}
+
+pub fn run_args(config: &Path, args: &[&str]) -> Assert {
     let mut cmd = Command::new(BIN);
     cmd.args(args)
         .env_clear()

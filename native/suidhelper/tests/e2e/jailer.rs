@@ -8,6 +8,7 @@
 use assert_fs::TempDir;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use serde_json::json;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -85,22 +86,14 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
 
     let out = run(
         &cfg,
-        &[
-            "vm",
-            "launch",
-            "--id",
-            "vm1",
-            "--uid",
-            "900001",
-            "--gid",
-            "900002",
-            "--memory-max",
-            "1048576",
-            "--cpu-quota-us",
-            "100000",
-            "--cpu-period-us",
-            "100000",
-        ],
+        json!({
+            "op": "vm_launch",
+            "id": "vm1",
+            "uid": 900_001,
+            "gid": 900_002,
+            "memory_max": 1_048_576,
+            "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
+        }),
     );
 
     // The jailer's own exit status must propagate through the execve handoff.
@@ -169,9 +162,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(recorded: Record
 
     let out = run(
         &cfg,
-        &[
-            "vm", "launch", "--id", "vnet1", "--uid", "900001", "--gid", "900002",
-        ],
+        json!({"op": "vm_launch", "id": "vnet1", "uid": 900_001, "gid": 900_002}),
     );
 
     out.code(RECORDER_EXIT);
@@ -203,9 +194,7 @@ fn refuses_uid_zero_without_exec_as_root(recorded: Recorded) {
 
     run(
         &cfg,
-        &[
-            "vm", "launch", "--id", "vm1", "--uid", "0", "--gid", "900002",
-        ],
+        json!({"op": "vm_launch", "id": "vm1", "uid": 0, "gid": 900_002}),
     )
     .code(2);
     assert!(

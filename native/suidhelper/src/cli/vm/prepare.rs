@@ -1,25 +1,27 @@
-use super::teardown;
+use super::{teardown, VmOut};
 use crate::cli::DispatchError;
 use crate::network;
-use clap::Args;
 use hyperrs_firecracker::VmId;
 use hyperrs_process::privilege::Unprivileged;
+use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PrepareArgs {
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
-    #[arg(long)]
     uid: u32,
 }
 
 pub fn run(
     PrepareArgs { id, uid }: PrepareArgs,
     token: &mut Unprivileged,
-) -> Result<(), DispatchError> {
-    teardown::run(&id, Some(uid), token)?;
+) -> Result<VmOut, DispatchError> {
+    teardown::teardown(&id, Some(uid), token)?;
     if network::enabled() {
         network::prepare(&id, uid, token).map_err(DispatchError::tool)?;
     }
-    Ok(())
+    Ok(VmOut::Prepared)
 }

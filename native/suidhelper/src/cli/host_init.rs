@@ -1,3 +1,4 @@
+use crate::cli::OpError;
 use crate::network::{self, host_init::HostInitError};
 use hyperrs_process::privilege::Unprivileged;
 use serde::Serialize;
@@ -12,3 +13,5 @@ pub fn run(token: &mut Unprivileged) -> Result<HostInitOut, HostInitError> {
     network::host_init(token)?;
     Ok(HostInitOut::HostReady)
 }
+
+impl OpError for HostInitError {}

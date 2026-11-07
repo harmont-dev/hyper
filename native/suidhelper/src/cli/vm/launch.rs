@@ -13,13 +13,14 @@
 
 use crate::config::{BinError, Config};
 use crate::id::IdError;
-use clap::Args;
 use hyperrs_firecracker::jailer::chroot::JailLayout;
 use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::path::SafePath;
 use hyperrs_linux::netns;
 use hyperrs_process::privilege::Unprivileged;
+use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use std::convert::Infallible;
 use std::num::NonZeroU64;
 use thiserror::Error as ThisError;
@@ -34,28 +35,25 @@ pub enum JailerError {
     Id(#[from] IdError),
 }
 
-#[derive(Args)]
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LaunchArgs {
     /// Microvm id; becomes the chroot subdirectory name.
-    #[arg(long)]
+    #[serde_as(as = "DisplayFromStr")]
     id: VmId,
     /// Unprivileged uid the jailer drops to (rejected if 0 or out of range).
-    #[arg(long)]
     uid: u32,
     /// Unprivileged gid the jailer drops to (rejected if 0 or out of range).
-    #[arg(long)]
     gid: u32,
-    #[arg(long)]
     memory_max: Option<NonZeroU64>,
-    #[command(flatten)]
     cpu_max: Option<CpuMaxArgs>,
 }
 
-#[derive(Args)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CpuMaxArgs {
-    #[arg(long = "cpu-quota-us", required = false, requires = "period_us")]
     quota_us: NonZeroU64,
-    #[arg(long = "cpu-period-us", required = false, requires = "quota_us")]
     period_us: NonZeroU64,
 }
 
@@ -130,43 +128,43 @@ fn try_run(args: LaunchArgs, token: Unprivileged) -> Result<Infallible, JailerEr
 #[cfg(test)]
 mod tests {
     use super::LaunchArgs;
-    use clap::{Args, FromArgMatches};
     use pretty_assertions::assert_eq;
     use rstest::rstest;
+    use serde_json::{json, Value};
 
-    fn parse(id: &str, extra: &[&str]) -> Result<LaunchArgs, clap::Error> {
-        let base = ["--id", id, "--uid", "900001", "--gid", "900001"];
-        let matches = LaunchArgs::augment_args(clap::Command::new("launch").no_binary_name(true))
-            .try_get_matches_from(base.iter().chain(extra))?;
-        LaunchArgs::from_arg_matches(&matches)
+    fn parse(id: &str, extra: Value) -> Result<LaunchArgs, serde_json::Error> {
+        let mut request = json!({"id": id, "uid": 900_001, "gid": 900_001});
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(request)
     }
 
     #[rstest]
-    #[case::none(&[], true)]
-    #[case::memory_max(&["--memory-max", "1048576"], true)]
-    #[case::cpu_quota_and_period(&["--cpu-quota-us", "50000", "--cpu-period-us", "100000"], true)]
-    #[case::all_minimal(&["--memory-max", "1", "--cpu-quota-us", "1", "--cpu-period-us", "1"], true)]
-    #[case::zero_memory(&["--memory-max", "0"], false)]
-    #[case::literal_max_memory(&["--memory-max", "max"], false)]
-    #[case::negative_memory(&["--memory-max", "-1"], false)]
-    #[case::suffixed_memory(&["--memory-max", "12x"], false)]
-    #[case::memory_past_u64(&["--memory-max", "18446744073709551616"], false)]
-    #[case::repeated_memory(&["--memory-max", "1", "--memory-max", "2"], false)]
-    #[case::quota_without_period(&["--cpu-quota-us", "50000"], false)]
-    #[case::period_without_quota(&["--cpu-period-us", "100000"], false)]
-    #[case::zero_quota(&["--cpu-quota-us", "0", "--cpu-period-us", "100000"], false)]
-    #[case::zero_period(&["--cpu-quota-us", "50000", "--cpu-period-us", "0"], false)]
-    #[case::repeated_quota(
-        &["--cpu-quota-us", "1", "--cpu-quota-us", "2", "--cpu-period-us", "1"],
-        false
-    )]
-    #[case::raw_cgroup(&["--cgroup", "memory.max=1"], false)]
-    #[case::caller_named_api_socket(&["--api-sock", "/api.socket"], false)]
-    #[case::caller_named_netns(&["--netns", "/var/run/netns/other"], false)]
-    #[case::caller_named_exec_file(&["--exec-file", "/bin/sh"], false)]
-    #[case::caller_named_chroot_base(&["--chroot-base-dir", "/"], false)]
-    fn caller_flags(#[case] extra: &[&str], #[case] accepted: bool) {
-        assert_eq!(parse("vm1", extra).is_ok(), accepted, "{extra:?}");
+    #[case::none(json!({}), true)]
+    #[case::memory_max(json!({"memory_max": 1_048_576}), true)]
+    #[case::cpu_max(json!({"cpu_max": {"quota_us": 50_000, "period_us": 100_000}}), true)]
+    #[case::all_minimal(json!({"memory_max": 1, "cpu_max": {"quota_us": 1, "period_us": 1}}), true)]
+    #[case::explicit_nulls(json!({"memory_max": null, "cpu_max": null}), true)]
+    #[case::zero_memory(json!({"memory_max": 0}), false)]
+    #[case::negative_memory(json!({"memory_max": -1}), false)]
+    #[case::string_memory(json!({"memory_max": "max"}), false)]
+    #[case::memory_past_u64(json!({"memory_max": 18_446_744_073_709_551_616_f64}), false)]
+    #[case::quota_without_period(json!({"cpu_max": {"quota_us": 50_000}}), false)]
+    #[case::period_without_quota(json!({"cpu_max": {"period_us": 100_000}}), false)]
+    #[case::zero_quota(json!({"cpu_max": {"quota_us": 0, "period_us": 100_000}}), false)]
+    #[case::zero_period(json!({"cpu_max": {"quota_us": 50_000, "period_us": 0}}), false)]
+    #[case::extra_cpu_field(json!({"cpu_max": {"quota_us": 1, "period_us": 1, "burst_us": 1}}), false)]
+    #[case::raw_cgroup(json!({"cgroup": "memory.max=1"}), false)]
+    #[case::caller_named_api_socket(json!({"api_sock": "/api.socket"}), false)]
+    #[case::caller_named_netns(json!({"netns": "/var/run/netns/other"}), false)]
+    #[case::caller_named_exec_file(json!({"exec_file": "/bin/sh"}), false)]
+    #[case::caller_named_chroot_base(json!({"chroot_base_dir": "/"}), false)]
+    #[case::negative_uid(json!({"uid": -1}), false)]
+    #[case::string_uid(json!({"uid": "900001"}), false)]
+    fn fields(#[case] extra: Value, #[case] accepted: bool) {
+        assert_eq!(parse("vm1", extra.clone()).is_ok(), accepted, "{extra}");
     }
 
     #[rstest]
@@ -179,6 +177,6 @@ mod tests {
     #[case::leading_dash("-vm1", false)]
     #[case::underscore("a_b", false)]
     fn vm_id(#[case] id: &str, #[case] accepted: bool) {
-        assert_eq!(parse(id, &[]).is_ok(), accepted, "{id:?}");
+        assert_eq!(parse(id, json!({})).is_ok(), accepted, "{id:?}");
     }
 }

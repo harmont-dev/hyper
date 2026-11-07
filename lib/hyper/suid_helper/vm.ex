@@ -19,39 +19,20 @@ defmodule Hyper.SuidHelper.Vm do
           :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.stage", include: [:vm_id, :device])
   def stage(vm_id, kernel, device, uid, gid) do
-    argv = [
-      "vm",
-      "stage",
-      "--id",
-      vm_id,
-      "--kernel",
-      kernel,
-      "--device",
-      device,
-      "--uid",
-      to_string(uid),
-      "--gid",
-      to_string(gid)
-    ]
-
-    run(argv)
+    run(%{op: "vm_stage", id: vm_id, kernel: kernel, device: device, uid: uid, gid: gid})
   end
 
   @spec prepare(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.prepare", include: [:vm_id, :uid])
   def prepare(vm_id, uid) do
-    run(["vm", "prepare", "--id", vm_id, "--uid", to_string(uid)])
+    run(%{op: "vm_prepare", id: vm_id, uid: uid})
   end
 
   @spec teardown(Hyper.Vm.Id.t(), non_neg_integer() | nil) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.teardown", include: [:vm_id, :uid])
   def teardown(vm_id, uid) do
-    run(["vm", "teardown", "--id", vm_id] ++ uid_flag(uid))
+    run(%{op: "vm_teardown", id: vm_id, uid: uid})
   end
-
-  @spec uid_flag(non_neg_integer() | nil) :: [String.t()]
-  defp uid_flag(nil), do: []
-  defp uid_flag(uid), do: ["--uid", to_string(uid)]
 
   @doc """
   Hand the firecracker API `socket` to the node user so the unprivileged
@@ -67,7 +48,7 @@ defmodule Hyper.SuidHelper.Vm do
   @spec grant_api(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.grant_api", include: [:vm_id])
   def grant_api(vm_id) do
-    case SuidHelper.exec(["vm", "grant-api", "--id", vm_id]) do
+    case SuidHelper.exec(%{op: "vm_grant_api", id: vm_id}) do
       {:ok, _} -> :ok
       {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
@@ -87,16 +68,16 @@ defmodule Hyper.SuidHelper.Vm do
   @spec grant_vsock(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.grant_vsock", include: [:vm_id])
   def grant_vsock(vm_id) do
-    case SuidHelper.exec(["vm", "grant-vsock", "--id", vm_id]) do
+    case SuidHelper.exec(%{op: "vm_grant_vsock", id: vm_id}) do
       {:ok, _} -> :ok
       {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end
 
-  @spec run([String.t()]) :: :ok | {:error, err()}
-  defp run(argv) do
-    case SuidHelper.exec(argv) do
+  @spec run(map()) :: :ok | {:error, err()}
+  defp run(request) do
+    case SuidHelper.exec(request) do
       {:ok, _} -> :ok
       {:error, _} = err -> err
     end

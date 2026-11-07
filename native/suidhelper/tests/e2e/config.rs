@@ -10,6 +10,7 @@ use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use serde_json::json;
 use std::assert_matches;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -48,7 +49,7 @@ fn sys_test_ok_as_root(tmp: TempDir, #[case] body: Option<&str>) {
         Some(body) => write_root_config(tmp.path(), body),
         None => tmp.path().join("nope.toml"),
     };
-    let out = run(&cfg, &["sys-test"]).success();
+    let out = run(&cfg, json!({"op": "sys_test"})).success();
     let json = stdout_json(&out);
     assert_eq!(json["sys_test"], "ok");
     assert_eq!(json["hyper_base"], "/srv/hyper");
@@ -67,7 +68,7 @@ fn non_root_owned_config_is_rejected(tmp: TempDir) {
         let nogrp = nix::unistd::Gid::from_raw(65534);
         nix::unistd::chown(&p, Some(nobody), Some(nogrp)).unwrap();
     }
-    run(&p, &["sys-test"])
+    run(&p, json!({"op": "sys_test"}))
         .code(2)
         .stderr(contains("root:root").or(contains("not owned")));
 }
@@ -87,7 +88,9 @@ fn invalid_config_exits_2_as_root(tmp: TempDir, #[case] body: &str, #[case] stde
         return;
     }
     let p = write_root_config(tmp.path(), body);
-    run(&p, &["sys-test"]).code(2).stderr(contains(stderr));
+    run(&p, json!({"op": "sys_test"}))
+        .code(2)
+        .stderr(contains(stderr));
 }
 
 // Config::default() has firecracker == None; the accessor must signal this

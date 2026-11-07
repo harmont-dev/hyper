@@ -60,7 +60,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
 
     File.write!(path, """
     #!/usr/bin/env bash
-    echo "$*" >> #{log}
+    printf '%s\n' "$1" >> #{log}
     echo '{}'
     """)
 
@@ -72,7 +72,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     log
     |> File.read!()
     |> String.split("\n", trim: true)
-    |> Enum.map(&(&1 |> String.split(" ") |> Enum.take(2) |> Enum.join(" ")))
+    |> Enum.map(&(&1 |> Jason.decode!() |> Map.fetch!("op")))
   end
 
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
@@ -94,10 +94,10 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       ops = calls(log)
-      prepare_at = Enum.find_index(ops, &(&1 == "vm prepare"))
-      jailer_at = Enum.find_index(ops, &(&1 == "vm launch"))
+      prepare_at = Enum.find_index(ops, &(&1 == "vm_prepare"))
+      jailer_at = Enum.find_index(ops, &(&1 == "vm_launch"))
 
-      assert prepare_at, "expected a `vm prepare` call before the jailer launch"
+      assert prepare_at, "expected a `vm_prepare` call before the jailer launch"
       assert jailer_at, "expected the jailer to have been launched"
       assert prepare_at < jailer_at, "netns must be prepared before the jailer enters it"
     end
@@ -111,7 +111,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                  muontrap: nil
                })
 
-      assert calls(log) == ["vm teardown"]
+      assert calls(log) == ["vm_teardown"]
     end
   end
 end

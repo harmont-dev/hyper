@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod support;
+use serde_json::{json, Value};
 use support::{is_root, run, stdout_json};
 
 const BLOCK_SECTORS: u64 = 128;
@@ -104,23 +105,20 @@ esac
         fs::read_to_string(self.dir.path().join("thin_dump.argv")).ok()
     }
 
-    fn thin_copy(&self, overrides: &[&str]) -> assert_cmd::assert::Assert {
-        let defaults = [
-            ("--pool", "hyper-pool"),
-            ("--meta", "/dev/loop3"),
-            ("--thin-id", "7"),
-            ("--src", "/dev/mapper/hyper-absent-src"),
-            ("--dst", "/dev/mapper/hyper-absent-dst"),
-        ];
-        let mut argv = vec!["thin-copy"];
-        for (flag, default) in defaults {
-            let value = overrides
-                .iter()
-                .position(|a| *a == flag)
-                .map_or(default, |i| overrides[i + 1]);
-            argv.extend([flag, value]);
-        }
-        run(&self.config, &argv)
+    fn thin_copy(&self, overrides: Value) -> assert_cmd::assert::Assert {
+        let mut request = json!({
+            "op": "thin_copy",
+            "pool": "hyper-pool",
+            "meta": "/dev/loop3",
+            "thin_id": 7,
+            "src": "/dev/mapper/hyper-absent-src",
+            "dst": "/dev/mapper/hyper-absent-dst",
+        });
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(overrides.as_object().unwrap().clone());
+        run(&self.config, request)
     }
 }
 
@@ -213,7 +211,7 @@ fn copies_exactly_the_dumped_ranges_under_a_reservation_as_root(pool: Pool) {
             eprintln!("SKIP thin_copy: losetup/dmsetup unavailable");
             return;
         };
-        pool.thin_copy(&["--src", &src.path(), "--dst", &dst.path()])
+        pool.thin_copy(json!({"src": src.path(), "dst": dst.path()}))
             .success()
     };
 
@@ -243,16 +241,16 @@ fn copies_exactly_the_dumped_ranges_under_a_reservation_as_root(pool: Pool) {
 }
 
 #[rstest]
-#[case::wrong_thin_id(recording_thin_dump, &["--thin-id", "9"], "thin device 9 not present")]
+#[case::wrong_thin_id(recording_thin_dump, json!({"thin_id": 9}), "thin device 9 not present")]
 #[case::thin_dump_fails(
     failing_thin_dump,
-    &[],
+    json!({}),
     "thin_dump failed: metadata snap not reserved"
 )]
-#[case::copy_target_missing(recording_thin_dump, &[], "No such file or directory")]
+#[case::copy_target_missing(recording_thin_dump, json!({}), "No such file or directory")]
 fn the_reservation_is_released_on_every_path_that_took_it_as_root(
     #[case] thin_dump: ThinDumpBody,
-    #[case] overrides: &[&str],
+    #[case] overrides: Value,
     #[case] stderr: &str,
 ) {
     if !is_root() {
@@ -282,32 +280,30 @@ fn reservation_recovery_as_root(
     }
     pool.mark(marker);
 
-    pool.thin_copy(&[]).failure();
+    pool.thin_copy(json!({})).failure();
 
     assert_eq!(pool.dmsetup_calls(), calls);
     assert_eq!(pool.thin_dump_record().is_some(), dumped);
 }
 
 #[rstest]
-#[case::system_disk_as_meta(&["--meta", "/dev/sda"])]
-#[case::traversing_meta(&["--meta", "/dev/loop0/../sda"])]
-#[case::dm_device_as_meta(&["--meta", "/dev/mapper/hyper-pool"])]
-#[case::relative_meta(&["--meta", "loop3"])]
-#[case::foreign_pool(&["--pool", "vg0-pool"])]
-#[case::foreign_src(&["--src", "/dev/sda"])]
-#[case::foreign_dst(&["--dst", "/dev/mapper/root"])]
-#[case::thin_id_past_24_bits(&["--thin-id", "16777216"])]
-fn refuses_foreign_operands_before_running_anything_as_root(
-    pool: Pool,
-    #[case] overrides: &[&str],
-) {
+#[case::system_disk_as_meta(json!({"meta": "/dev/sda"}))]
+#[case::traversing_meta(json!({"meta": "/dev/loop0/../sda"}))]
+#[case::dm_device_as_meta(json!({"meta": "/dev/mapper/hyper-pool"}))]
+#[case::relative_meta(json!({"meta": "loop3"}))]
+#[case::foreign_pool(json!({"pool": "vg0-pool"}))]
+#[case::foreign_src(json!({"src": "/dev/sda"}))]
+#[case::foreign_dst(json!({"dst": "/dev/mapper/root"}))]
+#[case::thin_id_past_24_bits(json!({"thin_id": 16_777_216}))]
+#[case::caller_chosen_chunk_size(json!({"chunk_bytes": 512}))]
+fn refuses_foreign_operands_before_running_anything_as_root(pool: Pool, #[case] overrides: Value) {
     if !is_root() {
         eprintln!("SKIP thin_copy refusal: needs root");
         return;
     }
 
-    pool.thin_copy(overrides).failure();
+    pool.thin_copy(overrides.clone()).failure();
 
-    assert!(pool.dmsetup_calls().is_empty(), "{overrides:?}");
-    assert!(pool.thin_dump_record().is_none(), "{overrides:?}");
+    assert!(pool.dmsetup_calls().is_empty(), "{overrides}");
+    assert!(pool.thin_dump_record().is_none(), "{overrides}");
 }

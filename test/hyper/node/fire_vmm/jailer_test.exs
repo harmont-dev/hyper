@@ -46,42 +46,27 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert Jailer.command(micro_opts()).binary == Hyper.Cfg.Tools.suidhelper()
   end
 
-  test "args start with the vm launch subcommand" do
-    %{args: [group, op | _]} = Jailer.command(micro_opts())
-    assert [group, op] == ["vm", "launch"]
+  defp request do
+    %{args: [json]} = Jailer.command(micro_opts())
+    Jason.decode!(json)
   end
 
-  test "args contain --id, --uid, --gid with the opts values" do
-    %{args: args} = Jailer.command(micro_opts())
-    assert "--id" in args
-    assert @vm_id in args
-    assert "--uid" in args
-    assert "--gid" in args
-    assert "900001" in args
+  test "args are a single vm_launch request carrying the opts ids" do
+    assert %{"op" => "vm_launch", "id" => @vm_id, "uid" => 900_001, "gid" => 900_001} = request()
   end
 
-  test "args do not contain privileged flags owned by the suidhelper" do
-    %{args: args} = Jailer.command(micro_opts())
-    refute "--exec-file" in args
-    refute "--chroot-base-dir" in args
-    refute "--cgroup-version" in args
-    refute "--parent-cgroup" in args
-    refute "--api-sock" in args
-    refute "--" in args
-  end
-
-  test "args carry the :micro cgroup limits as typed flags" do
-    %{args: args} = Jailer.command(micro_opts())
+  test "the request carries the :micro cgroup limits and nothing the helper owns" do
     cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
 
-    assert flag_value(args, "--memory-max") == to_string(cgroup.memory_max)
-    assert flag_value(args, "--cpu-quota-us") == to_string(cgroup.cpu_max.quota_us)
-    assert flag_value(args, "--cpu-period-us") == to_string(cgroup.cpu_max.period_us)
-    refute "--cgroup" in args
-  end
+    assert Map.keys(request()) |> Enum.sort() ==
+             ~w(cpu_max gid id memory_max op uid)
 
-  defp flag_value(args, flag) do
-    args |> Enum.drop_while(&(&1 != flag)) |> Enum.at(1)
+    assert request()["memory_max"] == cgroup.memory_max
+
+    assert request()["cpu_max"] == %{
+             "quota_us" => cgroup.cpu_max.quota_us,
+             "period_us" => cgroup.cpu_max.period_us
+           }
   end
 
   test "host_vsock/1 returns the chroot-rooted host path for vsock.sock" do
