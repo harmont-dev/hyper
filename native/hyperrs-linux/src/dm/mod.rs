@@ -14,8 +14,8 @@ pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{
-    BackingPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable,
-    ThinPoolTable, ThinTable,
+    DevPath, DmTable, InvalidPersistence, LinearTable, Origin, ParseTableError, Persistence, Role,
+    SnapshotTable, ThinPoolTable, ThinTable,
 };
 pub use thin::{
     Active, Inactive, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin, ThinId,
@@ -58,10 +58,10 @@ pub struct Dmsetup {
 }
 
 impl Dmsetup {
-    pub fn create<B: BackingPath>(
+    pub fn create(
         &self,
         name: &DmName,
-        table: &DmTable<B>,
+        table: &DmTable,
         access: Access,
     ) -> Result<Device<'_>, RunError> {
         let table = table.to_string();

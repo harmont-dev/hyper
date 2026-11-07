@@ -159,7 +159,7 @@ pub trait Components {
 }
 
 /// Ensure a path is absolute.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IsAbsolute;
 
 impl Absoluteness for IsAbsolute {
@@ -173,11 +173,11 @@ impl Absoluteness for IsAbsolute {
 }
 
 /// A path known to be relative. Only produced by [`SafePath::strip_base`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IsRelative;
 
 /// Ensure there are no `.` nor `..` components.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrictComponents;
 
 impl Components for StrictComponents {
@@ -226,7 +226,7 @@ pub struct SafePath<A, S> {
 }
 
 /// An owned [`SafePath`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafePathBuf<A, S>(PathBuf, PhantomData<(A, S)>);
 
 impl<A, S> SafePath<A, S> {

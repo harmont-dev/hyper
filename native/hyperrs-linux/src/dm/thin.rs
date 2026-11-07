@@ -1,7 +1,6 @@
-use super::{Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
+use super::{DevPath, Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
 use crate::Access;
 use derive_more::{Display, Into};
-use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use std::ffi::OsStr;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -188,13 +187,13 @@ impl<'a> Thin<'a, Inactive> {
         self,
         name: &DmName,
         sectors: u64,
-        origin: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
+        origin: Option<DevPath>,
     ) -> Result<Thin<'a, Active<'a>>, RunError> {
         let table = DmTable::Thin(ThinTable {
             sectors,
             pool: self.pool.device.name().clone(),
             id: self.id,
-            origin: origin.map(Origin::File),
+            origin: origin.map(Origin::Path),
         });
         let device = self
             .pool

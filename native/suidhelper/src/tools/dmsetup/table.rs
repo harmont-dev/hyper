@@ -1,11 +1,9 @@
 use super::backing::{BackingError, BackingFile};
 use super::name::{HyperDmName, NameError};
 use crate::config::Config;
-use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
-use hyperrs_linux::dm::{DmTable, ParseTableError};
+use hyperrs_linux::dm::{DevPath, DmTable, ParseTableError, Role};
+use std::collections::BTreeMap;
 use thiserror::Error as ThisError;
-
-pub type FilePath = SafePathBuf<IsAbsolute, StrictComponents>;
 
 const DEV_PREFIX: &str = "/dev/";
 
@@ -21,24 +19,46 @@ pub enum TableError {
     Backing(#[from] BackingError),
 }
 
-pub fn parse_table(s: &str) -> Result<DmTable<FilePath>, TableError> {
-    let table: DmTable<FilePath> = s.parse()?;
+#[derive(Debug, Clone)]
+pub struct ResolvedTable {
+    table: DmTable,
+    backing: BTreeMap<Role, BackingFile>,
+}
+
+impl ResolvedTable {
+    pub fn attach<E>(
+        &self,
+        mut f: impl FnMut(Role, &BackingFile) -> Result<DevPath, E>,
+    ) -> Result<DmTable, E> {
+        self.table
+            .clone()
+            .try_map_paths(|_, role| f(role, &self.backing[&role]))
+    }
+}
+
+pub fn parse_table(s: &str) -> Result<DmTable, TableError> {
+    let table: DmTable = s.parse()?;
     table
         .devices()
         .try_for_each(|dev| HyperDmName::try_from(dev.clone()).map(drop))?;
-    table.try_map(|file, _| {
-        let path = file.as_path();
-        if path.starts_with(DEV_PREFIX) {
-            Err(TableError::NotAFile(path.display().to_string()))
-        } else {
-            Ok(file)
+    table.paths().try_for_each(|(_, path)| {
+        let path = path.as_path();
+        match path.starts_with(DEV_PREFIX) {
+            true => Err(TableError::NotAFile(path.display().to_string())),
+            false => Ok(()),
         }
-    })
+    })?;
+    Ok(table)
 }
 
-pub fn resolve_table(s: &str) -> Result<DmTable<BackingFile>, TableError> {
+pub fn resolve_table(s: &str) -> Result<ResolvedTable, TableError> {
     let base = Config::get().hyper_base();
-    Ok(parse_table(s)?.try_map(|path, _| BackingFile::open(path.as_path(), base))?)
+    let table = parse_table(s)?;
+    let backing = table
+        .paths()
+        .map(|(role, path)| Ok((role, BackingFile::open(path.as_path(), base)?)))
+        .collect::<Result<_, TableError>>()?;
+    Ok(ResolvedTable { table, backing })
 }
 
 #[cfg(test)]

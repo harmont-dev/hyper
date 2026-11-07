@@ -5,7 +5,7 @@ mod table;
 use super::IsTool;
 pub use backing::{BackingError, BackingFile};
 use clap::{Args, Subcommand};
-use hyperrs_linux::dm::{self, DmTable, RemoveMode, Role, ThinMessage};
+use hyperrs_linux::dm::{self, RemoveMode, Role, ThinMessage};
 use hyperrs_linux::loopdev::LoopControl;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
@@ -15,7 +15,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
-pub use table::{parse_table, resolve_table, TableError};
+pub use table::{parse_table, resolve_table, ResolvedTable, TableError};
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -32,7 +32,7 @@ enum DmOp {
         #[arg(long)]
         readonly: bool,
         #[arg(long, value_parser = resolve_table)]
-        table: DmTable<BackingFile>,
+        table: ResolvedTable,
     },
     Remove {
         #[arg(long)]
@@ -109,19 +109,23 @@ impl IsTool for Dmsetup {
                 };
                 let control = LoopControl::open()?;
                 let mut loops = BTreeMap::new();
-                let attached = table.clone().try_map(|backing, role| {
+                let attached = table.attach(|role, backing| {
                     let role_access = match role {
                         Role::Origin => Access::ReadOnly,
                         Role::Cow => access,
                         Role::Metadata | Role::Data => Access::ReadWrite,
                     };
                     let device = control.attach(backing.file(), role_access, ATTACH_TIMEOUT)?;
-                    loops.insert(role, device.path().as_ref().to_path_buf());
-                    Ok::<_, Box<dyn std::error::Error>>(device)
+                    let path = device.path().to_owned();
+                    loops.insert(role, device);
+                    Ok::<_, Box<dyn std::error::Error>>(path)
                 })?;
                 DmsetupOut::Created {
                     device: dm.create(name, &attached, access)?.path().into(),
-                    loops,
+                    loops: loops
+                        .iter()
+                        .map(|(&role, device)| (role, device.path().as_ref().to_path_buf()))
+                        .collect(),
                 }
             }
             DmOp::Remove { retry, name } => {
