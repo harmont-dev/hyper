@@ -16,9 +16,11 @@ defmodule Hyper.SuidHelper do
   self-test and reports the base path it was compiled against.
   """
 
-  alias Hyper.SuidHelper.{Dmsetup, Expected}
+  alias Hyper.SuidHelper.Expected
 
   use OpenTelemetryDecorator
+
+  @dm_target_modules ~w(dm_mod dm_snapshot dm_thin_pool)
 
   @typedoc "Error tuple: exit code + trimmed stderr/stdout from the helper."
   @type err :: {non_neg_integer(), String.t()}
@@ -64,7 +66,24 @@ defmodule Hyper.SuidHelper do
   def test_system do
     with :ok <- helper_present(),
          :ok <- verify_version() do
-      Dmsetup.test_system()
+      dm_targets_present()
+    end
+  end
+
+  @spec host_init() :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.host_init")
+  def host_init do
+    case exec(["host-init"]) do
+      {:ok, _} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @spec dm_targets_present() :: :ok | {:error, {:missing_dm_targets, [String.t()]}}
+  defp dm_targets_present do
+    case Sys.Linux.Dm.missing_modules(@dm_target_modules) do
+      [] -> :ok
+      missing -> {:error, {:missing_dm_targets, missing}}
     end
   end
 

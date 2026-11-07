@@ -96,10 +96,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # the jailer refuses to start if the netns it is told to enter does not yet
   # exist. Networking is mandatory, so this is unconditional.
   @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
-  defp prelaunch(%Opts{vm_id: id, uid: uid} = opts) do
-    with :ok <- clear_jail(opts) do
-      Hyper.SuidHelper.Network.prepare(id, uid)
-    end
+  defp prelaunch(%Opts{vm_id: id, uid: uid}) do
+    SuidHelper.Vm.prepare(id, uid)
   end
 
   # Best-effort: both the chroot/cgroup removal and the network teardown are
@@ -107,9 +105,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # failure); the first error is surfaced to the caller.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id, uid: uid}) do
-    net = Hyper.SuidHelper.Network.teardown(id, uid)
-    jail = SuidHelper.ChrootJail.remove(id)
-    with :ok <- net, do: jail
+    SuidHelper.Vm.teardown(id, uid)
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}

@@ -58,11 +58,13 @@ defmodule Hyper.Node.Img.Publish do
   end
 
   @spec materialize(map(), Hyper.Img.id()) :: {:ok, Hyper.Img.id()} | {:error, term()}
-  defp materialize(%{thin_name: origin_name, thin_id: origin_id, origin_dev: ro_dev}, img_id) do
+  defp materialize(
+         %{thin_name: origin_name, thin_id: origin_id, origin_dev: ro_dev, sectors: sectors},
+         img_id
+       ) do
     tmp = Hyper.Vm.Id.generate()
 
-    with {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
-         {:ok, %{dev: snap_dev, id: snap_id}} <-
+    with {:ok, %{dev: snap_dev, id: snap_id}} <-
            ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, sectors, ro_dev) do
       try do
         write_delta(tmp, ro_dev, {snap_dev, snap_id}, sectors, img_id)
@@ -89,7 +91,7 @@ defmodule Hyper.Node.Img.Publish do
       try do
         with {:ok, write_dev} <-
                SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_path, sectors),
-             {:ok, _stats} <- copy_divergence(snap_dev, snap_id, write_dev),
+             {:ok, _stats} <- ThinPool.copy_provisioned(snap_id, snap_dev, write_dev),
              # Removing the snapshot device flushes every exception to the store;
              # only then is the COW file complete on disk.
              :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)) do
@@ -104,19 +106,6 @@ defmodule Hyper.Node.Img.Publish do
         # this only catches aborts before it ran. Never raises on ENOENT.
         _ = File.rm(cow_path)
       end
-    end
-  end
-
-  # The pool's own metadata is authoritative: with an external origin, the
-  # snapshot's provisioned blocks ARE the divergence, so the copy is O(bytes
-  # written). No scan fallback — a host that cannot read its pool metadata
-  # (thin-provisioning-tools missing/broken) must fail the publish loudly
-  # rather than degrade to an O(device) scan.
-  @spec copy_divergence(Path.t(), non_neg_integer(), Path.t()) ::
-          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  defp copy_divergence(snap_dev, snap_id, write_dev) do
-    with {:ok, spec} <- ThinPool.mappings(snap_id) do
-      SuidHelper.Blockcopy.copy(snap_dev, write_dev, spec)
     end
   end
 

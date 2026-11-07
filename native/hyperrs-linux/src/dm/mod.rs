@@ -31,20 +31,6 @@ pub enum RunError {
     Failed(String),
 }
 
-#[derive(Debug, Error)]
-pub enum TargetsError {
-    #[error(transparent)]
-    Run(#[from] RunError),
-    #[error("unexpected `dmsetup targets` line: {0:?}")]
-    Malformed(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Target {
-    pub name: String,
-    pub version: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveMode {
     Once,
@@ -83,26 +69,6 @@ impl Dmsetup {
 
     pub fn thin_pool(&self, name: &DmName) -> Result<ThinPool<'_>, ThinPoolError> {
         ThinPool::open(self, name)
-    }
-
-    pub fn targets(&self) -> Result<Vec<Target>, TargetsError> {
-        self.run(["targets"])?
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(
-                |line| match line.split_whitespace().collect::<Vec<_>>().as_slice() {
-                    [name, version] => Ok(Target {
-                        name: name.to_string(),
-                        version: version.to_string(),
-                    }),
-                    _ => Err(TargetsError::Malformed(line.to_string())),
-                },
-            )
-            .collect()
-    }
-
-    pub fn list(&self) -> Result<String, RunError> {
-        self.run(["ls"])
     }
 
     fn run<I, S>(&self, args: I) -> Result<String, RunError>

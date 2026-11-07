@@ -1,4 +1,4 @@
-//! L5: the `chroot-jail` ops observed end to end through the binary (exit code +
+//! L5: the `vm` jail ops observed end to end through the binary (exit code +
 //! stdout JSON), with the config-path seam pointing `work_dir` at a tempdir so we
 //! never touch /etc/hyper or /srv. Root-gated: the helper acquires privileges for
 //! mknod/chown, so these self-skip without root. The cgroup half is exercised
@@ -116,8 +116,8 @@ impl Work {
         run(
             cfg,
             &[
-                "chroot-jail",
-                "prepare",
+                "vm",
+                "stage",
                 "--id",
                 "id",
                 "--kernel",
@@ -148,8 +148,8 @@ fn work() -> Work {
     }
 }
 
-// `chroot-jail prepare` stages the kernel and creates the rootfs node, exiting 0
-// with {"result":"prepared"}.
+// `vm stage` stages the kernel and creates the rootfs node, exiting 0
+// with {"result":"staged"}.
 #[rstest]
 fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
     if !is_root() {
@@ -168,7 +168,7 @@ fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
     drop(dev);
 
     let json = stdout_json(&out.success());
-    assert_eq!(json["result"], "prepared");
+    assert_eq!(json["result"], "staged");
     assert_eq!(
         fs::read(work.chroot.join("vmlinux")).unwrap(),
         b"kernel image"
@@ -179,7 +179,7 @@ fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
     );
 }
 
-// `chroot-jail prepare` against a config with `[network]` set also mknods
+// `vm stage` against a config with `[network]` set also mknods
 // `dev/net/tun` into the jail: char device 10:200, mode 0666, owned uid:gid.
 #[rstest]
 fn prepare_creates_tun_node_when_networking_enabled_as_root(work: Work) {
@@ -231,7 +231,7 @@ fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: &str, #[ca
     );
 }
 
-// `chroot-jail prepare` with a system device (not a loop / hyper-* dm) is
+// `vm stage` with a system device (not a loop / hyper-* dm) is
 // rejected by BlockDev parsing at clap parse time — exit 2, nothing built. This
 // case needs no root (clap rejects before the privilege boundary) but also no
 // device, so it always runs.
@@ -241,7 +241,7 @@ fn prepare_rejects_system_device_operand(work: Work) {
     work.prepare(&cfg, "/dev/sda", "900000", "900000").failure();
 }
 
-// `chroot-jail remove` of a real chroot succeeds; the cgroup leaf is given as a
+// `vm teardown` of a real chroot succeeds; the cgroup leaf is given as a
 // missing path so removal is idempotent and touches nothing on the host.
 #[rstest]
 fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
@@ -254,9 +254,9 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
     let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
 
-    let out = run(&cfg, &["chroot-jail", "remove", "--id", "id"]).success();
+    let out = run(&cfg, &["vm", "teardown", "--id", "id"]).success();
     let json = stdout_json(&out);
-    assert_eq!(json["result"], "removed");
+    assert_eq!(json["result"], "tore_down");
     assert!(!chroot.exists(), "chroot must be gone");
 }
 
@@ -270,7 +270,7 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
 fn remove_refuses_an_invalid_id(work: Work, #[case] id: &str) {
     let cfg = work.config("");
 
-    run(&cfg, &["chroot-jail", "remove", "--id", id]).code(2);
+    run(&cfg, &["vm", "teardown", "--id", id]).code(2);
     assert!(work.chroot.exists(), "chroot must survive a refused remove");
 }
 
@@ -291,5 +291,5 @@ fn grant_exit_code_separates_not_yet_from_refused_as_root(
     }
     let cfg = work.config("");
 
-    run(&cfg, &["chroot-jail", op, "--id", id]).code(code);
+    run(&cfg, &["vm", op, "--id", id]).code(code);
 }

@@ -36,7 +36,7 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
     # The helper places the kernel at <chroot_root>/@kernel_name and the rootfs
     # node at <chroot_root>/@root_name; those names are the contract it rewrites
     # the spec against below.
-    with :ok <- SuidHelper.ChrootJail.prepare(vm_id, kernel, device, uid, gid) do
+    with :ok <- SuidHelper.Vm.stage(vm_id, kernel, device, uid, gid) do
       {:ok, jailify(cold, in_jail(@kernel_name), in_jail(@root_name))}
     end
   end

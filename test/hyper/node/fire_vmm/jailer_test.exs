@@ -46,9 +46,9 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert Jailer.command(micro_opts()).binary == Hyper.Cfg.Tools.suidhelper()
   end
 
-  test "args start with the jailer subcommand" do
-    %{args: [first | _]} = Jailer.command(micro_opts())
-    assert first == "jailer"
+  test "args start with the vm launch subcommand" do
+    %{args: [group, op | _]} = Jailer.command(micro_opts())
+    assert [group, op] == ["vm", "launch"]
   end
 
   test "args contain --id, --uid, --gid with the opts values" do
@@ -60,17 +60,13 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     assert "900001" in args
   end
 
-  test "args end with --api-sock /api.socket" do
-    %{args: args} = Jailer.command(micro_opts())
-    assert Enum.take(args, -2) == ["--api-sock", "/api.socket"]
-  end
-
   test "args do not contain privileged flags owned by the suidhelper" do
     %{args: args} = Jailer.command(micro_opts())
     refute "--exec-file" in args
     refute "--chroot-base-dir" in args
     refute "--cgroup-version" in args
     refute "--parent-cgroup" in args
+    refute "--api-sock" in args
     refute "--" in args
   end
 

@@ -143,7 +143,7 @@ defmodule Hyper.Node.FireVMM.State do
 
     alias Hyper.Firecracker.Api.{InstanceInfo, Operations}
     alias Hyper.Node.FireVMM.{Client, Opts}
-    alias Hyper.SuidHelper.ChrootJail
+    alias Hyper.SuidHelper.Vm
     alias Unit.Time
 
     require Logger
@@ -186,7 +186,7 @@ defmodule Hyper.Node.FireVMM.State do
     defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
 
     defp ensure_api_granted(id, data) do
-      case ChrootJail.grant_api(id) do
+      case Vm.grant_api(id) do
         :ok ->
           {:cont, %{data | api_granted: true}}
 
@@ -314,7 +314,7 @@ defmodule Hyper.Node.FireVMM.State do
             | {:keep_state, State.t(), list()}
             | {:stop, term(), State.t()}
     defp do_grant_vsock(id, data) do
-      case Hyper.SuidHelper.ChrootJail.grant_vsock(id) do
+      case Hyper.SuidHelper.Vm.grant_vsock(id) do
         :ok ->
           case instance_start(id) do
             :ok ->

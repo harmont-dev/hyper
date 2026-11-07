@@ -86,7 +86,8 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
     let out = run(
         &cfg,
         &[
-            "jailer",
+            "vm",
+            "launch",
             "--id",
             "vm1",
             "--uid",
@@ -99,8 +100,6 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
             "100000",
             "--cpu-period-us",
             "100000",
-            "--api-sock",
-            "/api.sock",
         ],
     );
 
@@ -130,12 +129,12 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
             "cpu.max=100000 100000",
             "--",
             "--api-sock",
-            "/api.sock",
+            "/api.socket",
         ],
         "helper handed the jailer a non-canonical argv",
     );
 
-    // The helper execve's the jailer with an EMPTY envp (see src/tools/jailer.rs):
+    // The helper execve's the jailer with an EMPTY envp (see src/cli/vm/launch.rs):
     // once ruid==0 a smuggled LD_PRELOAD would be honored, so nothing of the
     // caller's environment may reach the root jailer. The recorder is a `/bin/sh`
     // script and the shell *self-sets* `PWD` (and, under bash, `_`/`SHLVL`) on
@@ -171,15 +170,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(recorded: Record
     let out = run(
         &cfg,
         &[
-            "jailer",
-            "--id",
-            "vnet1",
-            "--uid",
-            "900001",
-            "--gid",
-            "900002",
-            "--api-sock",
-            "/api.sock",
+            "vm", "launch", "--id", "vnet1", "--uid", "900001", "--gid", "900002",
         ],
     );
 
@@ -213,15 +204,7 @@ fn refuses_uid_zero_without_exec_as_root(recorded: Recorded) {
     run(
         &cfg,
         &[
-            "jailer",
-            "--id",
-            "vm1",
-            "--uid",
-            "0",
-            "--gid",
-            "900002",
-            "--api-sock",
-            "/api.sock",
+            "vm", "launch", "--id", "vm1", "--uid", "0", "--gid", "900002",
         ],
     )
     .code(2);

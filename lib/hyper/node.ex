@@ -323,7 +323,7 @@ defmodule Hyper.Node do
   @spec init_network :: :ok | {:error, term()}
   defp init_network do
     if Hyper.Cfg.Network.configured?() do
-      Hyper.SuidHelper.Network.host_init()
+      Hyper.SuidHelper.host_init()
     else
       {:error, :network_not_configured}
     end

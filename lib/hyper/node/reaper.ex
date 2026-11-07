@@ -33,7 +33,7 @@ defmodule Hyper.Node.Reaper do
   alias Hyper.Node.FireVMM.Jailer
   alias Hyper.Node.Img
   alias Hyper.Node.Reaper.Plan
-  alias Hyper.SuidHelper.{ChrootJail, Dmsetup}
+  alias Hyper.SuidHelper.{Dmsetup, Vm}
 
   @vm_sup Hyper.Node.VMSupervisor
 
@@ -156,7 +156,7 @@ defmodule Hyper.Node.Reaper do
 
   @spec list_rw_dm() :: [String.t()]
   defp list_rw_dm do
-    case Dmsetup.list() do
+    case Sys.Linux.Dm.names() do
       {:ok, names} ->
         names
 
@@ -188,14 +188,8 @@ defmodule Hyper.Node.Reaper do
   defp reap_one(id) do
     Logger.warning("reaper: reaping orphan vm #{id}")
 
-    log_result(
-      "chroot/cgroup",
-      id,
-      ChrootJail.remove(id)
-    )
-
+    log_result("jail/netns", id, Vm.teardown(id, nil))
     log_result("dm volume", id, Dmsetup.remove(Img.Mutable.dm_name(id)))
-    log_result("netns", id, Hyper.SuidHelper.Network.teardown_orphan(id))
 
     :ok
   end

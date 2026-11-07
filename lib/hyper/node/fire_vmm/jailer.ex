@@ -134,9 +134,8 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @spec command(FireVMM.Opts.t()) :: t()
   def command(opts) do
     args =
-      ["jailer", "--id", opts.vm_id, "--uid", to_string(opts.uid), "--gid", to_string(opts.gid)] ++
-        cgroup_flags(opts.type) ++
-        ["--api-sock", "/" <> @jail_socket]
+      ["vm", "launch", "--id", opts.vm_id, "--uid", to_string(opts.uid)] ++
+        ["--gid", to_string(opts.gid)] ++ cgroup_flags(opts.type)
 
     %{binary: Hyper.Cfg.Tools.suidhelper(), args: args, host_socket: host_socket(opts.vm_id)}
   end

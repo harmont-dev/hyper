@@ -1,0 +1,313 @@
+#![cfg(feature = "insecure_mode")]
+
+use assert_fs::TempDir;
+use predicates::str::contains;
+use pretty_assertions::assert_eq;
+use rstest::{fixture, rstest};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+mod support;
+use support::{is_root, run, stdout_json};
+
+const BLOCK_SECTORS: u64 = 128;
+const BLOCK_BYTES: usize = (BLOCK_SECTORS * 512) as usize;
+
+// One superblock, one device (dev_id=7, 4 mapped blocks: a 3-block range plus
+// a single). Extra attributes mirror real thin_dump output; the parser must
+// ignore them. mapped_blocks MUST equal the summed lengths or the parser
+// refuses as truncated. Kept on one line: the fake emits it via a single
+// printf, and line breaks would add whitespace text nodes to the document.
+const XML: &str = r#"<superblock uuid="" time="0" transaction="1" data_block_size="128" nr_data_blocks="1000"><device dev_id="7" mapped_blocks="4" transaction="0" creation_time="0" snap_time="0"><range_mapping origin_begin="0" data_begin="100" length="3" time="0"/><single_mapping origin_block="9" data_block="200" time="0"/></device></superblock>"#;
+
+const TABLE: &str = "table hyper-pool";
+const RESERVE: &str = "message hyper-pool 0 reserve_metadata_snap";
+const RELEASE: &str = "message hyper-pool 0 release_metadata_snap";
+
+type ThinDumpBody = fn(&Path) -> String;
+
+fn recording_thin_dump(base: &Path) -> String {
+    format!(
+        r#"printf '%s\n' "$*" > '{record}'
+for last in "$@"; do :; done
+readlink "$last" >> '{record}'
+printf '%s\n' '{XML}'
+"#,
+        record = base.join("thin_dump.argv").display(),
+    )
+}
+
+fn failing_thin_dump(_: &Path) -> String {
+    "echo 'metadata snap not reserved' >&2\nexit 1\n".to_string()
+}
+
+struct Pool {
+    dir: TempDir,
+    config: PathBuf,
+}
+
+impl Pool {
+    fn new(thin_dump_body: ThinDumpBody) -> Self {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path();
+        let dmsetup = install(
+            base,
+            "dmsetup",
+            &format!(
+                r#"printf '%s\n' "$*" >> '{log}'
+case "$1" in
+  table)
+    if [ -e '{linear}' ]; then printf '0 100 linear 7:0 0\n'; else printf '0 100 thin-pool 7:0 7:1 128 0 0\n'; fi ;;
+  message)
+    if [ "$4" = reserve_metadata_snap ]; then
+      if [ -e '{reserved}' ]; then echo 'reservation exists' >&2; exit 1; fi
+      if [ -e '{stale}' ]; then rm '{stale}'; echo 'reservation exists' >&2; exit 1; fi
+    fi ;;
+esac
+"#,
+                log = base.join("dmsetup.log").display(),
+                linear = base.join("linear").display(),
+                reserved = base.join("reserved").display(),
+                stale = base.join("stale").display(),
+            ),
+        );
+        let thin_dump = install(base, "thin_dump", &thin_dump_body(base));
+        let config = base.join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                "work_dir = \"/srv/hyper\"\n[tools]\ndmsetup = \"{}\"\nthin_dump = \"{}\"\n",
+                dmsetup.display(),
+                thin_dump.display(),
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o644)).unwrap();
+        Self { dir, config }
+    }
+
+    fn mark(&self, marker: &str) {
+        fs::write(self.dir.path().join(marker), b"").unwrap();
+    }
+
+    fn dmsetup_calls(&self) -> Vec<String> {
+        fs::read_to_string(self.dir.path().join("dmsetup.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn thin_dump_record(&self) -> Option<String> {
+        fs::read_to_string(self.dir.path().join("thin_dump.argv")).ok()
+    }
+
+    fn thin_copy(&self, overrides: &[&str]) -> assert_cmd::assert::Assert {
+        let defaults = [
+            ("--pool", "hyper-pool"),
+            ("--meta", "/dev/loop3"),
+            ("--thin-id", "7"),
+            ("--src", "/dev/mapper/hyper-absent-src"),
+            ("--dst", "/dev/mapper/hyper-absent-dst"),
+        ];
+        let mut argv = vec!["thin-copy"];
+        for (flag, default) in defaults {
+            let value = overrides
+                .iter()
+                .position(|a| *a == flag)
+                .map_or(default, |i| overrides[i + 1]);
+            argv.extend([flag, value]);
+        }
+        run(&self.config, &argv)
+    }
+}
+
+#[fixture]
+fn pool() -> Pool {
+    Pool::new(recording_thin_dump)
+}
+
+fn install(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+struct LoopDevice(String);
+
+impl LoopDevice {
+    fn attach(backing: &Path) -> Option<Self> {
+        let out = Command::new("losetup")
+            .args(["--find", "--show"])
+            .arg(backing)
+            .output()
+            .ok()
+            .filter(|out| out.status.success())?;
+        Some(Self(String::from_utf8(out.stdout).ok()?.trim().to_string()))
+    }
+}
+
+impl Drop for LoopDevice {
+    fn drop(&mut self) {
+        let _ = Command::new("losetup").args(["--detach", &self.0]).status();
+    }
+}
+
+struct MapperDevice {
+    name: String,
+    _loop_dev: LoopDevice,
+}
+
+impl MapperDevice {
+    fn linear(name: &str, backing: &Path) -> Option<Self> {
+        let loop_dev = LoopDevice::attach(backing)?;
+        let sectors = fs::metadata(backing).unwrap().len() / 512;
+        let table = format!("0 {sectors} linear {} 0", loop_dev.0);
+        Command::new("dmsetup")
+            .args(["create", name, "--table", &table])
+            .status()
+            .is_ok_and(|status| status.success())
+            .then(|| Self {
+                name: name.to_string(),
+                _loop_dev: loop_dev,
+            })
+    }
+
+    fn path(&self) -> String {
+        format!("/dev/mapper/{}", self.name)
+    }
+}
+
+impl Drop for MapperDevice {
+    fn drop(&mut self) {
+        let _ = Command::new("dmsetup")
+            .args(["remove", "--retry", &self.name])
+            .status();
+    }
+}
+
+#[rstest]
+fn copies_exactly_the_dumped_ranges_under_a_reservation_as_root(pool: Pool) {
+    if !is_root() {
+        eprintln!("SKIP thin_copy: needs root");
+        return;
+    }
+    let blocks = 16;
+    let src_file = pool.dir.path().join("src.img");
+    let dst_file = pool.dir.path().join("dst.img");
+    let pattern: Vec<u8> = (0..blocks * BLOCK_BYTES)
+        .map(|i| (i % 251) as u8 + 1)
+        .collect();
+    fs::write(&src_file, &pattern).unwrap();
+    fs::write(&dst_file, vec![0u8; pattern.len()]).unwrap();
+
+    let pid = std::process::id();
+    let out = {
+        let (Some(src), Some(dst)) = (
+            MapperDevice::linear(&format!("hyper-e2e-src-{pid}"), &src_file),
+            MapperDevice::linear(&format!("hyper-e2e-dst-{pid}"), &dst_file),
+        ) else {
+            eprintln!("SKIP thin_copy: losetup/dmsetup unavailable");
+            return;
+        };
+        pool.thin_copy(&["--src", &src.path(), "--dst", &dst.path()])
+            .success()
+    };
+
+    assert_eq!(pool.dmsetup_calls(), [TABLE, RESERVE, RELEASE]);
+    let record = pool.thin_dump_record().expect("thin_dump ran");
+    let mut lines = record.lines();
+    let argv = lines.next().unwrap();
+    assert!(
+        argv.starts_with("--metadata-snap --dev-id 7 /proc/self/fd/"),
+        "{argv}"
+    );
+    assert_eq!(lines.next(), Some("/dev/loop3"));
+
+    let json = stdout_json(&out);
+    assert_eq!(json["written_chunks"], 2);
+    assert_eq!(json["scanned_chunks"], 2);
+
+    let mut expected = vec![0u8; pattern.len()];
+    for (begin, len) in [(0, 3), (9, 1)] {
+        let range = begin * BLOCK_BYTES..(begin + len) * BLOCK_BYTES;
+        expected[range.clone()].copy_from_slice(&pattern[range]);
+    }
+    assert!(
+        fs::read(&dst_file).unwrap() == expected,
+        "dst differs from the ranged oracle"
+    );
+}
+
+#[rstest]
+#[case::wrong_thin_id(recording_thin_dump, &["--thin-id", "9"], "thin device 9 not present")]
+#[case::thin_dump_fails(
+    failing_thin_dump,
+    &[],
+    "thin_dump failed: metadata snap not reserved"
+)]
+#[case::copy_target_missing(recording_thin_dump, &[], "No such file or directory")]
+fn the_reservation_is_released_on_every_path_that_took_it_as_root(
+    #[case] thin_dump: ThinDumpBody,
+    #[case] overrides: &[&str],
+    #[case] stderr: &str,
+) {
+    if !is_root() {
+        eprintln!("SKIP thin_copy release: needs root");
+        return;
+    }
+    let pool = Pool::new(thin_dump);
+
+    pool.thin_copy(overrides).failure().stderr(contains(stderr));
+
+    assert_eq!(pool.dmsetup_calls(), [TABLE, RESERVE, RELEASE]);
+}
+
+#[rstest]
+#[case::leaked_once("stale", true, &[TABLE, RESERVE, RELEASE, RESERVE, RELEASE])]
+#[case::reserve_keeps_failing("reserved", false, &[TABLE, RESERVE, RELEASE, RESERVE])]
+#[case::not_a_thin_pool("linear", false, &[TABLE])]
+fn reservation_recovery_as_root(
+    pool: Pool,
+    #[case] marker: &str,
+    #[case] dumped: bool,
+    #[case] calls: &[&str],
+) {
+    if !is_root() {
+        eprintln!("SKIP thin_copy reservation: needs root");
+        return;
+    }
+    pool.mark(marker);
+
+    pool.thin_copy(&[]).failure();
+
+    assert_eq!(pool.dmsetup_calls(), calls);
+    assert_eq!(pool.thin_dump_record().is_some(), dumped);
+}
+
+#[rstest]
+#[case::system_disk_as_meta(&["--meta", "/dev/sda"])]
+#[case::traversing_meta(&["--meta", "/dev/loop0/../sda"])]
+#[case::dm_device_as_meta(&["--meta", "/dev/mapper/hyper-pool"])]
+#[case::relative_meta(&["--meta", "loop3"])]
+#[case::foreign_pool(&["--pool", "vg0-pool"])]
+#[case::foreign_src(&["--src", "/dev/sda"])]
+#[case::foreign_dst(&["--dst", "/dev/mapper/root"])]
+#[case::thin_id_past_24_bits(&["--thin-id", "16777216"])]
+fn refuses_foreign_operands_before_running_anything_as_root(
+    pool: Pool,
+    #[case] overrides: &[&str],
+) {
+    if !is_root() {
+        eprintln!("SKIP thin_copy refusal: needs root");
+        return;
+    }
+
+    pool.thin_copy(overrides).failure();
+
+    assert!(pool.dmsetup_calls().is_empty(), "{overrides:?}");
+    assert!(pool.thin_dump_record().is_none(), "{overrides:?}");
+}

@@ -34,11 +34,20 @@ defmodule Hyper.Node.Img.Server do
             layers: [Hyper.Layer.id()],
             dm_names: [String.t()],
             blk_path: Path.t() | nil,
+            sectors: pos_integer() | nil,
             holders: %{pid() => reference()},
             idle_ref: reference() | nil
           }
 
-    defstruct [:img_id, :blk_path, layers: [], dm_names: [], holders: %{}, idle_ref: nil]
+    defstruct [
+      :img_id,
+      :blk_path,
+      :sectors,
+      layers: [],
+      dm_names: [],
+      holders: %{},
+      idle_ref: nil
+    ]
   end
 
   defmodule Opts do
@@ -58,6 +67,9 @@ defmodule Hyper.Node.Img.Server do
   @doc "The composed read-only block device path for the image managed by `server`."
   @spec blk_path(GenServer.server()) :: Path.t()
   def blk_path(server), do: GenServer.call(server, :blk_path)
+
+  @spec sectors(GenServer.server()) :: pos_integer()
+  def sectors(server), do: GenServer.call(server, :sectors)
 
   @doc """
   Take a reference on `server` on behalf of the calling process. The image stays
@@ -83,8 +95,16 @@ defmodule Hyper.Node.Img.Server do
     layer_ids = resolve_layers(img_id)
 
     with {:ok, layer_paths} <- acquire_layers(layer_ids),
-         {:ok, %{blk_path: blk_path, dm_names: dm_names}} <- build_chain(img_id, layer_paths) do
-      state = %State{img_id: img_id, layers: layer_ids, dm_names: dm_names, blk_path: blk_path}
+         {:ok, %{blk_path: blk_path, dm_names: dm_names, sectors: sectors}} <-
+           build_chain(img_id, layer_paths) do
+      state = %State{
+        img_id: img_id,
+        layers: layer_ids,
+        dm_names: dm_names,
+        blk_path: blk_path,
+        sectors: sectors
+      }
+
       {:ok, arm_idle(state)}
     else
       {:error, reason} -> {:stop, reason}
@@ -116,6 +136,10 @@ defmodule Hyper.Node.Img.Server do
   @impl true
   def handle_call(:blk_path, _from, %State{blk_path: blk_path} = state) do
     {:reply, blk_path, state}
+  end
+
+  def handle_call(:sectors, _from, %State{sectors: sectors} = state) do
+    {:reply, sectors, state}
   end
 
   @impl true
@@ -186,7 +210,8 @@ defmodule Hyper.Node.Img.Server do
   # Stack dm-snapshot devices: base loop is the origin, each delta loop is layered
   # on top. Rolls back any devices it created if a later one fails.
   @spec build_chain(Hyper.Img.id(), [Path.t()]) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()], sectors: pos_integer()}}
+          | {:error, term()}
   # An unknown image id resolves to no layers; return a clean domain error so
   # `init/1` stops with `{:stop, :unknown_image}` (which the scheduler maps to
   # `:no_capacity`) rather than crashing with a FunctionClauseError + SASL
@@ -194,12 +219,18 @@ defmodule Hyper.Node.Img.Server do
   defp build_chain(_img_id, []), do: {:error, :unknown_image}
 
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- file_sectors(base) do
-      case deltas do
-        [] -> build_linear(img_id, base, sectors)
-        deltas -> build_snapshots(img_id, base, deltas, sectors)
-      end
+    with {:ok, sectors} <- file_sectors(base),
+         {:ok, chain} <- build_layers(img_id, base, deltas, sectors) do
+      {:ok, Map.put(chain, :sectors, sectors)}
     end
+  end
+
+  @spec build_layers(Hyper.Img.id(), Path.t(), [Path.t()], pos_integer()) ::
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+  defp build_layers(img_id, base, [], sectors), do: build_linear(img_id, base, sectors)
+
+  defp build_layers(img_id, base, deltas, sectors) do
+    build_snapshots(img_id, base, deltas, sectors)
   end
 
   @spec build_linear(Hyper.Img.id(), Path.t(), pos_integer()) ::

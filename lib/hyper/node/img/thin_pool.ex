@@ -25,8 +25,8 @@ defmodule Hyper.Node.Img.ThinPool do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:pool_dev, :meta_loop]
-    defstruct [:pool_dev, :meta_loop, next: 0, freed: []]
+    @enforce_keys [:meta_loop]
+    defstruct [:meta_loop, next: 0, freed: []]
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -61,22 +61,12 @@ defmodule Hyper.Node.Img.ThinPool do
     )
   end
 
-  @doc """
-  The provisioned ranges of thin device `thin_id`, from the pool's own
-  metadata. Because the volume reads through an external origin, provisioned
-  blocks are exactly the blocks ever written — the divergence a fork publish
-  must copy, discovered without scanning the device.
-
-  Reserves the pool's metadata snapshot for the duration of the dump and
-  always releases it (one reserve may exist at a time; this call is
-  serialized by the pool server).
-  """
-  @spec mappings(non_neg_integer()) ::
-          {:ok, %{block_sectors: pos_integer(), ranges: [[non_neg_integer()]]}}
-          | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.mappings", include: [:thin_id])
-  def mappings(thin_id) do
-    GenServer.call(__MODULE__, {:mappings, thin_id}, :timer.seconds(60))
+  @spec copy_provisioned(non_neg_integer(), Path.t(), Path.t()) ::
+          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
+  @decorate with_span("Hyper.Node.Img.ThinPool.copy_provisioned", include: [:thin_id])
+  def copy_provisioned(thin_id, src, dst) do
+    meta_loop = GenServer.call(__MODULE__, :meta_loop)
+    SuidHelper.ThinCopy.copy(@pool_name, meta_loop, thin_id, src, dst)
   end
 
   @doc "Remove thin volume `name` and free its thin device `id`."
@@ -95,7 +85,7 @@ defmodule Hyper.Node.Img.ThinPool do
          :ok <- reclaim_stale_pool(),
          :ok <- zero_metadata(meta),
          sectors = Information.as_sectors(ImgConfig.thin_pool_data_size()),
-         {:ok, pool_dev, meta_loop} <-
+         {:ok, _pool_dev, meta_loop} <-
            SuidHelper.Dmsetup.create_thin_pool(
              @pool_name,
              meta,
@@ -104,7 +94,7 @@ defmodule Hyper.Node.Img.ThinPool do
              ImgConfig.thin_block_sectors(),
              0
            ) do
-      {:ok, %State{pool_dev: pool_dev, meta_loop: meta_loop}}
+      {:ok, %State{meta_loop: meta_loop}}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -116,7 +106,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
     with :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_thin #{id}"),
          {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
+           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, sectors, origin_dev) do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->
@@ -133,7 +123,7 @@ defmodule Hyper.Node.Img.ThinPool do
          :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_snap #{id} #{origin_id}"),
          :ok <- SuidHelper.Dmsetup.resume(origin_name),
          {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
+           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, sectors, origin_dev) do
       {:reply, {:ok, %{dev: dev, id: id}}, state}
     else
       {:error, reason} ->
@@ -147,36 +137,13 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:mappings, thin_id}, _from, state) do
-    reply =
-      with :ok <- reserve_metadata_snap() do
-        try do
-          SuidHelper.ThinDump.mappings(state.meta_loop, thin_id)
-        after
-          _ = SuidHelper.Dmsetup.message(@pool_name, "release_metadata_snap")
-        end
-      end
-
-    {:reply, reply, state}
-  end
+  def handle_call(:meta_loop, _from, state), do: {:reply, state.meta_loop, state}
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
     _ = SuidHelper.Dmsetup.remove(name)
     _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
     {:reply, :ok, id_free(state, id)}
-  end
-
-  @spec reserve_metadata_snap() :: :ok | {:error, term()}
-  defp reserve_metadata_snap do
-    case SuidHelper.Dmsetup.message(@pool_name, "reserve_metadata_snap") do
-      :ok ->
-        :ok
-
-      {:error, _} ->
-        _ = SuidHelper.Dmsetup.message(@pool_name, "release_metadata_snap")
-        SuidHelper.Dmsetup.message(@pool_name, "reserve_metadata_snap")
-    end
   end
 
   @impl true

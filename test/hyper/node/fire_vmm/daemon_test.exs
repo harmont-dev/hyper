@@ -72,7 +72,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     log
     |> File.read!()
     |> String.split("\n", trim: true)
-    |> Enum.map(&hd(String.split(&1, " ")))
+    |> Enum.map(&(&1 |> String.split(" ") |> Enum.take(2) |> Enum.join(" ")))
   end
 
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
@@ -94,15 +94,15 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       ops = calls(log)
-      prepare_at = Enum.find_index(ops, &(&1 == "network"))
-      jailer_at = Enum.find_index(ops, &(&1 == "jailer"))
+      prepare_at = Enum.find_index(ops, &(&1 == "vm prepare"))
+      jailer_at = Enum.find_index(ops, &(&1 == "vm launch"))
 
-      assert prepare_at, "expected a `network` (prepare) call before the jailer launch"
+      assert prepare_at, "expected a `vm prepare` call before the jailer launch"
       assert jailer_at, "expected the jailer to have been launched"
       assert prepare_at < jailer_at, "netns must be prepared before the jailer enters it"
     end
 
-    test "terminate/2 tears down both the network and the chroot jail", %{log: log, fake: fake} do
+    test "terminate/2 tears down the jail and its network", %{log: log, fake: fake} do
       put_toml(fake)
 
       assert :ok =
@@ -111,9 +111,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                  muontrap: nil
                })
 
-      ops = calls(log)
-      assert "network" in ops
-      assert "chroot-jail" in ops
+      assert calls(log) == ["vm teardown"]
     end
   end
 end
