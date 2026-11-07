@@ -129,6 +129,7 @@ pub enum ParseTableError {
 }
 
 impl DmTable {
+    /// The non-dm block device operands, each with the table argument it fills.
     pub fn paths(&self) -> impl Iterator<Item = (Role, &DevPath)> {
         let (origin, first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
@@ -148,6 +149,7 @@ impl DmTable {
         origin.into_iter().chain(first).chain(second)
     }
 
+    /// [`Self::paths`], mutably.
     pub fn paths_mut(&mut self) -> impl Iterator<Item = (Role, &mut DevPath)> {
         let (origin, first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
@@ -167,6 +169,7 @@ impl DmTable {
         origin.into_iter().chain(first).chain(second)
     }
 
+    /// The dm devices this table references, by name.
     pub fn devices(&self) -> impl Iterator<Item = &DmName> {
         let (first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. })
