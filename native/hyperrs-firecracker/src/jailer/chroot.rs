@@ -2,7 +2,6 @@
 //! Module responsible for preparing a `chroot` jail to the firecracker jailer.
 
 use super::FIRECRACKER;
-use crate::tun;
 use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
@@ -37,9 +36,6 @@ const KERNEL_MODE: Mode = Mode::from_bits_truncate(0o444);
 /// The mode for the `ROOTFS_NAME`.
 const ROOTFS_MODE: Mode = Mode::from_bits_truncate(0o600);
 
-/// The mode of directories created by this utility in the chrooted jail.
-const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
-
 /// Mode set on `ROOT_NAME`.
 const JAIL_ROOT_MODE: Mode = Mode::from_bits_truncate(0o710);
 
@@ -67,8 +63,6 @@ pub enum BuildError {
     Kernel(#[source] dir::DirError),
     #[error("creating rootfs node: {0}")]
     Rootfs(#[source] dir::DirError),
-    #[error("creating /dev/net/tun: {0}")]
-    Tun(#[source] dir::DirError),
 }
 
 #[derive(Debug, ThisError)]
@@ -169,15 +163,9 @@ impl JailRoot {
         #[builder(start_fn)] owner: Owner,
         kernel: &KernelImage,
         rootfs: &BlockDevice,
-        #[builder(default)] tun: bool,
     ) -> Result<(), BuildError> {
         self.stage_kernel(kernel).map_err(BuildError::Kernel)?;
         self.add_rootfs(rootfs, owner).map_err(BuildError::Rootfs)?;
-
-        if tun {
-            self.add_tun(owner).map_err(BuildError::Tun)?;
-        }
-
         Ok(())
     }
 
@@ -206,16 +194,6 @@ impl JailRoot {
     ) -> Result<(), dir::DirError> {
         let node = DeviceNode::<IsBlockDevice>::new(device.rdev()?, ROOTFS_MODE);
         self.0.make_device(ROOTFS_NAME, node, owner)?;
-        Ok(())
-    }
-
-    /// TODO(markovejnovic): Remove this slop
-    pub fn add_tun(&self, owner: Owner) -> Result<(), dir::DirError> {
-        let net = self
-            .0
-            .ensure_dir(tun::DEV, DIR_MODE)?
-            .ensure_dir(tun::NET, DIR_MODE)?;
-        net.make_device(tun::NAME, tun::NODE, owner)?;
         Ok(())
     }
 
@@ -259,12 +237,11 @@ type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
 mod tests {
     use super::{JailLayout, JailRoot, KernelError, KernelImage};
     use crate::VmId;
+    use hyperrs_fs::file;
     use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
-    use hyperrs_fs::{dir, file};
     use nix::errno::Errno;
-    use nix::sys::stat::{makedev, mknod, Mode, SFlag};
     use nix::unistd::{Gid, Uid};
     use proptest::prelude::*;
     use std::fs;
@@ -496,56 +473,5 @@ mod tests {
         assert_eq!(meta.rdev(), dev_rdev.unwrap());
         assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
         assert_eq!(meta.mode() & 0o777, 0o600);
-    }
-
-    #[test]
-    fn add_tun_is_idempotent_as_root() {
-        if !is_root() {
-            eprintln!("SKIP add_tun_is_idempotent: needs root for mknod/chown");
-            return;
-        }
-        let tmp = tempfile::tempdir().unwrap();
-        let root_dir = jail_root(tmp.path());
-        let root = open_root(tmp.path());
-
-        root.add_tun(owner(12345, 12346)).unwrap();
-        root.add_tun(owner(12345, 12346)).unwrap();
-
-        let meta = fs::metadata(root_dir.join("dev/net/tun")).unwrap();
-        assert!(meta.file_type().is_char_device());
-        assert_eq!(meta.rdev(), makedev(10, 200));
-        assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
-        assert_eq!(meta.mode() & 0o777, 0o666);
-    }
-
-    #[test]
-    fn add_tun_refuses_a_preexisting_node_with_another_number_as_root() {
-        if !is_root() {
-            eprintln!("SKIP add_tun_refuses_a_preexisting_node: needs root for mknod");
-            return;
-        }
-        let tmp = tempfile::tempdir().unwrap();
-        let root_dir = jail_root(tmp.path());
-        fs::create_dir_all(root_dir.join("dev/net")).unwrap();
-        let planted = root_dir.join("dev/net/tun");
-        mknod(
-            &planted,
-            SFlag::S_IFCHR,
-            Mode::from_bits_truncate(0o666),
-            makedev(1, 3),
-        )
-        .unwrap();
-        let root = open_root(tmp.path());
-
-        let err = root.add_tun(owner(12345, 12346)).unwrap_err();
-        assert!(
-            matches!(err, dir::DirError::DeviceMismatch { .. }),
-            "got {err:?}"
-        );
-        assert_eq!(
-            fs::metadata(&planted).unwrap().uid(),
-            0,
-            "planted node must not be chowned"
-        );
     }
 }

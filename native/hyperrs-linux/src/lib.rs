@@ -11,7 +11,6 @@
 pub mod cgroup;
 pub mod dm;
 pub mod loopdev;
-pub mod netns;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {

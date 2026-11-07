@@ -61,10 +61,6 @@ fn config_path() -> PathBuf {
 }
 
 /// Hyper's /etc/hyper/config.toml file format.
-///
-/// A legacy `[network]` table and `[tools] ip`/`nft`/`sysctl` keys are accepted
-/// and ignored (serde drops unknown keys), so operator configs written before
-/// the networking rewrite keep working.
 #[derive(Debug, Clone, Deserialize, SmartDefault)]
 pub struct Config {
     #[default(default_work_dir())]

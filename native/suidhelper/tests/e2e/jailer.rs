@@ -42,21 +42,6 @@ fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     p
 }
 
-/// Same as [`write_root_config`] plus a legacy `[network]` table and
-/// `[tools] ip`/`nft`/`sysctl` keys, as an operator config written before the
-/// networking rewrite would carry.
-fn write_root_config_with_legacy_network(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
-    let p = dir.join("config.toml");
-    let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\nip = \"/usr/bin/ip\"\nnft = \"/usr/sbin/nft\"\nsysctl = \"/usr/sbin/sysctl\"\n[network]\nuplink = \"eth0\"\nclone_pool = \"172.31.0.0/16\"\n",
-        jailer.display(),
-        firecracker.display(),
-    );
-    fs::write(&p, body).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-    p
-}
-
 #[test]
 fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     if !is_root() {
@@ -146,45 +131,6 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     assert!(
         leaked.is_empty(),
         "caller environment leaked to the jailer (only shell-set PWD/_/SHLVL allowed): {leaked:?}",
-    );
-}
-
-#[test]
-fn execs_jailer_without_netns_with_legacy_network_table_as_root() {
-    if !is_root() {
-        eprintln!(
-            "SKIP jailer legacy [network]: needs root to become_root_permanently + own the fakes"
-        );
-        return;
-    }
-    let tmp = tempfile::tempdir().unwrap();
-    let argv_rec = tmp.path().join("argv.json");
-    let jailer = install_recorder(tmp.path());
-    let firecracker = install_firecracker(tmp.path());
-    let cfg = write_root_config_with_legacy_network(tmp.path(), &jailer, &firecracker);
-
-    let out = run(
-        &cfg,
-        &[
-            "jailer",
-            "--id",
-            "vnet1",
-            "--uid",
-            "900001",
-            "--gid",
-            "900002",
-            "--api-sock",
-            "/api.sock",
-        ],
-    );
-
-    out.code(RECORDER_EXIT);
-
-    let argv: Vec<String> =
-        serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
-    assert!(
-        !argv.iter().any(|a| a == "--netns"),
-        "the jailer must never be told to enter a netns: {argv:?}"
     );
 }
 
