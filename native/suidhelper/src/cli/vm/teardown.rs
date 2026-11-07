@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! `vm teardown`: delete a VM's stale chroot and cgroup leaf before
-//! relaunching the jailer.
-//!
-//! Security: each path is validated as a `SafePath` and reached by an
-//! `O_NOFOLLOW` walk from its base (`JAIL_BASE` / `/sys/fs/cgroup`), so a
-//! symlinked component cannot redirect the deletion outside the tree, and removal
-//! is fd-relative (`unlinkat`), never by re-resolved name. `--chroot` must be
-//! exactly `<exec>/<id>` below `JAIL_BASE`; `--cgroup` at least two components
-//! below its base. Before removing the cgroup leaf we write `cgroup.kill` to
-//! SIGKILL any process still in the subtree (a still-live firecracker would
-//! otherwise keep the leaf non-empty and leak its loop/dm devices), then
-//! `rmdir` it (non-recursive). Both deletes are idempotent: a missing target
-//! (`ENOENT`, and for the cgroup `ENOTEMPTY`) is success.
+//! `vm teardown`: delete a VM's stale chroot and cgroup leaf before relaunching the jailer.
 
 use super::VmOut;
 use crate::cli::Op;
@@ -86,8 +74,6 @@ impl Teardown {
             let jail_base = config.jail_base();
             let layout = JailLayout::new(&jail_base, &self.id);
             let _root = token.elevate()?;
-            // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
-            // chroot teardown below is not yanking files out from under a live process.
             self.remove_cgroup(&cgroup_parent)?;
             Ok::<_, JailRemoveError>(layout.remove()?)
         })()
@@ -104,11 +90,6 @@ impl Teardown {
         jail.and(net)
     }
 
-    /// SIGKILL any process still in the per-VM cgroup leaf (via `cgroup.kill`), then
-    /// `rmdir` it, fd-relative after an `O_NOFOLLOW` walk from `base`. `--cgroup` must
-    /// be at least two components below `base` (one or more parents, plus the leaf).
-    /// Idempotent: a missing leaf is success, and a leaf that has not finished
-    /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
     pub fn remove_cgroup(&self, parent: &LexicalPath) -> Result<(), CgroupError> {
         let cgroup = match Cgroup::open(&parent.join(&self.id)) {
             Ok(cgroup) => cgroup,
