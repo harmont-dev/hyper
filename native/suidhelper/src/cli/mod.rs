@@ -3,6 +3,7 @@
 pub mod dm;
 mod host_init;
 mod sys_test;
+pub mod thin;
 pub mod thin_copy;
 mod version;
 pub mod vm;
@@ -68,11 +69,10 @@ pub enum Request {
     DmLinear(dm::Linear),
     DmSnapshot(dm::Snapshot),
     DmThinPool(dm::ThinPool),
-    DmThin(dm::Thin),
     DmRemove(dm::Remove),
-    DmSuspend(dm::Suspend),
-    DmResume(dm::Resume),
-    DmMessage(dm::Message),
+    ThinCreate(thin::ThinCreate),
+    ThinSnapshot(thin::ThinSnapshot),
+    ThinDestroy(thin::ThinDestroy),
     ThinCopy(thin_copy::ThinCopy),
     HostInit(host_init::HostInit),
     SysTest(sys_test::SysTest),
@@ -149,20 +149,20 @@ mod tests {
             json!({"op": "vm_grant_vsock", "id": "v1"}),
             json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
             json!({"op": "vm_teardown", "id": "v1"}),
-            json!({"op": "dm_linear", "name": "hyper-img", "readonly": true, 
-                   "origin": "/srv/hyper/base.img"}),
-            json!({"op": "dm_snapshot", "name": "hyper-img-1", "readonly": true, 
-                   "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}),
+            json!({"op": "dm_linear", "name": "hyper-img", "origin": "/srv/hyper/base.img"}),
+            json!({"op": "dm_snapshot", "name": "hyper-img-1", "origin": "/dev/mapper/hyper-img",
+                   "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}),
             json!({"op": "dm_thin_pool", "name": "hyper-pool", "metadata": "/srv/hyper/meta",
                    "data": "/srv/hyper/data", "block_sectors": 128, "low_water": 0}),
-            json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool", "thin_id": 1,
-                   "origin": "/dev/mapper/hyper-img"}),
             json!({"op": "dm_remove", "name": "hyper-v1", "retry": true}),
-            json!({"op": "dm_suspend", "name": "hyper-v1"}),
-            json!({"op": "dm_resume", "name": "hyper-v1"}),
-            json!({"op": "dm_message", "name": "hyper-pool", "message": "create_thin 1"}),
-            json!({"op": "thin_copy", "pool": "hyper-pool", "meta": "/dev/loop3", "thin_id": 7,
-                   "src": "/dev/mapper/hyper-a", "dst": "/dev/mapper/hyper-b"}),
+            json!({"op": "thin_create", "pool": "hyper-pool", "thin_id": 1, "name": "hyper-v1",
+                   "origin": "/dev/mapper/hyper-img"}),
+            json!({"op": "thin_snapshot", "pool": "hyper-pool", "parent": "hyper-v1", "thin_id": 2,
+                   "name": "hyper-v2", "origin": "/dev/mapper/hyper-img"}),
+            json!({"op": "thin_destroy", "pool": "hyper-pool", "name": "hyper-v1"}),
+            json!({"op": "thin_copy", "pool": "hyper-pool", "meta": "/dev/loop3",
+                   "src": "/dev/mapper/hyper-a", "origin": "/dev/mapper/hyper-img",
+                   "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}),
             json!({"op": "host_init"}),
             json!({"op": "sys_test"}),
             json!({"op": "version"}),
@@ -230,22 +230,38 @@ mod tests {
     #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]
     #[case::thin_copy_src_outside_mapper(json!({"op": "thin_copy", "pool": "hyper-pool",
-        "meta": "/dev/loop3", "thin_id": 7, "src": "/dev/sda", "dst": "/dev/mapper/hyper-b"}))]
-    #[case::thin_copy_chunk_bytes(json!({"op": "thin_copy", "pool": "hyper-pool", "meta": "/dev/loop3",
-        "thin_id": 7, "src": "/dev/mapper/hyper-a", "dst": "/dev/mapper/hyper-b", "chunk_bytes": 1}))]
-    #[case::thin_id_as_string(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
-        "thin_id": "1", "origin": "/dev/mapper/hyper-img"}))]
-    #[case::relative_cow(json!({"op": "dm_snapshot", "name": "hyper-v1", "readonly": true,
+        "meta": "/dev/loop3", "src": "/dev/sda", "origin": "/dev/mapper/hyper-img",
+        "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
+    #[case::thin_copy_caller_named_target(json!({"op": "thin_copy", "pool": "hyper-pool",
+        "meta": "/dev/loop3", "src": "/dev/mapper/hyper-a", "dst": "/dev/mapper/hyper-b",
+        "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
+    #[case::thin_copy_caller_named_thin_id(json!({"op": "thin_copy", "pool": "hyper-pool",
+        "meta": "/dev/loop3", "thin_id": 7, "src": "/dev/mapper/hyper-a",
+        "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
+    #[case::thin_id_as_string(json!({"op": "thin_create", "pool": "hyper-pool", "thin_id": "1",
+        "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}))]
+    #[case::thin_id_past_24_bits(json!({"op": "thin_create", "pool": "hyper-pool",
+        "thin_id": 16_777_216, "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}))]
+    #[case::thin_origin_by_name(json!({"op": "thin_create", "pool": "hyper-pool", "thin_id": 1,
+        "name": "hyper-v1", "origin": "hyper-img"}))]
+    #[case::caller_named_parent_id(json!({"op": "thin_snapshot", "pool": "hyper-pool",
+        "parent": "hyper-v1", "parent_id": 1, "thin_id": 2, "name": "hyper-v2",
+        "origin": "/dev/mapper/hyper-img"}))]
+    #[case::foreign_parent(json!({"op": "thin_snapshot", "pool": "hyper-pool", "parent": "root",
+        "thin_id": 2, "name": "hyper-v2", "origin": "/dev/mapper/hyper-img"}))]
+    #[case::caller_named_destroy_id(json!({"op": "thin_destroy", "pool": "hyper-pool",
+        "name": "hyper-v1", "thin_id": 1}))]
+    #[case::relative_cow(json!({"op": "dm_snapshot", "name": "hyper-v1",
         "origin": "/dev/mapper/hyper-img", "cow": "cow.img", "chunk_sectors": 8}))]
-    #[case::thin_id_past_24_bits(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
-        "thin_id": 16_777_216, "origin": "/dev/mapper/hyper-img"}))]
-    #[case::caller_chosen_sectors(json!({"op": "dm_linear", "name": "hyper-img", "readonly": true,
-        "sectors": 8, "origin": "/srv/hyper/base.img"}))]
-    #[case::thin_without_origin(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
-        "thin_id": 1}))]
-    #[case::readonly_thin_pool(json!({"op": "dm_thin_pool", "name": "hyper-pool", "readonly": true,
-        "metadata": "/srv/hyper/meta", "data": "/srv/hyper/data",
-        "block_sectors": 128, "low_water": 0}))]
+    #[case::caller_chosen_sectors(json!({"op": "dm_linear", "name": "hyper-img", "sectors": 8,
+        "origin": "/srv/hyper/base.img"}))]
+    #[case::writable_snapshot(json!({"op": "dm_snapshot", "name": "hyper-v1", "readonly": false,
+        "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
+    #[case::retired_message_op(json!({"op": "dm_message", "name": "hyper-pool",
+        "message": "delete 1"}))]
+    #[case::retired_suspend_op(json!({"op": "dm_suspend", "name": "hyper-v1"}))]
+    #[case::retired_thin_op(json!({"op": "dm_thin", "name": "hyper-v1", "pool": "hyper-pool",
+        "thin_id": 1, "origin": "/dev/mapper/hyper-img"}))]
     fn malformed_requests_are_refused(#[case] request: Value) {
         assert!(
             matches!(parse(&request), Err(RequestError::Json(_))),

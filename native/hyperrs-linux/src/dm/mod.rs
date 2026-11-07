@@ -18,8 +18,8 @@ pub use table::{
     ThinPoolTable, ThinTable,
 };
 pub use thin::{
-    Active, Inactive, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin, ThinId,
-    ThinIdOutOfRange, ThinMessage, ThinPool, ThinPoolError,
+    Active, Inactive, OpenThinError, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin,
+    ThinId, ThinIdOutOfRange, ThinMessage, ThinPool, ThinPoolError,
 };
 use thiserror::Error;
 

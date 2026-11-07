@@ -58,6 +58,10 @@ impl LoopDevice {
             .filter(|out| out.status.success())?;
         Some(Self(String::from_utf8(out.stdout).ok()?.trim().to_string()))
     }
+
+    pub fn path(&self) -> &str {
+        &self.0
+    }
 }
 
 impl Drop for LoopDevice {
@@ -95,6 +99,37 @@ impl Drop for MapperDevice {
     fn drop(&mut self) {
         let _ = Process::new("dmsetup")
             .args(["remove", "--retry", &self.name])
+            .status();
+    }
+}
+
+pub struct DmDevice(String);
+
+impl DmDevice {
+    pub fn create(name: &str, table: &str) -> Option<Self> {
+        Process::new("dmsetup")
+            .args(["create", name, "--table", table])
+            .status()
+            .is_ok_and(|status| status.success())
+            .then(|| Self(name.to_string()))
+    }
+
+    pub fn path(&self) -> String {
+        format!("/dev/mapper/{}", self.0)
+    }
+
+    pub fn message(&self, message: &str) -> bool {
+        Process::new("dmsetup")
+            .args(["message", &self.0, "0", message])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+}
+
+impl Drop for DmDevice {
+    fn drop(&mut self) {
+        let _ = Process::new("dmsetup")
+            .args(["remove", "--retry", &self.0])
             .status();
     }
 }

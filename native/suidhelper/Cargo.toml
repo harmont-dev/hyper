@@ -60,6 +60,10 @@ name = "e2e_version"
 path = "tests/e2e/version.rs"
 
 [[test]]
+name = "e2e_thin"
+path = "tests/e2e/thin.rs"
+
+[[test]]
 name = "e2e_thin_copy"
 path = "tests/e2e/thin_copy.rs"
 

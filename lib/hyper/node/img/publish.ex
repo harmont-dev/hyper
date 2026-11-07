@@ -17,7 +17,6 @@ defmodule Hyper.Node.Img.Publish do
 
   alias Hyper.Node.Img
   alias Hyper.Node.Img.{Mutable, ThinPool}
-  alias Hyper.SuidHelper
   alias Unit.Information
 
   use OpenTelemetryDecorator
@@ -61,7 +60,6 @@ defmodule Hyper.Node.Img.Publish do
   defp materialize(
          %{
            thin_name: origin_name,
-           thin_id: origin_id,
            origin_dev: ro_dev,
            img_server: img_server
          },
@@ -70,9 +68,9 @@ defmodule Hyper.Node.Img.Publish do
     tmp = Hyper.Vm.Id.generate()
 
     with {:ok, %{dev: snap_dev, id: snap_id}} <-
-           ThinPool.snapshot(snap_name(tmp), origin_name, origin_id, ro_dev) do
+           ThinPool.snapshot(snap_name(tmp), origin_name, ro_dev) do
       try do
-        write_delta(tmp, ro_dev, {snap_dev, snap_id}, Img.Server.size(img_server), img_id)
+        write_delta(tmp, ro_dev, snap_dev, Img.Server.size(img_server), img_id)
       after
         :ok = ThinPool.destroy(snap_name(tmp), snap_id)
       end
@@ -84,27 +82,18 @@ defmodule Hyper.Node.Img.Publish do
   @spec write_delta(
           String.t(),
           Path.t(),
-          {Path.t(), non_neg_integer()},
+          Path.t(),
           Information.t(),
           Hyper.Img.id()
         ) ::
           {:ok, Hyper.Img.id()} | {:error, term()}
-  defp write_delta(tmp, ro_dev, {snap_dev, snap_id}, size, parent_img_id) do
+  defp write_delta(tmp, ro_dev, snap_dev, size, parent_img_id) do
     cow_path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), "fork-delta-#{tmp}.img")
 
     with :ok <- create_sparse(cow_path, cow_size(size)) do
       try do
-        with {:ok, write_dev} <-
-               SuidHelper.Dmsetup.create_snapshot_rw(cow_name(tmp), ro_dev, cow_path),
-             {:ok, _stats} <- ThinPool.copy_provisioned(snap_id, snap_dev, write_dev),
-             # Removing the snapshot device flushes every exception to the store;
-             # only then is the COW file complete on disk.
-             :ok <- SuidHelper.Dmsetup.remove(cow_name(tmp)) do
+        with {:ok, _stats} <- ThinPool.copy_provisioned(snap_dev, ro_dev, cow_path) do
           Hyper.Img.create_derived(parent_img_id, cow_path, label: "fork of #{parent_img_id}")
-        else
-          {:error, _} = err ->
-            _ = SuidHelper.Dmsetup.remove(cow_name(tmp))
-            err
         end
       after
         # create_derived consumes the file on success and removes it on failure;
@@ -140,7 +129,4 @@ defmodule Hyper.Node.Img.Publish do
 
   @spec snap_name(String.t()) :: String.t()
   defp snap_name(tmp), do: "hyper-fork-#{tmp}"
-
-  @spec cow_name(String.t()) :: String.t()
-  defp cow_name(tmp), do: "hyper-forkcow-#{tmp}"
 end

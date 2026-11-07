@@ -1,11 +1,10 @@
 use crate::cli::Op;
-use crate::cli::ThinIdNumber;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, TableError};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, LinearTable, Origin, Persistence, RemoveMode, Role, SnapshotTable,
-    ThinId, ThinMessage, ThinPoolTable, ThinTable,
+    self, DevPath, DmName, DmTable, LinearTable, Origin, Persistence, RemoveMode, Role,
+    SnapshotTable, ThinPoolTable, ThinTable,
 };
 use hyperrs_linux::loopdev::{self, LoopControl};
 use hyperrs_linux::Access;
@@ -29,7 +28,6 @@ const SECTOR_BYTES: u64 = 512;
 pub struct Linear {
     #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
-    readonly: bool,
     #[serde_as(as = "DisplayFromStr")]
     origin: Origin,
 }
@@ -40,7 +38,6 @@ pub struct Linear {
 pub struct Snapshot {
     #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
-    readonly: bool,
     #[serde_as(as = "DisplayFromStr")]
     origin: Origin,
     #[serde_as(as = "DisplayFromStr")]
@@ -65,50 +62,10 @@ pub struct ThinPool {
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Thin {
-    #[serde_as(as = "DisplayFromStr")]
-    name: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
-    pool: HyperDmName,
-    #[serde_as(as = "ThinIdNumber")]
-    thin_id: ThinId,
-    #[serde_as(as = "DisplayFromStr")]
-    origin: Origin,
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Remove {
     #[serde_as(as = "DisplayFromStr")]
     name: HyperDmName,
     retry: bool,
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Suspend {
-    #[serde_as(as = "DisplayFromStr")]
-    name: HyperDmName,
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Resume {
-    #[serde_as(as = "DisplayFromStr")]
-    name: HyperDmName,
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Message {
-    #[serde_as(as = "DisplayFromStr")]
-    name: HyperDmName,
-    #[serde_as(as = "DisplayFromStr")]
-    message: ThinMessage,
 }
 
 #[derive(Serialize)]
@@ -119,9 +76,6 @@ pub enum DmOut {
         loops: BTreeMap<Role, PathBuf>,
     },
     Removed,
-    Messaged,
-    Suspended,
-    Resumed,
 }
 
 #[derive(Debug, ThisError)]
@@ -155,13 +109,14 @@ impl Op for Linear {
     type Error = DmError;
 
     fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Linear {
-            name,
-            readonly,
-            origin,
-        } = self;
+        let Linear { name, origin } = self;
         let table = DmTable::Linear(LinearTable { sectors: 0, origin });
-        create(&name, access(readonly), table, &mut token)
+        create(
+            &name,
+            Access::ReadOnly,
+            HyperDmTable::new(table)?,
+            &mut token,
+        )
     }
 }
 
@@ -172,19 +127,12 @@ impl Op for Snapshot {
     fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
         let Snapshot {
             name,
-            readonly,
             origin,
             cow,
             chunk_sectors,
         } = self;
-        let table = DmTable::Snapshot(SnapshotTable {
-            sectors: 0,
-            origin,
-            cow,
-            persistence: Persistence::Persistent,
-            chunk: chunk_sectors,
-        });
-        create(&name, access(readonly), table, &mut token)
+        let table = HyperDmTable::new(snapshot_table(origin, cow, chunk_sectors))?;
+        create(&name, Access::ReadOnly, table, &mut token)
     }
 }
 
@@ -207,28 +155,12 @@ impl Op for ThinPool {
             block_sectors,
             low_water,
         });
-        create(&name, Access::ReadWrite, table, &mut token)
-    }
-}
-
-impl Op for Thin {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Thin {
-            name,
-            pool,
-            thin_id,
-            origin,
-        } = self;
-        let table = DmTable::Thin(ThinTable {
-            sectors: 0,
-            pool: (*pool).clone(),
-            id: thin_id,
-            origin: Some(origin),
-        });
-        create(&name, Access::ReadWrite, table, &mut token)
+        create(
+            &name,
+            Access::ReadWrite,
+            HyperDmTable::new(table)?,
+            &mut token,
+        )
     }
 }
 
@@ -250,64 +182,16 @@ impl Op for Remove {
     }
 }
 
-impl Op for Suspend {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Suspend { name } = self;
-        let dm = dmsetup()?;
-        let _root = token.elevate()?;
-        dm.device(&name).suspend()?;
-        Ok(DmOut::Suspended)
-    }
-}
-
-impl Op for Resume {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Resume { name } = self;
-        let dm = dmsetup()?;
-        let _root = token.elevate()?;
-        dm.device(&name).resume()?;
-        Ok(DmOut::Resumed)
-    }
-}
-
-impl Op for Message {
-    type Output = DmOut;
-    type Error = DmError;
-
-    fn run(self, mut token: Unprivileged) -> Result<DmOut, DmError> {
-        let Message { name, message } = self;
-        let dm = dmsetup()?;
-        let _root = token.elevate()?;
-        dm.thin_pool(&name)?.send(message)?;
-        Ok(DmOut::Messaged)
-    }
-}
-
-fn dmsetup() -> Result<dm::Dmsetup, RootSafeBinError> {
+pub(super) fn dmsetup() -> Result<dm::Dmsetup, RootSafeBinError> {
     Ok(dm::Dmsetup::new(Config::get().dmsetup()?))
 }
 
-fn access(readonly: bool) -> Access {
-    if readonly {
-        Access::ReadOnly
-    } else {
-        Access::ReadWrite
-    }
-}
-
-fn create(
+pub(super) fn create(
     name: &HyperDmName,
     access: Access,
-    table: DmTable,
+    table: HyperDmTable,
     token: &mut Unprivileged,
 ) -> Result<DmOut, DmError> {
-    let table = HyperDmTable::new(table)?;
     let dm = dmsetup()?;
     let (device, loops) = {
         let _root = token.elevate()?;
@@ -350,11 +234,23 @@ fn source_sectors(table: &HyperDmTable) -> Result<u64, DmError> {
     };
     match origin {
         Origin::Path(_) => file_sectors(table, Role::Origin),
-        Origin::Device(name) => {
-            let device = name.open()?.reopen(OpenFlags::RDONLY)?;
-            device.sectors().map_err(DmError::Size)
-        }
+        Origin::Device(name) => device_sectors(name),
     }
+}
+
+pub(super) fn device_sectors(name: &DmName) -> Result<u64, DmError> {
+    let device = name.open()?.reopen(OpenFlags::RDONLY)?;
+    device.sectors().map_err(DmError::Size)
+}
+
+pub(super) fn snapshot_table(origin: Origin, cow: DevPath, chunk_sectors: u64) -> DmTable {
+    DmTable::Snapshot(SnapshotTable {
+        sectors: 0,
+        origin,
+        cow,
+        persistence: Persistence::Persistent,
+        chunk: chunk_sectors,
+    })
 }
 
 fn file_sectors(table: &HyperDmTable, role: Role) -> Result<u64, DmError> {

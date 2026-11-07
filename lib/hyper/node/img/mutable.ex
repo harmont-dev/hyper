@@ -139,12 +139,12 @@ defmodule Hyper.Node.Img.Mutable do
          # Hold the parent so it cannot idle-reap (freeing its thin id) between
          # describe and create_snap; released once the snapshot is independent.
          :ok <- acquire(parent, self()),
-         %{thin_name: origin_name, thin_id: origin_id} = describe(parent),
+         %{thin_name: origin_name} = describe(parent),
          {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
          {:ok, %{dev: dev, id: id}} <-
-           ThinPool.snapshot(name, origin_name, origin_id, ro_dev) do
+           ThinPool.snapshot(name, origin_name, ro_dev) do
       release_parent(parent)
 
       state = %State{

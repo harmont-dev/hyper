@@ -53,7 +53,8 @@ impl Launch {
     fn networked_config(&self) -> PathBuf {
         let tools: String = ["ip", "nft", "sysctl"]
             .map(|name| {
-                let fake = install(self.tmp.path(), name, "#!/bin/sh\nexit 0\n", 0o755);
+                let fake = self.tmp.path().join(name);
+                fs::copy("/bin/true", &fake).unwrap();
                 format!("{name} = \"{}\"\n", fake.display())
             })
             .concat();

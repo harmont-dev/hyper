@@ -50,23 +50,19 @@ defmodule Hyper.Node.Img.ThinPool do
   (`origin_dev`) as its parent — unprovisioned reads must keep resolving
   through the composed RO image chain.
   """
-  @spec snapshot(String.t(), String.t(), non_neg_integer(), Path.t()) ::
+  @spec snapshot(String.t(), String.t(), Path.t()) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.snapshot", include: [:name, :origin_name])
-  def snapshot(name, origin_name, origin_id, origin_dev) do
-    GenServer.call(
-      __MODULE__,
-      {:snapshot, name, origin_name, origin_id, origin_dev},
-      :timer.seconds(30)
-    )
+  def snapshot(name, origin_name, origin_dev) do
+    GenServer.call(__MODULE__, {:snapshot, name, origin_name, origin_dev}, :timer.seconds(30))
   end
 
-  @spec copy_provisioned(non_neg_integer(), Path.t(), Path.t()) ::
+  @spec copy_provisioned(Path.t(), Path.t(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.copy_provisioned", include: [:thin_id])
-  def copy_provisioned(thin_id, src, dst) do
+  @decorate with_span("Hyper.Node.Img.ThinPool.copy_provisioned", include: [:src, :cow])
+  def copy_provisioned(src, origin, cow) do
     meta_loop = GenServer.call(__MODULE__, :meta_loop)
-    SuidHelper.ThinCopy.copy(@pool_name, meta_loop, thin_id, src, dst)
+    SuidHelper.ThinCopy.copy(@pool_name, meta_loop, src, origin, cow)
   end
 
   @doc "Remove thin volume `name` and free its thin device `id`."
@@ -102,35 +98,19 @@ defmodule Hyper.Node.Img.ThinPool do
   def handle_call({:create_external, name, origin_dev}, _from, state) do
     {id, state} = id_alloc(state)
 
-    with :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_thin #{id}"),
-         {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, origin_dev) do
-      {:reply, {:ok, %{dev: dev, id: id}}, state}
-    else
-      {:error, reason} ->
-        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
-        {:reply, {:error, reason}, id_free(state, id)}
+    case SuidHelper.Thin.create(@pool_name, id, name, origin_dev) do
+      {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
+      {:error, _} = err -> {:reply, err, id_free(state, id)}
     end
   end
 
   @impl true
-  def handle_call({:snapshot, name, origin_name, origin_id, origin_dev}, _from, state) do
+  def handle_call({:snapshot, name, origin_name, origin_dev}, _from, state) do
     {id, state} = id_alloc(state)
 
-    with :ok <- SuidHelper.Dmsetup.suspend(origin_name),
-         :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_snap #{id} #{origin_id}"),
-         :ok <- SuidHelper.Dmsetup.resume(origin_name),
-         {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, @pool_name, id, origin_dev) do
-      {:reply, {:ok, %{dev: dev, id: id}}, state}
-    else
-      {:error, reason} ->
-        # Unconditional resume: suspend may or may not have taken effect, and
-        # resuming a non-suspended device is harmless — but leaving the parent
-        # VM's rootfs frozen is not.
-        _ = SuidHelper.Dmsetup.resume(origin_name)
-        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
-        {:reply, {:error, reason}, id_free(state, id)}
+    case SuidHelper.Thin.snapshot(@pool_name, origin_name, id, name, origin_dev) do
+      {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
+      {:error, _} = err -> {:reply, err, id_free(state, id)}
     end
   end
 
@@ -139,8 +119,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
-    _ = SuidHelper.Dmsetup.remove(name)
-    _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
+    _ = SuidHelper.Thin.destroy(@pool_name, name)
     {:reply, :ok, id_free(state, id)}
   end
 

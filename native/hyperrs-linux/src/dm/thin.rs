@@ -1,4 +1,4 @@
-use super::{DevPath, Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
+use super::{Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
 use crate::Access;
 use derive_more::{Display, Into};
 use std::ffi::OsStr;
@@ -92,6 +92,16 @@ pub enum ThinPoolError {
 }
 
 #[derive(Debug, ThisError)]
+pub enum OpenThinError {
+    #[error(transparent)]
+    Run(#[from] RunError),
+    #[error("{name} is not a thin device of this pool: {table:?}")]
+    NotAThin { name: DmName, table: String },
+    #[error(transparent)]
+    Id(#[from] ParseThinIdError),
+}
+
+#[derive(Debug, ThisError)]
 pub enum SnapshotError {
     #[error("suspending origin: {0}")]
     Suspend(#[source] RunError),
@@ -146,6 +156,27 @@ impl<'a> ThinPool<'a> {
         })
     }
 
+    pub fn open_thin(&self, name: &DmName) -> Result<Thin<'a, Active<'a>>, OpenThinError> {
+        let dmsetup = self.device.dmsetup;
+        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
+        let pool = self.device.number()?;
+        let not_a_thin = || OpenThinError::NotAThin {
+            name: name.clone(),
+            table: table.clone(),
+        };
+        let [line] = table.lines().collect::<Vec<_>>()[..] else {
+            return Err(not_a_thin());
+        };
+        match line.split_whitespace().collect::<Vec<_>>()[..] {
+            [_, _, "thin", dev, id, ..] if dev == pool => Ok(Thin {
+                pool: self.clone(),
+                id: id.parse()?,
+                state: Active(dmsetup.device(name)),
+            }),
+            _ => Err(not_a_thin()),
+        }
+    }
+
     pub fn create_snap(&self, id: ThinId, origin: ThinId) -> Result<(), RunError> {
         self.send(ThinMessage::CreateSnap { id, origin })
     }
@@ -187,13 +218,13 @@ impl<'a> Thin<'a, Inactive> {
         self,
         name: &DmName,
         sectors: u64,
-        origin: Option<DevPath>,
+        origin: Option<Origin>,
     ) -> Result<Thin<'a, Active<'a>>, RunError> {
         let table = DmTable::Thin(ThinTable {
             sectors,
             pool: self.pool.device.name().clone(),
             id: self.id,
-            origin: origin.map(Origin::Path),
+            origin,
         });
         let device = self
             .pool
@@ -243,7 +274,8 @@ impl<'a> Thin<'a, Active<'a>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError,
+        Inactive, OpenThinError, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage,
+        ThinPoolError,
     };
     use crate::dm::{DmName, Dmsetup};
     use assert_fs::fixture::ChildPath;
@@ -362,14 +394,23 @@ mod tests {
 
     impl Fake {
         fn new(table: &str, failing_message: &str) -> Self {
+            Self::with_tables(&[("*", table)], failing_message)
+        }
+
+        fn with_tables(tables: &[(&str, &str)], failing_message: &str) -> Self {
             let dir = TempDir::new().unwrap();
             let log = dir.child("calls");
             let bin = dir.child("dmsetup");
+            let tables: String = tables
+                .iter()
+                .map(|(device, table)| format!("      {device}) printf '%b\\n' '{table}' ;;\n"))
+                .collect();
             let script = format!(
                 "#!/bin/sh\n\
                  printf '%s\\n' \"$*\" >> '{log}'\n\
                  case \"$1\" in\n\
-                   table) printf '%s\\n' '{table}' ;;\n\
+                   table) case \"$2\" in\n{tables}    esac ;;\n\
+                   info) printf '253:1\\n' ;;\n\
                    message) [ \"$4\" = '{failing_message}' ] && exit 1 ;;\n\
                  esac\n\
                  exit 0\n",
@@ -473,6 +514,78 @@ mod tests {
         assert_eq!(
             fake.calls()[3..],
             ["remove --retry hyper-vol", "message hyper-pool 0 delete 1"]
+        );
+    }
+
+    #[rstest]
+    fn open_thin_reads_the_id_from_the_live_table_as_root() {
+        if !is_root() {
+            eprintln!("SKIP open_thin: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(
+            &[
+                ("hyper-pool", POOL_TABLE),
+                ("hyper-vol", "0 100 thin 253:1 7 253:4"),
+            ],
+            "",
+        );
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        let snap = pool
+            .open_thin(&name("hyper-vol"))
+            .unwrap()
+            .snapshot(ThinId::new(8).unwrap())
+            .unwrap();
+
+        assert_eq!(snap.id(), ThinId::new(8).unwrap());
+        assert_eq!(
+            fake.calls()[1..],
+            [
+                "table hyper-vol",
+                "info -c --noheadings -o major,minor hyper-pool",
+                "suspend hyper-vol",
+                "message hyper-pool 0 create_snap 8 7",
+                "resume hyper-vol",
+            ]
+        );
+    }
+
+    #[rstest]
+    #[case::thin_of_another_pool("0 100 thin 253:9 7")]
+    #[case::linear("0 100 linear 7:0 0")]
+    #[case::pool_itself(POOL_TABLE)]
+    #[case::two_segments("0 100 thin 253:1 7\\n100 100 thin 253:1 8")]
+    #[case::no_id("0 100 thin 253:1")]
+    #[case::absent("")]
+    fn open_thin_refuses_anything_but_a_thin_of_this_pool_as_root(#[case] table: &str) {
+        if !is_root() {
+            eprintln!("SKIP open_thin refusal: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], "");
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        assert_matches!(
+            pool.open_thin(&name("hyper-vol")),
+            Err(OpenThinError::NotAThin { .. })
+        );
+    }
+
+    #[rstest]
+    #[case::not_a_number("0 100 thin 253:1 x")]
+    #[case::past_24_bits("0 100 thin 253:1 16777216")]
+    fn open_thin_refuses_an_invalid_id_as_root(#[case] table: &str) {
+        if !is_root() {
+            eprintln!("SKIP open_thin id: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], "");
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        assert_matches!(
+            pool.open_thin(&name("hyper-vol")),
+            Err(OpenThinError::Id(_))
         );
     }
 }
