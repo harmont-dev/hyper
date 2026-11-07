@@ -374,6 +374,12 @@ fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
     };
     let dir = TempDir::new().unwrap();
     let base = fs::canonicalize(dir.path()).unwrap();
+    let thin_dump = {
+        let copy = base.join("thin_dump");
+        fs::copy(&thin_dump, &copy).unwrap();
+        fs::set_permissions(&copy, fs::Permissions::from_mode(0o755)).unwrap();
+        copy
+    };
     let config = write_config(&base, &dmsetup, &thin_dump);
     let pid = std::process::id();
 
