@@ -70,6 +70,7 @@ impl DmName {
         SafePath::from_static::<"/dev/mapper">().join(&self.0)
     }
 
+    /// The number of sectors of this dm entry.
     pub fn sectors(&self) -> Result<u64, SizeError> {
         let device = self.open()?.reopen(OpenFlags::RDONLY)?;
         device.sectors().map_err(SizeError::Ioctl)
