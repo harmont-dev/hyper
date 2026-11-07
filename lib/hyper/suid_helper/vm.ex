@@ -7,8 +7,6 @@ defmodule Hyper.SuidHelper.Vm do
 
   @type err :: SuidHelper.err()
 
-  @exit_retryable 75
-
   @doc """
   Prepare `chroot_root`'s boot artifacts: stage the `kernel` file in and `mknod`
   a node mirroring the rootfs `device`, both owned `uid:gid`. The helper places
@@ -49,8 +47,8 @@ defmodule Hyper.SuidHelper.Vm do
   @decorate with_span("Hyper.SuidHelper.Vm.grant_api", include: [:vm_id])
   def grant_api(vm_id) do
     case SuidHelper.exec(%{op: "vm_grant_api", id: vm_id}) do
-      {:ok, _} -> :ok
-      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
+      {:ok, %{"result" => "granted"}} -> :ok
+      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end
@@ -69,8 +67,8 @@ defmodule Hyper.SuidHelper.Vm do
   @decorate with_span("Hyper.SuidHelper.Vm.grant_vsock", include: [:vm_id])
   def grant_vsock(vm_id) do
     case SuidHelper.exec(%{op: "vm_grant_vsock", id: vm_id}) do
-      {:ok, _} -> :ok
-      {:error, {@exit_retryable, _}} -> {:error, :socket_pending}
+      {:ok, %{"result" => "granted"}} -> :ok
+      {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
   end

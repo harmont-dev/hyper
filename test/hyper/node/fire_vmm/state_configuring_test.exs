@@ -46,8 +46,8 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     end
   end
 
-  @granted_script "echo null"
-  @pending_script "echo 'socket does not exist yet' >&2; exit 75"
+  @granted_script ~s(echo '{"result":"granted"}')
+  @pending_script ~s(echo '{"result":"pending"}')
 
   setup context do
     tmp = Path.join(System.tmp_dir!(), "cfg-vsock-#{System.unique_integer([:positive])}")
