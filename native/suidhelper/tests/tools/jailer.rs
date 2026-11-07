@@ -6,6 +6,7 @@
 
 use clap::{Args, FromArgMatches};
 use hyper_suidhelper::tools::jailer::JailerArgs;
+use rstest::rstest;
 
 fn parse(limits: &[&str]) -> Result<JailerArgs, clap::Error> {
     parse_with_sock("/api.sock", limits)
@@ -27,66 +28,41 @@ fn parse_with_sock(api_sock: &str, limits: &[&str]) -> Result<JailerArgs, clap::
     JailerArgs::from_arg_matches(&matches)
 }
 
-#[test]
-fn cgroup_limits_accepted() {
-    for limits in [
-        &[][..],
-        &["--memory-max", "1048576"],
-        &["--cpu-quota-us", "50000", "--cpu-period-us", "100000"],
-        &[
-            "--memory-max",
-            "1",
-            "--cpu-quota-us",
-            "1",
-            "--cpu-period-us",
-            "1",
-        ],
-    ] {
-        assert!(parse(limits).is_ok(), "{limits:?} refused");
-    }
+#[rstest]
+#[case::none(&[], true)]
+#[case::memory_max(&["--memory-max", "1048576"], true)]
+#[case::cpu_quota_and_period(&["--cpu-quota-us", "50000", "--cpu-period-us", "100000"], true)]
+#[case::all_minimal(&["--memory-max", "1", "--cpu-quota-us", "1", "--cpu-period-us", "1"], true)]
+#[case::zero_memory(&["--memory-max", "0"], false)]
+#[case::literal_max_memory(&["--memory-max", "max"], false)]
+#[case::negative_memory(&["--memory-max", "-1"], false)]
+#[case::suffixed_memory(&["--memory-max", "12x"], false)]
+#[case::memory_past_u64(&["--memory-max", "18446744073709551616"], false)]
+#[case::repeated_memory(&["--memory-max", "1", "--memory-max", "2"], false)]
+#[case::quota_without_period(&["--cpu-quota-us", "50000"], false)]
+#[case::period_without_quota(&["--cpu-period-us", "100000"], false)]
+#[case::zero_quota(&["--cpu-quota-us", "0", "--cpu-period-us", "100000"], false)]
+#[case::zero_period(&["--cpu-quota-us", "50000", "--cpu-period-us", "0"], false)]
+#[case::repeated_quota(
+    &["--cpu-quota-us", "1", "--cpu-quota-us", "2", "--cpu-period-us", "1"],
+    false
+)]
+#[case::raw_cgroup(&["--cgroup", "memory.max=1"], false)]
+fn cgroup_limits(#[case] limits: &[&str], #[case] accepted: bool) {
+    assert_eq!(parse(limits).is_ok(), accepted, "{limits:?}");
 }
 
-#[test]
-fn cgroup_limits_refused() {
-    for limits in [
-        &["--memory-max", "0"][..],
-        &["--memory-max", "max"],
-        &["--memory-max", "-1"],
-        &["--memory-max", "12x"],
-        &["--memory-max", "18446744073709551616"],
-        &["--memory-max", "1", "--memory-max", "2"],
-        &["--cpu-quota-us", "50000"],
-        &["--cpu-period-us", "100000"],
-        &["--cpu-quota-us", "0", "--cpu-period-us", "100000"],
-        &["--cpu-quota-us", "50000", "--cpu-period-us", "0"],
-        &[
-            "--cpu-quota-us",
-            "1",
-            "--cpu-quota-us",
-            "2",
-            "--cpu-period-us",
-            "1",
-        ],
-        &["--cgroup", "memory.max=1"],
-    ] {
-        assert!(parse(limits).is_err(), "{limits:?} accepted");
-    }
-}
-
-#[test]
-fn api_sock_must_be_a_strict_absolute_path() {
-    for ok in ["/api.socket", "/run/fc/api.socket", "/-dash"] {
-        assert!(parse_with_sock(ok, &[]).is_ok(), "{ok:?} refused");
-    }
-    for bad in [
-        "",
-        "api.socket",
-        "/../etc/x",
-        "/a/./b",
-        "//x",
-        "/a/",
-        "/a b",
-    ] {
-        assert!(parse_with_sock(bad, &[]).is_err(), "{bad:?} accepted");
-    }
+#[rstest]
+#[case::root_file("/api.socket", true)]
+#[case::nested("/run/fc/api.socket", true)]
+#[case::leading_dash("/-dash", true)]
+#[case::empty("", false)]
+#[case::relative("api.socket", false)]
+#[case::parent_dir("/../etc/x", false)]
+#[case::current_dir("/a/./b", false)]
+#[case::double_slash("//x", false)]
+#[case::trailing_slash("/a/", false)]
+#[case::space("/a b", false)]
+fn api_sock_must_be_a_strict_absolute_path(#[case] sock: &str, #[case] accepted: bool) {
+    assert_eq!(parse_with_sock(sock, &[]).is_ok(), accepted, "{sock:?}");
 }

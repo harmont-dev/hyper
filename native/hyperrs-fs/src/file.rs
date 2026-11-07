@@ -340,17 +340,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        Any, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner,
-        SafeFile, ValidationError,
+        Any, FileType, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable,
+        RootOwner, SafeFile, ValidationError,
     };
     use crate::dir::SafeDir;
     use crate::path::{IsAbsolute, SafePathBuf, StrictComponents};
     use nix::errno::Errno;
     use nix::sys::stat::Mode;
+    use rstest::{fixture, rstest};
     use std::fs;
     use std::io::Write;
     use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
@@ -360,58 +362,78 @@ mod tests {
             .expect("test path must be strict-absolute")
     }
 
-    #[test]
-    fn safefile_type_axis_distinguishes_file_types() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn opens_as<T: FileType>(p: &Strict) -> bool {
+        SafeFile::<T, Any, Any>::open(p, OpenFlags::PATH).is_ok()
+    }
+
+    #[fixture]
+    fn tmp() -> TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[fixture]
+    fn plain(tmp: TempDir) -> (TempDir, PathBuf) {
         let f = tmp.path().join("plain");
         fs::write(&f, b"data").unwrap();
-
-        let p = safe(&f);
-        assert!(SafeFile::<IsRegularFile, Any, Any>::open(&p, OpenFlags::PATH).is_ok());
-        assert!(SafeFile::<IsBlockDevice, Any, Any>::open(&p, OpenFlags::PATH).is_err());
-        assert!(SafeFile::<IsDirectory, Any, Any>::open(&p, OpenFlags::PATH).is_err());
-
-        let d = safe(tmp.path());
-        assert!(SafeFile::<IsDirectory, Any, Any>::open(&d, OpenFlags::PATH).is_ok());
-        assert!(SafeFile::<IsRegularFile, Any, Any>::open(&d, OpenFlags::PATH).is_err());
+        (tmp, f)
     }
 
-    #[test]
-    fn safefile_owner_axis_rejects_non_root_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let f = tmp.path().join("ours");
-        fs::write(&f, b"data").unwrap();
-        let p = safe(&f);
-        assert!(SafeFile::<IsRegularFile, RootOwner, Any>::open(&p, OpenFlags::PATH).is_err());
+    #[fixture]
+    fn file_and_dir(plain: (TempDir, PathBuf)) -> TempDir {
+        let (tmp, _) = plain;
+        fs::create_dir(tmp.path().join("dir")).unwrap();
+        tmp
     }
 
-    #[test]
-    fn safefile_mode_axis_rejects_group_writable() {
-        let tmp = tempfile::tempdir().unwrap();
-        let f = tmp.path().join("loose");
-        fs::write(&f, b"data").unwrap();
-        fs::set_permissions(&f, fs::Permissions::from_mode(0o666)).unwrap();
-        let p = safe(&f);
-        assert!(
-            SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&p, OpenFlags::PATH).is_err()
-        );
-
-        fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(
-            SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&p, OpenFlags::PATH).is_ok()
+    #[rstest]
+    #[case::file_as_regular("plain", opens_as::<IsRegularFile>, true)]
+    #[case::file_as_block_device("plain", opens_as::<IsBlockDevice>, false)]
+    #[case::file_as_directory("plain", opens_as::<IsDirectory>, false)]
+    #[case::directory_as_directory("dir", opens_as::<IsDirectory>, true)]
+    #[case::directory_as_regular("dir", opens_as::<IsRegularFile>, false)]
+    fn safefile_type_axis_distinguishes_file_types(
+        file_and_dir: TempDir,
+        #[case] name: &str,
+        #[case] opens: fn(&Strict) -> bool,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(
+            opens(&safe(&file_and_dir.path().join(name))),
+            expected,
+            "{name}"
         );
     }
 
-    #[test]
-    fn safefile_write_all_writes_through_the_fd() {
-        let tmp = tempfile::tempdir().unwrap();
-        let f = tmp.path().join("f");
-        fs::write(&f, b"x").unwrap();
+    #[rstest]
+    fn safefile_owner_axis_rejects_non_root_file(plain: (TempDir, PathBuf)) {
+        let (_tmp, f) = plain;
+        assert!(
+            SafeFile::<IsRegularFile, RootOwner, Any>::open(&safe(&f), OpenFlags::PATH).is_err()
+        );
+    }
 
+    #[rstest]
+    #[case::group_and_other_writable(0o666, false)]
+    #[case::owner_only_writable(0o644, true)]
+    fn safefile_mode_axis_rejects_group_writable(
+        plain: (TempDir, PathBuf),
+        #[case] mode: u32,
+        #[case] accepted: bool,
+    ) {
+        let (_tmp, f) = plain;
+        fs::set_permissions(&f, fs::Permissions::from_mode(mode)).unwrap();
+        let got =
+            SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&safe(&f), OpenFlags::PATH);
+        assert_eq!(got.is_ok(), accepted, "{mode:o}: {got:?}");
+    }
+
+    #[rstest]
+    fn safefile_write_all_writes_through_the_fd(plain: (TempDir, PathBuf)) {
+        let (tmp, f) = plain;
         let dir = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
         let mut file: SafeFile<Any, Any, Any> = dir
             .openat(
-                Path::new("f"),
+                Path::new("plain"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 Mode::empty(),
             )
@@ -420,26 +442,26 @@ mod tests {
         assert_eq!(fs::read(&f).unwrap(), b"hello");
     }
 
-    #[test]
-    fn safefile_open_rejects_symlink_in_any_component() {
-        let tmp = tempfile::tempdir().unwrap();
+    #[fixture]
+    fn symlinked(tmp: TempDir) -> TempDir {
         let dir = tmp.path().join("dir");
         fs::create_dir(&dir).unwrap();
         fs::write(dir.join("target"), b"data").unwrap();
         symlink(dir.join("target"), tmp.path().join("final_link")).unwrap();
         symlink(&dir, tmp.path().join("parent_link")).unwrap();
+        tmp
+    }
 
-        for (case, path) in [
-            ("final", tmp.path().join("final_link")),
-            ("parent", tmp.path().join("parent_link/target")),
-        ] {
-            for flags in [OpenFlags::PATH, OpenFlags::RDONLY] {
-                let res = SafeFile::<Any, Any, Any>::open(&safe(&path), flags);
-                assert!(
-                    matches!(res, Err(ValidationError::Open(Errno::ELOOP))),
-                    "{case} symlink with {flags:?}: {res:?}"
-                );
-            }
-        }
+    #[rstest]
+    fn safefile_open_rejects_symlink_in_any_component(
+        symlinked: TempDir,
+        #[values("final_link", "parent_link/target")] path: &str,
+        #[values(OpenFlags::PATH, OpenFlags::RDONLY)] flags: OpenFlags,
+    ) {
+        let res = SafeFile::<Any, Any, Any>::open(&safe(&symlinked.path().join(path)), flags);
+        assert!(
+            matches!(res, Err(ValidationError::Open(Errno::ELOOP))),
+            "{path} with {flags:?}: {res:?}"
+        );
     }
 }

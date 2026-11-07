@@ -114,6 +114,7 @@ mod tests {
     use super::remove_cgroup;
     use hyperrs_firecracker::VmId;
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use rstest::rstest;
     use std::fs;
     use std::path::Path;
 
@@ -121,7 +122,7 @@ mod tests {
         p.to_path_buf().try_into().unwrap()
     }
 
-    #[test]
+    #[rstest]
     fn missing_cgroup_targets_are_ok() {
         let tmp = tempfile::tempdir().unwrap();
         let id: VmId = "id".parse().unwrap();

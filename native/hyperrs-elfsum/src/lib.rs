@@ -103,6 +103,7 @@ macro_rules! checksum {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use rstest::rstest;
 
     proptest! {
         #[test]
@@ -119,7 +120,7 @@ mod tests {
     }
 
     #[cfg(all(target_os = "linux", feature = "stamp"))]
-    #[test]
+    #[rstest]
     fn checksum_macro_lands_in_the_stamped_section() {
         let slot: &'static Slot = crate::checksum!();
         assert!(std::ptr::eq(slot, crate::checksum!()));

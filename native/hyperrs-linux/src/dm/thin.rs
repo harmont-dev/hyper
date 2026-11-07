@@ -248,6 +248,7 @@ mod tests {
     use crate::dm::{DmName, Dmsetup};
     use hyperrs_process::binary::RootSafeBin;
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -311,9 +312,9 @@ mod tests {
         ]
     }
 
-    #[test]
-    fn message_rejects_strings_outside_the_grammar() {
-        for bad in [
+    #[rstest]
+    fn message_rejects_strings_outside_the_grammar(
+        #[values(
             "resize 10",
             "create_thin",
             "delete",
@@ -328,10 +329,11 @@ mod tests {
             "reserve_metadata",
             "create_thin 16777216",
             "delete 16777216",
-            "create_snap 1 16777216",
-        ] {
-            assert!(bad.parse::<ThinMessage>().is_err(), "accepted {bad:?}");
-        }
+            "create_snap 1 16777216"
+        )]
+        bad: &str,
+    ) {
+        assert!(bad.parse::<ThinMessage>().is_err(), "accepted {bad:?}");
     }
 
     const POOL_TABLE: &str = "0 100 thin-pool 7:0 7:1 128 0 0";
@@ -384,67 +386,68 @@ mod tests {
         }
     }
 
-    #[test]
-    fn thin_pool_refuses_a_device_that_is_not_a_pool_as_root() {
+    fn snapshot_of_id_2(r: &Result<Thin<Inactive>, SnapshotError>) -> bool {
+        r.as_ref()
+            .is_ok_and(|snap| snap.id() == ThinId::new(2).unwrap())
+    }
+
+    fn create_snap_failed(r: &Result<Thin<Inactive>, SnapshotError>) -> bool {
+        matches!(r, Err(SnapshotError::CreateSnap(_)))
+    }
+
+    #[rstest]
+    fn thin_pool_refuses_a_device_that_is_not_a_pool_as_root(
+        #[values("0 100 linear 7:0 0", "0 100 thin /dev/mapper/hyper-pool 1", "")] table: &str,
+    ) {
         if !is_root() {
             eprintln!("SKIP thin_pool_refuses: needs root to own the fake dmsetup");
             return;
         }
-        for table in [
-            "0 100 linear 7:0 0",
-            "0 100 thin /dev/mapper/hyper-pool 1",
-            "",
-        ] {
-            let fake = Fake::new(table, "");
-            let got = fake.dmsetup.thin_pool(&name("hyper-x"));
-            assert!(
-                matches!(got, Err(ThinPoolError::NotAThinPool { .. })),
-                "{table:?}: {got:?}"
-            );
-            assert_eq!(fake.calls(), ["table hyper-x"], "{table:?}");
-        }
+        let fake = Fake::new(table, "");
+        let got = fake.dmsetup.thin_pool(&name("hyper-x"));
+        assert!(
+            matches!(got, Err(ThinPoolError::NotAThinPool { .. })),
+            "{got:?}"
+        );
+        assert_eq!(fake.calls(), ["table hyper-x"]);
     }
 
-    #[test]
-    fn snapshot_always_resumes_the_origin_as_root() {
+    #[rstest]
+    #[case::create_snap_succeeds("", snapshot_of_id_2)]
+    #[case::create_snap_fails("create_snap 2 1", create_snap_failed)]
+    fn snapshot_always_resumes_the_origin_as_root(
+        #[case] failing_message: &str,
+        #[case] expected: fn(&Result<Thin<Inactive>, SnapshotError>) -> bool,
+    ) {
         if !is_root() {
             eprintln!("SKIP snapshot_always_resumes: needs root to own the fake dmsetup");
             return;
         }
-        let ok: fn(&Result<Thin<Inactive>, SnapshotError>) -> bool = |r| {
-            r.as_ref()
-                .is_ok_and(|snap| snap.id() == ThinId::new(2).unwrap())
-        };
-        let create_snap_failed: fn(&Result<Thin<Inactive>, SnapshotError>) -> bool =
-            |r| matches!(r, Err(SnapshotError::CreateSnap(_)));
-        for (failing_message, expected) in [("", ok), ("create_snap 2 1", create_snap_failed)] {
-            let fake = Fake::new(POOL_TABLE, failing_message);
-            let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
-            let active = pool
-                .create_thin(ThinId::new(1).unwrap())
-                .unwrap()
-                .activate(&name("hyper-vol"), 100, None)
-                .unwrap();
+        let fake = Fake::new(POOL_TABLE, failing_message);
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let active = pool
+            .create_thin(ThinId::new(1).unwrap())
+            .unwrap()
+            .activate(&name("hyper-vol"), 100, None)
+            .unwrap();
 
-            let got = active.snapshot(ThinId::new(2).unwrap());
+        let got = active.snapshot(ThinId::new(2).unwrap());
 
-            assert!(expected(&got), "{failing_message:?}: {got:?}");
-            assert_eq!(
-                fake.calls(),
-                [
-                    "table hyper-pool",
-                    "message hyper-pool 0 create_thin 1",
-                    "create hyper-vol --table 0 100 thin /dev/mapper/hyper-pool 1",
-                    "suspend hyper-vol",
-                    "message hyper-pool 0 create_snap 2 1",
-                    "resume hyper-vol",
-                ],
-                "{failing_message:?}"
-            );
-        }
+        assert!(expected(&got), "{got:?}");
+        assert_eq!(
+            fake.calls(),
+            [
+                "table hyper-pool",
+                "message hyper-pool 0 create_thin 1",
+                "create hyper-vol --table 0 100 thin /dev/mapper/hyper-pool 1",
+                "suspend hyper-vol",
+                "message hyper-pool 0 create_snap 2 1",
+                "resume hyper-vol",
+            ]
+        );
     }
 
-    #[test]
+    #[rstest]
     fn deactivate_then_delete_removes_the_device_then_frees_its_id_as_root() {
         if !is_root() {
             eprintln!("SKIP delete_removes: needs root to own the fake dmsetup");

@@ -56,6 +56,7 @@ mod tests {
     use super::{HyperDmName, NameError};
     use hyperrs_linux::dm::DmTable;
     use proptest::prelude::*;
+    use rstest::rstest;
 
     proptest! {
         #[test]
@@ -87,18 +88,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn check_table_accepts_tables_over_hyper_devices() {
-        for s in [
+    #[rstest]
+    fn check_table_accepts_tables_over_hyper_devices(
+        #[values(
             "0 100 linear /srv/hyper/layers/base.img 0",
             "0 100 linear /dev/mapper/hyper-img 0",
             "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8",
             "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024",
             "0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig",
-            "0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img",
-        ] {
-            let table: DmTable = s.parse().unwrap();
-            assert!(HyperDmName::check_table(&table).is_ok(), "rejected {s:?}");
-        }
+            "0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img"
+        )]
+        table: &str,
+    ) {
+        let table: DmTable = table.parse().unwrap();
+        assert!(HyperDmName::check_table(&table).is_ok(), "rejected {table}");
     }
 }

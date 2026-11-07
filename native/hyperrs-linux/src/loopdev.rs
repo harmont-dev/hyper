@@ -221,6 +221,7 @@ impl LoopDevice {
 mod tests {
     use super::LoopDevNum;
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::path::Path;
 
     proptest! {
@@ -259,9 +260,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_known_attack_strings() {
-        for bad in [
+    #[rstest]
+    fn rejects_known_attack_strings(
+        #[values(
             "/dev/loop",
             "/dev/loop+7",
             "/dev/loop-1",
@@ -270,9 +271,10 @@ mod tests {
             "../dev/loop0",
             "dev/loop0",
             "/dev//loop0",
-            "7",
-        ] {
-            assert!(bad.parse::<LoopDevNum>().is_err(), "accepted {bad:?}");
-        }
+            "7"
+        )]
+        bad: &str,
+    ) {
+        assert!(bad.parse::<LoopDevNum>().is_err(), "accepted {bad:?}");
     }
 }

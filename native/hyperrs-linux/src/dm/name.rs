@@ -106,6 +106,7 @@ impl AsRef<OsStr> for DmName {
 mod tests {
     use super::{DmName, ParseDmDeviceError};
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::path::Path;
 
     const DM_NAME_CHARS: &str =
@@ -159,18 +160,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_reserved_and_edge_names() {
-        for bad in [
-            "", ".", "..", "control", "-", "--help", "a/b", "/x", "a\0b", "a b",
-        ] {
-            assert!(bad.parse::<DmName>().is_err(), "accepted {bad:?}");
-        }
+    #[rstest]
+    fn rejects_reserved_and_edge_names(
+        #[values("", ".", "..", "control", "-", "--help", "a/b", "/x", "a\0b", "a b")] bad: &str,
+    ) {
+        assert!(bad.parse::<DmName>().is_err(), "accepted {bad:?}");
     }
 
-    #[test]
-    fn device_path_rejects_known_attack_strings() {
-        for bad in [
+    #[rstest]
+    fn device_path_rejects_known_attack_strings(
+        #[values(
             "/dev/sda",
             "/dev/loop0",
             "/dev/loop0/../sda",
@@ -181,9 +180,10 @@ mod tests {
             "/dev/mapper",
             "../dev/mapper/x",
             "dev/mapper/x",
-            "x",
-        ] {
-            assert!(DmName::from_device_path(bad).is_err(), "accepted {bad:?}");
-        }
+            "x"
+        )]
+        bad: &str,
+    ) {
+        assert!(DmName::from_device_path(bad).is_err(), "accepted {bad:?}");
     }
 }
