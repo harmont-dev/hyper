@@ -1,9 +1,9 @@
 defmodule Hyper.SuidHelper.Net.Ip do
-  @moduledoc "`suidhelper net ip` subcommands: the IP link inside a VM's netns."
+  @moduledoc "Setuid helper `net_ip_*` requests: the IP link inside a VM's netns."
 
   @type err :: Hyper.SuidHelper.err()
 
-  @doc "Apply host-wide IP networking (`net ip host-init`). Idempotent."
+  @doc "Apply host-wide IP networking (`net_ip_host_init`). Idempotent."
   @spec host_init() :: no_return()
   def host_init,
     do:
@@ -11,7 +11,7 @@ defmodule Hyper.SuidHelper.Net.Ip do
         "Hyper.SuidHelper.Net.Ip.host_init/0 is unimplemented: VM networking is being rewritten"
       )
 
-  @doc "Create `vm_id`'s IP link in its netns (`net ip prepare`). Idempotent."
+  @doc "Create `vm_id`'s IP link in its netns (`net_ip_prepare`). Idempotent."
   @spec prepare(Hyper.Vm.Id.t(), Hyper.Node.Users.id()) :: no_return()
   def prepare(_vm_id, _uid),
     do:
@@ -19,7 +19,7 @@ defmodule Hyper.SuidHelper.Net.Ip do
         "Hyper.SuidHelper.Net.Ip.prepare/2 is unimplemented: VM networking is being rewritten"
       )
 
-  @doc "Remove `vm_id`'s IP link by id alone (`net ip teardown`). Idempotent."
+  @doc "Remove `vm_id`'s IP link by id alone (`net_ip_teardown`). Idempotent."
   @spec teardown(Hyper.Vm.Id.t()) :: no_return()
   def teardown(_vm_id),
     do:

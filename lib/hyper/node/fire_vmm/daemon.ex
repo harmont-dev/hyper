@@ -91,9 +91,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  # Best-effort: both the chroot/cgroup removal and the network teardown are
-  # attempted regardless of the other's outcome (a `Reaper` backstops either
-  # failure); the first error is surfaced to the caller.
+  # Removes the VM's chroot and kills its cgroup leaf (`vm_teardown`). A failure
+  # is surfaced to the caller; the `Reaper` backstops it.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id}) do
     SuidHelper.Vm.teardown(id)

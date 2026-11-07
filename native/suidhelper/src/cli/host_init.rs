@@ -1,4 +1,3 @@
-// TODO(markovejnovic): This is slop and should be removed when networking is re-done.
 use crate::cli::Op;
 use crate::config::Config;
 use hyperrs_process::privilege::Unprivileged;
