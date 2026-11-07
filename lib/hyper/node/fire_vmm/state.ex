@@ -39,13 +39,13 @@ defmodule Hyper.Node.FireVMM.State do
   }
 
   @enforce_keys [:opts]
-  defstruct [:opts, :spec, :boot_deadline, api_granted: false]
+  defstruct [:opts, :spec, :boot_deadline, api_claimed: false]
 
   @type t :: %State{
           opts: Opts.t(),
           spec: BootSpec.Cold.t() | nil,
           boot_deadline: integer() | nil,
-          api_granted: boolean()
+          api_claimed: boolean()
         }
 
   # How long to wait for the daemon's API to come up before failing the boot.
@@ -157,7 +157,7 @@ defmodule Hyper.Node.FireVMM.State do
     # creates the socket owned by the per-VM uid, so the unprivileged controller
     # gets EACCES on connect until the helper chowns it to us.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
-      case ensure_api_granted(id, data) do
+      case ensure_api_claimed(id, data) do
         {:cont, data} ->
           case Client.run(Client.via(id), &Operations.describe_instance/1) do
             {:ok, %InstanceInfo{}} ->
@@ -181,21 +181,21 @@ defmodule Hyper.Node.FireVMM.State do
     # `:socket_pending` means firecracker has not created the socket yet, so we
     # keep waiting; a hard error is logged but also tolerated until the deadline
     # (the probe that follows would fail with EACCES anyway and drive the stop).
-    @spec ensure_api_granted(Hyper.Vm.Id.t(), State.t()) ::
+    @spec ensure_api_claimed(Hyper.Vm.Id.t(), State.t()) ::
             {:cont, State.t()} | {:wait, State.t(), term()}
-    defp ensure_api_granted(_id, %{api_granted: true} = data), do: {:cont, data}
+    defp ensure_api_claimed(_id, %{api_claimed: true} = data), do: {:cont, data}
 
-    defp ensure_api_granted(id, data) do
-      case Vm.grant_api(id) do
+    defp ensure_api_claimed(id, data) do
+      case Vm.claim_api_socket(id) do
         :ok ->
-          {:cont, %{data | api_granted: true}}
+          {:cont, %{data | api_claimed: true}}
 
         {:error, :socket_pending} ->
           {:wait, data, :socket_pending}
 
         {:error, reason} ->
-          Logger.warning("vm #{id}: grant-api failed: #{inspect(reason)}")
-          {:wait, data, {:grant_api, reason}}
+          Logger.warning("vm #{id}: claim-api-socket failed: #{inspect(reason)}")
+          {:wait, data, {:claim_api_socket, reason}}
       end
     end
 
@@ -244,7 +244,7 @@ defmodule Hyper.Node.FireVMM.State do
         ) do
       case configure_devices(id, ChrootJail.jailify(spec)) do
         :ok ->
-          do_grant_vsock(id, data)
+          do_claim_vsock_socket(id, data)
 
         {:error, reason} ->
           Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
@@ -252,8 +252,8 @@ defmodule Hyper.Node.FireVMM.State do
       end
     end
 
-    def handle(:state_timeout, :grant_vsock, %{opts: %Opts{vm_id: id}} = data) do
-      do_grant_vsock(id, data)
+    def handle(:state_timeout, :claim_vsock_socket, %{opts: %Opts{vm_id: id}} = data) do
+      do_claim_vsock_socket(id, data)
     end
 
     def handle({:call, from}, :stop, data) do
@@ -302,12 +302,12 @@ defmodule Hyper.Node.FireVMM.State do
     # Attempt to hand the vsock UDS to the node user. Firecracker may not have
     # created the socket yet immediately after PUT /vsock, so retry on
     # :socket_pending at @probe_interval, mirroring AwaitingApi's grant-api shape.
-    @spec do_grant_vsock(Hyper.Vm.Id.t(), State.t()) ::
+    @spec do_claim_vsock_socket(Hyper.Vm.Id.t(), State.t()) ::
             {:next_state, :running, State.t()}
             | {:keep_state, State.t(), list()}
             | {:stop, term(), State.t()}
-    defp do_grant_vsock(id, data) do
-      case Hyper.SuidHelper.Vm.grant_vsock(id) do
+    defp do_claim_vsock_socket(id, data) do
+      case Hyper.SuidHelper.Vm.claim_vsock_socket(id) do
         :ok ->
           case instance_start(id) do
             :ok ->
@@ -320,11 +320,11 @@ defmodule Hyper.Node.FireVMM.State do
           end
 
         {:error, :socket_pending} ->
-          keep_granting(id, data, :socket_pending)
+          keep_claiming(id, data, :socket_pending)
 
         {:error, reason} ->
-          Logger.warning("vm #{id}: grant-vsock failed: #{inspect(reason)}")
-          keep_granting(id, data, {:grant_vsock, reason})
+          Logger.warning("vm #{id}: claim-vsock-socket failed: #{inspect(reason)}")
+          keep_claiming(id, data, {:claim_vsock_socket, reason})
       end
     end
 
@@ -338,18 +338,18 @@ defmodule Hyper.Node.FireVMM.State do
       end)
     end
 
-    @spec keep_granting(Hyper.Vm.Id.t(), State.t(), term()) ::
+    @spec keep_claiming(Hyper.Vm.Id.t(), State.t(), term()) ::
             {:keep_state, State.t(), list()} | {:stop, term(), State.t()}
-    defp keep_granting(id, data, reason) do
+    defp keep_claiming(id, data, reason) do
       if System.monotonic_time(:millisecond) >= data.boot_deadline do
         Logger.warning(
           "vm #{id}: vsock UDS not available before deadline; " <>
             "last error: #{inspect(reason)}"
         )
 
-        {:stop, {:shutdown, {:boot_failed, {:vsock_grant_timeout, reason}}}, data}
+        {:stop, {:shutdown, {:boot_failed, {:vsock_claim_timeout, reason}}}, data}
       else
-        {:keep_state, data, [{:state_timeout, Time.as_ms(@probe_interval), :grant_vsock}]}
+        {:keep_state, data, [{:state_timeout, Time.as_ms(@probe_interval), :claim_vsock_socket}]}
       end
     end
   end

@@ -24,11 +24,11 @@ defmodule Hyper.SuidHelper.Vm do
   Returns `{:error, :socket_pending}` while firecracker has not yet created the
   socket, so the caller can keep waiting.
   """
-  @spec grant_api(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.grant_api", include: [:vm_id])
-  def grant_api(vm_id) do
-    case SuidHelper.exec(%{op: "vm_grant_api", id: vm_id}) do
-      {:ok, %{"result" => "granted"}} -> :ok
+  @spec claim_api_socket(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Vm.claim_api_socket", include: [:vm_id])
+  def claim_api_socket(vm_id) do
+    case SuidHelper.exec(%{op: "vm_claim_api_socket", id: vm_id}) do
+      {:ok, %{"result" => "claimed"}} -> :ok
       {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end
@@ -44,11 +44,11 @@ defmodule Hyper.SuidHelper.Vm do
   Returns `{:error, :socket_pending}` while firecracker has not yet created the
   vsock socket, so the caller can keep waiting.
   """
-  @spec grant_vsock(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.grant_vsock", include: [:vm_id])
-  def grant_vsock(vm_id) do
-    case SuidHelper.exec(%{op: "vm_grant_vsock", id: vm_id}) do
-      {:ok, %{"result" => "granted"}} -> :ok
+  @spec claim_vsock_socket(Hyper.Vm.Id.t()) :: :ok | {:error, :socket_pending} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Vm.claim_vsock_socket", include: [:vm_id])
+  def claim_vsock_socket(vm_id) do
+    case SuidHelper.exec(%{op: "vm_claim_vsock_socket", id: vm_id}) do
+      {:ok, %{"result" => "claimed"}} -> :ok
       {:ok, %{"result" => "pending"}} -> {:error, :socket_pending}
       {:error, _} = err -> err
     end

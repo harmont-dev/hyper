@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pub mod grant;
+pub mod claim;
 pub mod launch;
 pub mod teardown;
 
@@ -11,7 +11,7 @@ pub const VSOCK_SOCKET: &str = "vsock.sock";
 #[derive(Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum VmOut {
-    Granted,
+    Claimed,
     Pending,
     ToreDown,
 }

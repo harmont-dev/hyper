@@ -93,9 +93,9 @@ fn remove_refuses_an_invalid_id(work: Work, #[case] id: &str) {
 }
 
 #[rstest]
-#[case::api_not_yet("vm_grant_api")]
-#[case::vsock_not_yet("vm_grant_vsock")]
-fn grant_reports_a_socket_not_created_yet_as_pending_as_root(work: Work, #[case] op: &str) {
+#[case::api_not_yet("vm_claim_api_socket")]
+#[case::vsock_not_yet("vm_claim_vsock_socket")]
+fn claim_reports_a_socket_not_created_yet_as_pending_as_root(work: Work, #[case] op: &str) {
     if !is_root() {
         eprintln!("SKIP grant pending: needs root");
         return;
@@ -107,9 +107,9 @@ fn grant_reports_a_socket_not_created_yet_as_pending_as_root(work: Work, #[case]
 }
 
 #[rstest]
-#[case::api_traversal("vm_grant_api", "../id")]
-#[case::vsock_nested("vm_grant_vsock", "a/b")]
-fn grant_refuses_an_invalid_id(work: Work, #[case] op: &str, #[case] id: &str) {
+#[case::api_traversal("vm_claim_api_socket", "../id")]
+#[case::vsock_nested("vm_claim_vsock_socket", "a/b")]
+fn claim_refuses_an_invalid_id(work: Work, #[case] op: &str, #[case] id: &str) {
     let cfg = work.config("");
 
     run(&cfg, json!({"op": op, "id": id})).code(2).stdout("");

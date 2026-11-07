@@ -14,27 +14,27 @@ use serde::Deserialize;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
-pub enum GrantOpError {
+pub enum ClaimError {
     #[error(transparent)]
     Grant(#[from] GrantError),
     #[error(transparent)]
     Privilege(#[from] PrivilegeError),
 }
 
-pub type GrantApi = Grant<API_SOCKET>;
-pub type GrantVsock = Grant<VSOCK_SOCKET>;
+pub type ClaimApiSocket = Claim<API_SOCKET>;
+pub type ClaimVsockSocket = Claim<VSOCK_SOCKET>;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Grant<const SOCKET: &'static str> {
+pub struct Claim<const SOCKET: &'static str> {
     id: VmId,
 }
 
-impl<const SOCKET: &'static str> Op for Grant<SOCKET> {
+impl<const SOCKET: &'static str> Op for Claim<SOCKET> {
     type Output = VmOut;
-    type Error = GrantOpError;
+    type Error = ClaimError;
 
-    fn run(self, mut token: Unprivileged) -> Result<VmOut, GrantOpError> {
+    fn run(self, mut token: Unprivileged) -> Result<VmOut, ClaimError> {
         let jail_base = Config::get().jail_base();
         let layout = JailLayout::new(&jail_base, &self.id);
         let owner = Owner::caller();
@@ -44,7 +44,7 @@ impl<const SOCKET: &'static str> Op for Grant<SOCKET> {
         drop(root);
 
         match res {
-            Ok(()) => Ok(VmOut::Granted),
+            Ok(()) => Ok(VmOut::Claimed),
             Err(GrantError::Missing) => Ok(VmOut::Pending),
             Err(e) => Err(e.into()),
         }

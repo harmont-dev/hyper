@@ -54,8 +54,8 @@ impl<'de> DeserializeAs<'de, HyperDmName> for MapperPath {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     VmLaunch(vm::launch::Launch),
-    VmGrantApi(vm::grant::GrantApi),
-    VmGrantVsock(vm::grant::GrantVsock),
+    VmClaimApiSocket(vm::claim::ClaimApiSocket),
+    VmClaimVsockSocket(vm::claim::ClaimVsockSocket),
     VmTeardown(vm::teardown::Teardown),
     ImgActivate(img::ImgActivate),
     DmRemove(dm::Remove),
@@ -134,8 +134,8 @@ mod tests {
             json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
                    "kernel": "/srv/hyper/vmlinux", "device": "/dev/mapper/hyper-v1",
                    "limits": {"memory_max": 1, "cpu_max": {"quota_us": 1, "period_us": 1}}}),
-            json!({"op": "vm_grant_api", "id": "v1"}),
-            json!({"op": "vm_grant_vsock", "id": "v1"}),
+            json!({"op": "vm_claim_api_socket", "id": "v1"}),
+            json!({"op": "vm_claim_vsock_socket", "id": "v1"}),
             json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
             json!({"op": "vm_teardown", "id": "v1"}),
             json!({"op": "img_activate", "name": "hyper-img-x", "base": "/srv/hyper/base.img",
@@ -209,7 +209,7 @@ mod tests {
     #[case::not_an_object(json!(["vm_teardown", "v1"]))]
     #[case::op_not_a_string(json!({"op": 1}))]
     #[case::foreign_dm_name(json!({"op": "dm_remove", "name": "sda1", "retry": false}))]
-    #[case::traversing_vm_id(json!({"op": "vm_grant_api", "id": "../v1"}))]
+    #[case::traversing_vm_id(json!({"op": "vm_claim_api_socket", "id": "../v1"}))]
     #[case::relative_kernel(json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
         "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}}))]
     #[case::rootfs_device_by_name(json!({"op": "vm_launch", "id": "v1", "uid": 900_001,
@@ -281,7 +281,7 @@ mod tests {
     #[case::trailing_garbage(r#"{"op":"version"} x"#)]
     #[case::two_requests(r#"{"op":"version"}{"op":"version"}"#)]
     #[case::duplicate_op(r#"{"op":"version","op":"host_init"}"#)]
-    #[case::duplicate_field(r#"{"op":"vm_grant_api","id":"v1","id":"v2"}"#)]
+    #[case::duplicate_field(r#"{"op":"vm_claim_api_socket","id":"v1","id":"v2"}"#)]
     #[case::empty("")]
     fn the_argument_must_be_exactly_one_json_object(#[case] raw: &str) {
         assert!(matches!(
