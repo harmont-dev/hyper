@@ -36,14 +36,16 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     {:ok, log: log, fake: fake}
   end
 
-  defp opts do
+  @rootfs "/dev/mapper/hyper-vdaemontest01"
+
+  defp opts(mutable \\ nil) do
     %FireVMM.Opts{
       vm_id: @vm_id,
       uid: 900_500,
       gid: 900_500,
       type: :micro,
       arch: :x86_64,
-      mutable: nil,
+      mutable: mutable,
       kernel: "/nonexistent/vmlinux",
       boot_args: nil
     }
@@ -60,7 +62,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
 
     File.write!(path, """
     #!/usr/bin/env bash
-    echo "$*" >> #{log}
+    printf '%s\n' "$1" >> #{log}
     echo '{}'
     """)
 
@@ -68,11 +70,23 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     path
   end
 
+  defp mutable_stub(device) do
+    spawn_link(fn ->
+      receive do
+        {:"$gen_call", from, :blk_path} -> GenServer.reply(from, device)
+      end
+    end)
+  end
+
+  defp requests(log) do
+    log |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+  end
+
   defp calls(log) do
     log
     |> File.read!()
     |> String.split("\n", trim: true)
-    |> Enum.map(&hd(String.split(&1, " ")))
+    |> Enum.map(&(&1 |> Jason.decode!() |> Map.fetch!("op")))
   end
 
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
@@ -84,25 +98,23 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
   end
 
   describe "netns lifecycle (mandatory)" do
-    test "start_link prepares the netns before launching the jailer", %{log: log, fake: fake} do
-      # No [network] table on purpose: the netns prepare must fire regardless,
-      # since networking is mandatory rather than config-gated.
+    test "start_link boots with one vm_launch carrying the kernel and the volume's device",
+         %{log: log, fake: fake} do
       put_toml(fake)
 
       Process.flag(:trap_exit, true)
-      {:ok, pid} = Daemon.start_link(opts())
+      {:ok, pid} = Daemon.start_link(opts(mutable_stub(@rootfs)))
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
-      ops = calls(log)
-      prepare_at = Enum.find_index(ops, &(&1 == "network"))
-      jailer_at = Enum.find_index(ops, &(&1 == "jailer"))
+      assert [
+               %{"op" => "vm_launch", "kernel" => "/nonexistent/vmlinux", "device" => @rootfs}
+               | exit
+             ] = requests(log)
 
-      assert prepare_at, "expected a `network` (prepare) call before the jailer launch"
-      assert jailer_at, "expected the jailer to have been launched"
-      assert prepare_at < jailer_at, "netns must be prepared before the jailer enters it"
+      assert Enum.map(exit, & &1["op"]) == ["vm_teardown"]
     end
 
-    test "terminate/2 tears down both the network and the chroot jail", %{log: log, fake: fake} do
+    test "terminate/2 tears down the jail and its network", %{log: log, fake: fake} do
       put_toml(fake)
 
       assert :ok =
@@ -111,9 +123,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                  muontrap: nil
                })
 
-      ops = calls(log)
-      assert "network" in ops
-      assert "chroot-jail" in ops
+      assert calls(log) == ["vm_teardown"]
     end
   end
 end

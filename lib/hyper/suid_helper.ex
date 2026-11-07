@@ -16,39 +16,32 @@ defmodule Hyper.SuidHelper do
   self-test and reports the base path it was compiled against.
   """
 
-  alias Hyper.SuidHelper.{Dmsetup, Expected}
+  alias Hyper.SuidHelper.Expected
 
   use OpenTelemetryDecorator
+
+  @dm_target_modules ~w(dm_mod dm_snapshot dm_thin_pool)
 
   @typedoc "Error tuple: exit code + trimmed stderr/stdout from the helper."
   @type err :: {non_neg_integer(), String.t()}
 
   @doc false
-  # Run the helper with `argv`. Returns `{:ok, decoded_json}` on exit 0,
-  # `{:error, {code, message}}` otherwise. Shared transport for the tool
-  # submodules; not part of the public API.
-  @spec exec([String.t()]) :: {:ok, map()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.exec", include: [:argv])
-  def exec(argv) do
-    case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv, stderr_to_stdout: true) do
+  # Run the helper with `request` as its single JSON argument. Returns
+  # `{:ok, decoded_json}` on exit 0, `{:error, {code, message}}` otherwise.
+  # Shared transport for the tool submodules; not part of the public API.
+  @spec exec(%{required(:op) => String.t(), optional(atom()) => term()}) ::
+          {:ok, map()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.exec", include: [:request])
+  def exec(request) do
+    case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv(request), stderr_to_stdout: true) do
       {out, 0} -> {:ok, Jason.decode!(out)}
       {out, code} -> {:error, {code, String.trim(out)}}
     end
   end
 
-  @doc """
-  Run the helper's `sys-test` subcommand (proves it can promote to root). Returns
-  `{:ok, hyper_base}` where `hyper_base` is the work-dir the helper was compiled
-  against.
-  """
-  @spec sys_test() :: {:ok, Path.t()} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.sys_test")
-  def sys_test do
-    case exec(["sys-test"]) do
-      {:ok, %{"hyper_base" => base}} -> {:ok, base}
-      {:error, _} = err -> err
-    end
-  end
+  @doc false
+  @spec argv(%{required(:op) => String.t(), optional(atom()) => term()}) :: [String.t()]
+  def argv(request), do: [Jason.encode!(request)]
 
   @doc """
   Check that the setuid helper is usable on this machine: the helper binary is
@@ -64,7 +57,24 @@ defmodule Hyper.SuidHelper do
   def test_system do
     with :ok <- helper_present(),
          :ok <- verify_version() do
-      Dmsetup.test_system()
+      dm_targets_present()
+    end
+  end
+
+  @spec host_init() :: {:ok, Path.t()} | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.host_init")
+  def host_init do
+    case exec(%{op: "host_init"}) do
+      {:ok, %{"result" => "host_ready", "hyper_base" => base}} -> {:ok, base}
+      {:error, _} = err -> err
+    end
+  end
+
+  @spec dm_targets_present() :: :ok | {:error, {:missing_dm_targets, [String.t()]}}
+  defp dm_targets_present do
+    case Sys.Linux.Dm.missing_modules(@dm_target_modules) do
+      [] -> :ok
+      missing -> {:error, {:missing_dm_targets, missing}}
     end
   end
 
@@ -80,7 +90,7 @@ defmodule Hyper.SuidHelper do
   @spec verify_version() :: :ok | {:error, :version_mismatch | err()}
   @decorate with_span("Hyper.SuidHelper.verify_version")
   def verify_version do
-    case exec(["version"]) do
+    case exec(%{op: "version"}) do
       {:ok, %{"version" => v, "checksum_blake3" => c}} ->
         if v == Expected.version() and c == Expected.checksum_blake3(),
           do: :ok,

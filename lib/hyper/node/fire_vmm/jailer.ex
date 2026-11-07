@@ -131,30 +131,24 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @decorate with_span("Hyper.Node.FireVMM.Jailer.test_system", include: [:result])
   def test_system, do: Checks.run()
 
-  @spec command(FireVMM.Opts.t()) :: t()
-  def command(opts) do
-    args =
-      ["jailer", "--id", opts.vm_id, "--uid", to_string(opts.uid), "--gid", to_string(opts.gid)] ++
-        cgroup_flags(opts.type) ++
-        ["--api-sock", "/" <> @jail_socket]
+  @spec command(FireVMM.Opts.t(), Path.t()) :: t()
+  def command(opts, rootfs_device) do
+    request = %{
+      op: "vm_launch",
+      id: opts.vm_id,
+      uid: opts.uid,
+      gid: opts.gid,
+      kernel: opts.kernel,
+      device: rootfs_device,
+      limits: opts.type |> Instance.spec() |> Instance.Spec.cgroup_v2()
+    }
 
-    %{binary: Hyper.Cfg.Tools.suidhelper(), args: args, host_socket: host_socket(opts.vm_id)}
+    %{
+      binary: Hyper.Cfg.Tools.suidhelper(),
+      args: Hyper.SuidHelper.argv(request),
+      host_socket: host_socket(opts.vm_id)
+    }
   end
-
-  # Find the appropriate jailer cgroup flags for the given instance type.
-  @spec cgroup_flags(Instance.t()) :: [String.t()]
-  defp cgroup_flags(type) do
-    type
-    |> Instance.spec()
-    |> Instance.Spec.cgroup_v2()
-    |> Enum.flat_map(&cgroup_flag/1)
-  end
-
-  @spec cgroup_flag({atom(), term()}) :: [String.t()]
-  defp cgroup_flag({:memory_max, bytes}), do: ["--memory-max", to_string(bytes)]
-
-  defp cgroup_flag({:cpu_max, %{quota_us: quota, period_us: period}}),
-    do: ["--cpu-quota-us", to_string(quota), "--cpu-period-us", to_string(period)]
 
   @doc "Host path of the VM's per-VM jail dir (`<chroot_base>/<exec>/<id>`)."
   @spec chroot_dir(Hyper.Vm.Id.t()) :: Path.t()

@@ -67,6 +67,7 @@ const _: () = assert!(std::mem::size_of::<LoopConfig>() == 304);
 pub struct InvalidLoopDevNum(String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, From)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[display("{DEVICE_PREFIX}{_0}")]
 pub struct LoopDevNum(u32);
 

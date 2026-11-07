@@ -24,7 +24,6 @@ defmodule Hyper.Node.Img.Mutable do
 
   alias Hyper.Node.Img
   alias Hyper.Node.Img.{Server, ThinPool}
-  alias Hyper.SuidHelper
 
   use OpenTelemetryDecorator
 
@@ -85,7 +84,8 @@ defmodule Hyper.Node.Img.Mutable do
           thin_name: String.t(),
           thin_id: non_neg_integer(),
           blk_path: Path.t(),
-          origin_dev: Path.t()
+          origin_dev: Path.t(),
+          img_server: GenServer.server()
         }
   def describe(server), do: GenServer.call(server, :describe)
 
@@ -112,8 +112,7 @@ defmodule Hyper.Node.Img.Mutable do
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
-         {:ok, %{dev: dev, id: id}} <- ThinPool.create_external(name, ro_dev, sectors) do
+         {:ok, %{dev: dev, id: id}} <- ThinPool.create_volume(name, ro_dev) do
       state = %State{
         img_id: img_id,
         img_server: img_server,
@@ -140,13 +139,12 @@ defmodule Hyper.Node.Img.Mutable do
          # Hold the parent so it cannot idle-reap (freeing its thin id) between
          # describe and create_snap; released once the snapshot is independent.
          :ok <- acquire(parent, self()),
-         %{thin_name: origin_name, thin_id: origin_id} = describe(parent),
+         %{thin_name: origin_name} = describe(parent),
          {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, sectors} <- SuidHelper.Blockdev.device_sectors(ro_dev),
          {:ok, %{dev: dev, id: id}} <-
-           ThinPool.snapshot(name, origin_name, origin_id, sectors, ro_dev) do
+           ThinPool.create_volume(name, ro_dev, origin_name) do
       release_parent(parent)
 
       state = %State{
@@ -194,7 +192,8 @@ defmodule Hyper.Node.Img.Mutable do
       thin_name: state.thin_name,
       thin_id: state.thin_id,
       blk_path: state.blk_path,
-      origin_dev: state.origin_dev
+      origin_dev: state.origin_dev,
+      img_server: state.img_server
     }
 
     {:reply, reply, state}

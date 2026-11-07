@@ -11,35 +11,18 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
   (chroot-relative) equivalents the chrooted firecracker can open.
   """
 
-  use OpenTelemetryDecorator
-
   alias Hyper.Node.FireVMM.BootSpec.Cold
-  alias Hyper.SuidHelper
 
   # In-jail filenames + the rootfs drive id (matches BootSpec.resolve/2).
   @kernel_name "vmlinux"
   @root_name "rootfs"
   @root_drive_id "rootfs"
 
-  @doc """
-  Stage `cold`'s host kernel + rootfs device into `vm_id`'s chroot (owned
-  `uid:gid`), and return `cold` with its kernel + rootfs paths rewritten to their
-  in-jail equivalents. Fails the boot if either artifact cannot be staged.
-  """
-  @spec stage(Hyper.Vm.Id.t(), non_neg_integer(), non_neg_integer(), Cold.t()) ::
-          {:ok, Cold.t()} | {:error, term()}
-  @decorate with_span("Hyper.Node.FireVMM.ChrootJail.stage", include: [:vm_id])
-  def stage(vm_id, uid, gid, %Cold{} = cold) do
-    kernel = cold.boot_source.kernel_image_path
-    device = root_drive_host_path(cold)
-
-    # The helper places the kernel at <chroot_root>/@kernel_name and the rootfs
-    # node at <chroot_root>/@root_name; those names are the contract it rewrites
-    # the spec against below.
-    with :ok <- SuidHelper.ChrootJail.prepare(vm_id, kernel, device, uid, gid) do
-      {:ok, jailify(cold, in_jail(@kernel_name), in_jail(@root_name))}
-    end
-  end
+  # The helper places the kernel at <chroot_root>/@kernel_name and the rootfs
+  # node at <chroot_root>/@root_name; those names are the contract it rewrites
+  # the spec against below.
+  @spec jailify(Cold.t()) :: Cold.t()
+  def jailify(%Cold{} = cold), do: jailify(cold, in_jail(@kernel_name), in_jail(@root_name))
 
   # Rewrite the boot source's kernel path and the rootfs drive's path to the
   # given in-jail paths; other drives are left untouched.
@@ -57,15 +40,6 @@ defmodule Hyper.Node.FireVMM.ChrootJail do
   end
 
   defp rewrite_drive(drive, _jail_root), do: drive
-
-  # The host path of the rootfs drive (BootSpec.resolve always produces one).
-  @spec root_drive_host_path(Cold.t()) :: Path.t() | nil
-  defp root_drive_host_path(%Cold{drives: drives}) do
-    Enum.find_value(drives, fn
-      %{drive_id: @root_drive_id, path_on_host: path} -> path
-      _ -> nil
-    end)
-  end
 
   defp in_jail(name), do: "/" <> name
 end

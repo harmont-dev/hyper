@@ -19,7 +19,11 @@ use support::stdout_json;
 fn version_reports_pkg_version_and_hex_checksum() {
     // A nonexistent config path: `version` renders before config setup,
     // so it must succeed regardless. Needs no root.
-    let out = support::run(Path::new("/nonexistent/hyper-config.toml"), &["version"]).success();
+    let out = support::run(
+        Path::new("/nonexistent/hyper-config.toml"),
+        serde_json::json!({"op": "version"}),
+    )
+    .success();
     let json = stdout_json(&out);
     assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
     let sum = json["checksum_blake3"]

@@ -8,11 +8,11 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     * granted        -> InstanceStart is issued -> :running (and InstanceStart
                         is issued ONLY on grant success — the ordering contract);
-    * pending        -> re-arm the :grant_vsock timer (firecracker hasn't
+    * pending        -> re-arm the :claim_vsock_socket timer (firecracker hasn't
                         created the socket yet; never a boot failure);
     * hard error     -> also re-arm until the deadline (transient helper
                         failures must not kill a boot that could still succeed);
-    * past deadline  -> stop with {:vsock_grant_timeout, reason}, surfacing the
+    * past deadline  -> stop with {:vsock_claim_timeout, reason}, surfacing the
                         last REAL reason rather than swallowing it.
 
   Driven end-to-end through the real seams: a stub helper script behind
@@ -25,6 +25,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
   alias Hyper.Node.FireVMM.Opts
   alias Hyper.Node.FireVMM.State
   alias Hyper.Node.FireVMM.State.Configuring
+  alias Hyper.Test.SuidHelperStub
 
   defmodule ClientStub do
     @moduledoc false
@@ -46,8 +47,8 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     end
   end
 
-  @granted_script "echo null"
-  @pending_script "echo 'socket does not exist yet' >&2; exit 75"
+  @claimed_script ~s(echo '{"result":"claimed"}')
+  @pending_script ~s(echo '{"result":"pending"}')
 
   setup context do
     tmp = Path.join(System.tmp_dir!(), "cfg-vsock-#{System.unique_integer([:positive])}")
@@ -89,19 +90,19 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     Map.put(context, :tmp, tmp)
   end
 
-  test "granted: InstanceStart is issued and the VM advances to :running", %{tmp: tmp} do
+  test "claimed: InstanceStart is issued and the VM advances to :running", %{tmp: tmp} do
     vm_id = Hyper.Vm.Id.generate()
-    stub_helper!(tmp, @granted_script)
+    SuidHelperStub.install!(tmp, @claimed_script)
     start_supervised!({ClientStub, {vm_id, self()}})
     await_client(vm_id)
 
-    result = Configuring.handle(:state_timeout, :grant_vsock, data(vm_id, 60_000))
+    result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, 60_000))
 
     assert {:next_state, :running, _} = result
     assert_received :instance_start_requested
   end
 
-  test "pending and hard errors before the deadline re-arm the grant timer", %{tmp: tmp} do
+  test "pending and hard errors before the deadline re-arm the claim timer", %{tmp: tmp} do
     # Two rows, one assertion shape: the classification (retry, not fail) is
     # the behavior; the concrete interval is a tunable, so only its presence
     # and target are pinned. No ClientStub is running, so an erroneous
@@ -114,11 +115,11 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     for {label, script} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      stub_helper!(tmp, script)
+      SuidHelperStub.install!(tmp, script)
 
-      result = Configuring.handle(:state_timeout, :grant_vsock, data(vm_id, 60_000))
+      result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, 60_000))
 
-      assert {:keep_state, _, [{:state_timeout, ms, :grant_vsock}]} = result,
+      assert {:keep_state, _, [{:state_timeout, ms, :claim_vsock_socket}]} = result,
              "#{label}: expected a re-arm, got #{inspect(result)}"
 
       assert ms > 0, "#{label}: re-arm delay must be positive"
@@ -131,16 +132,16 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     # operator gets for a boot that never came up.
     rows = [
       {@pending_script, :socket_pending},
-      {"echo boom >&2; exit 3", {:grant_vsock, {3, "boom"}}}
+      {"echo boom >&2; exit 3", {:claim_vsock_socket, {3, "boom"}}}
     ]
 
     for {script, expected_reason} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      stub_helper!(tmp, script)
+      SuidHelperStub.install!(tmp, script)
 
-      result = Configuring.handle(:state_timeout, :grant_vsock, data(vm_id, -1))
+      result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, -1))
 
-      assert {:stop, {:shutdown, {:boot_failed, {:vsock_grant_timeout, reason}}}, _} = result
+      assert {:stop, {:shutdown, {:boot_failed, {:vsock_claim_timeout, reason}}}, _} = result
       assert reason == expected_reason
     end
   end
@@ -152,18 +153,6 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
       opts: %Opts{vm_id: vm_id},
       boot_deadline: System.monotonic_time(:millisecond) + offset_ms
     }
-  end
-
-  # Point Hyper.Cfg.Tools.suidhelper/0 (runtime source) at a stub script and
-  # restore the previous binding afterwards.
-  defp stub_helper!(tmp, body) do
-    script = Path.join(tmp, "suidhelper-stub-#{System.unique_integer([:positive])}")
-    File.write!(script, "#!/bin/sh\n#{body}\n")
-    File.chmod!(script, 0o755)
-
-    previous = Application.get_env(:hyper, Hyper.Cfg.Tools, [])
-    Application.put_env(:hyper, Hyper.Cfg.Tools, Keyword.put(previous, :suidhelper, script))
-    on_exit(fn -> Application.put_env(:hyper, Hyper.Cfg.Tools, previous) end)
   end
 
   # Horde materialises registrations asynchronously; wait until the stub is

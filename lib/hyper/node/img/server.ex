@@ -34,11 +34,20 @@ defmodule Hyper.Node.Img.Server do
             layers: [Hyper.Layer.id()],
             dm_names: [String.t()],
             blk_path: Path.t() | nil,
+            size: Information.t() | nil,
             holders: %{pid() => reference()},
             idle_ref: reference() | nil
           }
 
-    defstruct [:img_id, :blk_path, layers: [], dm_names: [], holders: %{}, idle_ref: nil]
+    defstruct [
+      :img_id,
+      :blk_path,
+      :size,
+      layers: [],
+      dm_names: [],
+      holders: %{},
+      idle_ref: nil
+    ]
   end
 
   defmodule Opts do
@@ -58,6 +67,9 @@ defmodule Hyper.Node.Img.Server do
   @doc "The composed read-only block device path for the image managed by `server`."
   @spec blk_path(GenServer.server()) :: Path.t()
   def blk_path(server), do: GenServer.call(server, :blk_path)
+
+  @spec size(GenServer.server()) :: Information.t()
+  def size(server), do: GenServer.call(server, :size)
 
   @doc """
   Take a reference on `server` on behalf of the calling process. The image stays
@@ -83,8 +95,16 @@ defmodule Hyper.Node.Img.Server do
     layer_ids = resolve_layers(img_id)
 
     with {:ok, layer_paths} <- acquire_layers(layer_ids),
-         {:ok, %{blk_path: blk_path, dm_names: dm_names}} <- build_chain(img_id, layer_paths) do
-      state = %State{img_id: img_id, layers: layer_ids, dm_names: dm_names, blk_path: blk_path}
+         {:ok, %{blk_path: blk_path, dm_names: dm_names, size: size}} <-
+           build_chain(img_id, layer_paths) do
+      state = %State{
+        img_id: img_id,
+        layers: layer_ids,
+        dm_names: dm_names,
+        blk_path: blk_path,
+        size: size
+      }
+
       {:ok, arm_idle(state)}
     else
       {:error, reason} -> {:stop, reason}
@@ -116,6 +136,10 @@ defmodule Hyper.Node.Img.Server do
   @impl true
   def handle_call(:blk_path, _from, %State{blk_path: blk_path} = state) do
     {:reply, blk_path, state}
+  end
+
+  def handle_call(:size, _from, %State{size: size} = state) do
+    {:reply, size, state}
   end
 
   @impl true
@@ -186,7 +210,8 @@ defmodule Hyper.Node.Img.Server do
   # Stack dm-snapshot devices: base loop is the origin, each delta loop is layered
   # on top. Rolls back any devices it created if a later one fails.
   @spec build_chain(Hyper.Img.id(), [Path.t()]) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
+          {:ok, %{blk_path: Path.t(), dm_names: [String.t()], size: Information.t()}}
+          | {:error, term()}
   # An unknown image id resolves to no layers; return a clean domain error so
   # `init/1` stops with `{:stop, :unknown_image}` (which the scheduler maps to
   # `:no_capacity`) rather than crashing with a FunctionClauseError + SASL
@@ -194,56 +219,14 @@ defmodule Hyper.Node.Img.Server do
   defp build_chain(_img_id, []), do: {:error, :unknown_image}
 
   defp build_chain(img_id, [base | deltas]) do
-    with {:ok, sectors} <- file_sectors(base) do
-      case deltas do
-        [] -> build_linear(img_id, base, sectors)
-        deltas -> build_snapshots(img_id, base, deltas, sectors)
-      end
+    with {:ok, %File.Stat{size: bytes}} <- File.stat(base),
+         {:ok, chain} <- SuidHelper.Img.activate(dm_prefix(img_id), base, deltas) do
+      {:ok, Map.put(chain, :size, Information.bytes(bytes))}
     end
   end
 
-  @spec build_linear(Hyper.Img.id(), Path.t(), pos_integer()) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_linear(img_id, base, sectors) do
-    name = dm_name(img_id, 0)
-
-    with {:ok, dev} <- SuidHelper.Dmsetup.create_linear(name, base, sectors) do
-      {:ok, %{blk_path: dev, dm_names: [name]}}
-    end
-  end
-
-  @spec build_snapshots(Hyper.Img.id(), Path.t(), [Path.t()], pos_integer()) ::
-          {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, term()}
-  defp build_snapshots(img_id, base, deltas, sectors) do
-    deltas
-    |> Enum.with_index(1)
-    |> Enum.reduce_while({:ok, base, []}, fn {cow_file, idx}, {:ok, origin, names} ->
-      name = dm_name(img_id, idx)
-
-      case SuidHelper.Dmsetup.create_snapshot(name, origin, cow_file, sectors) do
-        {:ok, dev} ->
-          {:cont, {:ok, dev, [name | names]}}
-
-        {:error, reason} ->
-          Enum.each(names, &remove_quietly/1)
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, blk_path, names} -> {:ok, %{blk_path: blk_path, dm_names: Enum.reverse(names)}}
-      {:error, _} = err -> err
-    end
-  end
-
-  @spec file_sectors(Path.t()) :: {:ok, non_neg_integer()} | {:error, File.posix()}
-  defp file_sectors(path) do
-    with {:ok, %File.Stat{size: size}} <- File.stat(path) do
-      {:ok, size |> Information.bytes() |> Information.as_sectors()}
-    end
-  end
-
-  @spec dm_name(Hyper.Img.id(), non_neg_integer()) :: String.t()
-  defp dm_name(img_id, idx), do: "hyper-img-#{sanitize(img_id)}-#{idx}"
+  @spec dm_prefix(Hyper.Img.id()) :: String.t()
+  defp dm_prefix(img_id), do: "hyper-img-#{sanitize(img_id)}"
 
   @spec sanitize(String.t()) :: String.t()
   defp sanitize(id), do: String.replace(id, ~r/[^A-Za-z0-9._-]/, "_")

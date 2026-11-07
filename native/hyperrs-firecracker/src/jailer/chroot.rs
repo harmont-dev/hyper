@@ -2,7 +2,6 @@
 //! Module responsible for preparing a `chroot` jail to the firecracker jailer.
 
 use super::FIRECRACKER;
-use crate::tun;
 use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
@@ -70,8 +69,6 @@ pub enum BuildError {
     Kernel(#[source] dir::DirError),
     #[error("creating rootfs node: {0}")]
     Rootfs(#[source] dir::DirError),
-    #[error("creating /dev/net/tun: {0}")]
-    Tun(#[source] dir::DirError),
 }
 
 #[derive(Debug, ThisError)]
@@ -170,6 +167,14 @@ impl<'a> JailLayout<'a> {
         SafeDir::open(&self.root(), OpenFlags::RDONLY).map(JailRoot)
     }
 
+    pub fn create_root(&self) -> Result<JailRoot, dir::DirError> {
+        let base: SafeDir = SafeFile::open(self.base, OpenFlags::RDONLY)?;
+        base.ensure_dir(EXEC_NAME, DIR_MODE)?
+            .ensure_dir(self.id, DIR_MODE)?
+            .ensure_dir(ROOT_NAME, DIR_MODE)
+            .map(JailRoot)
+    }
+
     /// Grant access to a socket `name` to the `owner`.
     pub fn grant_socket(&self, name: &StrictComponent, owner: Owner) -> Result<(), GrantError> {
         let root = match self.open_root() {
@@ -207,15 +212,9 @@ impl JailRoot {
         #[builder(start_fn)] owner: Owner,
         kernel: &KernelImage,
         rootfs: &BlockDevice,
-        #[builder(default)] tun: bool,
     ) -> Result<(), BuildError> {
         self.stage_kernel(kernel).map_err(BuildError::Kernel)?;
         self.add_rootfs(rootfs, owner).map_err(BuildError::Rootfs)?;
-
-        if tun {
-            self.add_tun(owner).map_err(BuildError::Tun)?;
-        }
-
         Ok(())
     }
 
@@ -244,16 +243,6 @@ impl JailRoot {
     ) -> Result<(), dir::DirError> {
         let node = DeviceNode::<IsBlockDevice>::new(device.rdev()?, ROOTFS_MODE);
         self.0.make_device(ROOTFS_NAME, node, owner)?;
-        Ok(())
-    }
-
-    /// TODO(markovejnovic): Remove this slop
-    pub fn add_tun(&self, owner: Owner) -> Result<(), dir::DirError> {
-        let net = self
-            .0
-            .ensure_dir(tun::DEV, DIR_MODE)?
-            .ensure_dir(tun::NET, DIR_MODE)?;
-        net.make_device(tun::NAME, tun::NODE, owner)?;
         Ok(())
     }
 
@@ -300,12 +289,11 @@ mod tests {
     use assert_fs::fixture::ChildPath;
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use hyperrs_fs::file;
     use hyperrs_fs::file::Owner;
     use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
-    use hyperrs_fs::{dir, file};
     use nix::errno::Errno;
-    use nix::sys::stat::{makedev, mknod, Mode, SFlag};
     use nix::unistd::{Gid, Uid};
     use predicates::prelude::*;
     use pretty_assertions::assert_eq;
@@ -554,49 +542,6 @@ mod tests {
         assert_eq!(meta.rdev(), dev_rdev.unwrap());
         assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
         assert_eq!(meta.mode() & 0o777, 0o600);
-    }
-
-    #[rstest]
-    fn add_tun_is_idempotent_as_root(jail: Jail) {
-        if !is_root() {
-            eprintln!("SKIP add_tun_is_idempotent: needs root for mknod/chown");
-            return;
-        }
-        let root = jail.open_root();
-
-        root.add_tun(owner(12345, 12346)).unwrap();
-        root.add_tun(owner(12345, 12346)).unwrap();
-
-        let meta = fs::metadata(jail.root_dir.join("dev/net/tun")).unwrap();
-        assert!(meta.file_type().is_char_device());
-        assert_eq!(meta.rdev(), makedev(10, 200));
-        assert_eq!((meta.uid(), meta.gid()), (12345, 12346));
-        assert_eq!(meta.mode() & 0o777, 0o666);
-    }
-
-    #[rstest]
-    fn add_tun_refuses_a_preexisting_node_with_another_number_as_root(jail: Jail) {
-        if !is_root() {
-            eprintln!("SKIP add_tun_refuses_a_preexisting_node: needs root for mknod");
-            return;
-        }
-        jail.root_dir.child("dev/net").create_dir_all().unwrap();
-        let planted = jail.root_dir.child("dev/net/tun");
-        mknod(
-            planted.path(),
-            SFlag::S_IFCHR,
-            Mode::from_bits_truncate(0o666),
-            makedev(1, 3),
-        )
-        .unwrap();
-
-        let err = jail.open_root().add_tun(owner(12345, 12346)).unwrap_err();
-        assert_matches!(err, dir::DirError::DeviceMismatch { .. });
-        assert_eq!(
-            fs::metadata(&planted).unwrap().uid(),
-            0,
-            "planted node must not be chowned"
-        );
     }
 
     const API_SOCKET: &StrictComponent = StrictComponent::from_static("api.socket");

@@ -18,6 +18,8 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   # Stub the cached TOML so firecracker/jailer resolve to dummy paths without
   # requiring /etc/hyper/config.toml on the test host. async: false because the
   # cache is global state.
+  @rootfs "/dev/mapper/hyper-vjailertest"
+
   setup do
     Hyper.Cfg.Toml.put_cache(%{
       "tools" => %{
@@ -43,49 +45,37 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   end
 
   test "binary is the suid helper" do
-    assert Jailer.command(micro_opts()).binary == Hyper.Cfg.Tools.suidhelper()
+    assert Jailer.command(micro_opts(), @rootfs).binary == Hyper.Cfg.Tools.suidhelper()
   end
 
-  test "args start with the jailer subcommand" do
-    %{args: [first | _]} = Jailer.command(micro_opts())
-    assert first == "jailer"
+  defp request do
+    %{args: [json]} = Jailer.command(micro_opts(), @rootfs)
+    Jason.decode!(json)
   end
 
-  test "args contain --id, --uid, --gid with the opts values" do
-    %{args: args} = Jailer.command(micro_opts())
-    assert "--id" in args
-    assert @vm_id in args
-    assert "--uid" in args
-    assert "--gid" in args
-    assert "900001" in args
+  test "args are a single vm_launch request carrying the ids and boot artifacts" do
+    assert %{
+             "op" => "vm_launch",
+             "id" => @vm_id,
+             "uid" => 900_001,
+             "gid" => 900_001,
+             "kernel" => "/srv/hyper/redist/vmlinux/vmlinux-x86_64-6.1",
+             "device" => @rootfs
+           } = request()
   end
 
-  test "args end with --api-sock /api.socket" do
-    %{args: args} = Jailer.command(micro_opts())
-    assert Enum.take(args, -2) == ["--api-sock", "/api.socket"]
-  end
-
-  test "args do not contain privileged flags owned by the suidhelper" do
-    %{args: args} = Jailer.command(micro_opts())
-    refute "--exec-file" in args
-    refute "--chroot-base-dir" in args
-    refute "--cgroup-version" in args
-    refute "--parent-cgroup" in args
-    refute "--" in args
-  end
-
-  test "args carry the :micro cgroup limits as typed flags" do
-    %{args: args} = Jailer.command(micro_opts())
+  test "the request carries the :micro cgroup limits and nothing the helper owns" do
     cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
 
-    assert flag_value(args, "--memory-max") == to_string(cgroup.memory_max)
-    assert flag_value(args, "--cpu-quota-us") == to_string(cgroup.cpu_max.quota_us)
-    assert flag_value(args, "--cpu-period-us") == to_string(cgroup.cpu_max.period_us)
-    refute "--cgroup" in args
-  end
+    assert Map.keys(request()) |> Enum.sort() ==
+             ~w(device gid id kernel limits op uid)
 
-  defp flag_value(args, flag) do
-    args |> Enum.drop_while(&(&1 != flag)) |> Enum.at(1)
+    assert request()["limits"]["memory_max"] == cgroup.memory_max
+
+    assert request()["limits"]["cpu_max"] == %{
+             "quota_us" => cgroup.cpu_max.quota_us,
+             "period_us" => cgroup.cpu_max.period_us
+           }
   end
 
   test "host_vsock/1 returns the chroot-rooted host path for vsock.sock" do

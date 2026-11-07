@@ -19,65 +19,50 @@ defmodule Hyper.Node.Img.ThinPool do
 
   use OpenTelemetryDecorator
 
+  require Logger
+
   @pool_name "hyper-thinpool"
   @data_file "thinpool.data"
   @meta_file "thinpool.meta"
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:pool_dev, :meta_loop]
-    defstruct [:pool_dev, :meta_loop, next: 0, freed: []]
+    @enforce_keys [:meta_loop]
+    defstruct [:meta_loop, next: 0, freed: []]
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Provision a thin volume of `sectors` over read-only `origin_dev`."
-  @spec create_external(String.t(), Path.t(), pos_integer()) ::
+  @spec create_volume(String.t(), Path.t(), String.t() | nil) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.create_external", include: [:name])
-  def create_external(name, origin_dev, sectors) do
-    GenServer.call(__MODULE__, {:create_external, name, origin_dev, sectors})
+  @decorate with_span("Hyper.Node.Img.ThinPool.create_volume", include: [:name, :parent])
+  def create_volume(name, origin_dev, parent \\ nil) do
+    serialized_on(parent, fn ->
+      GenServer.call(__MODULE__, {:create_volume, name, origin_dev, parent}, :timer.seconds(30))
+    end)
   end
 
-  @doc """
-  Take an internal snapshot of live thin volume `origin_name` (thin id
-  `origin_id`) and activate it as `name`, sharing the pool's blocks COW-style.
+  @spec fork_delta(String.t(), Path.t(), Path.t()) ::
+          {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
+  @decorate with_span("Hyper.Node.Img.ThinPool.fork_delta", include: [:parent, :cow])
+  def fork_delta(parent, origin, cow) do
+    {scratch_id, meta_loop} = GenServer.call(__MODULE__, :reserve_scratch)
 
-  dm-thin requires the origin suspended while `create_snap` is sent; the origin
-  is resumed on *every* path out, so a failed snapshot never leaves the parent
-  VM's I/O frozen. The snapshot is activated with the same external origin
-  (`origin_dev`) as its parent — unprovisioned reads must keep resolving
-  through the composed RO image chain.
-  """
-  @spec snapshot(String.t(), String.t(), non_neg_integer(), pos_integer(), Path.t()) ::
-          {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.snapshot", include: [:name, :origin_name])
-  def snapshot(name, origin_name, origin_id, sectors, origin_dev) do
-    GenServer.call(
-      __MODULE__,
-      {:snapshot, name, origin_name, origin_id, sectors, origin_dev},
-      :timer.seconds(30)
-    )
+    result =
+      serialized_on(parent, fn ->
+        SuidHelper.ForkDelta.run(@pool_name, meta_loop, parent, scratch_id, origin, cow)
+      end)
+
+    GenServer.call(__MODULE__, {:release_scratch, scratch_id, result})
+    result
   end
 
-  @doc """
-  The provisioned ranges of thin device `thin_id`, from the pool's own
-  metadata. Because the volume reads through an external origin, provisioned
-  blocks are exactly the blocks ever written — the divergence a fork publish
-  must copy, discovered without scanning the device.
+  @spec serialized_on(String.t() | nil, (-> result)) :: result when result: term()
+  defp serialized_on(nil, fun), do: fun.()
 
-  Reserves the pool's metadata snapshot for the duration of the dump and
-  always releases it (one reserve may exist at a time; this call is
-  serialized by the pool server).
-  """
-  @spec mappings(non_neg_integer()) ::
-          {:ok, %{block_sectors: pos_integer(), ranges: [[non_neg_integer()]]}}
-          | {:error, term()}
-  @decorate with_span("Hyper.Node.Img.ThinPool.mappings", include: [:thin_id])
-  def mappings(thin_id) do
-    GenServer.call(__MODULE__, {:mappings, thin_id}, :timer.seconds(60))
-  end
+  defp serialized_on(parent, fun),
+    do: :global.trans({{__MODULE__, parent}, self()}, fun, [node()])
 
   @doc "Remove thin volume `name` and free its thin device `id`."
   @spec destroy(String.t(), non_neg_integer()) :: :ok
@@ -92,90 +77,42 @@ defmodule Hyper.Node.Img.ThinPool do
     with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
-         :ok <- reclaim_stale_pool(),
-         :ok <- zero_metadata(meta),
-         sectors = Information.as_sectors(ImgConfig.thin_pool_data_size()),
-         {:ok, pool_dev, meta_loop} <-
-           SuidHelper.Dmsetup.create_thin_pool(
-             @pool_name,
-             meta,
-             data,
-             sectors,
-             ImgConfig.thin_block_sectors(),
-             0
-           ) do
-      {:ok, %State{pool_dev: pool_dev, meta_loop: meta_loop}}
+         {:ok, _pool_dev, meta_loop} <-
+           SuidHelper.Thin.create_pool(@pool_name, meta, data, ImgConfig.thin_block_sectors(), 0) do
+      {:ok, %State{meta_loop: meta_loop}}
     else
       {:error, reason} -> {:stop, reason}
     end
   end
 
   @impl true
-  def handle_call({:create_external, name, origin_dev, sectors}, _from, state) do
+  def handle_call({:create_volume, name, origin_dev, parent}, _from, state) do
     {id, state} = id_alloc(state)
 
-    with :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_thin #{id}"),
-         {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
-      {:reply, {:ok, %{dev: dev, id: id}}, state}
-    else
-      {:error, reason} ->
-        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
-        {:reply, {:error, reason}, id_free(state, id)}
+    case SuidHelper.Thin.create_volume(@pool_name, id, name, origin_dev, parent) do
+      {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
+      {:error, _} = err -> {:reply, err, retire(state, id, err)}
     end
   end
 
   @impl true
-  def handle_call({:snapshot, name, origin_name, origin_id, sectors, origin_dev}, _from, state) do
+  def handle_call(:reserve_scratch, _from, state) do
     {id, state} = id_alloc(state)
-
-    with :ok <- SuidHelper.Dmsetup.suspend(origin_name),
-         :ok <- SuidHelper.Dmsetup.message(@pool_name, "create_snap #{id} #{origin_id}"),
-         :ok <- SuidHelper.Dmsetup.resume(origin_name),
-         {:ok, dev} <-
-           SuidHelper.Dmsetup.create_thin_external(name, state.pool_dev, id, sectors, origin_dev) do
-      {:reply, {:ok, %{dev: dev, id: id}}, state}
-    else
-      {:error, reason} ->
-        # Unconditional resume: suspend may or may not have taken effect, and
-        # resuming a non-suspended device is harmless — but leaving the parent
-        # VM's rootfs frozen is not.
-        _ = SuidHelper.Dmsetup.resume(origin_name)
-        _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
-        {:reply, {:error, reason}, id_free(state, id)}
-    end
+    {:reply, {id, state.meta_loop}, state}
   end
 
   @impl true
-  def handle_call({:mappings, thin_id}, _from, state) do
-    reply =
-      with :ok <- reserve_metadata_snap() do
-        try do
-          SuidHelper.ThinDump.mappings(state.meta_loop, thin_id)
-        after
-          _ = SuidHelper.Dmsetup.message(@pool_name, "release_metadata_snap")
-        end
-      end
+  def handle_call({:release_scratch, id, {:ok, _}}, _from, state),
+    do: {:reply, :ok, id_free(state, id)}
 
-    {:reply, reply, state}
-  end
+  def handle_call({:release_scratch, id, err}, _from, state),
+    do: {:reply, :ok, retire(state, id, err)}
 
   @impl true
   def handle_call({:destroy, name, id}, _from, state) do
-    _ = SuidHelper.Dmsetup.remove(name)
-    _ = SuidHelper.Dmsetup.message(@pool_name, "delete #{id}")
-    {:reply, :ok, id_free(state, id)}
-  end
-
-  @spec reserve_metadata_snap() :: :ok | {:error, term()}
-  defp reserve_metadata_snap do
-    case SuidHelper.Dmsetup.message(@pool_name, "reserve_metadata_snap") do
-      :ok ->
-        :ok
-
-      {:error, _} ->
-        _ = SuidHelper.Dmsetup.message(@pool_name, "release_metadata_snap")
-        SuidHelper.Dmsetup.message(@pool_name, "reserve_metadata_snap")
+    case SuidHelper.Thin.destroy(@pool_name, name) do
+      :ok -> {:reply, :ok, id_free(state, id)}
+      {:error, _} = err -> {:reply, :ok, retire(state, id, err)}
     end
   end
 
@@ -208,15 +145,10 @@ defmodule Hyper.Node.Img.ThinPool do
   @spec id_free(map(), non_neg_integer()) :: map()
   def id_free(%{freed: freed} = s, id), do: %{s | freed: [id | freed]}
 
-  # A run that did not shut down cleanly (e.g. SIGKILL, so `terminate/2` never
-  # ran) leaves the dm pool behind, and recreating it fails with "Device or
-  # resource busy". Best-effort remove any stale pool of our name so this boot
-  # can build a fresh one. Runs before `zero_metadata`, which would otherwise
-  # corrupt a still-live pool.
-  @spec reclaim_stale_pool() :: :ok
-  defp reclaim_stale_pool do
-    _ = SuidHelper.Dmsetup.remove(@pool_name)
-    :ok
+  @spec retire(map(), non_neg_integer(), term()) :: map()
+  defp retire(state, id, err) do
+    Logger.warning("thin id #{id} may still be in #{@pool_name}; retiring it: #{inspect(err)}")
+    state
   end
 
   # Create a sparse file of `size` if absent; reuse it if already present.
@@ -236,16 +168,6 @@ defmodule Hyper.Node.Img.ThinPool do
 
       {:error, reason} ->
         {:error, {:backing_file, file, reason}}
-    end
-  end
-
-  # Wipe the metadata header so the kernel treats the pool as freshly created.
-  @spec zero_metadata(Path.t()) :: :ok | {:error, term()}
-  defp zero_metadata(path) do
-    case File.open(path, [:write, :read, :binary], fn io -> IO.binwrite(io, <<0::4096*8>>) end) do
-      {:ok, :ok} -> :ok
-      {:ok, other} -> other
-      {:error, reason} -> {:error, {:zero_metadata, reason}}
     end
   end
 end

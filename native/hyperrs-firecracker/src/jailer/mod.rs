@@ -15,6 +15,11 @@ use std::process::Command;
 const FIRECRACKER: &str = "firecracker";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CpuMax {
     /// How many microseconds this cgroup can run for.
     pub quota_us: NonZeroU64,
@@ -23,6 +28,11 @@ pub struct CpuMax {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Builder)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CgroupLimits {
     /// The RAM usage, in bytes.
     memory_max: Option<NonZeroU64>,
