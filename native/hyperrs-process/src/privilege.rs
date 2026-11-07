@@ -235,11 +235,12 @@ mod tests {
     use super::{RootCommandExt, TakeError, Unprivileged};
     use nix::fcntl::{fcntl, FcntlArg, FdFlag};
     use nix::unistd::geteuid;
+    use rstest::rstest;
     use std::fs::File;
     use std::os::unix::io::{AsFd, AsRawFd};
     use std::process::Command;
 
-    #[test]
+    #[rstest]
     fn at_most_one_token_per_process() {
         {
             let first = Unprivileged::take();
@@ -255,7 +256,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn a_root_child_inherits_exactly_the_listed_fds_as_root() {
         if !geteuid().is_root() {
             eprintln!("SKIP a_root_child_inherits: needs root to elevate");

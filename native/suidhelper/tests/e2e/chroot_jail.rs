@@ -10,47 +10,23 @@
 //! table.
 #![cfg(feature = "insecure_mode")]
 
+use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
-/// `work_dir`, 0644 so the OwnerOnlyWritable axis passes.
-fn write_config(dir: &Path, work_dir: &Path) -> PathBuf {
-    let p = dir.join("config.toml");
-    fs::write(&p, format!("work_dir = \"{}\"\n", work_dir.display())).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-    p
-}
-
-/// Same as [`write_config`], plus a `[network]` table — the gate that makes
-/// `chroot-jail prepare` also mknod `dev/net/tun` into the jail.
-fn write_config_with_parent_cgroup(dir: &Path, work_dir: &Path, parent: &str) -> PathBuf {
+/// `work_dir`, followed by `tables`, 0644 so the OwnerOnlyWritable axis passes.
+fn write_config(dir: &Path, work_dir: &Path, tables: &str) -> PathBuf {
     let p = dir.join("config.toml");
     fs::write(
         &p,
-        format!(
-            "work_dir = \"{}\"\n[jails]\ncgroup = \"{parent}\"\n",
-            work_dir.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-    p
-}
-
-fn write_config_with_network(dir: &Path, work_dir: &Path) -> PathBuf {
-    let p = dir.join("config.toml");
-    fs::write(
-        &p,
-        format!(
-            "work_dir = \"{}\"\n[network]\nuplink = \"eth0\"\n",
-            work_dir.display()
-        ),
+        format!("work_dir = \"{}\"\n{tables}", work_dir.display()),
     )
     .unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
@@ -116,108 +92,118 @@ impl Drop for MapperDev {
     }
 }
 
-// `chroot-jail prepare` stages the kernel and creates the rootfs node, exiting 0
-// with {"result":"prepared"}.
-#[test]
-fn prepare_succeeds_and_builds_jail_as_root() {
-    if !is_root() {
-        eprintln!("SKIP prepare_succeeds_and_builds_jail: needs root");
-        return;
+struct Work {
+    tmp: TempDir,
+    dir: PathBuf,
+    chroot: PathBuf,
+    kernel: PathBuf,
+}
+
+impl Work {
+    fn config(&self, tables: &str) -> PathBuf {
+        write_config(self.tmp.path(), &self.dir, tables)
     }
+
+    fn prepare(
+        &self,
+        cfg: &Path,
+        device: &str,
+        uid: &str,
+        gid: &str,
+    ) -> assert_cmd::assert::Assert {
+        run(
+            cfg,
+            &[
+                "chroot-jail",
+                "prepare",
+                "--id",
+                "id",
+                "--kernel",
+                self.kernel.to_str().unwrap(),
+                "--device",
+                device,
+                "--uid",
+                uid,
+                "--gid",
+                gid,
+            ],
+        )
+    }
+}
+
+#[fixture]
+fn work() -> Work {
     let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let chroot = work
+    let dir = tmp.path().join("srv");
+    let chroot = dir
         .join("jails")
         .join("firecracker")
         .join("id")
         .join("root");
     fs::create_dir_all(&chroot).unwrap();
-    let kernel = work.join("vmlinux-src");
+    let kernel = dir.join("vmlinux-src");
     fs::write(&kernel, b"kernel image").unwrap();
-    let cfg = write_config(tmp.path(), &work);
+    Work {
+        tmp,
+        dir,
+        chroot,
+        kernel,
+    }
+}
 
-    let Some(dev) = MapperDev::setup(tmp.path(), "prepare") else {
+// `chroot-jail prepare` stages the kernel and creates the rootfs node, exiting 0
+// with {"result":"prepared"}.
+#[rstest]
+fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
+    if !is_root() {
+        eprintln!("SKIP prepare_succeeds_and_builds_jail: needs root");
+        return;
+    }
+    let cfg = work.config("");
+
+    let Some(dev) = MapperDev::setup(work.tmp.path(), "prepare") else {
         eprintln!("SKIP prepare: losetup/dmsetup unavailable");
         return;
     };
 
-    let out = run(
-        &cfg,
-        &[
-            "chroot-jail",
-            "prepare",
-            "--id",
-            "id",
-            "--kernel",
-            kernel.to_str().unwrap(),
-            "--device",
-            &dev.path(),
-            "--uid",
-            "900000",
-            "--gid",
-            "900000",
-        ],
-    );
+    let out = work.prepare(&cfg, &dev.path(), "900000", "900000");
     let dev_rdev = fs::metadata(dev.path()).map(|m| m.rdev());
     drop(dev);
 
     let json = stdout_json(&out.success());
     assert_eq!(json["result"], "prepared");
-    assert_eq!(fs::read(chroot.join("vmlinux")).unwrap(), b"kernel image");
     assert_eq!(
-        fs::metadata(chroot.join("rootfs")).unwrap().rdev(),
+        fs::read(work.chroot.join("vmlinux")).unwrap(),
+        b"kernel image"
+    );
+    assert_eq!(
+        fs::metadata(work.chroot.join("rootfs")).unwrap().rdev(),
         dev_rdev.unwrap(),
     );
 }
 
 // `chroot-jail prepare` against a config with `[network]` set also mknods
 // `dev/net/tun` into the jail: char device 10:200, mode 0666, owned uid:gid.
-#[test]
-fn prepare_creates_tun_node_when_networking_enabled_as_root() {
+#[rstest]
+fn prepare_creates_tun_node_when_networking_enabled_as_root(work: Work) {
     if !is_root() {
         eprintln!("SKIP prepare_creates_tun_node_when_networking_enabled: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let chroot = work
-        .join("jails")
-        .join("firecracker")
-        .join("id")
-        .join("root");
-    fs::create_dir_all(&chroot).unwrap();
-    let kernel = work.join("vmlinux-src");
-    fs::write(&kernel, b"kernel image").unwrap();
-    let cfg = write_config_with_network(tmp.path(), &work);
+    let cfg = work.config("[network]\nuplink = \"eth0\"\n");
 
-    let Some(dev) = MapperDev::setup(tmp.path(), "tun") else {
+    let Some(dev) = MapperDev::setup(work.tmp.path(), "tun") else {
         eprintln!("SKIP prepare_creates_tun_node: losetup/dmsetup unavailable");
         return;
     };
 
     let uid = 900_001;
     let gid = 900_002;
-    let out = run(
-        &cfg,
-        &[
-            "chroot-jail",
-            "prepare",
-            "--id",
-            "id",
-            "--kernel",
-            kernel.to_str().unwrap(),
-            "--device",
-            &dev.path(),
-            "--uid",
-            &uid.to_string(),
-            "--gid",
-            &gid.to_string(),
-        ],
-    );
+    let out = work.prepare(&cfg, &dev.path(), &uid.to_string(), &gid.to_string());
     drop(dev);
     out.success();
 
-    let tun = chroot.join("dev").join("net").join("tun");
+    let tun = work.chroot.join("dev").join("net").join("tun");
     let meta = fs::metadata(&tun).expect("dev/net/tun must exist");
     assert!(meta.file_type().is_char_device(), "must be a char device");
     assert_eq!(nix::sys::stat::major(meta.rdev()), 10);
@@ -227,98 +213,49 @@ fn prepare_creates_tun_node_when_networking_enabled_as_root() {
     assert_eq!(meta.permissions().mode() & 0o777, 0o666);
 }
 
-#[test]
-fn prepare_refuses_ids_outside_range_as_root() {
+#[rstest]
+#[case::root_uid("0", "900000")]
+#[case::root_gid("900000", "0")]
+#[case::uid_below_range("1000", "900000")]
+#[case::gid_above_range("900000", "1000000")]
+fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: &str, #[case] gid: &str) {
     if !is_root() {
         eprintln!("SKIP prepare_refuses_ids_outside_range: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let chroot = work
-        .join("jails")
-        .join("firecracker")
-        .join("id")
-        .join("root");
-    fs::create_dir_all(&chroot).unwrap();
-    let kernel = work.join("vmlinux-src");
-    fs::write(&kernel, b"kernel image").unwrap();
-    let cfg = write_config(tmp.path(), &work);
+    let cfg = work.config("");
 
-    for (uid, gid) in [
-        ("0", "900000"),
-        ("900000", "0"),
-        ("1000", "900000"),
-        ("900000", "1000000"),
-    ] {
-        run(
-            &cfg,
-            &[
-                "chroot-jail",
-                "prepare",
-                "--id",
-                "id",
-                "--kernel",
-                kernel.to_str().unwrap(),
-                "--device",
-                "/dev/mapper/hyper-unused",
-                "--uid",
-                uid,
-                "--gid",
-                gid,
-            ],
-        )
+    work.prepare(&cfg, "/dev/mapper/hyper-unused", uid, gid)
         .code(2)
         .stderr(predicates::str::contains("outside the configured range"));
-        assert!(
-            !chroot.join("vmlinux").exists(),
-            "uid={uid} gid={gid}: nothing may be staged"
-        );
-    }
+    assert!(
+        !work.chroot.join("vmlinux").exists(),
+        "nothing may be staged"
+    );
 }
 
 // `chroot-jail prepare` with a system device (not a loop / hyper-* dm) is
 // rejected by BlockDev parsing at clap parse time — exit 2, nothing built. This
 // case needs no root (clap rejects before the privilege boundary) but also no
 // device, so it always runs.
-#[test]
-fn prepare_rejects_system_device_operand() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cfg = write_config(tmp.path(), tmp.path());
-    run(
-        &cfg,
-        &[
-            "chroot-jail",
-            "prepare",
-            "--id",
-            "id",
-            "--kernel",
-            "/srv/vmlinux",
-            "--device",
-            "/dev/sda",
-            "--uid",
-            "900000",
-            "--gid",
-            "900000",
-        ],
-    )
-    .failure();
+#[rstest]
+fn prepare_rejects_system_device_operand(work: Work) {
+    let cfg = work.config("");
+    work.prepare(&cfg, "/dev/sda", "900000", "900000").failure();
 }
 
 // `chroot-jail remove` of a real chroot succeeds; the cgroup leaf is given as a
 // missing path so removal is idempotent and touches nothing on the host.
-#[test]
-fn remove_succeeds_and_is_idempotent_as_root() {
+#[rstest]
+fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
     if !is_root() {
         eprintln!("SKIP remove_succeeds_and_is_idempotent: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("firecracker").join("id");
+    let chroot = work.chroot.parent().unwrap();
     fs::create_dir_all(chroot.join("inner")).unwrap();
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
-    let cfg = write_config_with_parent_cgroup(tmp.path(), &work, "hyper-e2e-does-not-exist");
+    let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
 
     let out = run(&cfg, &["chroot-jail", "remove", "--id", "id"]).success();
     let json = stdout_json(&out);
@@ -326,42 +263,33 @@ fn remove_succeeds_and_is_idempotent_as_root() {
     assert!(!chroot.exists(), "chroot must be gone");
 }
 
-#[test]
-fn remove_refuses_an_invalid_id() {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let chroot = work.join("jails").join("firecracker").join("id");
-    fs::create_dir_all(&chroot).unwrap();
-    let cfg = write_config(tmp.path(), &work);
+#[rstest]
+fn remove_refuses_an_invalid_id(
+    work: Work,
+    #[values("../id", "a/b", "..", "-id", "a_b", "")] id: &str,
+) {
+    let cfg = work.config("");
 
-    for id in ["../id", "a/b", "..", "-id", "a_b", ""] {
-        run(&cfg, &["chroot-jail", "remove", "--id", id]).code(2);
-        assert!(
-            chroot.exists(),
-            "{id:?}: chroot must survive a refused remove"
-        );
-    }
+    run(&cfg, &["chroot-jail", "remove", "--id", id]).code(2);
+    assert!(work.chroot.exists(), "chroot must survive a refused remove");
 }
 
-#[test]
-fn grant_exit_code_separates_not_yet_from_refused_as_root() {
+#[rstest]
+#[case::api_not_yet("grant-api", "id", 75)]
+#[case::vsock_not_yet("grant-vsock", "id", 75)]
+#[case::api_refused("grant-api", "../id", 2)]
+#[case::vsock_refused("grant-vsock", "a/b", 2)]
+fn grant_exit_code_separates_not_yet_from_refused_as_root(
+    work: Work,
+    #[case] op: &str,
+    #[case] id: &str,
+    #[case] code: i32,
+) {
     if !is_root() {
         eprintln!("SKIP grant_exit_code_separates_not_yet_from_refused: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("srv");
-    let jails = work.join("jails");
-    fs::create_dir_all(&jails).unwrap();
-    let cfg = write_config(tmp.path(), &work);
+    let cfg = work.config("");
 
-    let rows = [
-        ("grant-api", "id", 75),
-        ("grant-vsock", "id", 75),
-        ("grant-api", "../id", 2),
-        ("grant-vsock", "a/b", 2),
-    ];
-    for (op, id, code) in rows {
-        run(&cfg, &["chroot-jail", op, "--id", id]).code(code);
-    }
+    run(&cfg, &["chroot-jail", op, "--id", id]).code(code);
 }

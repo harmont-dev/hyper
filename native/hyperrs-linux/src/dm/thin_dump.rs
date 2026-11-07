@@ -181,6 +181,7 @@ impl Mapping {
 mod tests {
     use super::{BlockRange, MappingsError, MetadataDump, ParseError, ThinId, ThinMappings};
     use proptest::prelude::*;
+    use rstest::rstest;
 
     #[derive(Debug, Clone)]
     enum M {
@@ -314,13 +315,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn missing_superblock_is_an_error() {
-        let got = dump("<device dev_id=\"3\" mapped_blocks=\"0\"></device>").parse();
-        assert!(matches!(got, Err(ParseError::Xml(_))), "{got:?}");
-    }
-
-    #[test]
+    #[rstest]
     fn non_utf8_output_is_an_error() {
         let mut xml = render(128, &[device(3, vec![])]).into_bytes();
         xml.insert(1, 0xff);
@@ -328,7 +323,7 @@ mod tests {
         assert!(matches!(got, Err(ParseError::Utf8(_))), "{got:?}");
     }
 
-    #[test]
+    #[rstest]
     fn empty_self_closing_device_parses_to_no_ranges() {
         let xml = render(128, &[device(3, vec![])]);
         assert_eq!(
@@ -340,7 +335,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn attribute_lookup_is_by_exact_name() {
         let xml = "<superblock uuid=\"\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\" data_block_size=\"128\" nr_data_blocks=\"1\">\n  <device snap_dev_id=\"9\" dev_id=\"3\" mapped_blocks=\"1\" transaction=\"0\" creation_time=\"0\" snap_time=\"1\">\n    <range_mapping origin_begin=\"0\" data_begin=\"0\" length=\"1\" time=\"0\"/>\n  </device>\n</superblock>\n";
         assert_eq!(
@@ -352,7 +347,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn layout_variance_is_irrelevant() {
         let xml = "<superblock nr_data_blocks=\"16384\" data_block_size=\"128\" uuid=\"a&quot;b\" time=\"1\" transaction=\"2\" flags=\"0\" version=\"2\"><device snap_time=\"1\" dev_id=\"3\" mapped_blocks=\"9\" transaction=\"0\" creation_time=\"0\"><range_mapping length=\"8\" origin_begin=\"0\" data_begin=\"100\" time=\"0\"/><single_mapping data_block=\"200\" origin_block=\"42\" time=\"0\"/></device></superblock>";
         assert_eq!(
@@ -373,16 +368,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn malformed_or_cut_xml_is_an_error_not_a_guess() {
+    fn cut_after_first_device_line() -> String {
         let whole = render(128, &[device(3, vec![M::Range { begin: 0, len: 8 }])]);
-        let cut: String = whole.lines().take(3).map(|l| format!("{l}\n")).collect();
-        for xml in [
-            "<superblock data_block_size=\"128\"><device dev_id=\"3\"",
-            cut.as_str(),
-        ] {
-            let got = dump(xml).parse();
-            assert!(matches!(got, Err(ParseError::Xml(_))), "{xml:?}: {got:?}");
-        }
+        whole.lines().take(3).map(|l| format!("{l}\n")).collect()
+    }
+
+    #[rstest]
+    #[case::no_superblock("<device dev_id=\"3\" mapped_blocks=\"0\"></device>".to_string())]
+    #[case::unterminated_tag(
+        "<superblock data_block_size=\"128\"><device dev_id=\"3\"".to_string()
+    )]
+    #[case::cut_mid_document(cut_after_first_device_line())]
+    fn malformed_or_cut_xml_is_an_error_not_a_guess(#[case] xml: String) {
+        let got = dump(xml.as_str()).parse();
+        assert!(matches!(got, Err(ParseError::Xml(_))), "{xml:?}: {got:?}");
     }
 }

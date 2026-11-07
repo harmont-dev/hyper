@@ -10,6 +10,7 @@
 
 use hyper_suidhelper::config::Config;
 use proptest::prelude::*;
+use rstest::rstest;
 
 fn parse(min: u32, max: u32) -> Result<Config, toml::de::Error> {
     toml::from_str(&format!(
@@ -17,7 +18,7 @@ fn parse(min: u32, max: u32) -> Result<Config, toml::de::Error> {
     ))
 }
 
-#[test]
+#[rstest]
 fn absent_range_yields_default() {
     let r = Config::default().uid_gid_range();
     assert_eq!((r.min(), r.max()), (900_000, 999_999));

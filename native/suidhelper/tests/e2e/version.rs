@@ -8,12 +8,13 @@
 //! lowercase hex (all-zero on an unstamped dev build -- shape, not value).
 #![cfg(feature = "insecure_mode")]
 
+use rstest::rstest;
 use std::path::Path;
 
 mod support;
 use support::stdout_json;
 
-#[test]
+#[rstest]
 fn version_reports_pkg_version_and_hex_checksum() {
     // A nonexistent config path: `version` renders before config setup,
     // so it must succeed regardless. Needs no root.

@@ -1,7 +1,8 @@
 use hyper_guest_agent::exec::run;
+use rstest::rstest;
 use std::collections::BTreeMap;
 
-#[test]
+#[rstest]
 fn runs_and_captures() {
     let (code, out, err) = run(&["/bin/echo".into(), "hi".into()], &BTreeMap::new(), None);
     assert_eq!(code, 0);
@@ -9,7 +10,7 @@ fn runs_and_captures() {
     assert!(err.is_empty());
 }
 
-#[test]
+#[rstest]
 fn missing_command_is_127() {
     let (code, out, err) = run(&["/definitely/not/here".into()], &BTreeMap::new(), None);
     assert_eq!(code, 127);
@@ -17,7 +18,7 @@ fn missing_command_is_127() {
     assert!(!err.is_empty());
 }
 
-#[test]
+#[rstest]
 fn honors_cwd() {
     let (code, out, _) = run(&["/bin/pwd".into()], &BTreeMap::new(), Some("/tmp"));
     assert_eq!(code, 0);

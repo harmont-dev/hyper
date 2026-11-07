@@ -9,8 +9,9 @@
 
 use hyper_suidhelper::config::{Config, LoadingError};
 use hyperrs_fs::path::{ComponentError, ValidationError};
+use rstest::rstest;
 
-#[test]
+#[rstest]
 fn override_path_is_consulted_through_the_real_lexical_gate() {
     let loose = "/tmp/hyper-suidhelper/../escape.toml";
     std::env::set_var("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1");

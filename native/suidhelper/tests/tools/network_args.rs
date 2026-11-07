@@ -4,6 +4,7 @@ use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
 use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
 use hyperrs_firecracker::VmId;
+use rstest::rstest;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -18,7 +19,7 @@ fn plan0() -> Plan {
     .unwrap()
 }
 
-#[test]
+#[rstest]
 fn prepare_creates_netns_first_and_default_route_last() {
     let cmds = args::prepare_commands(&plan0(), "/usr/sbin/nft", "/usr/sbin/sysctl");
     let first = &cmds[0];
@@ -39,7 +40,7 @@ fn prepare_creates_netns_first_and_default_route_last() {
     assert!(route_idx > veth_up_idx);
 }
 
-#[test]
+#[rstest]
 fn teardown_deletes_netns() {
     let cmds = args::teardown_commands(&plan0());
     assert!(cmds
@@ -47,7 +48,7 @@ fn teardown_deletes_netns() {
         .any(|c| c.argv == vec!["netns", "del", "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]));
 }
 
-#[test]
+#[rstest]
 fn teardown_orphan_is_exactly_ip_netns_del_by_id_alone() {
     // No uid, no veth cleanup: an orphan's teardown has only the vm_id to work
     // from (see `teardown_orphan`'s module doc), and `ip netns del` alone is
@@ -62,7 +63,7 @@ fn teardown_orphan_is_exactly_ip_netns_del_by_id_alone() {
     );
 }
 
-#[test]
+#[rstest]
 fn host_init_masquerades_pool_out_uplink() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
     assert!(cmds.iter().any(
@@ -74,7 +75,7 @@ fn host_init_masquerades_pool_out_uplink() {
         .any(|c| c.argv.contains(&"169.254.169.254".to_string())));
 }
 
-#[test]
+#[rstest]
 fn host_init_drops_guest_traffic_to_host() {
     // The INPUT hook is a distinct chain from FORWARD: a guest packet
     // addressed to a host-owned IP (its own gateway, or any other host IP) is
@@ -109,7 +110,7 @@ fn cmd_allow_failure(bin: Which, argv: &[&str]) -> args::Command {
 /// Full-sequence golden test: pins every bin/argv, in order, so a wrong flag,
 /// a wrong address, or a reordered/reversed SNAT/DNAT target fails here even
 /// though it would slip past the substring checks above.
-#[test]
+#[rstest]
 fn prepare_commands_golden_sequence() {
     let netns = "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     // In-netns nft runs via `ip netns exec <ns> <abs nft path>` — the absolute
@@ -261,7 +262,7 @@ fn prepare_commands_golden_sequence() {
 /// isolation (drops all clone-pool-sourced traffic addressed to the host
 /// itself, on the INPUT hook FORWARD never sees — see `host_init_commands`'s
 /// doc), and that every command after the delete is *not* failure-tolerant.
-#[test]
+#[rstest]
 fn host_init_commands_golden_sequence() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
     let expected = vec![
@@ -384,8 +385,10 @@ fn host_init_commands_golden_sequence() {
     assert_eq!(cmds, expected);
 }
 
-#[test]
-fn prepare_refuses_uid_outside_range() {
+#[rstest]
+#[case::uid_outside_range(42, "172.31.0.0/16")]
+#[case::malformed_clone_pool_cidr(900_000, "not-a-cidr")]
+fn prepare_refuses_before_any_command_runs(#[case] uid: u32, #[case] clone_pool: &str) {
     // Derivation from an out-of-range uid must error before any command runs.
     // Proving `Err` here is sufficient, not just necessary, to prove no
     // privileged command spawns: `plan_from` only ever returns a `Plan`, and
@@ -393,28 +396,15 @@ fn prepare_refuses_uid_outside_range() {
     // step downstream, one that is structurally unreachable when derivation
     // itself fails.
     let err = prepare::plan_from(
-        42,
+        uid,
         UidGidRange::default(),
-        "172.31.0.0/16",
+        clone_pool,
         &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
     );
     assert!(err.is_err());
 }
 
-#[test]
-fn prepare_refuses_malformed_clone_pool_cidr() {
-    // A malformed CIDR must error before any command runs, distinctly from a
-    // uid-range refusal.
-    let err = prepare::plan_from(
-        900_000,
-        UidGidRange::default(),
-        "not-a-cidr",
-        &VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
-    );
-    assert!(err.is_err());
-}
-
-#[test]
+#[rstest]
 fn resolve_network_refuses_when_networking_disabled() {
     // `[network]` absent from config is the security-critical refusal: every
     // op (`prepare`, `teardown`, `host_init`) resolves through this same pure
@@ -425,7 +415,7 @@ fn resolve_network_refuses_when_networking_disabled() {
     assert!(matches!(resolve_network(None), Err(NetworkingDisabled)));
 }
 
-#[test]
+#[rstest]
 fn resolve_network_returns_the_configured_network_when_present() {
     let network = Network {
         uplink: Some("eth0".to_string()),
