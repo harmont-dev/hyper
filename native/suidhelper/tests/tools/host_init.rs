@@ -4,26 +4,16 @@
 //! `false` for everything else (kernel default `"0"`, empty, garbage).
 use hyper_suidhelper::tools::network::host_init::ip_forward_enabled;
 use proptest::prelude::*;
+use rstest::rstest;
 
-#[test]
-fn enabled_for_bare_one() {
-    assert!(ip_forward_enabled("1"));
-}
-
-#[test]
-fn enabled_for_one_with_trailing_newline() {
-    assert!(ip_forward_enabled("1\n"));
-}
-
-#[test]
-fn disabled_for_zero() {
-    assert!(!ip_forward_enabled("0"));
-    assert!(!ip_forward_enabled("0\n"));
-}
-
-#[test]
-fn disabled_for_empty_contents() {
-    assert!(!ip_forward_enabled(""));
+#[rstest]
+#[case::bare_one("1", true)]
+#[case::one_with_trailing_newline("1\n", true)]
+#[case::bare_zero("0", false)]
+#[case::zero_with_trailing_newline("0\n", false)]
+#[case::empty("", false)]
+fn ip_forward_enabled_reads_the_proc_value(#[case] contents: &str, #[case] enabled: bool) {
+    assert_eq!(ip_forward_enabled(contents), enabled);
 }
 
 proptest! {

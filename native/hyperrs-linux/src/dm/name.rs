@@ -106,6 +106,7 @@ impl AsRef<OsStr> for DmName {
 mod tests {
     use super::{DmName, ParseDmDeviceError};
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::path::Path;
 
     const DM_NAME_CHARS: &str =
@@ -159,31 +160,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_reserved_and_edge_names() {
-        for bad in [
-            "", ".", "..", "control", "-", "--help", "a/b", "/x", "a\0b", "a b",
-        ] {
-            assert!(bad.parse::<DmName>().is_err(), "accepted {bad:?}");
-        }
+    #[rstest]
+    #[case::empty("")]
+    #[case::current_dir(".")]
+    #[case::parent_dir("..")]
+    #[case::control("control")]
+    #[case::lone_dash("-")]
+    #[case::flag("--help")]
+    #[case::separator("a/b")]
+    #[case::absolute("/x")]
+    #[case::nul("a\0b")]
+    #[case::space("a b")]
+    fn rejects_reserved_and_edge_names(#[case] bad: &str) {
+        assert!(bad.parse::<DmName>().is_err(), "accepted {bad:?}");
     }
 
-    #[test]
-    fn device_path_rejects_known_attack_strings() {
-        for bad in [
-            "/dev/sda",
-            "/dev/loop0",
-            "/dev/loop0/../sda",
-            "/dev/mapper/x/../../sda",
-            "/dev/mapper/x/",
-            "/dev/mapper/control",
-            "/dev/mapper/",
-            "/dev/mapper",
-            "../dev/mapper/x",
-            "dev/mapper/x",
-            "x",
-        ] {
-            assert!(DmName::from_device_path(bad).is_err(), "accepted {bad:?}");
-        }
+    #[rstest]
+    #[case::not_mapper("/dev/sda")]
+    #[case::loop_device("/dev/loop0")]
+    #[case::traversal_from_loop("/dev/loop0/../sda")]
+    #[case::traversal_from_mapper("/dev/mapper/x/../../sda")]
+    #[case::trailing_slash("/dev/mapper/x/")]
+    #[case::control("/dev/mapper/control")]
+    #[case::empty_name("/dev/mapper/")]
+    #[case::mapper_dir("/dev/mapper")]
+    #[case::relative_parent("../dev/mapper/x")]
+    #[case::relative("dev/mapper/x")]
+    #[case::bare_name("x")]
+    fn device_path_rejects_known_attack_strings(#[case] bad: &str) {
+        assert!(DmName::from_device_path(bad).is_err(), "accepted {bad:?}");
     }
 }

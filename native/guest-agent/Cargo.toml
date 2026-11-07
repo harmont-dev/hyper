@@ -28,6 +28,7 @@ tonic-prost-build = "0.14"
 
 [dev-dependencies]
 proptest = "1"
+rstest = "0.28"
 tokio-stream = "0.1"
 
 [[test]]

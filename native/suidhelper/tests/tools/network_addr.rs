@@ -2,6 +2,7 @@ use hyper_suidhelper::id::{JailUid, UidGidRange};
 use hyper_suidhelper::tools::network::addr::{self, AddrError, Plan};
 use hyperrs_firecracker::VmId;
 use proptest::prelude::*;
+use rstest::rstest;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -20,7 +21,7 @@ fn vm_id() -> VmId {
     VmId::from_str("vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()
 }
 
-#[test]
+#[rstest]
 fn slot_zero_is_first_block() {
     let p = Plan::derive(jail_uid(FLOOR), range(), POOL, &vm_id()).unwrap();
     assert_eq!(p.slot, 0);
@@ -30,7 +31,7 @@ fn slot_zero_is_first_block() {
     assert_eq!(p.veth_ns, "hp0");
 }
 
-#[test]
+#[rstest]
 fn uid_below_range_is_refused() {
     assert!(matches!(
         Plan::derive(

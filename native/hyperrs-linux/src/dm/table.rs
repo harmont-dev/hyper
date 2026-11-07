@@ -246,6 +246,7 @@ mod tests {
     };
     use crate::dm::{DmName, ThinId};
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::path::PathBuf;
 
     fn file() -> impl Strategy<Value = DevPath> {
@@ -344,30 +345,27 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_tables_outside_the_grammar() {
-        for bad in [
-            "0 100 crypt /dev/loop0 /srv/hyper/a",
-            "0 100 linear /srv/hyper/a 8",
-            "0 100 snapshot /srv/hyper/o srv/hyper/a P 8",
-            "0 100 snapshot /srv/hyper/o /srv/hyper/../a P 8",
-            "0 100 snapshot /srv/hyper/o /srv/hyper/a X 8",
-            "1 100 snapshot /srv/hyper/o /srv/hyper/a P 8",
-            "0 100 snapshot /srv/hyper/o /srv/hyper/a P",
-            "0 x linear /srv/hyper/a 0",
-            "0 100 thin /srv/hyper/pool 0",
-            "0 100 thin /dev/loop0 0",
-            "0 100 thin /dev/mapper/pool 16777216",
-            "0 100 thin /dev/mapper/pool 0 /dev/loop0 /dev/loop1",
-            "0 100 linear /dev/mapper/control 0",
-            "",
-            "garbage",
-        ] {
-            assert!(bad.parse::<DmTable>().is_err(), "accepted {bad:?}");
-        }
+    #[rstest]
+    #[case::unsupported_target("0 100 crypt /dev/loop0 /srv/hyper/a")]
+    #[case::nonzero_linear_offset("0 100 linear /srv/hyper/a 8")]
+    #[case::relative_cow("0 100 snapshot /srv/hyper/o srv/hyper/a P 8")]
+    #[case::parent_dir_in_cow("0 100 snapshot /srv/hyper/o /srv/hyper/../a P 8")]
+    #[case::unknown_persistence("0 100 snapshot /srv/hyper/o /srv/hyper/a X 8")]
+    #[case::nonzero_start("1 100 snapshot /srv/hyper/o /srv/hyper/a P 8")]
+    #[case::missing_chunk("0 100 snapshot /srv/hyper/o /srv/hyper/a P")]
+    #[case::non_numeric_sectors("0 x linear /srv/hyper/a 0")]
+    #[case::file_as_pool("0 100 thin /srv/hyper/pool 0")]
+    #[case::loop_as_pool("0 100 thin /dev/loop0 0")]
+    #[case::thin_id_past_24_bits("0 100 thin /dev/mapper/pool 16777216")]
+    #[case::two_origins("0 100 thin /dev/mapper/pool 0 /dev/loop0 /dev/loop1")]
+    #[case::control_device("0 100 linear /dev/mapper/control 0")]
+    #[case::empty("")]
+    #[case::garbage("garbage")]
+    fn rejects_tables_outside_the_grammar(#[case] bad: &str) {
+        assert!(bad.parse::<DmTable>().is_err(), "accepted {bad:?}");
     }
 
-    #[test]
+    #[rstest]
     fn a_malformed_mapper_operand_is_a_device_error_not_a_path() {
         assert!(matches!(
             "0 100 linear /dev/mapper/a/b 0".parse::<DmTable>(),

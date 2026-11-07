@@ -83,6 +83,7 @@ mod tests {
     use hyperrs_fs::file::{OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::fs;
     use tempfile::NamedTempFile;
 
@@ -163,7 +164,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[rstest]
     fn non_utf8_contents_are_an_error() {
         let (_tmp, events) = events_over(b"populated \xff\nfrozen 0\n");
         assert!(matches!(events.read(), Err(ReadError::Utf8(_))));

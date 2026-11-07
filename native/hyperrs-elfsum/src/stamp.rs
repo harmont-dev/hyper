@@ -72,6 +72,7 @@ mod tests {
     use object::{Architecture, BinaryFormat, Endianness, SectionKind};
     use proptest::prelude::*;
     use proptest::sample::Index;
+    use rstest::rstest;
 
     use super::*;
 
@@ -179,7 +180,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[rstest]
     fn rejects_an_image_without_the_section() {
         let mut obj = Builder::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         let id = obj.add_section(Vec::new(), b".data".to_vec(), SectionKind::Data);
@@ -191,7 +192,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[rstest]
     fn rejects_bytes_that_are_not_an_object_file() {
         assert!(matches!(
             Elf::read(b"not an elf"),

@@ -5,9 +5,11 @@
 //! code. Root-only: `become_root_permanently` requires we are already root.
 #![cfg(feature = "insecure_mode")]
 
+use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run};
@@ -30,10 +32,10 @@ fn install_firecracker(dir: &Path) -> PathBuf {
     path
 }
 
-fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
+fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path, tables: &str) -> PathBuf {
     let p = dir.join("config.toml");
     let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n",
+        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n{tables}",
         jailer.display(),
         firecracker.display(),
     );
@@ -42,32 +44,43 @@ fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
     p
 }
 
-/// Same as [`write_root_config`] but with a `[network]` table present, so
-/// `Config::network()` is `Some` and `run()` derives a `--netns` flag.
-fn write_root_config_with_network(dir: &Path, jailer: &Path, firecracker: &Path) -> PathBuf {
-    let p = dir.join("config.toml");
-    let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n[network]\nuplink = \"eth0\"\n",
-        jailer.display(),
-        firecracker.display(),
-    );
-    fs::write(&p, body).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-    p
+struct Recorded {
+    tmp: TempDir,
+    firecracker: PathBuf,
+    argv: PathBuf,
 }
 
-#[test]
-fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
+impl Recorded {
+    fn config(&self, tables: &str) -> PathBuf {
+        let jailer = install_recorder(self.tmp.path());
+        write_root_config(self.tmp.path(), &jailer, &self.firecracker, tables)
+    }
+
+    fn argv(&self) -> Vec<String> {
+        serde_json::from_str(&fs::read_to_string(&self.argv).expect("recorded argv")).unwrap()
+    }
+}
+
+#[fixture]
+fn recorded() -> Recorded {
+    let tmp = tempfile::tempdir().unwrap();
+    let firecracker = install_firecracker(tmp.path());
+    let argv = tmp.path().join("argv.json");
+    Recorded {
+        tmp,
+        firecracker,
+        argv,
+    }
+}
+
+#[rstest]
+fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
     if !is_root() {
         eprintln!("SKIP jailer exec: needs root to become_root_permanently + own the fakes");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let argv_rec = tmp.path().join("argv.json");
-    let env_rec = tmp.path().join("environ.bin");
-    let jailer = install_recorder(tmp.path());
-    let firecracker = install_firecracker(tmp.path());
-    let cfg = write_root_config(tmp.path(), &jailer, &firecracker);
+    let env_rec = recorded.tmp.path().join("environ.bin");
+    let cfg = recorded.config("");
 
     let out = run(
         &cfg,
@@ -93,15 +106,13 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     // The jailer's own exit status must propagate through the execve handoff.
     out.code(RECORDER_EXIT);
 
-    let argv: Vec<String> =
-        serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
     assert_eq!(
-        argv,
+        recorded.argv(),
         vec![
             "--id",
             "vm1",
             "--exec-file",
-            &firecracker.to_string_lossy(),
+            &recorded.firecracker.to_string_lossy(),
             "--uid",
             "900001",
             "--gid",
@@ -148,17 +159,13 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root() {
     );
 }
 
-#[test]
-fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
+#[rstest]
+fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(recorded: Recorded) {
     if !is_root() {
         eprintln!("SKIP jailer netns: needs root to become_root_permanently + own the fakes");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let argv_rec = tmp.path().join("argv.json");
-    let jailer = install_recorder(tmp.path());
-    let firecracker = install_firecracker(tmp.path());
-    let cfg = write_root_config_with_network(tmp.path(), &jailer, &firecracker);
+    let cfg = recorded.config("[network]\nuplink = \"eth0\"\n");
 
     let out = run(
         &cfg,
@@ -177,8 +184,7 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
 
     out.code(RECORDER_EXIT);
 
-    let argv: Vec<String> =
-        serde_json::from_str(&fs::read_to_string(&argv_rec).expect("recorded argv")).unwrap();
+    let argv = recorded.argv();
     let i = argv
         .iter()
         .position(|a| a == "--netns")
@@ -195,17 +201,13 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root() {
     );
 }
 
-#[test]
-fn refuses_uid_zero_without_exec_as_root() {
+#[rstest]
+fn refuses_uid_zero_without_exec_as_root(recorded: Recorded) {
     if !is_root() {
         eprintln!("SKIP jailer uid 0: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let argv_rec = tmp.path().join("argv.json");
-    let jailer = install_recorder(tmp.path());
-    let firecracker = install_firecracker(tmp.path());
-    let cfg = write_root_config(tmp.path(), &jailer, &firecracker);
+    let cfg = recorded.config("");
 
     run(
         &cfg,
@@ -223,7 +225,7 @@ fn refuses_uid_zero_without_exec_as_root() {
     )
     .code(2);
     assert!(
-        !argv_rec.exists(),
+        !recorded.argv.exists(),
         "the jailer must never have been exec'd for uid 0",
     );
 }

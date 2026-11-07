@@ -1,13 +1,14 @@
 use hyper_suidhelper::config::{Config, Network};
+use rstest::rstest;
 
-#[test]
+#[rstest]
 fn absent_network_table_means_disabled() {
     // Default config (no file) has no [network] table.
     let cfg = Config::default();
     assert!(cfg.network().is_none());
 }
 
-#[test]
+#[rstest]
 fn present_table_with_only_uplink_defaults_clone_pool() {
     // clone_pool is safety-critical: it must match Elixir's
     // Hyper.Cfg.Network.clone_pool/0 default. This is the present-path test —
@@ -16,7 +17,7 @@ fn present_table_with_only_uplink_defaults_clone_pool() {
     assert_eq!(network.clone_pool, "172.31.0.0/16");
 }
 
-#[test]
+#[rstest]
 fn partial_network_table_without_uplink_disables_not_bricks() {
     // A `[network]` table with `clone_pool` set but `uplink` omitted must
     // parse the WHOLE config successfully (not fail the process-wide,

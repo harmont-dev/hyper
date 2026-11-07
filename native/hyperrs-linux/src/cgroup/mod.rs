@@ -151,6 +151,7 @@ mod tests {
     use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use nix::errno::Errno;
     use nix::libc::SIGKILL;
+    use rstest::rstest;
     use std::fs;
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
@@ -201,7 +202,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[rstest]
     fn open_refuses_a_directory_that_is_not_on_cgroup2() {
         let dir = tempfile::tempdir().unwrap();
         let leaf = dir.path().join("leaf");
@@ -216,7 +217,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn a_populated_cgroup_is_only_removable_after_kill_procs_as_root() {
         let Some(scratch) = Scratch::new("kill-then-remove") else {
             return;
@@ -236,7 +237,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[rstest]
     fn kill_procs_and_remove_succeed_once_the_cgroup_is_gone_as_root() {
         let Some(scratch) = Scratch::new("vanished") else {
             return;

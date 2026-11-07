@@ -109,4 +109,5 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 assert_cmd = "2.2.2"
 predicates = "3.1.4"
 proptest = "1"
+rstest = "0.28"
 tempfile = "3"

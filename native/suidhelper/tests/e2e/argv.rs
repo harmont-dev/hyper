@@ -5,9 +5,11 @@
 #![cfg(feature = "insecure_mode")]
 
 use predicates::str::contains;
+use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -52,7 +54,7 @@ fn recorded_argv(record: &Path) -> Vec<String> {
     serde_json::from_str(&body).expect("argv json")
 }
 
-#[test]
+#[rstest]
 fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_create: needs root to acquire + own the fake bin");
@@ -107,93 +109,78 @@ fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
     );
 }
 
-#[test]
-fn dmsetup_remove_retry_toggle_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_remove: needs root");
-        return;
-    }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake(tmp.path(), "dmsetup", &rec, "");
-    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
-
-    run(&cfg, &["dmsetup", "remove", "--retry", "hyper-vm1"]).success();
-    assert_eq!(recorded_argv(&rec), vec!["remove", "--retry", "hyper-vm1"]);
+struct FakeDmsetup {
+    tmp: TempDir,
+    rec: PathBuf,
 }
 
-#[test]
-fn dmsetup_message_create_thin_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_message: needs root");
-        return;
+impl FakeDmsetup {
+    fn printing(&self, stdout_line: &str) -> PathBuf {
+        let bin = install_fake(self.tmp.path(), "dmsetup", &self.rec, stdout_line);
+        write_root_config(self.tmp.path(), &[("dmsetup", &bin)])
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake(
-        tmp.path(),
-        "dmsetup",
-        &rec,
-        "0 100 thin-pool 7:0 7:1 128 0 0",
-    );
-    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
-
-    run(
-        &cfg,
-        &[
-            "dmsetup",
-            "message",
-            "hyper-pool",
-            "--message",
-            "create_thin 7",
-        ],
-    )
-    .success();
-    // the helper passes the whole message as a single argv element (dmsetup re-joins remaining args)
-    assert_eq!(
-        recorded_argv(&rec),
-        vec!["message", "hyper-pool", "0", "create_thin 7"]
-    );
 }
 
-#[test]
-fn dmsetup_targets_argv_and_parse_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_targets: needs root");
-        return;
-    }
+#[fixture]
+fn fake() -> FakeDmsetup {
     let tmp = tempfile::tempdir().unwrap();
     let rec = tmp.path().join("argv.json");
-    // Fake prints one `dmsetup targets` row; the helper returns it verbatim.
-    let bin = install_fake(tmp.path(), "dmsetup", &rec, "snapshot         v1.16.0");
-    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
+    FakeDmsetup { tmp, rec }
+}
 
-    let out = run(&cfg, &["dmsetup", "targets"]).success();
-    assert_eq!(recorded_argv(&rec), vec!["targets"]);
+#[rstest]
+#[case::remove_retry("", &["remove", "--retry", "hyper-vm1"], &["remove", "--retry", "hyper-vm1"])]
+// the helper passes the whole message as a single argv element (dmsetup re-joins remaining args)
+#[case::message_create_thin(
+    "0 100 thin-pool 7:0 7:1 128 0 0",
+    &["message", "hyper-pool", "--message", "create_thin 7"],
+    &["message", "hyper-pool", "0", "create_thin 7"]
+)]
+fn dmsetup_argv_as_root(
+    fake: FakeDmsetup,
+    #[case] stdout_line: &str,
+    #[case] args: &[&str],
+    #[case] expected: &[&str],
+) {
+    if !is_root() {
+        eprintln!("SKIP dmsetup_argv: needs root");
+        return;
+    }
+    let cfg = fake.printing(stdout_line);
+
+    run(&cfg, &[&["dmsetup"], args].concat()).success();
+    assert_eq!(recorded_argv(&fake.rec), expected);
+}
+
+#[rstest]
+#[case::targets("snapshot         v1.16.0", "targets", "targets", "snapshot v1.16.0\n")]
+#[case::ls(
+    "hyper-thinpool\\nhyper-rw-abc",
+    "ls",
+    "listed",
+    "hyper-thinpool\nhyper-rw-abc\n"
+)]
+fn dmsetup_listing_argv_and_parse_as_root(
+    fake: FakeDmsetup,
+    #[case] stdout_line: &str,
+    #[case] op: &str,
+    #[case] result: &str,
+    #[case] output: &str,
+) {
+    if !is_root() {
+        eprintln!("SKIP dmsetup_{op}: needs root");
+        return;
+    }
+    let cfg = fake.printing(stdout_line);
+
+    let out = run(&cfg, &["dmsetup", op]).success();
+    assert_eq!(recorded_argv(&fake.rec), vec![op]);
     let json = stdout_json(&out);
-    assert_eq!(json["result"], "targets");
-    assert_eq!(json["output"], "snapshot v1.16.0\n");
+    assert_eq!(json["result"], result);
+    assert_eq!(json["output"], output);
 }
 
-#[test]
-fn dmsetup_ls_argv_and_parse_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_ls: needs root");
-        return;
-    }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake(tmp.path(), "dmsetup", &rec, "hyper-thinpool\\nhyper-rw-abc");
-    let cfg = write_root_config(tmp.path(), &[("dmsetup", &bin)]);
-
-    let out = run(&cfg, &["dmsetup", "ls"]).success();
-    assert_eq!(recorded_argv(&rec), vec!["ls"]);
-    let json = stdout_json(&out);
-    assert_eq!(json["result"], "listed");
-    assert_eq!(json["output"], "hyper-thinpool\nhyper-rw-abc\n");
-}
-
-#[test]
+#[rstest]
 fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
     if !is_root() {
         eprintln!("SKIP dmsetup_rejects_bin: needs root to own the config file");
@@ -271,7 +258,7 @@ impl Drop for MapperDevice {
     }
 }
 
-#[test]
+#[rstest]
 fn blockdev_getsz_reports_a_dm_devices_size_as_root() {
     if !is_root() {
         eprintln!("SKIP blockdev: needs root");

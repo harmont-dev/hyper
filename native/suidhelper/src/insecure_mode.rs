@@ -36,32 +36,25 @@ pub fn select<T>(secure: impl FnOnce() -> T, insecure: impl FnOnce() -> T) -> T 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[cfg(not(feature = "insecure_mode"))]
-    #[test]
+    #[rstest]
     fn secure_arm_always_taken_without_feature() {
         std::env::set_var(INSECURE_MODE_ENV, "1");
         assert_eq!(select(|| "secure", || "insecure"), "secure");
     }
 
     #[cfg(feature = "insecure_mode")]
-    #[test]
-    fn secure_arm_when_env_absent_even_with_feature() {
-        std::env::remove_var(INSECURE_MODE_ENV);
-        assert_eq!(select(|| "secure", || "insecure"), "secure");
-    }
-
-    #[cfg(feature = "insecure_mode")]
-    #[test]
-    fn insecure_arm_when_feature_and_env() {
-        std::env::set_var(INSECURE_MODE_ENV, "1");
-        assert_eq!(select(|| "secure", || "insecure"), "insecure");
-    }
-
-    #[cfg(feature = "insecure_mode")]
-    #[test]
-    fn secure_arm_when_env_not_exactly_one() {
-        std::env::set_var(INSECURE_MODE_ENV, "true");
-        assert_eq!(select(|| "secure", || "insecure"), "secure");
+    #[rstest]
+    #[case::env_absent(None, "secure")]
+    #[case::env_exactly_one(Some("1"), "insecure")]
+    #[case::env_not_exactly_one(Some("true"), "secure")]
+    fn feature_on_selects_by_env(#[case] env: Option<&str>, #[case] expected: &str) {
+        match env {
+            Some(value) => std::env::set_var(INSECURE_MODE_ENV, value),
+            None => std::env::remove_var(INSECURE_MODE_ENV),
+        }
+        assert_eq!(select(|| "secure", || "insecure"), expected);
     }
 }

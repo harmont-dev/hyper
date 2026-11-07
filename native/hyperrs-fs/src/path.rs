@@ -380,6 +380,7 @@ mod tests {
         StrictComponents, ValidationError,
     };
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::path::{Path, PathBuf};
 
     // The fully-enforced flavor used at every real call site.
@@ -545,7 +546,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[rstest]
     fn root_has_no_file_name() {
         let root = SafePath::<IsAbsolute, StrictComponents>::from_static::<"/">();
         assert_eq!(root.file_name(), None);

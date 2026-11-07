@@ -10,6 +10,7 @@ use hyper_suidhelper::tools::{BackingError, BackingFile};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use nix::sys::stat::fstat;
 use proptest::prelude::*;
+use rstest::{fixture, rstest};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -40,65 +41,55 @@ proptest! {
     }
 }
 
-#[test]
-fn absent_path_is_refused_as_open() {
-    let (_base_dir, base) = real_tempdir();
-
-    let err = BackingFile::open(&strict(base.join("nope.img")), &strict(&base))
-        .expect_err("absent file accepted");
-    assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
+struct Base {
+    _base_dir: TempDir,
+    _outside_dir: TempDir,
+    path: PathBuf,
 }
 
-#[test]
-fn a_symlink_is_never_followed() {
-    let (_base_dir, base) = real_tempdir();
-    let (_outside_dir, outside) = real_tempdir();
+#[fixture]
+fn base() -> Base {
+    let (base_dir, base) = real_tempdir();
+    let (outside_dir, outside) = real_tempdir();
     let target = outside.join("target.img");
     std::fs::write(&target, b"x").unwrap();
     let inner = base.join("inner.img");
     std::fs::write(&inner, b"x").unwrap();
     std::fs::create_dir(base.join("sub")).unwrap();
-
-    let escaping = base.join("escaping.img");
-    std::os::unix::fs::symlink(&target, &escaping).unwrap();
-    let in_base = base.join("in-base.img");
-    std::os::unix::fs::symlink(&inner, &in_base).unwrap();
-    let dir_link = base.join("dir-link");
-    std::os::unix::fs::symlink(base.join("sub"), &dir_link).unwrap();
     std::fs::write(base.join("sub/disk.img"), b"x").unwrap();
-
-    for spelling in [escaping, in_base, dir_link.join("disk.img")] {
-        let err = BackingFile::open(&strict(&spelling), &strict(&base))
-            .expect_err("symlinked spelling accepted");
-        assert!(
-            matches!(err, BackingError::Open(_)),
-            "{}: got {err:?}",
-            spelling.display(),
-        );
+    std::os::unix::fs::symlink(&target, base.join("escaping.img")).unwrap();
+    std::os::unix::fs::symlink(&inner, base.join("in-base.img")).unwrap();
+    std::os::unix::fs::symlink(base.join("sub"), base.join("dir-link")).unwrap();
+    Base {
+        _base_dir: base_dir,
+        _outside_dir: outside_dir,
+        path: base,
     }
 }
 
-#[test]
-fn in_base_file_is_accepted_as_that_inode() {
-    let (_base_dir, base) = real_tempdir();
-    let backing = base.join("disk.img");
-    std::fs::write(&backing, b"data").unwrap();
+#[rstest]
+#[case::absent("nope.img")]
+#[case::symlink_escaping_the_base("escaping.img")]
+#[case::symlink_within_the_base("in-base.img")]
+#[case::symlinked_directory_component("dir-link/disk.img")]
+#[case::directory("sub")]
+fn in_base_path_that_is_not_a_plain_regular_file_is_refused_as_open(
+    base: Base,
+    #[case] name: &str,
+) {
+    let err = BackingFile::open(&strict(base.path.join(name)), &strict(&base.path))
+        .expect_err("accepted as a backing file");
+    assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
+}
 
-    let got =
-        BackingFile::open(&strict(&backing), &strict(&base)).expect("in-base regular file refused");
+#[rstest]
+fn in_base_file_is_accepted_as_that_inode(base: Base) {
+    let backing = base.path.join("sub/disk.img");
+
+    let got = BackingFile::open(&strict(&backing), &strict(&base.path))
+        .expect("in-base regular file refused");
 
     let held = fstat(got.file().as_raw_fd()).unwrap();
     let on_disk = std::fs::metadata(&backing).unwrap();
     assert_eq!((held.st_dev, held.st_ino), (on_disk.dev(), on_disk.ino()));
-}
-
-#[test]
-fn directory_under_base_is_refused() {
-    let (_base_dir, base) = real_tempdir();
-    let dir = base.join("subdir");
-    std::fs::create_dir(&dir).unwrap();
-
-    let err = BackingFile::open(&strict(&dir), &strict(&base))
-        .expect_err("directory accepted as backing file");
-    assert!(matches!(err, BackingError::Open(_)), "got {err:?}");
 }

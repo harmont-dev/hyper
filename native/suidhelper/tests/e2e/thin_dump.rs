@@ -6,9 +6,11 @@
 #![cfg(feature = "insecure_mode")]
 
 use predicates::str::contains;
+use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -43,7 +45,7 @@ printf '%s\n' '{XML}'
     path // root-owned because these tests run as root
 }
 
-fn install_failing_thin_dump(dir: &Path) -> PathBuf {
+fn install_failing_thin_dump(dir: &Path, _record: &Path) -> PathBuf {
     let path = dir.join("thin_dump");
     fs::write(
         &path,
@@ -76,16 +78,32 @@ fn recorded_argv(record: &Path) -> Vec<String> {
     serde_json::from_str(&body).expect("argv json")
 }
 
-#[test]
-fn thin_dump_argv_and_ranges_json_as_root() {
+struct Dump {
+    tmp: TempDir,
+    rec: PathBuf,
+}
+
+impl Dump {
+    fn config(&self, install: fn(&Path, &Path) -> PathBuf) -> PathBuf {
+        let bin = install(self.tmp.path(), &self.rec);
+        write_root_config(self.tmp.path(), &bin)
+    }
+}
+
+#[fixture]
+fn dump() -> Dump {
+    let tmp = tempfile::tempdir().unwrap();
+    let rec = tmp.path().join("argv.json");
+    Dump { tmp, rec }
+}
+
+#[rstest]
+fn thin_dump_argv_and_ranges_json_as_root(dump: Dump) {
     if !is_root() {
         eprintln!("SKIP thin_dump argv: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake_thin_dump(tmp.path(), &rec);
-    let cfg = write_root_config(tmp.path(), &bin);
+    let cfg = dump.config(install_fake_thin_dump);
 
     let out = run(
         &cfg,
@@ -93,11 +111,11 @@ fn thin_dump_argv_and_ranges_json_as_root() {
     )
     .success();
 
-    let argv = recorded_argv(&rec);
+    let argv = recorded_argv(&dump.rec);
     assert_eq!(argv[..3], ["--metadata-snap", "--dev-id", "7"], "{argv:?}");
     assert!(argv[3].starts_with("/proc/self/fd/"), "{argv:?}");
     assert_eq!(
-        fs::read_to_string(rec.with_extension("json.target"))
+        fs::read_to_string(dump.rec.with_extension("json.target"))
             .unwrap()
             .trim(),
         "/dev/loop3",
@@ -109,59 +127,44 @@ fn thin_dump_argv_and_ranges_json_as_root() {
     assert_eq!(json["ranges"], serde_json::json!([[0, 3], [9, 1]]));
 }
 
-#[test]
-fn thin_dump_wrong_dev_id_is_an_error_as_root() {
+#[rstest]
+#[case::wrong_dev_id(install_fake_thin_dump, "9", "thin device 9 not present")]
+#[case::child_failure(
+    install_failing_thin_dump,
+    "7",
+    "thin_dump failed: metadata snap not reserved"
+)]
+fn thin_dump_failure_is_an_error_as_root(
+    dump: Dump,
+    #[case] install: fn(&Path, &Path) -> PathBuf,
+    #[case] dev_id: &str,
+    #[case] stderr: &str,
+) {
     if !is_root() {
-        eprintln!("SKIP thin_dump dev_id: needs root");
+        eprintln!("SKIP thin_dump failure: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake_thin_dump(tmp.path(), &rec);
-    let cfg = write_root_config(tmp.path(), &bin);
+    let cfg = dump.config(install);
 
     run(
         &cfg,
-        &["thin-dump", "--meta", "/dev/loop3", "--dev-id", "9"],
+        &["thin-dump", "--meta", "/dev/loop3", "--dev-id", dev_id],
     )
     .failure()
-    .stderr(contains("thin device 9 not present"));
+    .stderr(contains(stderr));
 }
 
-#[test]
-fn thin_dump_child_failure_surfaces_its_stderr_as_root() {
-    if !is_root() {
-        eprintln!("SKIP thin_dump failure arm: needs root");
-        return;
-    }
-    let tmp = tempfile::tempdir().unwrap();
-    let bin = install_failing_thin_dump(tmp.path());
-    let cfg = write_root_config(tmp.path(), &bin);
-
-    run(
-        &cfg,
-        &["thin-dump", "--meta", "/dev/loop3", "--dev-id", "7"],
-    )
-    .failure()
-    .stderr(contains("thin_dump failed: metadata snap not reserved"));
-}
-
-#[test]
-fn thin_dump_refuses_non_loop_meta_as_root() {
+#[rstest]
+#[case::not_a_loop("/dev/sda")]
+#[case::traversal_from_loop("/dev/loop0/../sda")]
+#[case::mapper_device("/dev/mapper/hyper-pool")]
+fn thin_dump_refuses_non_loop_meta_as_root(dump: Dump, #[case] bad: &str) {
     if !is_root() {
         eprintln!("SKIP thin_dump meta refusal: needs root");
         return;
     }
-    let tmp = tempfile::tempdir().unwrap();
-    let rec = tmp.path().join("argv.json");
-    let bin = install_fake_thin_dump(tmp.path(), &rec);
-    let cfg = write_root_config(tmp.path(), &bin);
+    let cfg = dump.config(install_fake_thin_dump);
 
-    for bad in ["/dev/sda", "/dev/loop0/../sda", "/dev/mapper/hyper-pool"] {
-        run(&cfg, &["thin-dump", "--meta", bad, "--dev-id", "7"]).failure();
-        assert!(
-            !rec.exists(),
-            "fake thin_dump ran for refused operand {bad}"
-        );
-    }
+    run(&cfg, &["thin-dump", "--meta", bad, "--dev-id", "7"]).failure();
+    assert!(!dump.rec.exists(), "fake thin_dump ran for refused operand");
 }

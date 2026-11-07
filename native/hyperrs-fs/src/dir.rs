@@ -247,12 +247,14 @@ mod tests {
     use nix::dir::Type;
     use nix::errno::Errno;
     use nix::sys::stat::Mode;
+    use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::os::unix::net::UnixListener;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
 
@@ -262,23 +264,45 @@ mod tests {
             .expect("test path must be strict-absolute")
     }
 
-    #[test]
-    fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn open(p: &Path) -> SafeDir {
+        SafeDir::open(&safe(p), OpenFlags::RDONLY).unwrap()
+    }
 
-        // Sentinel OUTSIDE the tree we will delete.
+    #[fixture]
+    fn tmp() -> TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    struct Anchored {
+        tmp: TempDir,
+        anchor: SafeDir,
+    }
+
+    #[fixture]
+    fn anchored(tmp: TempDir) -> Anchored {
+        fs::write(tmp.path().join("outside"), b"x").unwrap();
+        let anchor_dir = tmp.path().join("anchor");
+        fs::create_dir_all(anchor_dir.join("real")).unwrap();
+        fs::write(anchor_dir.join("real/f"), b"x").unwrap();
+        symlink(anchor_dir.join("real"), anchor_dir.join("link")).unwrap();
+        Anchored {
+            anchor: open(&anchor_dir),
+            tmp,
+        }
+    }
+
+    #[rstest]
+    fn rmdirat_recursive_does_not_follow_symlinks_out_of_tree(tmp: TempDir) {
         let sentinel = tmp.path().join("sentinel");
         fs::create_dir(&sentinel).unwrap();
         fs::write(sentinel.join("keep.txt"), b"do not delete me").unwrap();
 
-        // The tree we will recursively remove, containing a symlink to the sentinel.
         let tree = tmp.path().join("tree");
         fs::create_dir(&tree).unwrap();
         fs::write(tree.join("a.txt"), b"x").unwrap();
         symlink(&sentinel, tree.join("escape")).unwrap();
 
-        let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-        anchor
+        open(tmp.path())
             .rmdirat_recursive(StrictComponent::from_static("tree"))
             .unwrap();
 
@@ -290,61 +314,56 @@ mod tests {
         );
     }
 
-    #[test]
-    fn openat_refuses_escape_and_symlinked_components() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join("outside"), b"x").unwrap();
-        let anchor_dir = tmp.path().join("anchor");
-        fs::create_dir_all(anchor_dir.join("real")).unwrap();
-        fs::write(anchor_dir.join("real/f"), b"x").unwrap();
-        symlink(anchor_dir.join("real"), anchor_dir.join("link")).unwrap();
+    #[rstest]
+    #[case::parent_traversal(|_: &Path| PathBuf::from("../outside"), Errno::EXDEV)]
+    #[case::absolute(|tmp: &Path| tmp.join("outside"), Errno::EXDEV)]
+    #[case::symlinked_component(|_: &Path| PathBuf::from("link/f"), Errno::ELOOP)]
+    #[case::missing(|_: &Path| PathBuf::from("missing"), Errno::ENOENT)]
+    fn openat_refuses_escape_and_symlinked_components(
+        anchored: Anchored,
+        #[case] name: fn(&Path) -> PathBuf,
+        #[case] expected: Errno,
+    ) {
+        let name = name(anchored.tmp.path());
+        let err = anchored
+            .anchor
+            .openat::<Any, Any, Any>(&name, OpenFlags::PATH, Mode::empty())
+            .unwrap_err();
+        assert!(
+            matches!(err, ValidationError::Open(errno) if errno == expected),
+            "{name:?}: {err:?}"
+        );
+    }
 
-        let anchor = SafeDir::open(&safe(&anchor_dir), OpenFlags::RDONLY).unwrap();
-        let outside = tmp.path().join("outside");
-        for (name, expected) in [
-            (Path::new("../outside"), Errno::EXDEV),
-            (outside.as_path(), Errno::EXDEV),
-            (Path::new("link/f"), Errno::ELOOP),
-            (Path::new("missing"), Errno::ENOENT),
-        ] {
-            let err = anchor
-                .openat::<Any, Any, Any>(name, OpenFlags::PATH, Mode::empty())
-                .unwrap_err();
-            assert!(
-                matches!(err, ValidationError::Open(errno) if errno == expected),
-                "{name:?}: {err:?}"
-            );
-        }
-        assert!(anchor
+    #[rstest]
+    fn openat_opens_a_file_below_the_anchor(anchored: Anchored) {
+        assert!(anchored
+            .anchor
             .openat::<IsRegularFile, Any, Any>(Path::new("real/f"), OpenFlags::PATH, Mode::empty())
             .is_ok());
     }
 
-    #[test]
-    fn rmdirat_recursive_clears_nested_tree() {
-        let tmp = tempfile::tempdir().unwrap();
+    #[rstest]
+    fn rmdirat_recursive_clears_nested_tree(tmp: TempDir) {
         let tree = tmp.path().join("tree");
         fs::create_dir_all(tree.join("a/b/c")).unwrap();
         fs::write(tree.join("a/b/c/deep.txt"), b"x").unwrap();
         fs::write(tree.join("a/top.txt"), b"y").unwrap();
 
-        let anchor = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-        anchor
+        open(tmp.path())
             .rmdirat_recursive(StrictComponent::from_static("tree"))
             .unwrap();
         assert!(!tree.exists());
     }
 
-    #[test]
-    fn entries_reports_each_child_with_its_own_type() {
-        let tmp = tempfile::tempdir().unwrap();
+    #[rstest]
+    fn entries_reports_each_child_with_its_own_type(tmp: TempDir) {
         fs::write(tmp.path().join("file"), b"x").unwrap();
         fs::create_dir(tmp.path().join("dir")).unwrap();
         symlink(tmp.path().join("dir"), tmp.path().join("link")).unwrap();
         let _sock = UnixListener::bind(tmp.path().join("sock")).unwrap();
 
-        let dir = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
-        let got: BTreeMap<OsString, Type> = dir
+        let got: BTreeMap<OsString, Type> = open(tmp.path())
             .entries()
             .unwrap()
             .map(|entry| entry.map(|(name, ty)| (name.as_os_str().to_os_string(), ty)))

@@ -110,29 +110,38 @@ mod tests {
     //! axis is root-independent, the owner axis is asserted both ways.
 
     use super::RootSafeBin;
+    use rstest::{fixture, rstest};
     use std::fs;
     use std::os::unix::fs::{symlink, PermissionsExt};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     fn is_root() -> bool {
         nix::unistd::geteuid().is_root()
     }
 
-    #[test]
-    fn rejects_relative_path() {
-        assert!(RootSafeBin::<"dmsetup">::open(Path::new("dmsetup")).is_err());
-        assert!(RootSafeBin::<"dmsetup">::open(Path::new("./dmsetup")).is_err());
+    #[fixture]
+    fn dir() -> TempDir {
+        tempfile::tempdir().unwrap()
     }
 
-    #[test]
-    fn rejects_wrong_basename() {
-        // An absolute, existing, root-owned system file with the WRONG basename fails.
-        assert!(RootSafeBin::<"dmsetup">::open(Path::new("/usr/bin/env")).is_err());
+    fn dmsetup_with_mode(dir: &TempDir, mode: u32) -> PathBuf {
+        let f = dir.path().join("dmsetup");
+        fs::write(&f, b"#!/bin/true\n").unwrap();
+        fs::set_permissions(&f, fs::Permissions::from_mode(mode)).unwrap();
+        f
     }
 
-    #[test]
-    fn rejects_symlink_with_correct_basename() {
-        let dir = tempfile::tempdir().unwrap();
+    #[rstest]
+    #[case::bare_name("dmsetup")]
+    #[case::dot_relative("./dmsetup")]
+    #[case::wrong_basename("/usr/bin/env")]
+    fn rejects_relative_path_or_wrong_basename(#[case] path: &str) {
+        assert!(RootSafeBin::<"dmsetup">::open(Path::new(path)).is_err());
+    }
+
+    #[rstest]
+    fn rejects_symlink_with_correct_basename(dir: TempDir) {
         let target = dir.path().join("target");
         fs::write(&target, b"x").unwrap();
         let link = dir.path().join("dmsetup");
@@ -141,13 +150,9 @@ mod tests {
         assert!(RootSafeBin::<"dmsetup">::open(&link).is_err());
     }
 
-    #[test]
-    fn owner_axis_root_owned_accepted_else_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let f = dir.path().join("dmsetup");
-        fs::write(&f, b"#!/bin/true\n").unwrap();
-        fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
-        let got = RootSafeBin::<"dmsetup">::open(&f);
+    #[rstest]
+    fn owner_axis_root_owned_accepted_else_rejected(dir: TempDir) {
+        let got = RootSafeBin::<"dmsetup">::open(&dmsetup_with_mode(&dir, 0o755));
         if is_root() {
             // root-owned, 0755, absolute, correct basename, not a symlink → valid.
             assert!(got.is_ok(), "root-owned valid bin rejected: {got:?}");
@@ -157,15 +162,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_group_or_other_writable() {
+    #[rstest]
+    fn rejects_group_or_other_writable(dir: TempDir) {
         if is_root() {
-            let dir = tempfile::tempdir().unwrap();
-            let f = dir.path().join("dmsetup");
-            fs::write(&f, b"x").unwrap();
             // root-owned but group/other-writable → Writable rejection.
-            fs::set_permissions(&f, fs::Permissions::from_mode(0o757)).unwrap();
-            assert!(RootSafeBin::<"dmsetup">::open(&f).is_err());
+            assert!(RootSafeBin::<"dmsetup">::open(&dmsetup_with_mode(&dir, 0o757)).is_err());
         } else {
             eprintln!("SKIP rejects_group_or_other_writable: needs root to own a 0757 file");
         }

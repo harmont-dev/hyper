@@ -50,6 +50,7 @@ impl Deref for VmId {
 mod tests {
     use super::VmId;
     use proptest::prelude::*;
+    use rstest::rstest;
     use std::str::FromStr;
 
     proptest! {
@@ -80,23 +81,20 @@ mod tests {
 
     }
 
-    #[test]
-    fn vmid_rejects_known_bad_shapes() {
-        for bad in [
-            "",              // empty
-            "-leading",      // leading dash
-            "a/b",           // separator
-            "a.b",           // dot
-            ".",             // current dir
-            "..",            // parent dir
-            "a_b",           // underscore (firecracker rejects it)
-            "a b",           // whitespace
-            "a\tb",          // tab
-            "a\0b",          // NUL
-            "naïve",         // non-ascii
-            &"x".repeat(65), // too long
-        ] {
-            assert!(VmId::from_str(bad).is_err(), "VmId accepted {bad:?}");
-        }
+    #[rstest]
+    #[case::empty("")]
+    #[case::leading_dash("-leading")]
+    #[case::separator("a/b")]
+    #[case::dot("a.b")]
+    #[case::current_dir(".")]
+    #[case::parent_dir("..")]
+    #[case::underscore("a_b")]
+    #[case::space("a b")]
+    #[case::tab("a\tb")]
+    #[case::nul("a\0b")]
+    #[case::non_ascii("naïve")]
+    #[case::too_long(&"x".repeat(65))]
+    fn vmid_rejects_known_bad_shapes(#[case] bad: &str) {
+        assert!(VmId::from_str(bad).is_err(), "VmId accepted {bad:?}");
     }
 }
