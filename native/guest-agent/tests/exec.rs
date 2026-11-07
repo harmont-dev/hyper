@@ -1,4 +1,5 @@
 use hyper_guest_agent::exec::run;
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 use std::collections::BTreeMap;
 

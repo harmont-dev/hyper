@@ -110,11 +110,12 @@ mod tests {
     //! axis is root-independent, the owner axis is asserted both ways.
 
     use super::RootSafeBin;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
     use rstest::{fixture, rstest};
     use std::fs;
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use tempfile::TempDir;
 
     fn is_root() -> bool {
         nix::unistd::geteuid().is_root()
@@ -122,14 +123,14 @@ mod tests {
 
     #[fixture]
     fn dir() -> TempDir {
-        tempfile::tempdir().unwrap()
+        TempDir::new().unwrap()
     }
 
     fn dmsetup_with_mode(dir: &TempDir, mode: u32) -> PathBuf {
-        let f = dir.path().join("dmsetup");
-        fs::write(&f, b"#!/bin/true\n").unwrap();
+        let f = dir.child("dmsetup");
+        f.write_str("#!/bin/true\n").unwrap();
         fs::set_permissions(&f, fs::Permissions::from_mode(mode)).unwrap();
-        f
+        f.to_path_buf()
     }
 
     #[rstest]
@@ -142,10 +143,10 @@ mod tests {
 
     #[rstest]
     fn rejects_symlink_with_correct_basename(dir: TempDir) {
-        let target = dir.path().join("target");
-        fs::write(&target, b"x").unwrap();
-        let link = dir.path().join("dmsetup");
-        symlink(&target, &link).unwrap();
+        let target = dir.child("target");
+        target.write_str("x").unwrap();
+        let link = dir.child("dmsetup");
+        link.symlink_to_file(&target).unwrap();
         // Symlink is checked before ownership, so this holds regardless of who runs it.
         assert!(RootSafeBin::<"dmsetup">::open(&link).is_err());
     }

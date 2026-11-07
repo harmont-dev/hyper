@@ -5,12 +5,13 @@
 //! mean "wrong dump".
 #![cfg(feature = "insecure_mode")]
 
+use assert_fs::TempDir;
 use predicates::str::contains;
+use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -92,7 +93,7 @@ impl Dump {
 
 #[fixture]
 fn dump() -> Dump {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = TempDir::new().unwrap();
     let rec = tmp.path().join("argv.json");
     Dump { tmp, rec }
 }

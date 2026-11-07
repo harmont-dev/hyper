@@ -2,3 +2,5 @@
 /lcov.info
 *.profraw
 target/
+/mutants.out*
+/mutants.diff

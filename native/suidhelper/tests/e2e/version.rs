@@ -8,6 +8,7 @@
 //! lowercase hex (all-zero on an unstamped dev build -- shape, not value).
 #![cfg(feature = "insecure_mode")]
 
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 use std::path::Path;
 

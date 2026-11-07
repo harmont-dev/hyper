@@ -10,6 +10,7 @@
 use hyper_suidhelper::config::{Config, LoadingError};
 use hyperrs_fs::path::{ComponentError, ValidationError};
 use rstest::rstest;
+use std::assert_matches;
 
 #[rstest]
 fn override_path_is_consulted_through_the_real_lexical_gate() {
@@ -18,11 +19,9 @@ fn override_path_is_consulted_through_the_real_lexical_gate() {
     std::env::set_var("HYPER_SETUIDHELPER_CONFIG_PATH", loose);
 
     let err = Config::safe_load().expect_err("override must be consulted");
-    assert!(
-        matches!(
-            err,
-            LoadingError::Path(ValidationError::Component(ComponentError::ParentDir))
-        ),
-        "expected the override path to hit the real lexical gate, got {err:?}",
+    assert_matches!(
+        err,
+        LoadingError::Path(ValidationError::Component(ComponentError::ParentDir)),
+        "expected the override path to hit the real lexical gate",
     );
 }

@@ -107,7 +107,9 @@ mod tests {
     use super::{DmName, ParseDmDeviceError};
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
     use std::path::Path;
+    use test_strategy::proptest;
 
     const DM_NAME_CHARS: &str =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#+-.:=@_";
@@ -118,46 +120,50 @@ mod tests {
         })
     }
 
-    proptest! {
-        #[test]
-        fn round_trips_through_its_string_and_its_mapper_path(s in dm_name()) {
-            let dm: DmName = s.parse().unwrap();
-            prop_assert_eq!(dm.to_string(), s.clone());
-            let path = dm.path();
-            let expected = format!("/dev/mapper/{s}");
-            prop_assert_eq!(path.as_path(), Path::new(&expected));
-            prop_assert_eq!(DmName::from_device_path(path.as_path()).unwrap(), dm);
-        }
+    #[proptest]
+    fn round_trips_through_its_string_and_its_mapper_path(#[strategy(dm_name())] s: String) {
+        let dm: DmName = s.parse().unwrap();
+        prop_assert_eq!(dm.to_string(), s.clone());
+        let path = dm.path();
+        let expected = format!("/dev/mapper/{s}");
+        prop_assert_eq!(path.as_path(), Path::new(&expected));
+        prop_assert_eq!(DmName::from_device_path(path.as_path()).unwrap(), dm);
+    }
 
-        #[test]
-        fn device_path_refuses_anything_outside_dev_mapper(s in dm_name(), dir in "/dev/[a-z]{0,8}/?|[a-z/]{0,12}") {
-            prop_assume!(dir != "/dev/mapper/");
-            let got = DmName::from_device_path(format!("{dir}{s}"));
-            prop_assert!(matches!(got, Err(ParseDmDeviceError::NotMapper(_))), "{:?}", got);
-        }
+    #[proptest]
+    fn device_path_refuses_anything_outside_dev_mapper(
+        #[strategy(dm_name())] s: String,
+        #[strategy("/dev/[a-z]{0,8}/?|[a-z/]{0,12}")] dir: String,
+    ) {
+        prop_assume!(dir != "/dev/mapper/");
+        assert_matches!(
+            DmName::from_device_path(format!("{dir}{s}")),
+            Err(ParseDmDeviceError::NotMapper(_))
+        );
+    }
 
-        #[test]
-        fn rejects_any_byte_outside_the_charset(
-            s in dm_name(),
-            at in any::<prop::sample::Index>(),
-            bad in any::<char>().prop_filter("charset", |c| !DM_NAME_CHARS.contains(*c)),
-        ) {
-            let mut chars: Vec<char> = s.chars().collect();
-            chars.insert(at.index(chars.len() + 1), bad);
-            let s: String = chars.into_iter().collect();
-            prop_assert!(s.parse::<DmName>().is_err(), "accepted {:?}", s);
-        }
+    #[proptest]
+    fn rejects_any_byte_outside_the_charset(
+        #[strategy(dm_name())] s: String,
+        at: prop::sample::Index,
+        #[strategy(any::<char>().prop_filter("charset", |c| !DM_NAME_CHARS.contains(*c)))]
+        bad: char,
+    ) {
+        let mut chars: Vec<char> = s.chars().collect();
+        chars.insert(at.index(chars.len() + 1), bad);
+        let s: String = chars.into_iter().collect();
+        prop_assert!(s.parse::<DmName>().is_err(), "accepted {:?}", s);
+    }
 
-        #[test]
-        fn rejects_names_past_127_bytes(s in "[0-9A-Za-z]{128,200}") {
-            prop_assert!(s.parse::<DmName>().is_err());
-        }
+    #[proptest]
+    fn rejects_names_past_127_bytes(#[strategy("[0-9A-Za-z]{128,200}")] s: String) {
+        prop_assert!(s.parse::<DmName>().is_err());
+    }
 
-        #[test]
-        fn rejects_a_leading_dash(s in dm_name()) {
-            let dashed = format!("-{s}");
-            prop_assert!(dashed.parse::<DmName>().is_err());
-        }
+    #[proptest]
+    fn rejects_a_leading_dash(#[strategy(dm_name())] s: String) {
+        let dashed = format!("-{s}");
+        prop_assert!(dashed.parse::<DmName>().is_err());
     }
 
     #[rstest]

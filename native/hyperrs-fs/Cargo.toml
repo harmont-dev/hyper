@@ -14,6 +14,9 @@ ref-cast = "1.0.25"
 thiserror = "1"
 
 [dev-dependencies]
+assert_fs = "1"
+predicates = "3"
+pretty_assertions = "1"
 proptest = "1"
 rstest = "0.28"
-tempfile = "3"
+test-strategy = "0.4"

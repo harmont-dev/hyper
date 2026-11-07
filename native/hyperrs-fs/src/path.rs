@@ -379,9 +379,12 @@ mod tests {
         ComponentError, IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent,
         StrictComponents, ValidationError,
     };
+    use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
     use std::path::{Path, PathBuf};
+    use test_strategy::proptest;
 
     // The fully-enforced flavor used at every real call site.
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
@@ -412,138 +415,139 @@ mod tests {
         p
     }
 
-    proptest! {
-        #[test]
-        fn accepts_clean_absolute_paths(parts in prop::collection::vec(safe_component(), 1..6)) {
-            let path = join_abs(&parts);
-            prop_assert!(Strict::try_from(path).is_ok());
-        }
+    fn components(len: std::ops::Range<usize>) -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(safe_component(), len)
+    }
 
-        #[test]
-        fn rejects_any_loose_component(
-            prefix in prop::collection::vec(safe_component(), 0..4),
-            bad in loose_component(),
-            suffix in prop::collection::vec(safe_component(), 0..4),
-        ) {
-            let mut parts = prefix;
-            parts.push(bad);
-            parts.extend(suffix);
-            // Build the path from a RAW string, not via PathBuf::push: pushing an empty
-            // component collapses it to a bare separator, hiding the `//` we want to
-            // test. Raw joining makes `.`, `..`, and empty (`//`) literally present.
-            let path = PathBuf::from(format!("/{}", parts.join("/")));
-            prop_assume!(path != Path::new("/"));
-            prop_assert!(matches!(
-                Strict::try_from(path),
-                Err(ValidationError::Component(_))
-            ));
-        }
+    #[proptest]
+    fn accepts_clean_absolute_paths(#[strategy(components(1..6))] parts: Vec<String>) {
+        let path = join_abs(&parts);
+        prop_assert!(Strict::try_from(path).is_ok());
+    }
 
-        #[test]
-        fn rejects_whitespace_anywhere_in_any_component(
-            prefix in prop::collection::vec(safe_component(), 0..4),
-            (head, tail) in (safe_component(), safe_component()),
-            ws in prop::sample::select(vec![' ', '\t', '\n', '\x0b', '\x0c', '\r']),
-            at in 0usize..3,
-        ) {
-            let bad = match at {
-                0 => format!("{ws}{head}"),
-                1 => format!("{head}{ws}{tail}"),
-                _ => format!("{head}{ws}"),
-            };
-            let path = PathBuf::from(format!("/{}", prefix.iter().chain([&bad]).cloned().collect::<Vec<_>>().join("/")));
-            prop_assert!(matches!(
-                Strict::try_from(path),
-                Err(ValidationError::Component(ComponentError::Whitespace))
-            ));
-        }
+    #[proptest]
+    fn rejects_any_loose_component(
+        #[strategy(components(0..4))] prefix: Vec<String>,
+        #[strategy(loose_component())] bad: String,
+        #[strategy(components(0..4))] suffix: Vec<String>,
+    ) {
+        let mut parts = prefix;
+        parts.push(bad);
+        parts.extend(suffix);
+        // Build the path from a RAW string, not via PathBuf::push: pushing an empty
+        // component collapses it to a bare separator, hiding the `//` we want to
+        // test. Raw joining makes `.`, `..`, and empty (`//`) literally present.
+        let path = PathBuf::from(format!("/{}", parts.join("/")));
+        prop_assume!(path != Path::new("/"));
+        assert_matches!(Strict::try_from(path), Err(ValidationError::Component(_)));
+    }
 
-        #[test]
-        fn rejects_relative_paths(parts in prop::collection::vec(safe_component(), 1..6)) {
-            let rel: PathBuf = parts.iter().collect();
-            prop_assert!(matches!(
-                Strict::try_from(rel),
-                Err(ValidationError::NotAbsolute)
-            ));
-        }
+    #[proptest]
+    fn rejects_whitespace_anywhere_in_any_component(
+        #[strategy(components(0..4))] prefix: Vec<String>,
+        #[strategy(safe_component())] head: String,
+        #[strategy(safe_component())] tail: String,
+        #[strategy(prop::sample::select(vec![' ', '\t', '\n', '\x0b', '\x0c', '\r']))] ws: char,
+        #[strategy(0usize..3)] at: usize,
+    ) {
+        let bad = match at {
+            0 => format!("{ws}{head}"),
+            1 => format!("{head}{ws}{tail}"),
+            _ => format!("{head}{ws}"),
+        };
+        let path = PathBuf::from(format!(
+            "/{}",
+            prefix
+                .iter()
+                .chain([&bad])
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("/")
+        ));
+        assert_matches!(
+            Strict::try_from(path),
+            Err(ValidationError::Component(ComponentError::Whitespace))
+        );
+    }
 
-        #[test]
-        fn strip_base_segments_round_trip(
-            base_parts in prop::collection::vec(safe_component(), 1..4),
-            rel_parts in prop::collection::vec(safe_component(), 1..5),
-        ) {
-            let base = join_abs(&base_parts);
-            let full_parts: Vec<String> =
-                base_parts.iter().chain(rel_parts.iter()).cloned().collect();
-            let full = join_abs(&full_parts);
+    #[proptest]
+    fn rejects_relative_paths(#[strategy(components(1..6))] parts: Vec<String>) {
+        let rel: PathBuf = parts.iter().collect();
+        assert_matches!(Strict::try_from(rel), Err(ValidationError::NotAbsolute));
+    }
 
-            let safe = Strict::try_from(full.clone()).unwrap();
-            let segments: Vec<String> = safe
-                .strip_base(&strict(&base))
-                .unwrap()
-                .segments()
-                .map(|s| s.as_os_str().to_string_lossy().into_owned())
-                .collect();
-            prop_assert_eq!(&segments, &rel_parts);
+    #[proptest]
+    fn strip_base_segments_round_trip(
+        #[strategy(components(1..4))] base_parts: Vec<String>,
+        #[strategy(components(1..5))] rel_parts: Vec<String>,
+    ) {
+        let base = join_abs(&base_parts);
+        let full_parts: Vec<String> = base_parts.iter().chain(rel_parts.iter()).cloned().collect();
+        let full = join_abs(&full_parts);
 
-            let mut rebuilt = base.clone();
-            rebuilt.extend(&segments);
-            prop_assert_eq!(rebuilt, full);
-        }
+        let safe = Strict::try_from(full.clone()).unwrap();
+        let segments: Vec<String> = safe
+            .strip_base(&strict(&base))
+            .unwrap()
+            .segments()
+            .map(|s| s.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        prop_assert_eq!(&segments, &rel_parts);
 
-        #[test]
-        fn strip_base_rejects_paths_outside_base(
-            base_parts in prop::collection::vec(safe_component(), 1..4),
-            other_parts in prop::collection::vec(safe_component(), 1..4),
-        ) {
-            // Force divergence at the first component so `other` cannot be under `base`.
-            let base = join_abs(&base_parts);
-            let mut other = vec!["zzdifferent".to_string()];
-            other.extend(other_parts);
-            let path = join_abs(&other);
+        let mut rebuilt = base.clone();
+        rebuilt.extend(&segments);
+        prop_assert_eq!(rebuilt, full);
+    }
 
-            let safe = Strict::try_from(path).unwrap();
-            prop_assert!(matches!(
-                safe.strip_base(&strict(&base)),
-                Err(RelativeError::NotUnderBase)
-            ));
-        }
+    #[proptest]
+    fn strip_base_rejects_paths_outside_base(
+        #[strategy(components(1..4))] base_parts: Vec<String>,
+        #[strategy(components(1..4))] other_parts: Vec<String>,
+    ) {
+        // Force divergence at the first component so `other` cannot be under `base`.
+        let base = join_abs(&base_parts);
+        let mut other = vec!["zzdifferent".to_string()];
+        other.extend(other_parts);
+        let path = join_abs(&other);
 
-        #[test]
-        fn file_name_returns_the_joined_component(
-            parts in prop::collection::vec(safe_component(), 0..5),
-            name in safe_component(),
-        ) {
-            let parent = Strict::try_from(join_abs(&parts)).unwrap();
-            let name: &StrictComponent = name.as_str().try_into().unwrap();
-            let joined = parent.join(name);
-            prop_assert_eq!(joined.file_name(), Some(name));
-        }
+        let safe = Strict::try_from(path).unwrap();
+        assert_matches!(
+            safe.strip_base(&strict(&base)),
+            Err(RelativeError::NotUnderBase)
+        );
+    }
 
-        #[test]
-        fn file_name_of_a_relative_path_is_its_last_segment(
-            base_parts in prop::collection::vec(safe_component(), 1..4),
-            rel_parts in prop::collection::vec(safe_component(), 1..5),
-        ) {
-            let base = join_abs(&base_parts);
-            let full_parts: Vec<String> =
-                base_parts.iter().chain(rel_parts.iter()).cloned().collect();
-            let safe = Strict::try_from(join_abs(&full_parts)).unwrap();
-            let rel = safe.strip_base(&strict(&base)).unwrap();
-            prop_assert_eq!(rel.file_name(), rel.segments().last());
-        }
+    #[proptest]
+    fn file_name_returns_the_joined_component(
+        #[strategy(components(0..5))] parts: Vec<String>,
+        #[strategy(safe_component())] name: String,
+    ) {
+        let parent = Strict::try_from(join_abs(&parts)).unwrap();
+        let name: &StrictComponent = name.as_str().try_into().unwrap();
+        let joined = parent.join(name);
+        prop_assert_eq!(joined.file_name(), Some(name));
+    }
 
-        #[test]
-        fn strip_base_refuses_the_base_itself(
-            base_parts in prop::collection::vec(safe_component(), 1..4),
-        ) {
-            let base = join_abs(&base_parts);
-            let safe = Strict::try_from(base.clone()).unwrap();
-            prop_assert!(matches!(
-                safe.strip_base(&strict(&base)),
-                Err(RelativeError::EqualsBase)
-            ));
-        }
+    #[proptest]
+    fn file_name_of_a_relative_path_is_its_last_segment(
+        #[strategy(components(1..4))] base_parts: Vec<String>,
+        #[strategy(components(1..5))] rel_parts: Vec<String>,
+    ) {
+        let base = join_abs(&base_parts);
+        let full_parts: Vec<String> = base_parts.iter().chain(rel_parts.iter()).cloned().collect();
+        let safe = Strict::try_from(join_abs(&full_parts)).unwrap();
+        let rel = safe.strip_base(&strict(&base)).unwrap();
+        prop_assert_eq!(rel.file_name(), rel.segments().last());
+    }
+
+    #[proptest]
+    fn strip_base_refuses_the_base_itself(#[strategy(components(1..4))] base_parts: Vec<String>) {
+        let base = join_abs(&base_parts);
+        let safe = Strict::try_from(base.clone()).unwrap();
+        assert_matches!(
+            safe.strip_base(&strict(&base)),
+            Err(RelativeError::EqualsBase)
+        );
     }
 
     #[rstest]

@@ -80,16 +80,18 @@ impl Events<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Events, EventsState, ReadError};
+    use assert_fs::prelude::*;
+    use assert_fs::NamedTempFile;
     use hyperrs_fs::file::{OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
     use proptest::prelude::*;
     use rstest::rstest;
-    use std::fs;
-    use tempfile::NamedTempFile;
+    use std::assert_matches;
+    use test_strategy::proptest;
 
     fn events_over(contents: &[u8]) -> (NamedTempFile, Events<'static>) {
-        let tmp = NamedTempFile::new().unwrap();
-        fs::write(tmp.path(), contents).unwrap();
+        let tmp = NamedTempFile::new("cgroup.events").unwrap();
+        tmp.write_binary(contents).unwrap();
         let path: &SafePath<IsAbsolute, StrictComponents> = tmp.path().try_into().unwrap();
         let events = Events::new(SafeFile::open(path, OpenFlags::RDONLY).unwrap());
         (tmp, events)
@@ -119,54 +121,56 @@ mod tests {
         ]
     }
 
-    proptest! {
-        #[test]
-        fn reads_exactly_the_populated_and_frozen_flags(
-            populated in any::<bool>(),
-            frozen in any::<bool>(),
-            populated_first in any::<bool>(),
-            decoys in proptest::collection::vec(decoy(), 0..4),
-        ) {
-            let (_tmp, events) = events_over(render(populated, frozen, populated_first, &decoys).as_bytes());
+    #[proptest]
+    fn reads_exactly_the_populated_and_frozen_flags(
+        populated: bool,
+        frozen: bool,
+        populated_first: bool,
+        #[strategy(proptest::collection::vec(decoy(), 0..4))] decoys: Vec<String>,
+    ) {
+        let (_tmp, events) =
+            events_over(render(populated, frozen, populated_first, &decoys).as_bytes());
+        prop_assert_eq!(events.read().unwrap(), EventsState { populated, frozen });
+    }
+
+    #[proptest]
+    fn a_missing_or_non_boolean_flag_is_malformed(
+        #[strategy("[^\r\n]{0,32}".prop_filter("boolean", |v| v != "0" && v != "1"))] value: String,
+        corrupt_populated: bool,
+        drop_line: bool,
+    ) {
+        let (key, other) = if corrupt_populated {
+            ("populated", "frozen 0")
+        } else {
+            ("frozen", "populated 0")
+        };
+        let contents = if drop_line {
+            format!("{other}\n")
+        } else {
+            format!("{key} {value}\n{other}\n")
+        };
+        let (_tmp, events) = events_over(contents.as_bytes());
+        assert_matches!(events.read(), Err(ReadError::Malformed(_)), "{contents:?}");
+    }
+
+    #[proptest]
+    fn every_read_reflects_the_current_contents(
+        #[strategy(proptest::collection::vec((any::<bool>(), any::<bool>()), 1..8))] states: Vec<(
+            bool,
+            bool,
+        )>,
+    ) {
+        let (tmp, events) = events_over(b"");
+        for (populated, frozen) in states {
+            tmp.write_str(&render(populated, frozen, true, &[]))
+                .unwrap();
             prop_assert_eq!(events.read().unwrap(), EventsState { populated, frozen });
-        }
-
-        #[test]
-        fn a_missing_or_non_boolean_flag_is_malformed(
-            value in "[^\r\n]{0,32}".prop_filter("boolean", |v| v != "0" && v != "1"),
-            corrupt_populated in any::<bool>(),
-            drop_line in any::<bool>(),
-        ) {
-            let (key, other) = if corrupt_populated {
-                ("populated", "frozen 0")
-            } else {
-                ("frozen", "populated 0")
-            };
-            let contents = if drop_line {
-                format!("{other}\n")
-            } else {
-                format!("{key} {value}\n{other}\n")
-            };
-            let (_tmp, events) = events_over(contents.as_bytes());
-            let got = events.read();
-            prop_assert!(matches!(got, Err(ReadError::Malformed(_))), "{:?}: {:?}", contents, got);
-        }
-
-        #[test]
-        fn every_read_reflects_the_current_contents(
-            states in proptest::collection::vec((any::<bool>(), any::<bool>()), 1..8),
-        ) {
-            let (tmp, events) = events_over(b"");
-            for (populated, frozen) in states {
-                fs::write(tmp.path(), render(populated, frozen, true, &[])).unwrap();
-                prop_assert_eq!(events.read().unwrap(), EventsState { populated, frozen });
-            }
         }
     }
 
     #[rstest]
     fn non_utf8_contents_are_an_error() {
         let (_tmp, events) = events_over(b"populated \xff\nfrozen 0\n");
-        assert!(matches!(events.read(), Err(ReadError::Utf8(_))));
+        assert_matches!(events.read(), Err(ReadError::Utf8(_)));
     }
 }

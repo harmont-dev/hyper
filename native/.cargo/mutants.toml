@@ -1,0 +1,4 @@
+test_tool = "nextest"
+all_features = true
+test_workspace = true
+exclude_globs = ["suidhelper/xtask/**"]

@@ -9,8 +9,10 @@
 //! - min > max is always rejected (incoherent range; likely a config typo).
 
 use hyper_suidhelper::config::Config;
+use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use rstest::rstest;
+use test_strategy::proptest;
 
 fn parse(min: u32, max: u32) -> Result<Config, toml::de::Error> {
     toml::from_str(&format!(
@@ -24,23 +26,21 @@ fn absent_range_yields_default() {
     assert_eq!((r.min(), r.max()), (900_000, 999_999));
 }
 
-proptest! {
-    #[test]
-    fn valid_range_round_trips_via_toml(min in 1u32.., delta in 0u32..) {
-        let max = min.saturating_add(delta);
-        let r = parse(min, max).expect("valid TOML").uid_gid_range();
-        prop_assert_eq!((r.min(), r.max()), (min, max));
-    }
+#[proptest]
+fn valid_range_round_trips_via_toml(#[strategy(1u32..)] min: u32, #[strategy(0u32..)] delta: u32) {
+    let max = min.saturating_add(delta);
+    let r = parse(min, max).expect("valid TOML").uid_gid_range();
+    prop_assert_eq!((r.min(), r.max()), (min, max));
+}
 
-    #[test]
-    fn zero_min_always_rejected(max in 0u32..) {
-        let err = parse(0, max).unwrap_err();
-        prop_assert!(err.to_string().contains("uid_gid_range"));
-    }
+#[proptest]
+fn zero_min_always_rejected(#[strategy(0u32..)] max: u32) {
+    let err = parse(0, max).unwrap_err();
+    prop_assert!(err.to_string().contains("uid_gid_range"));
+}
 
-    #[test]
-    fn min_exceeds_max_always_rejected(max in 0u32..u32::MAX) {
-        let err = parse(max + 1, max).unwrap_err();
-        prop_assert!(err.to_string().contains("uid_gid_range"));
-    }
+#[proptest]
+fn min_exceeds_max_always_rejected(#[strategy(0u32..u32::MAX)] max: u32) {
+    let err = parse(max + 1, max).unwrap_err();
+    prop_assert!(err.to_string().contains("uid_gid_range"));
 }

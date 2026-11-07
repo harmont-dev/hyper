@@ -4,7 +4,9 @@ use hyper_suidhelper::tools::network::addr::Plan;
 use hyper_suidhelper::tools::network::args::{self, Which};
 use hyper_suidhelper::tools::network::{prepare, resolve_network, NetworkingDisabled};
 use hyperrs_firecracker::VmId;
+use pretty_assertions::assert_eq;
 use rstest::rstest;
+use std::assert_matches;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
@@ -23,7 +25,7 @@ fn plan0() -> Plan {
 fn prepare_creates_netns_first_and_default_route_last() {
     let cmds = args::prepare_commands(&plan0(), "/usr/sbin/nft", "/usr/sbin/sysctl");
     let first = &cmds[0];
-    assert!(matches!(first.bin, Which::Ip));
+    assert_matches!(first.bin, Which::Ip);
     assert_eq!(
         first.argv,
         vec!["netns", "add", "vaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
@@ -412,7 +414,7 @@ fn resolve_network_refuses_when_networking_disabled() {
     // real refusal path, not a copy of it — no root and no config file
     // needed, since it takes the already-resolved `Option<&Network>` rather
     // than reaching into `Config` itself.
-    assert!(matches!(resolve_network(None), Err(NetworkingDisabled)));
+    assert_matches!(resolve_network(None), Err(NetworkingDisabled));
 }
 
 #[rstest]

@@ -247,7 +247,9 @@ mod tests {
     use crate::dm::{DmName, ThinId};
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
     use std::path::PathBuf;
+    use test_strategy::proptest;
 
     fn file() -> impl Strategy<Value = DevPath> {
         (
@@ -319,30 +321,34 @@ mod tests {
         ]
     }
 
-    proptest! {
-        #[test]
-        fn parse_is_the_inverse_of_render(t in table()) {
-            let back: DmTable = t.to_string().parse().unwrap();
-            prop_assert_eq!(back, t);
-        }
+    #[proptest]
+    fn parse_is_the_inverse_of_render(#[strategy(table())] t: DmTable) {
+        let back: DmTable = t.to_string().parse().unwrap();
+        prop_assert_eq!(back, t);
+    }
 
-        #[test]
-        fn render_is_canonical_regardless_of_input_spacing(t in table(), pad in "[ \t]{1,3}") {
-            let spaced = t.to_string().split(' ').collect::<Vec<_>>().join(&pad);
-            let back: DmTable = format!("{pad}{spaced}{pad}").parse().unwrap();
-            prop_assert_eq!(back.to_string(), t.to_string());
-        }
+    #[proptest]
+    fn render_is_canonical_regardless_of_input_spacing(
+        #[strategy(table())] t: DmTable,
+        #[strategy("[ \t]{1,3}")] pad: String,
+    ) {
+        let spaced = t.to_string().split(' ').collect::<Vec<_>>().join(&pad);
+        let back: DmTable = format!("{pad}{spaced}{pad}").parse().unwrap();
+        prop_assert_eq!(back.to_string(), t.to_string());
+    }
 
-        #[test]
-        fn devices_are_exactly_the_mapper_operands(t in table()) {
-            let rendered = t.to_string();
-            let mapper: Vec<&str> = rendered
-                .split(' ')
-                .filter(|tok| tok.starts_with("/dev/mapper/"))
-                .collect();
-            let devices: Vec<String> = t.devices().map(|d| d.path().as_path().display().to_string()).collect();
-            prop_assert_eq!(devices, mapper);
-        }
+    #[proptest]
+    fn devices_are_exactly_the_mapper_operands(#[strategy(table())] t: DmTable) {
+        let rendered = t.to_string();
+        let mapper: Vec<&str> = rendered
+            .split(' ')
+            .filter(|tok| tok.starts_with("/dev/mapper/"))
+            .collect();
+        let devices: Vec<String> = t
+            .devices()
+            .map(|d| d.path().as_path().display().to_string())
+            .collect();
+        prop_assert_eq!(devices, mapper);
     }
 
     #[rstest]
@@ -367,9 +373,9 @@ mod tests {
 
     #[rstest]
     fn a_malformed_mapper_operand_is_a_device_error_not_a_path() {
-        assert!(matches!(
+        assert_matches!(
             "0 100 linear /dev/mapper/a/b 0".parse::<DmTable>(),
             Err(ParseTableError::Device(_))
-        ));
+        );
     }
 }

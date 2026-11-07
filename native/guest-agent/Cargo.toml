@@ -27,7 +27,7 @@ tokio-vsock = { version = "0.7", features = ["tonic014"] }
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
-proptest = "1"
+pretty_assertions = "1"
 rstest = "0.28"
 tokio-stream = "0.1"
 

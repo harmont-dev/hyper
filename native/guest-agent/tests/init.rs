@@ -1,4 +1,5 @@
 use hyper_guest_agent::init::resolver_from_cmdline;
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 use std::net::Ipv4Addr;
 

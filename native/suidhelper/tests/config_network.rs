@@ -1,4 +1,5 @@
 use hyper_suidhelper::config::{Config, Network};
+use pretty_assertions::assert_eq;
 use rstest::rstest;
 
 #[rstest]

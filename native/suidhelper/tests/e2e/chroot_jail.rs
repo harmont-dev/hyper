@@ -10,12 +10,14 @@
 //! table.
 #![cfg(feature = "insecure_mode")]
 
+use assert_fs::prelude::*;
+use assert_fs::TempDir;
+use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tempfile::TempDir;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -133,21 +135,16 @@ impl Work {
 
 #[fixture]
 fn work() -> Work {
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path().join("srv");
-    let chroot = dir
-        .join("jails")
-        .join("firecracker")
-        .join("id")
-        .join("root");
-    fs::create_dir_all(&chroot).unwrap();
-    let kernel = dir.join("vmlinux-src");
-    fs::write(&kernel, b"kernel image").unwrap();
+    let tmp = TempDir::new().unwrap();
+    let chroot = tmp.child("srv/jails/firecracker/id/root");
+    chroot.create_dir_all().unwrap();
+    let kernel = tmp.child("srv/vmlinux-src");
+    kernel.write_binary(b"kernel image").unwrap();
     Work {
+        dir: tmp.child("srv").to_path_buf(),
+        chroot: chroot.to_path_buf(),
+        kernel: kernel.to_path_buf(),
         tmp,
-        dir,
-        chroot,
-        kernel,
     }
 }
 
