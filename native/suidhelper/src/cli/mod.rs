@@ -81,38 +81,39 @@ enum Command {
     Version,
 }
 
-pub fn run(token: Unprivileged) {
+pub fn run(mut token: Unprivileged) {
     let command = Cli::parse().command;
 
     // `version` is a pure self-report: it touches neither config nor privileges,
     // so render it before any setup that could fail (e.g. a missing config file).
-    if let Command::Version = command {
-        println!("{}", serde_json::to_string(&version::render()).unwrap());
-        return;
+    // Privileges are already dropped to the real uid by a pre-main constructor
+    // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
+    if !matches!(command, Command::Version) {
+        Config::init();
     }
 
-    Config::init();
+    let output = match command {
+        Command::Version => to_json(version::render()),
+        Command::Vm { op } => op.run(token),
+        Command::Dm { args } => dm::run(args, &mut token)
+            .map_err(DispatchError::tool)
+            .and_then(to_json),
+        Command::ThinCopy { args } => thin_copy::run(args, &mut token)
+            .map_err(DispatchError::tool)
+            .and_then(to_json),
+        Command::HostInit => host_init::run(&mut token)
+            .map_err(DispatchError::tool)
+            .and_then(to_json),
+        Command::SysTest => sys_test::run(&mut token)
+            .map_err(DispatchError::from)
+            .and_then(to_json),
+    };
 
-    let output = dispatch(command, token)
-        .and_then(|value| serde_json::to_string(&value).map_err(DispatchError::tool));
-    match output {
+    match output.and_then(|value| serde_json::to_string(&value).map_err(DispatchError::tool)) {
         Ok(json) => println!("{json}"),
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(e.exit_code());
         }
-    }
-}
-
-fn dispatch(command: Command, mut token: Unprivileged) -> Result<serde_json::Value, DispatchError> {
-    match command {
-        Command::Vm { op } => op.run(token),
-        Command::Dm { args } => to_json(dm::run(args, &mut token).map_err(DispatchError::tool)?),
-        Command::ThinCopy { args } => {
-            to_json(thin_copy::run(args, &mut token).map_err(DispatchError::tool)?)
-        }
-        Command::HostInit => to_json(host_init::run(&mut token).map_err(DispatchError::tool)?),
-        Command::SysTest => to_json(sys_test::run(&mut token)?),
-        Command::Version => unreachable!("handled in `run`"),
     }
 }
