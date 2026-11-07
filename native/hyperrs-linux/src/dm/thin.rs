@@ -1,6 +1,9 @@
-use super::{Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
+use super::{
+    Device, DmName, DmTable, Dmsetup, NumberError, Origin, RemoveMode, RunError, ThinTable,
+};
 use crate::Access;
 use derive_more::{Display, Into};
+use hyperrs_fs::dev::DeviceNumber;
 use std::ffi::OsStr;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -104,6 +107,8 @@ pub enum ThinPoolError {
 pub enum OpenThinError {
     #[error(transparent)]
     Run(#[from] RunError),
+    #[error("reading the pool's device number: {0}")]
+    Pool(#[from] NumberError),
     #[error("{name} is not a thin device of this pool: {table:?}")]
     NotAThin { name: DmName, table: String },
     #[error(transparent)]
@@ -177,11 +182,13 @@ impl<'a> ThinPool<'a> {
             return Err(not_a_thin());
         };
         match line.split_whitespace().collect::<Vec<_>>()[..] {
-            [_, _, "thin", dev, id, ..] if dev == pool => Ok(Thin {
-                pool: self.clone(),
-                id: id.parse()?,
-                state: Active(dmsetup.device(name)),
-            }),
+            [_, _, "thin", dev, id, ..] if dev.parse::<DeviceNumber>().ok() == Some(pool) => {
+                Ok(Thin {
+                    pool: self.clone(),
+                    id: id.parse()?,
+                    state: Active(dmsetup.device(name)),
+                })
+            }
             _ => Err(not_a_thin()),
         }
     }

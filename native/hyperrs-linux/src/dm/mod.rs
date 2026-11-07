@@ -8,7 +8,7 @@ pub mod thin_dump;
 
 use super::Access;
 use derive_more::Constructor;
-pub use device::Device;
+pub use device::{Device, NumberError};
 use hyperrs_process::binary::RootSafeBin;
 pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError, SizeError};
 use std::ffi::OsStr;
