@@ -1,6 +1,16 @@
 use super::{DmName, Dmsetup, RemoveMode, RunError};
+use hyperrs_fs::dev::{DeviceNumber, ParseDeviceNumberError};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use std::ffi::OsStr;
+use thiserror::Error as ThisError;
+
+#[derive(Debug, ThisError)]
+pub enum NumberError {
+    #[error(transparent)]
+    Run(#[from] RunError),
+    #[error(transparent)]
+    Parse(#[from] ParseDeviceNumberError),
+}
 
 #[derive(Debug, Clone)]
 pub struct Device<'a> {
@@ -15,6 +25,18 @@ impl<'a> Device<'a> {
 
     pub fn path(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
         self.name.path()
+    }
+
+    pub fn number(&self) -> Result<DeviceNumber, NumberError> {
+        let out = self.dmsetup.run([
+            OsStr::new("info"),
+            OsStr::new("-c"),
+            OsStr::new("--noheadings"),
+            OsStr::new("-o"),
+            OsStr::new("major,minor"),
+            self.name.as_ref(),
+        ])?;
+        Ok(out.trim().parse()?)
     }
 
     pub fn suspend(&self) -> Result<(), RunError> {

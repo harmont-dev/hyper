@@ -67,7 +67,7 @@ defmodule Hyper.Node.Reclaim do
   end
 
   defp reclaim_dm do
-    case Dmsetup.list() do
+    case Sys.Linux.Dm.names() do
       {:ok, names} ->
         case Enum.filter(names, &String.starts_with?(&1, @dm_prefix)) do
           [] ->

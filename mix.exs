@@ -532,7 +532,7 @@ defmodule Mix.Tasks.Compile.SuidhelperStamp do
   end
 
   defp capture_version!(binary) do
-    case System.cmd(binary, ["version"], stderr_to_stdout: true) do
+    case System.cmd(binary, [~s({"op":"version"})], stderr_to_stdout: true) do
       {out, 0} ->
         String.trim(out)
 

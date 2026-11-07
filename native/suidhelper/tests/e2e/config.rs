@@ -10,6 +10,7 @@ use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use serde_json::json;
 use std::assert_matches;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -33,24 +34,46 @@ fn write_root_config(dir: &Path, body: &str) -> std::path::PathBuf {
 }
 
 /// A genuinely-absent config file is NOT an error: the helper falls back to the
-/// built-in defaults (compiled into this root-owned binary, hence trusted). The
-/// default `work_dir` is `/srv/hyper`. Needs root because `sys-test` then
-/// acquires privileges to prove it can promote.
+/// built-in defaults (compiled into this root-owned binary, hence trusted).
 #[rstest]
 #[case::missing_config_falls_back_to_defaults(None)]
 #[case::valid_config(Some("work_dir = \"/srv/hyper\"\n"))]
-fn sys_test_ok_as_root(tmp: TempDir, #[case] body: Option<&str>) {
+fn a_trusted_config_loads_and_the_helper_elevates_as_root(
+    tmp: TempDir,
+    #[case] body: Option<&str>,
+) {
     if !is_root() {
-        eprintln!("SKIP sys_test_ok: sys-test needs root");
+        eprintln!("SKIP config loads: needs root");
         return;
     }
     let cfg = match body {
         Some(body) => write_root_config(tmp.path(), body),
         None => tmp.path().join("nope.toml"),
     };
-    let out = run(&cfg, &["sys-test"]).success();
+    let out = run(&cfg, json!({"op": "vm_teardown", "id": "vconfige2e"})).success();
+    assert_eq!(stdout_json(&out)["result"], "tore_down");
+}
+
+#[rstest]
+fn host_init_reports_the_work_dir_the_helper_trusts_as_root(tmp: TempDir) {
+    let forwarding = fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default();
+    if !is_root() || forwarding.trim() != "1" {
+        eprintln!("SKIP host_init: needs root and ip_forward=1");
+        return;
+    }
+    let nft = tmp.path().join("nft");
+    fs::copy("/bin/true", &nft).unwrap();
+    let cfg = write_root_config(
+        tmp.path(),
+        &format!(
+            "work_dir = \"/srv/hyper\"\n[tools]\nnft = \"{}\"\n[network]\nuplink = \"eth0\"\n",
+            nft.display()
+        ),
+    );
+
+    let out = run(&cfg, json!({"op": "host_init"})).success();
     let json = stdout_json(&out);
-    assert_eq!(json["sys_test"], "ok");
+    assert_eq!(json["result"], "host_ready");
     assert_eq!(json["hyper_base"], "/srv/hyper");
 }
 
@@ -67,7 +90,7 @@ fn non_root_owned_config_is_rejected(tmp: TempDir) {
         let nogrp = nix::unistd::Gid::from_raw(65534);
         nix::unistd::chown(&p, Some(nobody), Some(nogrp)).unwrap();
     }
-    run(&p, &["sys-test"])
+    run(&p, json!({"op": "vm_teardown", "id": "vconfige2e"}))
         .code(2)
         .stderr(contains("root:root").or(contains("not owned")));
 }
@@ -87,7 +110,9 @@ fn invalid_config_exits_2_as_root(tmp: TempDir, #[case] body: &str, #[case] stde
         return;
     }
     let p = write_root_config(tmp.path(), body);
-    run(&p, &["sys-test"]).code(2).stderr(contains(stderr));
+    run(&p, json!({"op": "vm_teardown", "id": "vconfige2e"}))
+        .code(2)
+        .stderr(contains(stderr));
 }
 
 // Config::default() has firecracker == None; the accessor must signal this

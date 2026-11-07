@@ -25,6 +25,16 @@ pub enum ParseDmDeviceError {
 }
 
 #[derive(Debug, ThisError)]
+pub enum SizeError {
+    #[error(transparent)]
+    Open(#[from] OpenDeviceError),
+    #[error("opening the device for reading: {0}")]
+    Reopen(#[from] file::ValidationError),
+    #[error("reading the device size: {0}")]
+    Ioctl(#[source] nix::Error),
+}
+
+#[derive(Debug, ThisError)]
 pub enum OpenDeviceError {
     #[error("resolving {path:?}: {source}")]
     Resolve {
@@ -39,6 +49,7 @@ pub enum OpenDeviceError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[display("{}", _0.as_os_str().to_string_lossy())]
 pub struct DmName(StrictComponentBuf);
 
@@ -57,6 +68,12 @@ impl DmName {
     /// The full path to the dm name.
     pub fn path(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
         SafePath::from_static::<"/dev/mapper">().join(&self.0)
+    }
+
+    /// The number of sectors of this dm entry.
+    pub fn sectors(&self) -> Result<u64, SizeError> {
+        let device = self.open()?.reopen(OpenFlags::RDONLY)?;
+        device.sectors().map_err(SizeError::Ioctl)
     }
 
     pub fn open(&self) -> Result<SafeFile<IsBlockDevice, Any, Any>, OpenDeviceError> {

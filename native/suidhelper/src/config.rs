@@ -188,7 +188,9 @@ impl Config {
     /// *present but untrusted* file (wrong owner/mode, malformed) is fatal —
     /// the helper prints the error and exits rather than trusting it.
     pub fn get() -> &'static Config {
-        LazyLock::force(&CONFIG)
+        CONFIG
+            .as_ref()
+            .expect("Config::init must succeed before the config is read")
     }
 
     /// Force the config to load now. Call this once at the very start of `main`,
@@ -196,8 +198,8 @@ impl Config {
     /// `setuid_privileged` runs before `main`), so the file is never first read
     /// lazily from inside a `Privileged` scope — i.e. it is guaranteed to be read
     /// as the real uid, not as root.
-    pub fn init() {
-        let _ = Self::get();
+    pub fn init() -> Result<&'static Config, &'static LoadingError> {
+        CONFIG.as_ref()
     }
 
     /// Hyper's data root.
@@ -325,9 +327,4 @@ impl Config {
 }
 
 /// The process-wide config, loaded once on first access via [`Config::get`].
-static CONFIG: LazyLock<Config> = LazyLock::new(|| {
-    Config::safe_load().unwrap_or_else(|e| {
-        eprintln!("hyper-suidhelper: {e}");
-        std::process::exit(2);
-    })
-});
+static CONFIG: LazyLock<Result<Config, LoadingError>> = LazyLock::new(Config::safe_load);

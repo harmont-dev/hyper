@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-const RECORDER_EXIT: i32 = 7;
+const RECORDER_EXIT: u8 = 7;
 
-fn main() {
+fn main() -> ExitCode {
     let dir: PathBuf = std::env::current_exe()
         .expect("own executable path")
         .parent()
@@ -16,5 +17,5 @@ fn main() {
     let environ = fs::read("/proc/self/environ").unwrap();
     fs::write(dir.join("environ.bin"), environ).unwrap();
 
-    std::process::exit(RECORDER_EXIT);
+    ExitCode::from(RECORDER_EXIT)
 }

@@ -1,12 +1,16 @@
-use super::{DevPath, Device, DmName, DmTable, Dmsetup, Origin, RemoveMode, RunError, ThinTable};
+use super::{
+    Device, DmName, DmTable, Dmsetup, NumberError, Origin, RemoveMode, RunError, ThinTable,
+};
 use crate::Access;
 use derive_more::{Display, Into};
+use hyperrs_fs::dev::DeviceNumber;
 use std::ffi::OsStr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Into)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(try_from = "u32"))]
 #[into(u64)]
 pub struct ThinId(u32);
 
@@ -26,6 +30,14 @@ impl ThinId {
     pub const MAX: u32 = (1 << 24) - 1;
 
     pub fn new(id: u32) -> Result<Self, ThinIdOutOfRange> {
+        Self::try_from(id)
+    }
+}
+
+impl TryFrom<u32> for ThinId {
+    type Error = ThinIdOutOfRange;
+
+    fn try_from(id: u32) -> Result<Self, ThinIdOutOfRange> {
         if id <= Self::MAX {
             Ok(Self(id))
         } else {
@@ -92,13 +104,29 @@ pub enum ThinPoolError {
 }
 
 #[derive(Debug, ThisError)]
+pub enum OpenThinError {
+    #[error(transparent)]
+    Run(#[from] RunError),
+    #[error("reading the pool's device number: {0}")]
+    Pool(#[from] NumberError),
+    #[error("{name} is not a thin device of this pool: {table:?}")]
+    NotAThin { name: DmName, table: String },
+    #[error(transparent)]
+    Id(#[from] ParseThinIdError),
+}
+
+#[derive(Debug, ThisError)]
 pub enum SnapshotError {
     #[error("suspending origin: {0}")]
     Suspend(#[source] RunError),
     #[error("sending create_snap: {0}")]
     CreateSnap(#[source] RunError),
-    #[error("resuming origin: {0}")]
-    Resume(#[source] RunError),
+    #[error("resuming origin: {source}")]
+    Resume {
+        created: bool,
+        #[source]
+        source: RunError,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +174,29 @@ impl<'a> ThinPool<'a> {
         })
     }
 
+    pub fn open_thin(&self, name: &DmName) -> Result<Thin<'a, Active<'a>>, OpenThinError> {
+        let dmsetup = self.device.dmsetup;
+        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
+        let pool = self.device.number()?;
+        let not_a_thin = || OpenThinError::NotAThin {
+            name: name.clone(),
+            table: table.clone(),
+        };
+        let [line] = table.lines().collect::<Vec<_>>()[..] else {
+            return Err(not_a_thin());
+        };
+        match line.split_whitespace().collect::<Vec<_>>()[..] {
+            [_, _, "thin", dev, id, ..] if dev.parse::<DeviceNumber>().ok() == Some(pool) => {
+                Ok(Thin {
+                    pool: self.clone(),
+                    id: id.parse()?,
+                    state: Active(dmsetup.device(name)),
+                })
+            }
+            _ => Err(not_a_thin()),
+        }
+    }
+
     pub fn create_snap(&self, id: ThinId, origin: ThinId) -> Result<(), RunError> {
         self.send(ThinMessage::CreateSnap { id, origin })
     }
@@ -187,13 +238,13 @@ impl<'a> Thin<'a, Inactive> {
         self,
         name: &DmName,
         sectors: u64,
-        origin: Option<DevPath>,
+        origin: Option<Origin>,
     ) -> Result<Thin<'a, Active<'a>>, RunError> {
         let table = DmTable::Thin(ThinTable {
             sectors,
             pool: self.pool.device.name().clone(),
             id: self.id,
-            origin: origin.map(Origin::Path),
+            origin,
         });
         let device = self
             .pool
@@ -219,10 +270,21 @@ impl<'a> Thin<'a, Active<'a>> {
 
     pub fn snapshot(&self, new_id: ThinId) -> Result<Thin<'a, Inactive>, SnapshotError> {
         let device = self.device();
-        device.suspend().map_err(SnapshotError::Suspend)?;
-        let snapped = self.pool.create_snap(new_id, self.id);
-        device.resume().map_err(SnapshotError::Resume)?;
-        snapped.map_err(SnapshotError::CreateSnap)?;
+        let snapped = device
+            .suspend()
+            .map_err(SnapshotError::Suspend)
+            .and_then(|()| {
+                self.pool
+                    .create_snap(new_id, self.id)
+                    .map_err(SnapshotError::CreateSnap)
+            });
+        if let Err(source) = device.resume().or_else(|_| device.resume()) {
+            return Err(SnapshotError::Resume {
+                created: snapped.is_ok(),
+                source,
+            });
+        }
+        snapped?;
         Ok(Thin {
             pool: self.pool.clone(),
             id: new_id,
@@ -243,7 +305,8 @@ impl<'a> Thin<'a, Active<'a>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Inactive, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage, ThinPoolError,
+        Inactive, OpenThinError, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage,
+        ThinPoolError,
     };
     use crate::dm::{DmName, Dmsetup};
     use assert_fs::fixture::ChildPath;
@@ -361,16 +424,29 @@ mod tests {
     }
 
     impl Fake {
-        fn new(table: &str, failing_message: &str) -> Self {
+        fn new(table: &str, failing: &[&str]) -> Self {
+            Self::with_tables(&[("*", table)], failing)
+        }
+
+        fn with_tables(tables: &[(&str, &str)], failing: &[&str]) -> Self {
             let dir = TempDir::new().unwrap();
             let log = dir.child("calls");
             let bin = dir.child("dmsetup");
+            let tables: String = tables
+                .iter()
+                .map(|(device, table)| format!("      {device}) printf '%b\\n' '{table}' ;;\n"))
+                .collect();
+            let failing: String = failing
+                .iter()
+                .map(|call| format!("[ \"$*\" = '{call}' ] && exit 1\n"))
+                .collect();
             let script = format!(
                 "#!/bin/sh\n\
                  printf '%s\\n' \"$*\" >> '{log}'\n\
+                 {failing}\
                  case \"$1\" in\n\
-                   table) printf '%s\\n' '{table}' ;;\n\
-                   message) [ \"$4\" = '{failing_message}' ] && exit 1 ;;\n\
+                   table) case \"$2\" in\n{tables}    esac ;;\n\
+                   info) printf '253:1\\n' ;;\n\
                  esac\n\
                  exit 0\n",
                 log = log.display(),
@@ -403,6 +479,22 @@ mod tests {
         matches!(r, Err(SnapshotError::CreateSnap(_)))
     }
 
+    fn suspend_failed(r: &Result<Thin<Inactive>, SnapshotError>) -> bool {
+        matches!(r, Err(SnapshotError::Suspend(_)))
+    }
+
+    fn resume_failed_after_create(r: &Result<Thin<Inactive>, SnapshotError>) -> bool {
+        matches!(r, Err(SnapshotError::Resume { created: true, .. }))
+    }
+
+    fn resume_failed_without_create(r: &Result<Thin<Inactive>, SnapshotError>) -> bool {
+        matches!(r, Err(SnapshotError::Resume { created: false, .. }))
+    }
+
+    const SUSPEND: &str = "suspend hyper-vol";
+    const SNAP: &str = "message hyper-pool 0 create_snap 2 1";
+    const RESUME: &str = "resume hyper-vol";
+
     #[rstest]
     #[case::linear("0 100 linear 7:0 0")]
     #[case::thin("0 100 thin /dev/mapper/hyper-pool 1")]
@@ -412,24 +504,32 @@ mod tests {
             eprintln!("SKIP thin_pool_refuses: needs root to own the fake dmsetup");
             return;
         }
-        let fake = Fake::new(table, "");
+        let fake = Fake::new(table, &[]);
         let got = fake.dmsetup.thin_pool(&name("hyper-x"));
         assert_matches!(got, Err(ThinPoolError::NotAThinPool { .. }));
         assert_eq!(fake.calls(), ["table hyper-x"]);
     }
 
     #[rstest]
-    #[case::create_snap_succeeds("", snapshot_of_id_2)]
-    #[case::create_snap_fails("create_snap 2 1", create_snap_failed)]
+    #[case::succeeds(&[], snapshot_of_id_2, &[SUSPEND, SNAP, RESUME])]
+    #[case::create_snap_fails(&[SNAP], create_snap_failed, &[SUSPEND, SNAP, RESUME])]
+    #[case::suspend_fails(&[SUSPEND], suspend_failed, &[SUSPEND, RESUME])]
+    #[case::resume_fails(&[RESUME], resume_failed_after_create, &[SUSPEND, SNAP, RESUME, RESUME])]
+    #[case::create_snap_and_resume_fail(
+        &[SNAP, RESUME],
+        resume_failed_without_create,
+        &[SUSPEND, SNAP, RESUME, RESUME]
+    )]
     fn snapshot_always_resumes_the_origin_as_root(
-        #[case] failing_message: &str,
+        #[case] failing: &[&str],
         #[case] expected: fn(&Result<Thin<Inactive>, SnapshotError>) -> bool,
+        #[case] frozen: &[&str],
     ) {
         if !is_root() {
             eprintln!("SKIP snapshot_always_resumes: needs root to own the fake dmsetup");
             return;
         }
-        let fake = Fake::new(POOL_TABLE, failing_message);
+        let fake = Fake::new(POOL_TABLE, failing);
         let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
         let active = pool
             .create_thin(ThinId::new(1).unwrap())
@@ -440,17 +540,7 @@ mod tests {
         let got = active.snapshot(ThinId::new(2).unwrap());
 
         assert!(expected(&got), "{got:?}");
-        assert_eq!(
-            fake.calls(),
-            [
-                "table hyper-pool",
-                "message hyper-pool 0 create_thin 1",
-                "create hyper-vol --table 0 100 thin /dev/mapper/hyper-pool 1",
-                "suspend hyper-vol",
-                "message hyper-pool 0 create_snap 2 1",
-                "resume hyper-vol",
-            ]
-        );
+        assert_eq!(fake.calls()[3..], *frozen);
     }
 
     #[rstest]
@@ -459,7 +549,7 @@ mod tests {
             eprintln!("SKIP delete_removes: needs root to own the fake dmsetup");
             return;
         }
-        let fake = Fake::new(POOL_TABLE, "");
+        let fake = Fake::new(POOL_TABLE, &[]);
         let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
         pool.create_thin(ThinId::new(1).unwrap())
             .unwrap()
@@ -473,6 +563,78 @@ mod tests {
         assert_eq!(
             fake.calls()[3..],
             ["remove --retry hyper-vol", "message hyper-pool 0 delete 1"]
+        );
+    }
+
+    #[rstest]
+    fn open_thin_reads_the_id_from_the_live_table_as_root() {
+        if !is_root() {
+            eprintln!("SKIP open_thin: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(
+            &[
+                ("hyper-pool", POOL_TABLE),
+                ("hyper-vol", "0 100 thin 253:1 7 253:4"),
+            ],
+            &[],
+        );
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        let snap = pool
+            .open_thin(&name("hyper-vol"))
+            .unwrap()
+            .snapshot(ThinId::new(8).unwrap())
+            .unwrap();
+
+        assert_eq!(snap.id(), ThinId::new(8).unwrap());
+        assert_eq!(
+            fake.calls()[1..],
+            [
+                "table hyper-vol",
+                "info -c --noheadings -o major,minor hyper-pool",
+                "suspend hyper-vol",
+                "message hyper-pool 0 create_snap 8 7",
+                "resume hyper-vol",
+            ]
+        );
+    }
+
+    #[rstest]
+    #[case::thin_of_another_pool("0 100 thin 253:9 7")]
+    #[case::linear("0 100 linear 7:0 0")]
+    #[case::pool_itself(POOL_TABLE)]
+    #[case::two_segments("0 100 thin 253:1 7\\n100 100 thin 253:1 8")]
+    #[case::no_id("0 100 thin 253:1")]
+    #[case::absent("")]
+    fn open_thin_refuses_anything_but_a_thin_of_this_pool_as_root(#[case] table: &str) {
+        if !is_root() {
+            eprintln!("SKIP open_thin refusal: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], &[]);
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        assert_matches!(
+            pool.open_thin(&name("hyper-vol")),
+            Err(OpenThinError::NotAThin { .. })
+        );
+    }
+
+    #[rstest]
+    #[case::not_a_number("0 100 thin 253:1 x")]
+    #[case::past_24_bits("0 100 thin 253:1 16777216")]
+    fn open_thin_refuses_an_invalid_id_as_root(#[case] table: &str) {
+        if !is_root() {
+            eprintln!("SKIP open_thin id: needs root to own the fake dmsetup");
+            return;
+        }
+        let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], &[]);
+        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+
+        assert_matches!(
+            pool.open_thin(&name("hyper-vol")),
+            Err(OpenThinError::Id(_))
         );
     }
 }

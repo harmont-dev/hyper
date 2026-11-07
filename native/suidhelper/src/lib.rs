@@ -7,7 +7,9 @@
 //! exercised by integration tests under `tests/`; `src/main.rs` is a thin entry
 //! point over these modules.
 
+pub mod cli;
 pub mod config;
+pub mod dm;
 pub mod id;
 pub mod insecure_mode;
-pub mod tools;
+pub mod network;

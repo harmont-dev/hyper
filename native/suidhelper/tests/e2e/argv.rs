@@ -13,7 +13,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run, stdout_json};
+use serde_json::{json, Value};
+use support::{is_root, run, run_args};
 
 /// Install a root-owned fake tool named `basename` that records its argv (minus
 /// argv[0]) into `record` as a JSON array, then exits 0 with valid stdout for
@@ -55,226 +56,85 @@ fn recorded_argv(record: &Path) -> Vec<String> {
     serde_json::from_str(&body).expect("argv json")
 }
 
-#[rstest]
-fn dmsetup_create_snapshot_reconstructs_canonical_table_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_create: needs root to acquire + own the fake bin");
-        return;
-    }
-    let tmp = TempDir::new().unwrap();
-    let base = fs::canonicalize(tmp.path()).unwrap();
-    let rec = base.join("argv.json");
-    let bin = install_fake(&base, "dmsetup", &rec, "");
-    let cfg = write_root_config_in(&base, &base, &[("dmsetup", &bin)]);
-    let cow = base.join("cow.img");
-    fs::File::create(&cow)
-        .unwrap()
-        .set_len(1024 * 1024)
-        .unwrap();
-
-    // Deliberately weird inner spacing; the helper must re-render canonically.
-    let table = format!(
-        "0   100  snapshot  /dev/mapper/hyper-img   {} P 8",
-        cow.display()
-    );
-    let out = run(
-        &cfg,
-        &[
-            "dmsetup",
-            "create",
-            "hyper-vm1",
-            "--readonly",
-            "--table",
-            &table,
-        ],
-    )
-    .success();
-
-    let json = stdout_json(&out);
-    let cow_loop = json["loops"]["cow"]
-        .as_str()
-        .expect("helper must report the loop it attached for the cow file");
-    assert!(cow_loop.starts_with("/dev/loop"), "cow loop: {cow_loop}");
-
-    let argv = recorded_argv(&rec);
-    assert_eq!(
-        argv,
-        vec![
-            "create".to_string(),
-            "hyper-vm1".to_string(),
-            "--readonly".to_string(),
-            "--table".to_string(),
-            format!("0 100 snapshot /dev/mapper/hyper-img {cow_loop} P 8"),
-        ],
-        "helper did not substitute the attached loop into the canonical table",
-    );
-}
-
 struct FakeDmsetup {
-    tmp: TempDir,
+    _tmp: TempDir,
+    base: PathBuf,
     rec: PathBuf,
 }
 
 impl FakeDmsetup {
     fn printing(&self, stdout_line: &str) -> PathBuf {
-        let bin = install_fake(self.tmp.path(), "dmsetup", &self.rec, stdout_line);
-        write_root_config(self.tmp.path(), &[("dmsetup", &bin)])
+        let bin = install_fake(&self.base, "dmsetup", &self.rec, stdout_line);
+        write_root_config_in(&self.base, &self.base, &[("dmsetup", &bin)])
+    }
+
+    fn ran(&self) -> bool {
+        self.rec.exists()
     }
 }
 
 #[fixture]
 fn fake() -> FakeDmsetup {
     let tmp = TempDir::new().unwrap();
-    let rec = tmp.path().join("argv.json");
-    FakeDmsetup { tmp, rec }
+    let base = fs::canonicalize(tmp.path()).unwrap();
+    let rec = base.join("argv.json");
+    FakeDmsetup {
+        _tmp: tmp,
+        base,
+        rec,
+    }
 }
 
 #[rstest]
-#[case::remove_retry("", &["remove", "--retry", "hyper-vm1"], &["remove", "--retry", "hyper-vm1"])]
-// the helper passes the whole message as a single argv element (dmsetup re-joins remaining args)
-#[case::message_create_thin(
-    "0 100 thin-pool 7:0 7:1 128 0 0",
-    &["message", "hyper-pool", "--message", "create_thin 7"],
-    &["message", "hyper-pool", "0", "create_thin 7"]
-)]
-fn dmsetup_argv_as_root(
-    fake: FakeDmsetup,
-    #[case] stdout_line: &str,
-    #[case] args: &[&str],
-    #[case] expected: &[&str],
-) {
+#[case::remove_once(json!({"op": "dm_remove", "name": "hyper-vm1", "retry": false}),
+    &["remove", "hyper-vm1"])]
+#[case::remove_retry(json!({"op": "dm_remove", "name": "hyper-vm1", "retry": true}),
+    &["remove", "--retry", "hyper-vm1"])]
+fn dm_remove_argv_as_root(fake: FakeDmsetup, #[case] request: Value, #[case] expected: &[&str]) {
     if !is_root() {
-        eprintln!("SKIP dmsetup_argv: needs root");
+        eprintln!("SKIP dm argv: needs root");
         return;
     }
-    let cfg = fake.printing(stdout_line);
+    let cfg = fake.printing("");
 
-    run(&cfg, &[&["dmsetup"], args].concat()).success();
+    run(&cfg, request).success();
     assert_eq!(recorded_argv(&fake.rec), expected);
 }
 
 #[rstest]
-#[case::targets("snapshot         v1.16.0", "targets", "targets", "snapshot v1.16.0\n")]
-#[case::ls(
-    "hyper-thinpool\\nhyper-rw-abc",
-    "ls",
-    "listed",
-    "hyper-thinpool\nhyper-rw-abc\n"
-)]
-fn dmsetup_listing_argv_and_parse_as_root(
-    fake: FakeDmsetup,
-    #[case] stdout_line: &str,
-    #[case] op: &str,
-    #[case] result: &str,
-    #[case] output: &str,
-) {
+fn dm_rejects_configured_bin_with_wrong_basename_as_root() {
     if !is_root() {
-        eprintln!("SKIP dmsetup_{op}: needs root");
-        return;
-    }
-    let cfg = fake.printing(stdout_line);
-
-    let out = run(&cfg, &["dmsetup", op]).success();
-    assert_eq!(recorded_argv(&fake.rec), vec![op]);
-    let json = stdout_json(&out);
-    assert_eq!(json["result"], result);
-    assert_eq!(json["output"], output);
-}
-
-#[rstest]
-fn dmsetup_rejects_configured_bin_with_wrong_basename_as_root() {
-    if !is_root() {
-        eprintln!("SKIP dmsetup_rejects_bin: needs root to own the config file");
+        eprintln!("SKIP dm_rejects_bin: needs root to own the config file");
         return;
     }
     let tmp = TempDir::new().unwrap();
     // A real, root-owned system file, but the wrong basename for `dmsetup`.
     let cfg = write_root_config(tmp.path(), &[("dmsetup", Path::new("/usr/bin/env"))]);
 
-    run(&cfg, &["dmsetup", "targets"])
-        .failure()
-        .stderr(contains("basename must be"));
-}
-
-struct LoopDevice(String);
-
-impl LoopDevice {
-    fn attach(backing: &Path) -> Self {
-        let out = std::process::Command::new("losetup")
-            .args(["--find", "--show"])
-            .arg(backing)
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        Self(String::from_utf8(out.stdout).unwrap().trim().to_string())
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new("losetup")
-            .args(["--detach", &self.0])
-            .status();
-    }
-}
-
-struct MapperDevice {
-    name: String,
-    _loop_dev: LoopDevice,
-}
-
-impl MapperDevice {
-    fn linear(loop_dev: LoopDevice, sectors: u64) -> Self {
-        let name = format!("hyper-e2e-getsz-{}", std::process::id());
-        let table = format!("0 {sectors} linear {} 0", loop_dev.0);
-        let out = std::process::Command::new("dmsetup")
-            .args(["create", &name, "--table", &table])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        Self {
-            name,
-            _loop_dev: loop_dev,
-        }
-    }
-
-    fn path(&self) -> String {
-        format!("/dev/mapper/{}", self.name)
-    }
-}
-
-impl Drop for MapperDevice {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new("dmsetup")
-            .args(["remove", "--retry", &self.name])
-            .status();
-    }
+    run(
+        &cfg,
+        json!({"op": "dm_remove", "name": "hyper-vm1", "retry": false}),
+    )
+    .failure()
+    .stderr(contains("basename must be"));
 }
 
 #[rstest]
-fn blockdev_getsz_reports_a_dm_devices_size_as_root() {
+#[case::no_request(&[])]
+#[case::two_requests(&[r#"{"op":"version"}"#, r#"{"op":"version"}"#])]
+#[case::legacy_subcommand(&["dmsetup", "ls"])]
+#[case::not_json(&["vm teardown --id v1"])]
+#[case::unknown_field(&[r#"{"op":"dm_remove","name":"hyper-vm1","retry":false,"table":"0 8 linear /dev/sda 0"}"#])]
+fn malformed_requests_exit_2_without_running_anything_as_root(
+    fake: FakeDmsetup,
+    #[case] args: &[&str],
+) {
     if !is_root() {
-        eprintln!("SKIP blockdev: needs root");
+        eprintln!("SKIP malformed request: needs root to own the config");
         return;
     }
-    let tmp = TempDir::new().unwrap();
-    let backing = tmp.path().join("backing");
-    fs::File::create(&backing)
-        .unwrap()
-        .set_len(3 * 1024 * 1024 + 512)
-        .unwrap();
-    let dev = MapperDevice::linear(LoopDevice::attach(&backing), 6145);
-    let cfg = write_root_config(tmp.path(), &[]);
+    let cfg = fake.printing("");
 
-    let out = run(&cfg, &["blockdev", "--getsz", &dev.path()]).success();
-    let json = stdout_json(&out);
-    assert_eq!(json["sectors"], 6145);
+    run_args(&cfg, args).code(2);
+    assert!(!fake.ran(), "dmsetup ran for {args:?}");
 }

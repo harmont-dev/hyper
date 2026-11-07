@@ -11,7 +11,11 @@ redundant_field_names = "allow"
 derive_more = { version = "2.1.1", features = ["display", "as_ref", "constructor", "into", "add", "debug"] }
 nix = { version = "0.29", features = ["user", "fs", "dir", "ioctl"] }
 ref-cast = "1.0.25"
+serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "1"
+
+[features]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 assert_fs = "1"

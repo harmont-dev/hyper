@@ -232,6 +232,11 @@ pub struct SafePath<A, S> {
 
 /// An owned [`SafePath`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize),
+    serde(try_from = "PathBuf", bound = "A: Absoluteness, S: Components")
+)]
 pub struct SafePathBuf<A, S>(PathBuf, PhantomData<(A, S)>);
 
 impl<A, S> SafePath<A, S> {
