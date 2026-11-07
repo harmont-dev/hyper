@@ -10,7 +10,7 @@ use super::Access;
 use derive_more::Constructor;
 pub use device::Device;
 use hyperrs_process::binary::RootSafeBin;
-pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError};
+pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError, SizeError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{

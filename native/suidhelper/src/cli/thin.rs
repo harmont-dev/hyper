@@ -1,10 +1,11 @@
-use crate::cli::dm::{self as dm_op, Created, DmError};
+use crate::cli::dm::{Created, DmError};
 use crate::cli::{MapperPath, Op};
+use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError, ThinId,
-    ThinPoolError, ThinPoolTable,
+    self, DevPath, DmTable, OpenThinError, Origin, RemoveMode, Role, RunError, SnapshotError,
+    ThinId, ThinPoolError, ThinPoolTable,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -87,7 +88,7 @@ impl Op for ThinPoolCreate {
             low_water: self.low_water,
         }))
         .map_err(DmError::from)?;
-        let dm = dm_op::dmsetup().map_err(DmError::from)?;
+        let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         {
             let _root = token.elevate()?;
             let _ = dm.device(&self.name).remove(RemoveMode::Retry);
@@ -98,12 +99,7 @@ impl Op for ThinPoolCreate {
                 .write_all(&[0; METADATA_HEADER_BYTES])
                 .map_err(ThinError::Zero)?;
         }
-        Ok(dm_op::create(
-            &self.name,
-            Access::ReadWrite,
-            table,
-            &mut token,
-        )?)
+        Ok(table.create(&self.name, Access::ReadWrite, &mut token)?)
     }
 }
 
@@ -112,9 +108,9 @@ impl Op for ThinVolumeCreate {
     type Error = ThinError;
 
     fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
-        let dm = dm_op::dmsetup().map_err(DmError::from)?;
+        let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         let _root = token.elevate()?;
-        let sectors = dm_op::device_sectors(&self.origin)?;
+        let sectors = self.origin.sectors().map_err(DmError::from)?;
         let pool = dm.thin_pool(&self.pool)?;
         let thin = match &self.parent {
             None => pool.create_thin(self.thin_id)?,
@@ -145,7 +141,7 @@ impl Op for ThinDestroy {
     type Error = ThinError;
 
     fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
-        let dm = dm_op::dmsetup().map_err(DmError::from)?;
+        let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         let _root = token.elevate()?;
         dm.thin_pool(&self.pool)?
             .open_thin(&self.name)?

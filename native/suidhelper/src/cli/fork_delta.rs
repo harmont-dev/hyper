@@ -1,4 +1,4 @@
-use crate::cli::dm::{self as dm_op, DmError};
+use crate::cli::dm::DmError;
 use crate::cli::MapperPath;
 use crate::cli::Op;
 use crate::config::Config;
@@ -9,8 +9,8 @@ use hyperrs_linux::dm::thin_dump::{
     self as dump, DumpError, MappingsError, MetadataDump, ParseError, ThinMappings,
 };
 use hyperrs_linux::dm::{
-    self, DevPath, OpenThinError, Origin, RemoveMode, RunError, SnapshotError, ThinId, ThinMessage,
-    ThinPool, ThinPoolError,
+    self, DevPath, DmTable, OpenThinError, Origin, Persistence, RemoveMode, RunError,
+    SnapshotError, SnapshotTable, ThinId, ThinMessage, ThinPoolError,
 };
 use hyperrs_linux::loopdev::LoopDevNum;
 use hyperrs_linux::Access;
@@ -102,16 +102,18 @@ impl Op for ThinForkDelta {
         let thin_dump = dump::ThinDump::new(config.thin_dump()?);
         let meta = self.meta.path()?;
         let origin = Origin::Device((*self.origin).clone());
-        let target = HyperDmTable::new(dm_op::snapshot_table(
-            origin.clone(),
-            self.cow.clone(),
-            self.chunk_sectors,
-        ))?;
+        let target = HyperDmTable::new(DmTable::Snapshot(SnapshotTable {
+            sectors: 0,
+            origin: origin.clone(),
+            cow: self.cow.clone(),
+            persistence: Persistence::Persistent,
+            chunk: self.chunk_sectors,
+        }))?;
         let scratch: HyperDmName = format!("hyper-scratch-{}", self.scratch_id).parse()?;
 
         {
             let _root = token.elevate()?;
-            let sectors = dm_op::device_sectors(&self.origin)?;
+            let sectors = self.origin.sectors().map_err(DmError::from)?;
             let pool = dmsetup.thin_pool(&self.pool)?;
             let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
@@ -127,9 +129,7 @@ impl Op for ThinForkDelta {
             }
         }
 
-        let copied = copy_scratch(
-            &self, &scratch, target, &dmsetup, &thin_dump, &meta, &mut token,
-        );
+        let copied = self.copy_scratch(&scratch, target, &dmsetup, &thin_dump, &meta, &mut token);
         let destroyed = {
             let _root = token.elevate()?;
             dmsetup
@@ -145,88 +145,78 @@ impl Op for ThinForkDelta {
     }
 }
 
-fn copy_scratch(
-    request: &ThinForkDelta,
-    scratch: &HyperDmName,
-    target: HyperDmTable,
-    dmsetup: &dm::Dmsetup,
-    thin_dump: &dump::ThinDump,
-    meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
-    token: &mut Unprivileged,
-) -> Result<CopyStats, ForkDeltaError> {
-    let (id, dumped) = {
-        let _root = token.elevate()?;
-        dump_reserved(dmsetup, thin_dump, &request.pool, meta, scratch)?
-    };
-    let mappings = dumped.parse()?.mappings(id)?;
+impl ThinForkDelta {
+    fn copy_scratch(
+        &self,
+        scratch: &HyperDmName,
+        target: HyperDmTable,
+        dmsetup: &dm::Dmsetup,
+        thin_dump: &dump::ThinDump,
+        meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
+        token: &mut Unprivileged,
+    ) -> Result<CopyStats, ForkDeltaError> {
+        let (id, dumped) = {
+            let _root = token.elevate()?;
+            self.dump_reserved(dmsetup, thin_dump, meta, scratch)?
+        };
+        let mappings = dumped.parse()?.mappings(id)?;
 
-    let target_name: HyperDmName = format!("hyper-copy-{id}").parse()?;
-    let mut src = {
-        let _root = token.elevate()?;
-        File::open(scratch.path().as_path())?
-    };
-    dm_op::create(&target_name, Access::ReadWrite, target, token)?;
-    let copied = copy_into(&target_name, &mut src, &mappings, token);
-    let removed = {
-        let _root = token.elevate()?;
-        dmsetup
-            .device(&target_name)
-            .remove(RemoveMode::Retry)
-            .map_err(ForkDeltaError::Remove)
-    };
-    let stats = copied?;
-    removed?;
-    Ok(stats)
-}
-
-fn copy_into(
-    target: &HyperDmName,
-    src: &mut File,
-    mappings: &ThinMappings,
-    token: &mut Unprivileged,
-) -> Result<CopyStats, ForkDeltaError> {
-    let mut dst = {
-        let _root = token.elevate()?;
-        OpenOptions::new()
-            .write(true)
-            .open(target.path().as_path())?
-    };
-    Ok(copy_ranges(src, &mut dst, mappings, CHUNK_BYTES)?)
-}
-
-fn dump_reserved(
-    dmsetup: &dm::Dmsetup,
-    thin_dump: &dump::ThinDump,
-    pool: &HyperDmName,
-    meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
-    src: &HyperDmName,
-) -> Result<(ThinId, MetadataDump), ForkDeltaError> {
-    let device = SafeFile::<IsBlockDevice, Any, Any>::open(meta, OpenFlags::RDONLY)?;
-    let lock_fd = device
-        .as_fd()
-        .try_clone_to_owned()
-        .map_err(ForkDeltaError::Lock)?;
-    let _lock = Flock::lock(lock_fd, FlockArg::LockExclusive)
-        .map_err(|(_, e)| ForkDeltaError::Lock(e.into()))?;
-    let pool = dmsetup.thin_pool(pool)?;
-    let id = pool.open_thin(src)?.id();
-    reserve(&pool)?;
-    let dumped = thin_dump.dump(&device, id);
-    let released = pool
-        .send(ThinMessage::ReleaseMetadataSnap)
-        .map_err(ForkDeltaError::Release);
-    let dumped = dumped?;
-    released?;
-    Ok((id, dumped))
-}
-
-fn reserve(pool: &ThinPool<'_>) -> Result<(), ForkDeltaError> {
-    if pool.send(ThinMessage::ReserveMetadataSnap).is_ok() {
-        return Ok(());
+        let target_name: HyperDmName = format!("hyper-copy-{id}").parse()?;
+        let mut src = {
+            let _root = token.elevate()?;
+            File::open(scratch.path().as_path())?
+        };
+        target.create(&target_name, Access::ReadWrite, token)?;
+        let copied = (|| {
+            let mut dst = {
+                let _root = token.elevate()?;
+                OpenOptions::new()
+                    .write(true)
+                    .open(target_name.path().as_path())?
+            };
+            Ok::<_, ForkDeltaError>(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
+        })();
+        let removed = {
+            let _root = token.elevate()?;
+            dmsetup
+                .device(&target_name)
+                .remove(RemoveMode::Retry)
+                .map_err(ForkDeltaError::Remove)
+        };
+        let stats = copied?;
+        removed?;
+        Ok(stats)
     }
-    let _ = pool.send(ThinMessage::ReleaseMetadataSnap);
-    pool.send(ThinMessage::ReserveMetadataSnap)
-        .map_err(ForkDeltaError::Reserve)
+
+    fn dump_reserved(
+        &self,
+        dmsetup: &dm::Dmsetup,
+        thin_dump: &dump::ThinDump,
+        meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
+        src: &HyperDmName,
+    ) -> Result<(ThinId, MetadataDump), ForkDeltaError> {
+        let device = SafeFile::<IsBlockDevice, Any, Any>::open(meta, OpenFlags::RDONLY)?;
+        let lock_fd = device
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(ForkDeltaError::Lock)?;
+        let _lock = Flock::lock(lock_fd, FlockArg::LockExclusive)
+            .map_err(|(_, e)| ForkDeltaError::Lock(e.into()))?;
+        let pool = dmsetup.thin_pool(&self.pool)?;
+        let id = pool.open_thin(src)?.id();
+        if pool.send(ThinMessage::ReserveMetadataSnap).is_err() {
+            let _ = pool.send(ThinMessage::ReleaseMetadataSnap);
+            pool.send(ThinMessage::ReserveMetadataSnap)
+                .map_err(ForkDeltaError::Reserve)?;
+        }
+        let dumped = thin_dump.dump(&device, id);
+        let released = pool
+            .send(ThinMessage::ReleaseMetadataSnap)
+            .map_err(ForkDeltaError::Release);
+        let dumped = dumped?;
+        released?;
+        Ok((id, dumped))
+    }
 }
 
 pub fn copy_ranges(

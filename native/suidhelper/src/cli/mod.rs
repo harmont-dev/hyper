@@ -77,47 +77,45 @@ pub enum RequestError {
     Json(#[from] serde_json::Error),
 }
 
-pub fn parse_request(mut args: impl Iterator<Item = OsString>) -> Result<Request, RequestError> {
-    let (Some(request), None) = (args.next(), args.next()) else {
-        return Err(RequestError::Arity);
-    };
-    let request = request.into_string().map_err(|_| RequestError::Utf8)?;
-    Ok(serde_json::from_str(&request)?)
-}
-
-pub fn run(token: Unprivileged) -> ExitCode {
-    let request = match parse_request(std::env::args_os().skip(1)) {
-        Ok(request) => request,
-        Err(e) => return fail(e),
-    };
-
-    // `version` is a pure self-report: it touches neither config nor privileges,
-    // so render it before any setup that could fail (e.g. a missing config file).
-    // Privileges are already dropped to the real uid by a pre-main constructor
-    // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
-    if !matches!(request, Request::Version(_)) {
-        if let Err(e) = Config::init() {
-            return fail(format!("hyper-suidhelper: {e}"));
-        }
+impl Request {
+    pub fn from_args(mut args: impl Iterator<Item = OsString>) -> Result<Self, RequestError> {
+        let (Some(request), None) = (args.next(), args.next()) else {
+            return Err(RequestError::Arity);
+        };
+        let request = request.into_string().map_err(|_| RequestError::Utf8)?;
+        Ok(serde_json::from_str(&request)?)
     }
 
-    match request.dispatch(token) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => fail(e),
-    }
-}
+    pub fn main(token: Unprivileged) -> ExitCode {
+        let output = Request::from_args(std::env::args_os().skip(1))
+            .map_err(|e| e.to_string())
+            .and_then(|request| {
+                // `version` is a pure self-report: it touches neither config nor privileges,
+                // so render it before any setup that could fail (e.g. a missing config file).
+                // Privileges are already dropped to the real uid by a pre-main constructor
+                // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
+                if !matches!(request, Request::Version(_)) {
+                    Config::init().map_err(|e| format!("hyper-suidhelper: {e}"))?;
+                }
+                request.dispatch(token)
+            });
 
-fn fail(e: impl Display) -> ExitCode {
-    eprintln!("{e}");
-    ExitCode::from(EXIT_FAILURE)
+        match output {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(EXIT_FAILURE)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_request, Request, RequestError};
+    use super::{Request, RequestError};
     use proptest::prelude::*;
     use rstest::rstest;
     use serde_json::{json, Value};
@@ -126,7 +124,7 @@ mod tests {
     use test_strategy::proptest;
 
     fn parse(request: &Value) -> Result<Request, RequestError> {
-        parse_request([OsString::from(request.to_string())].into_iter())
+        Request::from_args([OsString::from(request.to_string())].into_iter())
     }
 
     fn valid_requests() -> Vec<Value> {
@@ -274,7 +272,7 @@ mod tests {
     #[case::two_arguments(vec![r#"{"op":"version"}"#, r#"{"op":"version"}"#])]
     fn the_request_must_be_exactly_one_argument(#[case] args: Vec<&str>) {
         let args = args.into_iter().map(OsString::from);
-        assert!(matches!(parse_request(args), Err(RequestError::Arity)));
+        assert!(matches!(Request::from_args(args), Err(RequestError::Arity)));
     }
 
     #[rstest]
@@ -285,7 +283,7 @@ mod tests {
     #[case::empty("")]
     fn the_argument_must_be_exactly_one_json_object(#[case] raw: &str) {
         assert!(matches!(
-            parse_request([OsString::from(raw)].into_iter()),
+            Request::from_args([OsString::from(raw)].into_iter()),
             Err(RequestError::Json(_))
         ));
     }
@@ -294,7 +292,7 @@ mod tests {
     fn non_utf8_is_refused() {
         let raw = OsString::from_vec(b"{\"op\":\"version\xff\"}".to_vec());
         assert!(matches!(
-            parse_request([raw].into_iter()),
+            Request::from_args([raw].into_iter()),
             Err(RequestError::Utf8)
         ));
     }

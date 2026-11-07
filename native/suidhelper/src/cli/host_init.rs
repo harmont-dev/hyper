@@ -21,7 +21,7 @@ impl Op for HostInit {
     type Error = HostInitError;
 
     fn run(self, mut token: Unprivileged) -> Result<HostInitOut, HostInitError> {
-        network::host_init(&mut token)?;
+        network::host_init::HostInit::new()?.run(&mut token)?;
         Ok(HostInitOut::HostReady {
             hyper_base: Config::get().hyper_base().as_path().to_path_buf(),
         })

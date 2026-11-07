@@ -91,7 +91,7 @@ pub(super) fn resolve(
     Ok((plan, config.ip()?, config.nft()?, config.sysctl()?))
 }
 
-pub(super) struct Prepare {
+pub struct Prepare {
     plan: Plan,
     ip: RootSafeBin<"ip">,
     nft: RootSafeBin<"nft">,
@@ -99,7 +99,7 @@ pub(super) struct Prepare {
 }
 
 impl Prepare {
-    pub(super) fn new(uid: u32, vm_id: &VmId) -> Result<Self, NetworkPrepareError> {
+    pub fn new(uid: u32, vm_id: &VmId) -> Result<Self, NetworkPrepareError> {
         let (plan, ip, nft, sysctl) = resolve(uid, vm_id)?;
         Ok(Self {
             plan,
@@ -111,7 +111,7 @@ impl Prepare {
 }
 
 impl Prepare {
-    pub(super) fn run(&self, token: &mut Unprivileged) -> Result<(), NetworkPrepareError> {
+    pub fn run(&self, token: &mut Unprivileged) -> Result<(), NetworkPrepareError> {
         let commands = args::prepare_commands(
             &self.plan,
             &self.nft.fd_path().to_string_lossy(),

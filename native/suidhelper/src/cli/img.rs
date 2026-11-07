@@ -1,7 +1,10 @@
-use crate::cli::dm::{self as dm_op, Created, DmError};
+use crate::cli::dm::{Created, DmError};
 use crate::cli::Op;
+use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, NameError};
-use hyperrs_linux::dm::{DevPath, DmTable, LinearTable, Origin, RemoveMode, Role};
+use hyperrs_linux::dm::{
+    self, DevPath, DmTable, LinearTable, Origin, Persistence, RemoveMode, Role, SnapshotTable,
+};
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::Unprivileged;
 use serde::{Deserialize, Serialize};
@@ -38,19 +41,23 @@ impl Op for ImgActivate {
     fn run(self, mut token: Unprivileged) -> Result<ImgOut, ImgError> {
         let layers = self.layers()?;
         let sectors = match layers.first() {
-            Some((_, base)) => dm_op::file_sectors(base, Role::Origin)?,
+            Some((_, base)) => base.backing_sectors(Role::Origin)?,
             None => return Err(DmError::Unsized.into()),
         };
+        let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         let mut created: Vec<HyperDmName> = Vec::new();
         let mut device = PathBuf::new();
         for (name, table) in layers {
-            match dm_op::create_sized(&name, Access::ReadOnly, table, sectors, &mut token) {
+            match table.create_sized(&name, Access::ReadOnly, sectors, &mut token) {
                 Ok(Created { device: path, .. }) => {
                     device = path;
                     created.push(name);
                 }
                 Err(e) => {
-                    remove_all(&created, &mut token);
+                    let _root = token.elevate().map_err(DmError::from)?;
+                    for name in created.iter().rev() {
+                        let _ = dm.device(name).remove(RemoveMode::Retry);
+                    }
                     return Err(e.into());
                 }
             }
@@ -78,7 +85,13 @@ impl ImgActivate {
         let mut layers = Vec::with_capacity(self.deltas.len());
         for (idx, cow) in self.deltas.iter().enumerate() {
             let name = self.layer(idx + 1)?;
-            let table = dm_op::snapshot_table(origin, cow.clone(), self.chunk_sectors);
+            let table = DmTable::Snapshot(SnapshotTable {
+                sectors: 0,
+                origin,
+                cow: cow.clone(),
+                persistence: Persistence::Persistent,
+                chunk: self.chunk_sectors,
+            });
             layers.push((
                 name.clone(),
                 HyperDmTable::new(table).map_err(DmError::from)?,
@@ -90,13 +103,5 @@ impl ImgActivate {
 
     fn layer(&self, idx: usize) -> Result<HyperDmName, NameError> {
         format!("{}-{idx}", self.name).parse()
-    }
-}
-
-fn remove_all(names: &[HyperDmName], token: &mut Unprivileged) {
-    let Ok(dm) = dm_op::dmsetup() else { return };
-    let Ok(_root) = token.elevate() else { return };
-    for name in names.iter().rev() {
-        let _ = dm.device(name).remove(RemoveMode::Retry);
     }
 }

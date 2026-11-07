@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Spawn a jailer instance.
 
-use super::teardown::{self, TeardownError};
+use super::teardown::{Teardown, TeardownError};
 use super::VmOut;
 use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config};
@@ -77,10 +77,10 @@ impl Op for Launch {
         let api_sock =
             SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
 
-        teardown::teardown(&self.id, Some(self.uid), &mut token)?;
+        Teardown::new(self.id.clone(), Some(self.uid)).teardown(&mut token)?;
 
         if netns.is_some() {
-            network::prepare(&self.id, self.uid, &mut token)?;
+            network::prepare::Prepare::new(self.uid, &self.id)?.run(&mut token)?;
         }
 
         {

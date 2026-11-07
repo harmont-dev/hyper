@@ -17,8 +17,6 @@ pub mod teardown;
 pub mod teardown_orphan;
 
 use crate::config::Network;
-use hyperrs_firecracker::VmId;
-use hyperrs_process::privilege::Unprivileged;
 use thiserror::Error as ThisError;
 
 /// `[network]` is absent from config, i.e. VM networking is disabled.
@@ -42,32 +40,4 @@ pub enum TeardownError {
     Planned(#[from] teardown::NetworkTeardownError),
     #[error(transparent)]
     Orphan(#[from] teardown_orphan::OrphanTeardownError),
-}
-
-pub fn prepare(
-    vm_id: &VmId,
-    uid: u32,
-    token: &mut Unprivileged,
-) -> Result<(), prepare::NetworkPrepareError> {
-    prepare::Prepare::new(uid, vm_id)?.run(token)
-}
-
-pub fn teardown(
-    vm_id: &VmId,
-    uid: Option<u32>,
-    token: &mut Unprivileged,
-) -> Result<(), TeardownError> {
-    match uid {
-        Some(uid) => teardown::Teardown::new(uid, vm_id)?.run(token)?,
-        None => teardown_orphan::TeardownOrphan::new(vm_id)?.run(token)?,
-    }
-    Ok(())
-}
-
-pub fn host_init(token: &mut Unprivileged) -> Result<(), host_init::HostInitError> {
-    host_init::HostInit::new()?.run(token)
-}
-
-pub fn enabled() -> bool {
-    crate::config::Config::get().network().is_some()
 }

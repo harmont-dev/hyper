@@ -17,6 +17,7 @@ use super::VmOut;
 use crate::cli::Op;
 use crate::config::Config;
 use crate::network;
+use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file;
@@ -60,7 +61,7 @@ pub enum CgroupError {
     Remove(#[source] Errno),
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Constructor)]
 #[serde(deny_unknown_fields)]
 pub struct Teardown {
     id: VmId,
@@ -72,56 +73,58 @@ impl Op for Teardown {
     type Error = TeardownError;
 
     fn run(self, mut token: Unprivileged) -> Result<VmOut, TeardownError> {
-        let Teardown { id, uid } = self;
-        teardown(&id, uid, &mut token)?;
+        self.teardown(&mut token)?;
         Ok(VmOut::ToreDown)
     }
 }
 
-pub fn teardown(
-    id: &VmId,
-    uid: Option<u32>,
-    token: &mut Unprivileged,
-) -> Result<(), TeardownError> {
-    let jail = remove_jail(id, token).map_err(TeardownError::from);
-    let net = if network::enabled() {
-        network::teardown(id, uid, token).map_err(TeardownError::from)
-    } else {
-        Ok(())
-    };
-    jail.and(net)
-}
+impl Teardown {
+    pub fn teardown(&self, token: &mut Unprivileged) -> Result<(), TeardownError> {
+        let config = Config::get();
+        let jail = (|| {
+            let cgroup_parent = config.parent_cgroup_dir();
+            let jail_base = config.jail_base();
+            let layout = JailLayout::new(&jail_base, &self.id);
+            let _root = token.elevate()?;
+            // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
+            // chroot teardown below is not yanking files out from under a live process.
+            self.remove_cgroup(&cgroup_parent)?;
+            Ok::<_, JailRemoveError>(layout.remove()?)
+        })()
+        .map_err(TeardownError::from);
+        let net = match (config.network(), self.uid) {
+            (None, _) => Ok(()),
+            (Some(_), Some(uid)) => network::teardown::Teardown::new(uid, &self.id)
+                .and_then(|net| net.run(token))
+                .map_err(|e| TeardownError::Network(e.into())),
+            (Some(_), None) => network::teardown_orphan::TeardownOrphan::new(&self.id)
+                .and_then(|net| net.run(token))
+                .map_err(|e| TeardownError::Network(e.into())),
+        };
+        jail.and(net)
+    }
 
-fn remove_jail(id: &VmId, token: &mut Unprivileged) -> Result<(), JailRemoveError> {
-    let config = Config::get();
-    let cgroup_parent = config.parent_cgroup_dir();
-    let jail_base = config.jail_base();
-    let layout = JailLayout::new(&jail_base, id);
-    let _root = token.elevate()?;
-    // Cgroup first: it SIGKILLs any firecracker still alive in the leaf, so the
-    // chroot teardown below is not yanking files out from under a live process.
-    remove_cgroup(&cgroup_parent, id)?;
-    Ok(layout.remove()?)
-}
-
-/// SIGKILL any process still in the per-VM cgroup leaf (via `cgroup.kill`), then
-/// `rmdir` it, fd-relative after an `O_NOFOLLOW` walk from `base`. `--cgroup` must
-/// be at least two components below `base` (one or more parents, plus the leaf).
-/// Idempotent: a missing leaf is success, and a leaf that has not finished
-/// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
-pub fn remove_cgroup(parent: &LexicalPath, id: &VmId) -> Result<(), CgroupError> {
-    let cgroup = match Cgroup::open(&parent.join(id)) {
-        Ok(cgroup) => cgroup,
-        Err(cgroup::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => return Ok(()),
-        Err(e) => return Err(CgroupError::Open(e)),
-    };
-    cgroup.kill_procs(KILL_TIMEOUT).map_err(CgroupError::Kill)?;
-    cgroup.remove().map_err(CgroupError::Remove)
+    /// SIGKILL any process still in the per-VM cgroup leaf (via `cgroup.kill`), then
+    /// `rmdir` it, fd-relative after an `O_NOFOLLOW` walk from `base`. `--cgroup` must
+    /// be at least two components below `base` (one or more parents, plus the leaf).
+    /// Idempotent: a missing leaf is success, and a leaf that has not finished
+    /// draining after the kill (`EBUSY`/`ENOTEMPTY`) is left for a later sweep.
+    pub fn remove_cgroup(&self, parent: &LexicalPath) -> Result<(), CgroupError> {
+        let cgroup = match Cgroup::open(&parent.join(&self.id)) {
+            Ok(cgroup) => cgroup,
+            Err(cgroup::OpenError::Open(file::ValidationError::Open(Errno::ENOENT))) => {
+                return Ok(())
+            }
+            Err(e) => return Err(CgroupError::Open(e)),
+        };
+        cgroup.kill_procs(KILL_TIMEOUT).map_err(CgroupError::Kill)?;
+        cgroup.remove().map_err(CgroupError::Remove)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::remove_cgroup;
+    use super::Teardown;
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
     use hyperrs_firecracker::VmId;
@@ -138,9 +141,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let id: VmId = "id".parse().unwrap();
         let parent = tmp.child("hyper");
-        remove_cgroup(&strict(&parent), &id).expect("missing parent must be Ok");
+        let teardown = Teardown::new(id, None);
+        teardown
+            .remove_cgroup(&strict(&parent))
+            .expect("missing parent must be Ok");
         parent.create_dir_all().unwrap();
-        remove_cgroup(&strict(&parent), &id).expect("missing leaf must be Ok");
+        teardown
+            .remove_cgroup(&strict(&parent))
+            .expect("missing leaf must be Ok");
         assert!(parent.exists(), "cgroup parent must survive");
     }
 }

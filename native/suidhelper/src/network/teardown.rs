@@ -18,14 +18,14 @@ pub enum NetworkTeardownError {
     Privilege(#[from] PrivilegeError),
 }
 
-pub(super) struct Teardown {
+pub struct Teardown {
     plan: super::addr::Plan,
     ip: RootSafeBin<"ip">,
     nft: RootSafeBin<"nft">,
 }
 
 impl Teardown {
-    pub(super) fn new(uid: u32, vm_id: &VmId) -> Result<Self, NetworkTeardownError> {
+    pub fn new(uid: u32, vm_id: &VmId) -> Result<Self, NetworkTeardownError> {
         // Teardown only deletes the netns/veth (no in-netns sysctl), so the
         // resolved sysctl path is unused here.
         let (plan, ip, nft, _sysctl) = prepare::resolve(uid, vm_id)?;
@@ -34,7 +34,7 @@ impl Teardown {
 }
 
 impl Teardown {
-    pub(super) fn run(&self, token: &mut Unprivileged) -> Result<(), NetworkTeardownError> {
+    pub fn run(&self, token: &mut Unprivileged) -> Result<(), NetworkTeardownError> {
         let commands = args::teardown_commands(&self.plan);
         let root = token.elevate()?;
         exec::run_all(&commands, &root, &[], |which| match which {

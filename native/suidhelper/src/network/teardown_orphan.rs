@@ -40,13 +40,13 @@ pub enum OrphanTeardownError {
     Privilege(#[from] PrivilegeError),
 }
 
-pub(super) struct TeardownOrphan {
+pub struct TeardownOrphan {
     netns: String,
     ip: RootSafeBin<"ip">,
 }
 
 impl TeardownOrphan {
-    pub(super) fn new(vm_id: &VmId) -> Result<Self, OrphanTeardownError> {
+    pub fn new(vm_id: &VmId) -> Result<Self, OrphanTeardownError> {
         let config = Config::get();
         super::resolve_network(config.network())?;
         Ok(Self {
@@ -57,7 +57,7 @@ impl TeardownOrphan {
 }
 
 impl TeardownOrphan {
-    pub(super) fn run(&self, token: &mut Unprivileged) -> Result<(), OrphanTeardownError> {
+    pub fn run(&self, token: &mut Unprivileged) -> Result<(), OrphanTeardownError> {
         let commands = args::teardown_orphan_commands(&self.netns);
         let _root = token.elevate()?;
         run_idempotent(&commands, &self.ip)

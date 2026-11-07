@@ -48,14 +48,14 @@ pub fn ip_forward_enabled(contents: &str) -> bool {
     contents.trim() == "1"
 }
 
-pub(super) struct HostInit {
+pub struct HostInit {
     uplink: String,
     clone_pool: String,
     nft: RootSafeBin<"nft">,
 }
 
 impl HostInit {
-    pub(super) fn new() -> Result<Self, HostInitError> {
+    pub fn new() -> Result<Self, HostInitError> {
         let config = Config::get();
         let network = super::resolve_network(config.network())?;
         Ok(Self {
@@ -73,7 +73,7 @@ impl HostInit {
 }
 
 impl HostInit {
-    pub(super) fn run(&self, token: &mut Unprivileged) -> Result<(), HostInitError> {
+    pub fn run(&self, token: &mut Unprivileged) -> Result<(), HostInitError> {
         let ip_forward =
             std::fs::read_to_string(IP_FORWARD_PATH).map_err(HostInitError::IpForwardRead)?;
         if !ip_forward_enabled(&ip_forward) {
