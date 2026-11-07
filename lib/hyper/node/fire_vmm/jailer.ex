@@ -131,11 +131,18 @@ defmodule Hyper.Node.FireVMM.Jailer do
   @decorate with_span("Hyper.Node.FireVMM.Jailer.test_system", include: [:result])
   def test_system, do: Checks.run()
 
-  @spec command(FireVMM.Opts.t()) :: t()
-  def command(opts) do
+  @spec command(FireVMM.Opts.t(), Path.t()) :: t()
+  def command(opts, rootfs_device) do
     request =
       Map.merge(
-        %{op: "vm_launch", id: opts.vm_id, uid: opts.uid, gid: opts.gid},
+        %{
+          op: "vm_launch",
+          id: opts.vm_id,
+          uid: opts.uid,
+          gid: opts.gid,
+          kernel: opts.kernel,
+          device: rootfs_device
+        },
         opts.type |> Instance.spec() |> Instance.Spec.cgroup_v2()
       )
 

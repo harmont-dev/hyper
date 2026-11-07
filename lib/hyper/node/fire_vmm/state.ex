@@ -240,22 +240,15 @@ defmodule Hyper.Node.FireVMM.State do
     def handle(
           :state_timeout,
           :configure,
-          %{opts: %Opts{vm_id: id, uid: uid, gid: gid}, spec: spec} = data
+          %{opts: %Opts{vm_id: id}, spec: spec} = data
         ) do
-      case ChrootJail.stage(id, uid, gid, spec) do
-        {:ok, jailed_spec} ->
-          case configure_devices(id, jailed_spec) do
-            :ok ->
-              do_grant_vsock(id, data)
-
-            {:error, reason} ->
-              Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
-              {:stop, {:shutdown, {:boot_failed, reason}}, data}
-          end
+      case configure_devices(id, ChrootJail.jailify(spec)) do
+        :ok ->
+          do_grant_vsock(id, data)
 
         {:error, reason} ->
-          Logger.error("vm #{id}: boot failed staging jail: #{inspect(reason)}")
-          {:stop, {:shutdown, {:boot_failed, {:staging, reason}}}, data}
+          Logger.error("vm #{id}: boot failed applying config: #{inspect(reason)}")
+          {:stop, {:shutdown, {:boot_failed, reason}}, data}
       end
     end
 

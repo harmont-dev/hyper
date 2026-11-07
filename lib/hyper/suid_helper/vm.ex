@@ -7,25 +7,6 @@ defmodule Hyper.SuidHelper.Vm do
 
   @type err :: SuidHelper.err()
 
-  @doc """
-  Prepare `chroot_root`'s boot artifacts: stage the `kernel` file in and `mknod`
-  a node mirroring the rootfs `device`, both owned `uid:gid`. The helper places
-  them at the fixed in-jail names (`/vmlinux`, `/rootfs`) and reads the device's
-  major:minor itself.
-  """
-  @spec stage(Hyper.Vm.Id.t(), Path.t(), Path.t(), non_neg_integer(), non_neg_integer()) ::
-          :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.stage", include: [:vm_id, :device])
-  def stage(vm_id, kernel, device, uid, gid) do
-    run(%{op: "vm_stage", id: vm_id, kernel: kernel, device: device, uid: uid, gid: gid})
-  end
-
-  @spec prepare(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.prepare", include: [:vm_id, :uid])
-  def prepare(vm_id, uid) do
-    run(%{op: "vm_prepare", id: vm_id, uid: uid})
-  end
-
   @spec teardown(Hyper.Vm.Id.t(), non_neg_integer() | nil) :: :ok | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Vm.teardown", include: [:vm_id, :uid])
   def teardown(vm_id, uid) do

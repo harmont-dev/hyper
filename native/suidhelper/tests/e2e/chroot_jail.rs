@@ -16,9 +16,8 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use serde_json::json;
 use std::fs;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod support;
 use support::{is_root, run, stdout_json};
@@ -36,89 +35,15 @@ fn write_config(dir: &Path, work_dir: &Path, tables: &str) -> PathBuf {
     p
 }
 
-fn setup_loop(tmp: &Path) -> Option<PathBuf> {
-    let backing = tmp.join("backing.img");
-    let f = fs::File::create(&backing).ok()?;
-    f.set_len(1024 * 1024).ok()?;
-    let out = Command::new("losetup")
-        .args(["--find", "--show"])
-        .arg(&backing)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let dev = String::from_utf8(out.stdout).ok()?.trim().to_string();
-    if dev.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(dev))
-    }
-}
-
-fn teardown_loop(dev: &Path) {
-    let _ = Command::new("losetup").arg("-d").arg(dev).output();
-}
-
-struct MapperDev {
-    loop_dev: PathBuf,
-    name: String,
-}
-
-impl MapperDev {
-    fn setup(tmp: &Path, test: &str) -> Option<Self> {
-        let loop_dev = setup_loop(tmp)?;
-        let name = format!("hyper-e2e-{test}-{}", std::process::id());
-        let table = format!("0 2048 linear {} 0", loop_dev.display());
-        let created = Command::new("dmsetup")
-            .args(["create", &name, "--table", &table])
-            .status()
-            .is_ok_and(|status| status.success());
-        if !created {
-            teardown_loop(&loop_dev);
-            return None;
-        }
-        Some(Self { loop_dev, name })
-    }
-
-    fn path(&self) -> String {
-        format!("/dev/mapper/{}", self.name)
-    }
-}
-
-impl Drop for MapperDev {
-    fn drop(&mut self) {
-        let _ = Command::new("dmsetup")
-            .args(["remove", "--retry", &self.name])
-            .output();
-        teardown_loop(&self.loop_dev);
-    }
-}
-
 struct Work {
     tmp: TempDir,
     dir: PathBuf,
     chroot: PathBuf,
-    kernel: PathBuf,
 }
 
 impl Work {
     fn config(&self, tables: &str) -> PathBuf {
         write_config(self.tmp.path(), &self.dir, tables)
-    }
-
-    fn prepare(&self, cfg: &Path, device: &str, uid: u32, gid: u32) -> assert_cmd::assert::Assert {
-        run(
-            cfg,
-            json!({
-                "op": "vm_stage",
-                "id": "id",
-                "kernel": self.kernel,
-                "device": device,
-                "uid": uid,
-                "gid": gid,
-            }),
-        )
     }
 }
 
@@ -127,107 +52,11 @@ fn work() -> Work {
     let tmp = TempDir::new().unwrap();
     let chroot = tmp.child("srv/jails/firecracker/id/root");
     chroot.create_dir_all().unwrap();
-    let kernel = tmp.child("srv/vmlinux-src");
-    kernel.write_binary(b"kernel image").unwrap();
     Work {
         dir: tmp.child("srv").to_path_buf(),
         chroot: chroot.to_path_buf(),
-        kernel: kernel.to_path_buf(),
         tmp,
     }
-}
-
-// `vm stage` stages the kernel and creates the rootfs node, exiting 0
-// with {"result":"staged"}.
-#[rstest]
-fn prepare_succeeds_and_builds_jail_as_root(work: Work) {
-    if !is_root() {
-        eprintln!("SKIP prepare_succeeds_and_builds_jail: needs root");
-        return;
-    }
-    let cfg = work.config("");
-
-    let Some(dev) = MapperDev::setup(work.tmp.path(), "prepare") else {
-        eprintln!("SKIP prepare: losetup/dmsetup unavailable");
-        return;
-    };
-
-    let out = work.prepare(&cfg, &dev.path(), 900_000, 900_000);
-    let dev_rdev = fs::metadata(dev.path()).map(|m| m.rdev());
-    drop(dev);
-
-    let json = stdout_json(&out.success());
-    assert_eq!(json["result"], "staged");
-    assert_eq!(
-        fs::read(work.chroot.join("vmlinux")).unwrap(),
-        b"kernel image"
-    );
-    assert_eq!(
-        fs::metadata(work.chroot.join("rootfs")).unwrap().rdev(),
-        dev_rdev.unwrap(),
-    );
-}
-
-// `vm stage` against a config with `[network]` set also mknods
-// `dev/net/tun` into the jail: char device 10:200, mode 0666, owned uid:gid.
-#[rstest]
-fn prepare_creates_tun_node_when_networking_enabled_as_root(work: Work) {
-    if !is_root() {
-        eprintln!("SKIP prepare_creates_tun_node_when_networking_enabled: needs root");
-        return;
-    }
-    let cfg = work.config("[network]\nuplink = \"eth0\"\n");
-
-    let Some(dev) = MapperDev::setup(work.tmp.path(), "tun") else {
-        eprintln!("SKIP prepare_creates_tun_node: losetup/dmsetup unavailable");
-        return;
-    };
-
-    let uid = 900_001;
-    let gid = 900_002;
-    let out = work.prepare(&cfg, &dev.path(), uid, gid);
-    drop(dev);
-    out.success();
-
-    let tun = work.chroot.join("dev").join("net").join("tun");
-    let meta = fs::metadata(&tun).expect("dev/net/tun must exist");
-    assert!(meta.file_type().is_char_device(), "must be a char device");
-    assert_eq!(nix::sys::stat::major(meta.rdev()), 10);
-    assert_eq!(nix::sys::stat::minor(meta.rdev()), 200);
-    assert_eq!(meta.uid(), uid);
-    assert_eq!(meta.gid(), gid);
-    assert_eq!(meta.permissions().mode() & 0o777, 0o666);
-}
-
-#[rstest]
-#[case::root_uid(0, 900_000)]
-#[case::root_gid(900_000, 0)]
-#[case::uid_below_range(1000, 900_000)]
-#[case::gid_above_range(900_000, 1_000_000)]
-fn prepare_refuses_ids_outside_range_as_root(work: Work, #[case] uid: u32, #[case] gid: u32) {
-    if !is_root() {
-        eprintln!("SKIP prepare_refuses_ids_outside_range: needs root");
-        return;
-    }
-    let cfg = work.config("");
-
-    work.prepare(&cfg, "/dev/mapper/hyper-unused", uid, gid)
-        .code(2)
-        .stderr(predicates::str::contains("outside the configured range"));
-    assert!(
-        !work.chroot.join("vmlinux").exists(),
-        "nothing may be staged"
-    );
-}
-
-// `vm stage` with a system device (not a loop / hyper-* dm) is
-// rejected by BlockDev parsing at request parse time — exit 2, nothing built. This
-// case needs no root (parsing rejects before the privilege boundary) but also no
-// device, so it always runs.
-#[rstest]
-fn prepare_rejects_system_device_operand(work: Work) {
-    let cfg = work.config("");
-    work.prepare(&cfg, "/dev/sda", 900_000, 900_000).failure();
 }
 
 // `vm teardown` of a real chroot succeeds; the cgroup leaf is given as a

@@ -11,16 +11,21 @@
 //! live in [`hyperrs_firecracker::jailer`]; this module is only the clap surface plus
 //! the trusted-config resolution that feeds them.
 
+use super::teardown::{self, TeardownError};
 use super::VmOut;
-use crate::cli::Op;
+use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config};
-use crate::id::IdError;
-use hyperrs_firecracker::jailer::chroot::JailLayout;
+use crate::dm::HyperDmName;
+use crate::id::{IdError, JailOwner};
+use crate::network::{self, prepare::NetworkPrepareError};
+use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
 use hyperrs_firecracker::jailer::{CgroupLimits, CpuMax, Jailer};
 use hyperrs_firecracker::VmId;
-use hyperrs_fs::path::{SafePath, StrictComponent};
+use hyperrs_fs::dir::DirError;
+use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
+use hyperrs_linux::dm::OpenDeviceError;
 use hyperrs_linux::netns;
-use hyperrs_process::privilege::Unprivileged;
+use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use std::convert::Infallible;
@@ -28,26 +33,39 @@ use std::num::NonZeroU64;
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
-pub enum JailerError {
+pub enum LaunchError {
     #[error(transparent)]
     Bin(#[from] BinError),
     #[error(transparent)]
-    Jail(#[from] hyperrs_firecracker::VmIdError),
-    #[error(transparent)]
     Id(#[from] IdError),
+    #[error(transparent)]
+    Kernel(#[from] KernelError),
+    #[error(transparent)]
+    Teardown(#[from] TeardownError),
+    #[error(transparent)]
+    Network(#[from] NetworkPrepareError),
+    #[error("creating the jail root: {0}")]
+    Root(#[from] DirError),
+    #[error("opening rootfs device: {0}")]
+    Device(#[from] OpenDeviceError),
+    #[error(transparent)]
+    Build(#[from] BuildError),
+    #[error(transparent)]
+    Privilege(#[from] PrivilegeError),
 }
 
 #[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Launch {
-    /// Microvm id; becomes the chroot subdirectory name.
     #[serde_as(as = "DisplayFromStr")]
     id: VmId,
-    /// Unprivileged uid the jailer drops to (rejected if 0 or out of range).
     uid: u32,
-    /// Unprivileged gid the jailer drops to (rejected if 0 or out of range).
     gid: u32,
+    #[serde_as(as = "DisplayFromStr")]
+    kernel: SafePathBuf<IsAbsolute, StrictComponents>,
+    #[serde_as(as = "MapperPath")]
+    device: HyperDmName,
     memory_max: Option<NonZeroU64>,
     cpu_max: Option<CpuMaxArgs>,
 }
@@ -73,21 +91,16 @@ impl From<CpuMaxArgs> for CpuMax {
     }
 }
 
-/// Validate the caller's args against trusted config, then hand off to
-/// [`Jailer::invoke`], which permanently becomes root and `execve`s the jailer.
-/// On success this never returns (the process image is replaced); the `Ok` arm
-/// is therefore [`std::convert::Infallible`]. Every failure is returned as
-/// [`JailerError`] for the caller to print and exit non-zero.
 impl Op for Launch {
     type Output = VmOut;
-    type Error = JailerError;
+    type Error = LaunchError;
 
-    fn run(self, token: Unprivileged) -> Result<VmOut, JailerError> {
-        try_run(self, token).map(|never| match never {})
+    fn run(self, token: Unprivileged) -> Result<VmOut, LaunchError> {
+        launch(self, token).map(|never| match never {})
     }
 }
 
-fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError> {
+fn launch(args: Launch, mut token: Unprivileged) -> Result<Infallible, LaunchError> {
     let config = Config::get();
 
     // Resolve everything that can fail as the REAL uid, before any privilege is
@@ -99,6 +112,7 @@ fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError>
 
     let uid = range.uid(args.uid)?;
     let gid = range.gid(args.gid)?;
+    let kernel = KernelImage::open(&args.kernel)?;
 
     // The netns path is derived entirely from trusted config (whether VM
     // networking is enabled) and the already-validated `--id` — the caller
@@ -111,6 +125,21 @@ fn try_run(args: Launch, token: Unprivileged) -> Result<Infallible, JailerError>
     let layout = JailLayout::new(&jail_base, &args.id);
     let api_sock =
         SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
+
+    teardown::teardown(&args.id, Some(args.uid), &mut token)?;
+    if netns.is_some() {
+        network::prepare(&args.id, args.uid, &mut token)?;
+    }
+    {
+        let _root = token.elevate()?;
+        let device = args.device.open()?;
+        layout
+            .create_root()?
+            .builder(JailOwner { uid, gid }.into())
+            .kernel(&kernel)
+            .rootfs(&device)
+            .build()?;
+    }
 
     Jailer::builder()
         .jailer(&jailer)
@@ -139,7 +168,13 @@ mod tests {
     use serde_json::{json, Value};
 
     fn parse(id: &str, extra: Value) -> Result<Launch, serde_json::Error> {
-        let mut request = json!({"id": id, "uid": 900_001, "gid": 900_001});
+        let mut request = json!({
+            "id": id,
+            "uid": 900_001,
+            "gid": 900_001,
+            "kernel": "/srv/hyper/vmlinux",
+            "device": "/dev/mapper/hyper-vm1",
+        });
         request
             .as_object_mut()
             .unwrap()

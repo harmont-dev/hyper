@@ -18,6 +18,8 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   # Stub the cached TOML so firecracker/jailer resolve to dummy paths without
   # requiring /etc/hyper/config.toml on the test host. async: false because the
   # cache is global state.
+  @rootfs "/dev/mapper/hyper-vjailertest"
+
   setup do
     Hyper.Cfg.Toml.put_cache(%{
       "tools" => %{
@@ -43,23 +45,30 @@ defmodule Hyper.Node.FireVMM.JailerTest do
   end
 
   test "binary is the suid helper" do
-    assert Jailer.command(micro_opts()).binary == Hyper.Cfg.Tools.suidhelper()
+    assert Jailer.command(micro_opts(), @rootfs).binary == Hyper.Cfg.Tools.suidhelper()
   end
 
   defp request do
-    %{args: [json]} = Jailer.command(micro_opts())
+    %{args: [json]} = Jailer.command(micro_opts(), @rootfs)
     Jason.decode!(json)
   end
 
-  test "args are a single vm_launch request carrying the opts ids" do
-    assert %{"op" => "vm_launch", "id" => @vm_id, "uid" => 900_001, "gid" => 900_001} = request()
+  test "args are a single vm_launch request carrying the ids and boot artifacts" do
+    assert %{
+             "op" => "vm_launch",
+             "id" => @vm_id,
+             "uid" => 900_001,
+             "gid" => 900_001,
+             "kernel" => "/srv/hyper/redist/vmlinux/vmlinux-x86_64-6.1",
+             "device" => @rootfs
+           } = request()
   end
 
   test "the request carries the :micro cgroup limits and nothing the helper owns" do
     cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
 
     assert Map.keys(request()) |> Enum.sort() ==
-             ~w(cpu_max gid id memory_max op uid)
+             ~w(cpu_max device gid id kernel memory_max op uid)
 
     assert request()["memory_max"] == cgroup.memory_max
 

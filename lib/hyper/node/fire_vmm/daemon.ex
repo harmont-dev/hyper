@@ -57,10 +57,10 @@ defmodule Hyper.Node.FireVMM.Daemon do
     # link kill) and so `terminate/2` runs on supervisor shutdown.
     Process.flag(:trap_exit, true)
 
-    with :ok <- prelaunch(opts),
-         {:ok, muontrap} <- launch(opts) do
-      {:ok, %__MODULE__{opts: opts, muontrap: muontrap}}
-    else
+    case launch(opts) do
+      {:ok, muontrap} ->
+        {:ok, %__MODULE__{opts: opts, muontrap: muontrap}}
+
       {:error, reason} ->
         Logger.error("vm #{id}: init failed: #{inspect(reason)}")
         {:stop, reason}
@@ -91,15 +91,6 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  # Clear any stale jail + netns left by a prior incarnation, then prepare the
-  # fresh netns the jailer's `--netns` will enter. Must run before `launch/1`:
-  # the jailer refuses to start if the netns it is told to enter does not yet
-  # exist. Networking is mandatory, so this is unconditional.
-  @spec prelaunch(Opts.t()) :: :ok | {:error, term()}
-  defp prelaunch(%Opts{vm_id: id, uid: uid}) do
-    SuidHelper.Vm.prepare(id, uid)
-  end
-
   # Best-effort: both the chroot/cgroup removal and the network teardown are
   # attempted regardless of the other's outcome (a `Reaper` backstops either
   # failure); the first error is surfaced to the caller.
@@ -109,8 +100,8 @@ defmodule Hyper.Node.FireVMM.Daemon do
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
-  defp launch(%Opts{vm_id: id} = opts) do
-    cmd = Jailer.command(opts)
+  defp launch(%Opts{vm_id: id, mutable: mutable} = opts) do
+    cmd = Jailer.command(opts, Hyper.Node.Img.Mutable.blk_path(mutable))
 
     # Surface what the jailed process actually does: `log_output` routes the
     # helper/jailer/firecracker stdout+stderr (guest serial console included)

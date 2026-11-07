@@ -6,112 +6,195 @@
 #![cfg(feature = "insecure_mode")]
 
 use assert_fs::TempDir;
+use predicates::str::contains;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run};
+use support::{is_root, run, MapperDevice};
 
 const RECORDER_EXIT: i32 = 7;
 
-fn install_recorder(dir: &Path) -> PathBuf {
-    let path = dir.join("jailer");
-    fs::copy(env!("CARGO_BIN_EXE_fake-jailer"), &path).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+fn install(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, body).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
     path
 }
 
-/// A root-owned plain file with basename `firecracker` — the `--exec-file`. It is
-/// never executed by us (the jailer would), only validated as a `RootSafeBinPathBuf`.
-fn install_firecracker(dir: &Path) -> PathBuf {
-    let path = dir.join("firecracker");
-    fs::write(&path, b"#!/bin/true\n").unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-    path
-}
-
-fn write_root_config(dir: &Path, jailer: &Path, firecracker: &Path, tables: &str) -> PathBuf {
-    let p = dir.join("config.toml");
-    let body = format!(
-        "work_dir = \"/srv/hyper\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n{tables}",
-        jailer.display(),
-        firecracker.display(),
-    );
-    fs::write(&p, body).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-    p
-}
-
-struct Recorded {
+struct Launch {
     tmp: TempDir,
+    work: PathBuf,
+    jail: PathBuf,
     firecracker: PathBuf,
-    argv: PathBuf,
+    jailer: PathBuf,
+    kernel: PathBuf,
+    rootfs: MapperDevice,
 }
 
-impl Recorded {
+impl Launch {
     fn config(&self, tables: &str) -> PathBuf {
-        let jailer = install_recorder(self.tmp.path());
-        write_root_config(self.tmp.path(), &jailer, &self.firecracker, tables)
+        let p = self.tmp.path().join("config.toml");
+        let body = format!(
+            "work_dir = \"{}\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n{tables}",
+            self.work.display(),
+            self.jailer.display(),
+            self.firecracker.display(),
+        );
+        fs::write(&p, body).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+        p
     }
 
-    fn argv(&self) -> Vec<String> {
-        serde_json::from_str(&fs::read_to_string(&self.argv).expect("recorded argv")).unwrap()
+    fn networked_config(&self) -> PathBuf {
+        let tools: String = ["ip", "nft", "sysctl"]
+            .map(|name| {
+                let fake = install(self.tmp.path(), name, "#!/bin/sh\nexit 0\n", 0o755);
+                format!("{name} = \"{}\"\n", fake.display())
+            })
+            .concat();
+        self.config(&format!("{tools}[network]\nuplink = \"eth0\"\n"))
     }
-}
 
-#[fixture]
-fn recorded() -> Recorded {
-    let tmp = TempDir::new().unwrap();
-    let firecracker = install_firecracker(tmp.path());
-    let argv = tmp.path().join("argv.json");
-    Recorded {
-        tmp,
-        firecracker,
-        argv,
-    }
-}
-
-#[rstest]
-fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
-    if !is_root() {
-        eprintln!("SKIP jailer exec: needs root to become_root_permanently + own the fakes");
-        return;
-    }
-    let env_rec = recorded.tmp.path().join("environ.bin");
-    let cfg = recorded.config("");
-
-    let out = run(
-        &cfg,
-        json!({
+    fn request(&self, overrides: Value) -> Value {
+        let mut request = json!({
             "op": "vm_launch",
             "id": "vm1",
             "uid": 900_001,
             "gid": 900_002,
+            "kernel": self.kernel,
+            "device": self.rootfs.path(),
+        });
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(overrides.as_object().unwrap().clone());
+        request
+    }
+
+    fn root(&self) -> PathBuf {
+        self.jail.join("firecracker/vm1/root")
+    }
+
+    fn plant_stale_jail(&self) -> PathBuf {
+        let stale = self.root().join("stale");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, b"left by a previous incarnation").unwrap();
+        stale
+    }
+
+    fn recorded_argv(&self) -> Option<Vec<String>> {
+        let body = fs::read_to_string(self.tmp.path().join("argv.json")).ok()?;
+        Some(serde_json::from_str(&body).unwrap())
+    }
+
+    fn recorded_environ(&self) -> Vec<u8> {
+        fs::read(self.tmp.path().join("environ.bin")).expect("recorded environ")
+    }
+}
+
+#[fixture]
+fn launch() -> Option<Launch> {
+    let tmp = TempDir::new().unwrap();
+    let base = fs::canonicalize(tmp.path()).unwrap();
+    let work = base.join("srv");
+    let jail = work.join("jails");
+    fs::create_dir_all(&jail).unwrap();
+    let firecracker = install(&base, "firecracker", "#!/bin/true\n", 0o644);
+    let jailer = base.join("jailer");
+    fs::copy(env!("CARGO_BIN_EXE_fake-jailer"), &jailer).unwrap();
+    fs::set_permissions(&jailer, fs::Permissions::from_mode(0o755)).unwrap();
+    let kernel = install(&work, "vmlinux-src", "kernel image", 0o644);
+    let backing = base.join("rootfs.img");
+    fs::write(&backing, vec![0u8; 1024 * 1024]).unwrap();
+    let rootfs = MapperDevice::linear(
+        &format!("hyper-e2e-launch-{}", std::process::id()),
+        &backing,
+    )?;
+    Some(Launch {
+        tmp,
+        work,
+        jail,
+        firecracker,
+        jailer,
+        kernel,
+        rootfs,
+    })
+}
+
+macro_rules! require {
+    ($launch:expr) => {
+        match (is_root(), $launch) {
+            (true, Some(launch)) => launch,
+            _ => {
+                eprintln!("SKIP: needs root and losetup/dmsetup");
+                return;
+            }
+        }
+    };
+}
+
+#[rstest]
+fn launch_clears_the_stale_jail_stages_the_boot_artifacts_then_execs_as_root(
+    launch: Option<Launch>,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let stale = launch.plant_stale_jail();
+
+    run(&cfg, launch.request(json!({}))).code(RECORDER_EXIT);
+
+    assert!(
+        !stale.exists(),
+        "the stale jail must be cleared before staging"
+    );
+    let root = launch.root();
+    assert_eq!(fs::read(root.join("vmlinux")).unwrap(), b"kernel image");
+    let rootfs = fs::metadata(root.join("rootfs")).unwrap();
+    assert_eq!(
+        rootfs.rdev(),
+        fs::metadata(launch.rootfs.path()).unwrap().rdev()
+    );
+    assert_eq!((rootfs.uid(), rootfs.gid()), (900_001, 900_002));
+    assert!(
+        !root.join("dev/net/tun").exists(),
+        "the jailer mknods dev/net/tun itself and fails on EEXIST"
+    );
+}
+
+#[rstest]
+fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+
+    run(
+        &cfg,
+        launch.request(json!({
             "memory_max": 1_048_576,
             "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
-        }),
-    );
+        })),
+    )
+    .code(RECORDER_EXIT);
 
-    // The jailer's own exit status must propagate through the execve handoff.
-    out.code(RECORDER_EXIT);
-
+    let jail = launch.jail.display().to_string();
+    let firecracker = launch.firecracker.display().to_string();
     assert_eq!(
-        recorded.argv(),
-        vec![
+        launch.recorded_argv().expect("the jailer was exec'd"),
+        [
             "--id",
             "vm1",
             "--exec-file",
-            &recorded.firecracker.to_string_lossy(),
+            &firecracker,
             "--uid",
             "900001",
             "--gid",
             "900002",
             "--chroot-base-dir",
-            "/srv/hyper/jails",
+            &jail,
             "--cgroup-version",
             "2",
             "--parent-cgroup",
@@ -136,8 +219,8 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
     // `HYPER_*` config vars in its own environment (see `run`), so their absence
     // here is the leak canary - had the helper passed its environment through,
     // they would appear alongside `PWD`.
-    let environ = fs::read(&env_rec).expect("recorded environ");
-    let leaked: Vec<String> = environ
+    let leaked: Vec<String> = launch
+        .recorded_environ()
         .split(|&b| b == 0)
         .filter(|entry| !entry.is_empty())
         .map(|entry| String::from_utf8_lossy(entry).into_owned())
@@ -153,28 +236,20 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(recorded: Recorded) {
 }
 
 #[rstest]
-fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(recorded: Recorded) {
-    if !is_root() {
-        eprintln!("SKIP jailer netns: needs root to become_root_permanently + own the fakes");
-        return;
-    }
-    let cfg = recorded.config("[network]\nuplink = \"eth0\"\n");
+fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(launch: Option<Launch>) {
+    let launch = require!(launch);
+    let cfg = launch.networked_config();
 
-    let out = run(
-        &cfg,
-        json!({"op": "vm_launch", "id": "vnet1", "uid": 900_001, "gid": 900_002}),
-    );
+    run(&cfg, launch.request(json!({}))).code(RECORDER_EXIT);
 
-    out.code(RECORDER_EXIT);
-
-    let argv = recorded.argv();
+    let argv = launch.recorded_argv().expect("the jailer was exec'd");
     let i = argv
         .iter()
         .position(|a| a == "--netns")
         .expect("--netns present when [network] is configured");
     assert_eq!(
         argv[i + 1],
-        "/var/run/netns/vnet1",
+        "/var/run/netns/vm1",
         "netns path must be derived from --id, not caller-supplied"
     );
     let sep = argv.iter().position(|a| a == "--").unwrap();
@@ -185,20 +260,35 @@ fn execs_jailer_with_netns_flag_when_networking_enabled_as_root(recorded: Record
 }
 
 #[rstest]
-fn refuses_uid_zero_without_exec_as_root(recorded: Recorded) {
-    if !is_root() {
-        eprintln!("SKIP jailer uid 0: needs root");
-        return;
-    }
-    let cfg = recorded.config("");
+#[case::root_uid(json!({"uid": 0}), "outside the configured range")]
+#[case::root_gid(json!({"gid": 0}), "outside the configured range")]
+#[case::uid_below_range(json!({"uid": 1000}), "outside the configured range")]
+#[case::gid_above_range(json!({"gid": 1_000_000}), "outside the configured range")]
+#[case::absent_kernel(json!({"kernel": "/srv/hyper-e2e-absent/vmlinux"}), "kernel")]
+#[case::system_rootfs(json!({"device": "/dev/sda"}), "invalid request")]
+fn refused_launches_touch_nothing_and_never_exec_as_root(
+    launch: Option<Launch>,
+    #[case] overrides: Value,
+    #[case] stderr: &str,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let stale = launch.plant_stale_jail();
 
-    run(
-        &cfg,
-        json!({"op": "vm_launch", "id": "vm1", "uid": 0, "gid": 900_002}),
-    )
-    .code(2);
+    run(&cfg, launch.request(overrides))
+        .code(2)
+        .stderr(contains(stderr));
+
     assert!(
-        !recorded.argv.exists(),
-        "the jailer must never have been exec'd for uid 0",
+        launch.recorded_argv().is_none(),
+        "the jailer must never run"
+    );
+    assert!(
+        stale.exists(),
+        "a refused launch must not tear anything down"
+    );
+    assert!(
+        !launch.root().join("vmlinux").exists(),
+        "nothing may be staged"
     );
 }

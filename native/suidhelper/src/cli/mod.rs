@@ -61,9 +61,7 @@ impl<'de> DeserializeAs<'de, ThinId> for ThinIdNumber {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    VmPrepare(vm::prepare::Prepare),
     VmLaunch(vm::launch::Launch),
-    VmStage(vm::stage::Stage),
     VmGrantApi(vm::grant::GrantApi),
     VmGrantVsock(vm::grant::GrantVsock),
     VmTeardown(vm::teardown::Teardown),
@@ -145,10 +143,8 @@ mod tests {
 
     fn valid_requests() -> Vec<Value> {
         vec![
-            json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}),
-            json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001}),
-            json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
-                   "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}),
+            json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
+                   "kernel": "/srv/hyper/vmlinux", "device": "/dev/mapper/hyper-v1"}),
             json!({"op": "vm_grant_api", "id": "v1"}),
             json!({"op": "vm_grant_vsock", "id": "v1"}),
             json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
@@ -226,10 +222,13 @@ mod tests {
     #[case::op_not_a_string(json!({"op": 1}))]
     #[case::foreign_dm_name(json!({"op": "dm_remove", "name": "sda1", "retry": false}))]
     #[case::traversing_vm_id(json!({"op": "vm_grant_api", "id": "../v1"}))]
-    #[case::relative_kernel(json!({"op": "vm_stage", "id": "v1", "kernel": "vmlinux",
+    #[case::relative_kernel(json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
+        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1"}))]
+    #[case::rootfs_device_by_name(json!({"op": "vm_launch", "id": "v1", "uid": 900_001,
+        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1"}))]
+    #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]
+    #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]
-    #[case::stage_device_by_name(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
-        "device": "hyper-v1", "uid": 900_001, "gid": 900_001}))]
     #[case::thin_copy_src_outside_mapper(json!({"op": "thin_copy", "pool": "hyper-pool",
         "meta": "/dev/loop3", "thin_id": 7, "src": "/dev/sda", "dst": "/dev/mapper/hyper-b"}))]
     #[case::thin_copy_chunk_bytes(json!({"op": "thin_copy", "pool": "hyper-pool", "meta": "/dev/loop3",
