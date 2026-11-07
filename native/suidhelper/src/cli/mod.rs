@@ -127,30 +127,9 @@ mod tests {
     }
 
     fn valid_requests() -> Vec<Value> {
-        vec![
-            json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
-                   "kernel": "/srv/hyper/vmlinux", "device": "/dev/mapper/hyper-v1",
-                   "limits": {"memory_max": 1, "cpu_max": {"quota_us": 1, "period_us": 1}}}),
-            json!({"op": "vm_claim_api_socket", "id": "v1"}),
-            json!({"op": "vm_claim_vsock_socket", "id": "v1"}),
-            json!({"op": "vm_teardown", "id": "v1", "uid": 900_001}),
-            json!({"op": "vm_teardown", "id": "v1"}),
-            json!({"op": "img_activate", "name": "hyper-img-x", "base": "/srv/hyper/base.img",
-                   "deltas": ["/srv/hyper/d1.img"], "chunk_sectors": 8}),
-            json!({"op": "thin_pool_create", "name": "hyper-pool", "metadata": "/srv/hyper/meta",
-                   "data": "/srv/hyper/data", "block_sectors": 128, "low_water": 0}),
-            json!({"op": "dm_remove", "name": "hyper-v1", "retry": true}),
-            json!({"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": 1,
-                   "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}),
-            json!({"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": 2,
-                   "name": "hyper-v2", "origin": "/dev/mapper/hyper-img", "parent": "hyper-v1"}),
-            json!({"op": "thin_destroy", "pool": "hyper-pool", "name": "hyper-v1"}),
-            json!({"op": "thin_fork_delta", "pool": "hyper-pool", "meta": "/dev/loop3",
-                   "parent": "hyper-v1", "scratch_id": 9, "origin": "/dev/mapper/hyper-img",
-                   "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}),
-            json!({"op": "host_init"}),
-            json!({"op": "version"}),
-        ]
+        let fixture: serde_json::Map<String, Value> =
+            serde_json::from_str(include_str!("../../tests/fixtures/requests.json")).unwrap();
+        fixture.into_iter().map(|(_, request)| request).collect()
     }
 
     #[test]

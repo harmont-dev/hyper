@@ -39,13 +39,12 @@ defmodule Hyper.Node.FireVMM.State do
   }
 
   @enforce_keys [:opts]
-  defstruct [:opts, :spec, :boot_deadline, api_claimed: false]
+  defstruct [:opts, :spec, :boot_deadline]
 
   @type t :: %State{
           opts: Opts.t(),
           spec: BootSpec.Cold.t() | nil,
-          boot_deadline: integer() | nil,
-          api_claimed: boolean()
+          boot_deadline: integer() | nil
         }
 
   # How long to wait for the daemon's API to come up before failing the boot.
@@ -157,7 +156,7 @@ defmodule Hyper.Node.FireVMM.State do
     # creates the socket owned by the per-VM uid, so the unprivileged controller
     # gets EACCES on connect until the helper chowns it to us.
     def handle(:state_timeout, :probe, %{opts: %Opts{vm_id: id}} = data) do
-      case ensure_api_claimed(id, data) do
+      case claim_api_socket(id, data) do
         {:cont, data} ->
           case Client.run(Client.via(id), &Operations.describe_instance/1) do
             {:ok, %InstanceInfo{}} ->
@@ -176,19 +175,16 @@ defmodule Hyper.Node.FireVMM.State do
       {:next_state, :stopping, data, [{:reply, from, :ok}]}
     end
 
-    # Ensure the jailed API socket has been handed to the node user. Idempotent
-    # once granted (we record it in `data` so we ask the helper only once).
+    # Ensure the jailed API socket has been handed to the node user.
     # `:socket_pending` means firecracker has not created the socket yet, so we
     # keep waiting; a hard error is logged but also tolerated until the deadline
     # (the probe that follows would fail with EACCES anyway and drive the stop).
-    @spec ensure_api_claimed(Hyper.Vm.Id.t(), State.t()) ::
+    @spec claim_api_socket(Hyper.Vm.Id.t(), State.t()) ::
             {:cont, State.t()} | {:wait, State.t(), term()}
-    defp ensure_api_claimed(_id, %{api_claimed: true} = data), do: {:cont, data}
-
-    defp ensure_api_claimed(id, data) do
+    defp claim_api_socket(id, data) do
       case Vm.claim_api_socket(id) do
         :ok ->
-          {:cont, %{data | api_claimed: true}}
+          {:cont, data}
 
         {:error, :socket_pending} ->
           {:wait, data, :socket_pending}

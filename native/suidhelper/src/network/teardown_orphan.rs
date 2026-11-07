@@ -15,11 +15,11 @@
 //! out from under a concurrent call, which needs root and a real netns to
 //! exercise — covered by the root e2e / reaper e2e suites, not this crate's
 //! unit tests.
-use super::args::{self, Command};
+use super::args;
 use crate::config::Config;
 use hyperrs_firecracker::VmId;
 use hyperrs_process::binary::{self, RootSafeBin};
-use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
+use hyperrs_process::privilege::{PrivilegeError, RootCommandExt, Unprivileged};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -59,45 +59,28 @@ impl TeardownOrphan {
 impl TeardownOrphan {
     pub fn run(&self, token: &mut Unprivileged) -> Result<(), OrphanTeardownError> {
         let commands = args::teardown_orphan_commands(&self.netns);
-        let _root = token.elevate()?;
-        run_idempotent(&commands, &self.ip)
-    }
-}
-
-/// Run each command against `ip`, tolerating an ENOENT-shaped failure (the
-/// namespace is already gone) as success. Kept separate from
-/// `super::exec::run_all`, whose contract for `prepare`/`teardown` is that
-/// any non-`allow_failure` non-zero exit is a real error — this op's whole
-/// point is that a missing netns is *not* an error.
-fn run_idempotent(commands: &[Command], ip: &RootSafeBin<"ip">) -> Result<(), OrphanTeardownError> {
-    for command in commands {
-        let output = ip
-            .command()
-            .args(&command.argv)
-            .env_clear()
-            .output()
-            .map_err(|source| OrphanTeardownError::Spawn {
-                argv: command.argv.clone(),
-                source,
-            })?;
-
-        if output.status.success() {
-            continue;
+        let root = token.elevate()?;
+        for command in &commands {
+            let output = self
+                .ip
+                .command()
+                .args(&command.argv)
+                .spawn_as_root(&root, &[])
+                .output()
+                .map_err(|source| OrphanTeardownError::Spawn {
+                    argv: command.argv.clone(),
+                    source,
+                })?;
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if !output.status.success()
+                && !stderr.to_lowercase().contains("no such file or directory")
+            {
+                return Err(OrphanTeardownError::Failed {
+                    argv: command.argv.clone(),
+                    stderr,
+                });
+            }
         }
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if is_enoent(&stderr) {
-            continue;
-        }
-
-        return Err(OrphanTeardownError::Failed {
-            argv: command.argv.clone(),
-            stderr,
-        });
+        Ok(())
     }
-    Ok(())
-}
-
-fn is_enoent(stderr: &str) -> bool {
-    stderr.to_lowercase().contains("no such file or directory")
 }

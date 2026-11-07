@@ -145,7 +145,11 @@ esac
     }
 
     fn thin_dump_ran(&self) -> bool {
-        self.base.join("thin_dump.argv").exists()
+        self.thin_dump_argv().is_some()
+    }
+
+    fn thin_dump_argv(&self) -> Option<String> {
+        fs::read_to_string(self.base.join("thin_dump.argv")).ok()
     }
 
     fn snapshot_calls(&self) -> Vec<String> {
@@ -271,6 +275,42 @@ fn reservation_recovery_still_destroys_the_scratch_as_root(
     .concat();
     assert_eq!(pool.dmsetup_calls(), expected);
     assert_eq!(pool.thin_dump_ran(), dumped);
+    if let Some(argv) = pool.thin_dump_argv() {
+        assert!(
+            argv.starts_with(&format!(
+                "--metadata-snap --dev-id {SCRATCH_ID} /proc/self/fd/"
+            )),
+            "{argv}"
+        );
+    }
+}
+
+#[rstest]
+fn a_failed_copy_still_removes_the_copy_target_as_root(pool: Option<Pool>) {
+    let pool = require!(pool);
+    sparse(&pool.base.join("cow.img"), 1 << 20);
+    let Some(_scratch) = MapperDevice::linear("hyper-scratch-11", &pool.base.join("origin.img"))
+    else {
+        eprintln!("SKIP: needs a real scratch device");
+        return;
+    };
+
+    pool.fork_delta(json!({"scratch_id": 11}))
+        .failure()
+        .stderr(contains("copying ranges"));
+
+    let target = format!("hyper-copy-{SCRATCH_ID}");
+    let calls: Vec<String> = pool
+        .dmsetup_calls()
+        .into_iter()
+        .filter(|call| call.contains(&target))
+        .collect();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(
+        calls[0].starts_with(&format!("create {target} --table ")),
+        "{calls:?}"
+    );
+    assert_eq!(calls[1], format!("remove --retry {target}"));
 }
 
 #[rstest]
@@ -311,9 +351,9 @@ fn refuses_before_running_anything_as_root(pool: Option<Pool>, #[case] overrides
     assert!(!pool.thin_dump_ran(), "{overrides}");
 }
 
-fn dmsetup_path() -> Option<PathBuf> {
+fn system_bin(name: &str) -> Option<PathBuf> {
     let out = Command::new("sh")
-        .args(["-c", "command -v dmsetup"])
+        .args(["-c", &format!("command -v {name}")])
         .output()
         .ok()?;
     let path = PathBuf::from(String::from_utf8(out.stdout).ok()?.trim());
@@ -326,13 +366,14 @@ fn sparse(path: &Path, bytes: u64) {
 
 #[rstest]
 fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
-    let Some(dmsetup) = dmsetup_path().filter(|_| is_root()) else {
-        eprintln!("SKIP fork_delta on a real pool: needs root and dmsetup");
+    let (Some(dmsetup), Some(thin_dump), true) =
+        (system_bin("dmsetup"), system_bin("thin_dump"), is_root())
+    else {
+        eprintln!("SKIP fork_delta on a real pool: needs root, dmsetup and thin_dump");
         return;
     };
     let dir = TempDir::new().unwrap();
     let base = fs::canonicalize(dir.path()).unwrap();
-    let thin_dump = install(&base, "thin_dump", &scratch_dump(&base));
     let config = write_config(&base, &dmsetup, &thin_dump);
     let pid = std::process::id();
 

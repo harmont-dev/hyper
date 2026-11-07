@@ -25,6 +25,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
   alias Hyper.Node.FireVMM.Opts
   alias Hyper.Node.FireVMM.State
   alias Hyper.Node.FireVMM.State.Configuring
+  alias Hyper.Test.SuidHelperStub
 
   defmodule ClientStub do
     @moduledoc false
@@ -91,7 +92,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
   test "claimed: InstanceStart is issued and the VM advances to :running", %{tmp: tmp} do
     vm_id = Hyper.Vm.Id.generate()
-    stub_helper!(tmp, @claimed_script)
+    SuidHelperStub.install!(tmp, @claimed_script)
     start_supervised!({ClientStub, {vm_id, self()}})
     await_client(vm_id)
 
@@ -114,7 +115,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     for {label, script} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      stub_helper!(tmp, script)
+      SuidHelperStub.install!(tmp, script)
 
       result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, 60_000))
 
@@ -136,7 +137,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     for {script, expected_reason} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      stub_helper!(tmp, script)
+      SuidHelperStub.install!(tmp, script)
 
       result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, -1))
 
@@ -152,18 +153,6 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
       opts: %Opts{vm_id: vm_id},
       boot_deadline: System.monotonic_time(:millisecond) + offset_ms
     }
-  end
-
-  # Point Hyper.Cfg.Tools.suidhelper/0 (runtime source) at a stub script and
-  # restore the previous binding afterwards.
-  defp stub_helper!(tmp, body) do
-    script = Path.join(tmp, "suidhelper-stub-#{System.unique_integer([:positive])}")
-    File.write!(script, "#!/bin/sh\n#{body}\n")
-    File.chmod!(script, 0o755)
-
-    previous = Application.get_env(:hyper, Hyper.Cfg.Tools, [])
-    Application.put_env(:hyper, Hyper.Cfg.Tools, Keyword.put(previous, :suidhelper, script))
-    on_exit(fn -> Application.put_env(:hyper, Hyper.Cfg.Tools, previous) end)
   end
 
   # Horde materialises registrations asynchronously; wait until the stub is

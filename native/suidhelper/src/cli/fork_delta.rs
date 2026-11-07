@@ -130,7 +130,7 @@ impl Op for ThinForkDelta {
         }
 
         let copied = self.copy_scratch(&scratch, target, &dmsetup, &thin_dump, &meta, &mut token);
-        let destroyed = {
+        let destroyed = (|| {
             let _root = token.elevate()?;
             dmsetup
                 .thin_pool(&self.pool)?
@@ -138,7 +138,7 @@ impl Op for ThinForkDelta {
                 .deactivate()
                 .and_then(|thin| thin.delete())
                 .map_err(ForkDeltaError::Destroy)
-        };
+        })();
         let stats = copied?;
         destroyed?;
         Ok(stats)
@@ -176,13 +176,13 @@ impl ThinForkDelta {
             };
             Ok::<_, ForkDeltaError>(copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?)
         })();
-        let removed = {
+        let removed = (|| {
             let _root = token.elevate()?;
             dmsetup
                 .device(&target_name)
                 .remove(RemoveMode::Retry)
                 .map_err(ForkDeltaError::Remove)
-        };
+        })();
         let stats = copied?;
         removed?;
         Ok(stats)
