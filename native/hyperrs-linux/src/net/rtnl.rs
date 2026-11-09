@@ -55,9 +55,7 @@ impl Rtnl {
     /// Look up the link named `name`, if any.
     pub fn link(&self, name: &IfName) -> Result<Option<Link<'_>>, LinkError> {
         let mut request = LinkMessage::default();
-        request
-            .attributes
-            .push(LinkAttribute::IfName(name.as_str().to_owned()));
+        request.attributes = vec![LinkAttribute::IfName(name.as_str().to_owned())];
 
         let reply = match self.request(RouteNetlinkMessage::GetLink(request), 0) {
             Ok(reply) => reply,
@@ -80,21 +78,19 @@ impl Rtnl {
         peer_ns: &NetNs,
     ) -> Result<Link<'_>, LinkError> {
         let mut peer_link = LinkMessage::default();
-        peer_link
-            .attributes
-            .push(LinkAttribute::IfName(peer.as_str().to_owned()));
-        peer_link
-            .attributes
-            .push(LinkAttribute::NetNsFd(peer_ns.as_fd().as_raw_fd()));
+        peer_link.attributes = vec![
+            LinkAttribute::IfName(peer.as_str().to_owned()),
+            LinkAttribute::NetNsFd(peer_ns.as_fd().as_raw_fd()),
+        ];
 
         let mut request = LinkMessage::default();
-        request
-            .attributes
-            .push(LinkAttribute::IfName(host.as_str().to_owned()));
-        request.attributes.push(LinkAttribute::LinkInfo(vec![
-            LinkInfo::Kind(InfoKind::Veth),
-            LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(peer_link))),
-        ]));
+        request.attributes = vec![
+            LinkAttribute::IfName(host.as_str().to_owned()),
+            LinkAttribute::LinkInfo(vec![
+                LinkInfo::Kind(InfoKind::Veth),
+                LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(peer_link))),
+            ]),
+        ];
 
         match self.ack(
             RouteNetlinkMessage::NewLink(request),

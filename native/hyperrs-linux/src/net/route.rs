@@ -62,15 +62,14 @@ impl Route {
             Some(_) => RouteScope::Universe,
             None => RouteScope::Link,
         };
-        message
-            .attributes
-            .push(RouteAttribute::Destination(RouteAddress::from(dst)));
-        if let Some(via) = via {
-            message
-                .attributes
-                .push(RouteAttribute::Gateway(RouteAddress::from(via)));
-        }
-        message.attributes.push(RouteAttribute::Oif(dev.get()));
+        message.attributes = [
+            Some(RouteAttribute::Destination(RouteAddress::from(dst))),
+            via.map(|via| RouteAttribute::Gateway(RouteAddress::from(via))),
+            Some(RouteAttribute::Oif(dev.get())),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         message
     }
 }

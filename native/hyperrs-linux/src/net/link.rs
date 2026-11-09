@@ -71,11 +71,9 @@ impl Link<'_> {
     /// Stop the kernel from generating IPv6 addresses, including the link-local one.
     pub fn disable_addr_gen(&self) -> Result<(), LinkError> {
         let mut request = self.message();
-        request
-            .attributes
-            .push(LinkAttribute::AfSpecUnspec(vec![AfSpecUnspec::Inet6(
-                vec![AfSpecInet6::AddrGenMode(In6AddrGenMode::None)],
-            )]));
+        request.attributes = vec![LinkAttribute::AfSpecUnspec(vec![AfSpecUnspec::Inet6(
+            vec![AfSpecInet6::AddrGenMode(In6AddrGenMode::None)],
+        )])];
         self.rtnl.ack(RouteNetlinkMessage::SetLink(request), 0)?;
         Ok(())
     }
@@ -104,14 +102,13 @@ impl Link<'_> {
             DuplicateAddrDetection::Enabled => AddressHeaderFlags::empty(),
             DuplicateAddrDetection::Disabled => AddressHeaderFlags::Nodad,
         };
-        if let IpNet::V4(_) = addr {
-            request
-                .attributes
-                .push(AddressAttribute::Local(addr.addr()));
-        }
-        request
-            .attributes
-            .push(AddressAttribute::Address(addr.addr()));
+        request.attributes = match addr {
+            IpNet::V4(_) => vec![
+                AddressAttribute::Local(addr.addr()),
+                AddressAttribute::Address(addr.addr()),
+            ],
+            IpNet::V6(_) => vec![AddressAttribute::Address(addr.addr())],
+        };
 
         match self.rtnl.ack(
             RouteNetlinkMessage::NewAddress(request),
@@ -156,11 +153,9 @@ impl Link<'_> {
         message.header.ifindex = self.index.get();
         message.header.flags = NeighbourFlags::Proxy;
         message.header.state = NeighbourState::Permanent;
-        message
-            .attributes
-            .push(NeighbourAttribute::Destination(NeighbourAddress::Inet6(
-                addr,
-            )));
+        message.attributes = vec![NeighbourAttribute::Destination(NeighbourAddress::Inet6(
+            addr,
+        ))];
         message
     }
 }
