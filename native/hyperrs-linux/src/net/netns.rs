@@ -14,6 +14,7 @@ use nix::sched::{setns, unshare, CloneFlags};
 use nix::sys::stat::Mode;
 use nix::sys::statfs::{fstatfs, NSFS_MAGIC};
 use nix::unistd::{Gid, Uid};
+use std::array;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::panic;
@@ -253,11 +254,10 @@ impl NetNs {
             let fd = tun.as_raw_fd();
 
             let mut request = IfReq {
-                name: [0; IFNAMSIZ],
+                name: array::from_fn(|i| name.as_str().as_bytes().get(i).copied().unwrap_or(0)),
                 flags: (IFF_TAP | IFF_NO_PI | IFF_TUN_EXCL) as c_short,
                 pad: [0; 22],
             };
-            request.name[..name.as_str().len()].copy_from_slice(name.as_str().as_bytes());
 
             // SAFETY: `request` is a fully initialised `struct ifreq` the kernel may write back into.
             match unsafe { ioctl::set_iff(fd, &mut request) } {
