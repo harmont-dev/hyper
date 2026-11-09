@@ -3,6 +3,7 @@
 
 pub mod link;
 pub mod netns;
+pub mod nft;
 pub mod route;
 mod rtnl;
 
@@ -131,6 +132,16 @@ pub struct Ipv4Net {
     pub prefix: Prefix<32>,
 }
 
+impl Ipv4Net {
+    /// The address with its host bits cleared.
+    pub fn network(self) -> Ipv4Addr {
+        let mask = u32::MAX
+            .checked_shl(32 - u32::from(self.prefix.get()))
+            .unwrap_or(0);
+        Ipv4Addr::from(u32::from(self.addr) & mask)
+    }
+}
+
 /// An IPV6 network address, encoding both the address and the prefix length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 #[display("{addr}/{prefix}")]
@@ -214,7 +225,7 @@ impl FromStr for IpNet {
 
 #[cfg(test)]
 mod tests {
-    use super::{IfIndex, IfName, IfNameError, IpNet, Prefix};
+    use super::{IfIndex, IfName, IfNameError, IpNet, Ipv4Net, Prefix};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
@@ -288,6 +299,22 @@ mod tests {
         prop_assert_eq!(net.to_string(), s);
         prop_assert_eq!(net.addr(), std::net::IpAddr::V6(addr));
         prop_assert_eq!(net.prefix_len(), len);
+    }
+
+    #[proptest]
+    fn an_ipv4_network_keeps_the_prefix_bits_and_clears_the_rest(
+        addr: std::net::Ipv4Addr,
+        #[strategy(0u8..=32)] len: u8,
+    ) {
+        let net = Ipv4Net {
+            addr,
+            prefix: len.try_into().unwrap(),
+        };
+        let kept = u64::from(u32::MAX) << (32 - len) & u64::from(u32::MAX);
+        prop_assert_eq!(
+            u64::from(u32::from(net.network())),
+            u64::from(u32::from(addr)) & kept
+        );
     }
 
     #[rstest]
