@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::{IfName, Rtnl, RtnlOpenError, IFNAMSIZ};
+use crate::sysctl::{Sysctl, SysctlError};
 use hyperrs_fs::dev::DeviceNumber;
 use hyperrs_fs::dir::{DirError, SafeDir};
 use hyperrs_fs::file::{self, Any, IsCharDevice, OpenFlags, SafeFile};
@@ -133,6 +134,14 @@ pub enum TapError {
     Persist(IfName, #[source] Errno),
 }
 
+#[derive(Debug, ThisError)]
+pub enum ForwardingError {
+    #[error(transparent)]
+    Enter(#[from] EnterError),
+    #[error(transparent)]
+    Sysctl(#[from] SysctlError),
+}
+
 pub struct NetNs {
     file: SafeFile<Any, Any, Any>,
     name: StrictComponentBuf,
@@ -237,6 +246,15 @@ impl NetNs {
     /// Open an rtnetlink socket bound to this namespace.
     pub fn rtnl(&self) -> Result<Rtnl, RtnlError> {
         self.scoped(Rtnl::open)?.map_err(RtnlError::Open)
+    }
+
+    /// Turn on IPv4 and IPv6 forwarding in this namespace.
+    pub fn enable_forwarding(&self) -> Result<(), ForwardingError> {
+        self.scoped(|| {
+            Sysctl::net().ipv4().ip_forward(true).write()?;
+            Sysctl::net().ipv6().conf_all().forwarding(true).write()
+        })??;
+        Ok(())
     }
 
     /// Create a persistent tap named `name` in this namespace, owned by `uid`:`gid`.
@@ -391,6 +409,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(owner, ("1234".to_owned(), "5678".to_owned()));
+    }
+
+    #[rstest]
+    fn enabling_forwarding_turns_on_both_families_as_root() {
+        let Some(ns) = ScratchNs::new("forwarding") else {
+            return;
+        };
+
+        ns.get().enable_forwarding().unwrap();
+
+        let read = |path: &str| {
+            fs::read_to_string(format!("/proc/sys/{path}"))
+                .unwrap()
+                .trim()
+                .to_owned()
+        };
+        let values = ns
+            .get()
+            .scoped(|| {
+                [
+                    read("net/ipv4/ip_forward"),
+                    read("net/ipv6/conf/all/forwarding"),
+                ]
+            })
+            .unwrap();
+        assert_eq!(values, ["1", "1"]);
     }
 
     #[rstest]
