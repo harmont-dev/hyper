@@ -42,6 +42,7 @@ defmodule Hyper.Node.Reclaim do
     # Ensure the dir exists: the relay bind needs it, and the sweep is a no-op
     # on a fresh node where it was never created.
     File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
 
     case File.ls(dir) do
       {:ok, names} ->

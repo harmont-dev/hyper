@@ -64,6 +64,7 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     _ = File.rm(listen_path)
     {:ok, sock} = :socket.open(:local, :stream)
     :ok = :socket.bind(sock, %{family: :local, path: listen_path})
+    :ok = File.chmod(listen_path, 0o600)
     :ok = :socket.listen(sock, 16)
 
     {:ok, %{listen: sock, listen_path: listen_path, vsock_uds: vsock_uds, vm_id: vm_id},
