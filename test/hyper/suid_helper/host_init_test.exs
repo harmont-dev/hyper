@@ -49,5 +49,12 @@ defmodule Hyper.SuidHelper.HostInitTest do
     end
   end
 
+  test "output that is not JSON is an error, not a crash", %{tmp: tmp} do
+    SuidHelperStub.install!(tmp, "echo 'nft: warning: something on stderr'")
+
+    assert SuidHelper.exec(%{op: "host_init"}) ==
+             {:error, {0, "nft: warning: something on stderr"}}
+  end
+
   defp reply(tmp, json), do: SuidHelperStub.install!(tmp, "echo '#{json}'")
 end

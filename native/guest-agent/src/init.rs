@@ -16,6 +16,9 @@ pub fn setup() -> io::Result<()> {
         // must not abort the agent; a missing /proc only degrades exec'd tools.
         let _ = mount(Some(src), target, Some(fstype), MsFlags::empty(), none);
     }
-    let _ = std::fs::read("/proc/net/pnp").and_then(|pnp| std::fs::write("/etc/resolv.conf", pnp));
+    let _ = std::fs::read("/proc/net/pnp").and_then(|pnp| {
+        let _ = std::fs::remove_file("/etc/resolv.conf");
+        std::fs::write("/etc/resolv.conf", pnp)
+    });
     Ok(())
 }

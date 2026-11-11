@@ -35,8 +35,16 @@ defmodule Hyper.SuidHelper do
   @decorate with_span("Hyper.SuidHelper.exec", include: [:request])
   def exec(request) do
     case System.cmd(Hyper.Cfg.Tools.suidhelper(), argv(request), stderr_to_stdout: true) do
-      {out, 0} -> {:ok, Jason.decode!(out)}
+      {out, 0} -> decode(out)
       {out, code} -> {:error, {code, String.trim(out)}}
+    end
+  end
+
+  @spec decode(String.t()) :: {:ok, map()} | {:error, err()}
+  defp decode(out) do
+    case Jason.decode(out) do
+      {:ok, decoded} -> {:ok, decoded}
+      {:error, _} -> {:error, {0, String.trim(out)}}
     end
   end
 

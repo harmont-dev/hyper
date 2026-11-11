@@ -214,7 +214,10 @@ impl NetNs {
 
     /// Unpin the namespace named `name`, even one left half-created; a missing one is `Ok`.
     pub fn delete(name: &StrictComponent) -> Result<(), RemoveError> {
-        match umount2(Self::run_path(name).as_path(), MntFlags::MNT_DETACH) {
+        match umount2(
+            Self::run_path(name).as_path(),
+            MntFlags::MNT_DETACH | MntFlags::UMOUNT_NOFOLLOW,
+        ) {
             Ok(()) | Err(Errno::EINVAL | Errno::ENOENT) => {}
             Err(e) => return Err(RemoveError::Unmount(name.to_owned(), e)),
         }
