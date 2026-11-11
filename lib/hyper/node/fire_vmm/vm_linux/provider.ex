@@ -17,16 +17,18 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
 
   alias Hyper.Node.FireVMM.VmLinux.Manifest
 
+  @kernel_mode 0o644
+  @group_or_other_write 0o022
+
   @doc "Ensure every kernel for this node's architecture is installed."
   @spec ensure_installed() :: :ok | {:error, term()}
   def ensure_installed do
     with {:ok, arch} <- Sys.Arch.current() do
       builds = Manifest.builds_for(arch)
 
-      case install_state(install_dir(), builds) do
+      case install_state(install_dir(), builds, node_uid()) do
         :ok -> :ok
-        {:error, :not_installed} -> install_all(builds)
-        {:error, :bad_install} -> reinstall(builds)
+        {:error, _} -> reinstall(builds)
       end
     end
   end
@@ -59,10 +61,10 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   sit at the same asset paths, and skipping the hash check would keep booting
   guests on the previous release forever.
   """
-  @spec install_state(Path.t(), [Manifest.Build.t()]) ::
+  @spec install_state(Path.t(), [Manifest.Build.t()], non_neg_integer()) ::
           :ok | {:error, :not_installed | :bad_install}
-  def install_state(dir, builds) do
-    installed = Enum.count(builds, &installed?(dir, &1))
+  def install_state(dir, builds, owner) do
+    installed = Enum.count(builds, &installed?(dir, &1, owner))
 
     cond do
       installed == length(builds) -> :ok
@@ -71,23 +73,37 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
     end
   end
 
-  defp installed?(dir, build) do
+  defp installed?(dir, build, owner) do
     path = build_path(dir, build)
-    File.regular?(path) and Redist.Sha256.file(path) == build.sha256
+
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, uid: ^owner, mode: mode}}
+      when Bitwise.band(mode, @group_or_other_write) == 0 ->
+        Redist.Sha256.file(path) == build.sha256
+
+      _ ->
+        false
+    end
   end
 
   defp install_all(builds) do
     Enum.reduce_while(builds, :ok, fn build, :ok ->
-      case Redist.File.install(
-             Manifest.asset_url(build),
-             build.sha256,
-             build_path(install_dir(), build)
-           ) do
+      case install(build) do
         :ok -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}
       end
     end)
   end
+
+  defp install(build) do
+    path = build_path(install_dir(), build)
+
+    with :ok <- Redist.File.install(Manifest.asset_url(build), build.sha256, path) do
+      File.chmod(path, @kernel_mode)
+    end
+  end
+
+  defp node_uid, do: File.stat!("/proc/self").uid
 
   # Safe to wipe wholesale: install_dir/0 is Hyper's own redist cache
   # (<work_dir>/redist/vmlinux), never operator data.
