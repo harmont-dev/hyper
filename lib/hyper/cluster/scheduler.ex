@@ -75,11 +75,18 @@ defmodule Hyper.Cluster.Scheduler do
         ) :: {:ok, {node(), pid()}} | {:error, :no_capacity}
   @decorate with_span("Hyper.Cluster.Scheduler.run", include: [:spec])
   def run(spec, layers, start_fun, stop_fun) do
-    attempt = fn target ->
-      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
-    end
-
+    attempt = fn target -> try_on(target, spec, start_fun, stop_fun) end
     place(spec, layers, attempt)
+  end
+
+  @spec try_on(node(), Spec.t(), (-> {:ok, pid()} | {:error, term()}), (pid() -> :ok)) ::
+          {:ok, pid()} | {:error, term()}
+  defp try_on(target, spec, start_fun, stop_fun) do
+    :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+  catch
+    :error, {:erpc, reason} -> {:error, {:node_unreachable, reason}}
+    :error, {:exception, reason, _stack} -> {:error, {:remote_exception, reason}}
+    :exit, {:exception, reason} -> {:error, {:remote_exit, reason}}
   end
 
   @doc "Bytes of `layers` already mounted on `state`'s node."

@@ -262,7 +262,13 @@ defmodule Hyper.Node do
 
       with {:ok, img_id} <- Img.Publish.fork_image(vm_id, parent.img_id) do
         {:ok,
-         %{img_id: img_id, type: parent.type, arch: parent.arch, boot_args: parent.boot_args}}
+         %{
+           img_id: img_id,
+           type: parent.type,
+           arch: parent.arch,
+           boot_args: parent.boot_args,
+           firewall: parent.firewall
+         }}
       end
     end
   end

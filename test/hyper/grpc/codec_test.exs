@@ -159,6 +159,35 @@ defmodule Hyper.Grpc.CodecTest do
       end
     end
 
+    test "boot_args are kept when plain, and refused when they could override the host's" do
+      rows = [
+        {nil, {:ok, nil}},
+        {"console=ttyS0 quiet", {:ok, "console=ttyS0 quiet"}},
+        {"console=ttyS0 hyper.ip6=2001:db8::1:0:0:9", {:error, :bad_boot_args}},
+        {"ip=10.0.0.2::10.0.0.1:255.0.0.0::eth0:off", {:error, :bad_boot_args}},
+        {"quiet -- single", {:error, :bad_boot_args}},
+        {"quiet\nip=1.2.3.4", {:error, :bad_boot_args}},
+        {String.duplicate("a", 1025), {:error, :bad_boot_args}},
+        {String.duplicate("a", 1024), {:ok, String.duplicate("a", 1024)}}
+      ]
+
+      for {args, expected} <- rows do
+        decoded =
+          Codec.from_grpc(%CreateVmRequest{
+            img_id: "img",
+            instance_type: :INSTANCE_TYPE_MICRO,
+            arch: :ARCHITECTURE_X86_64,
+            boot_args: args
+          })
+
+        assert (case decoded do
+                  {:ok, %Spec{boot_args: kept}} -> {:ok, kept}
+                  error -> error
+                end) == expected,
+               inspect(args)
+      end
+    end
+
     test "a missing img_id (nil or empty) is refused" do
       assert {:error, :missing_img_id} =
                Codec.from_grpc(%CreateVmRequest{img_id: nil, instance_type: :INSTANCE_TYPE_MICRO})
@@ -242,7 +271,10 @@ defmodule Hyper.Grpc.CodecTest do
       {:too_many_firewall_rules, GRPC.Status.invalid_argument()},
       {:machine_unreachable, GRPC.Status.unavailable()},
       {:no_capacity, GRPC.Status.resource_exhausted()},
-      {:exhausted, GRPC.Status.resource_exhausted()}
+      {:exhausted, GRPC.Status.resource_exhausted()},
+      {:bad_boot_args, GRPC.Status.invalid_argument()},
+      {:stopping, GRPC.Status.failed_precondition()},
+      {:not_ready, GRPC.Status.failed_precondition()}
     ]
 
     test "each domain reason maps to its promised gRPC status" do
@@ -260,13 +292,18 @@ defmodule Hyper.Grpc.CodecTest do
              } = Codec.to_grpc({:error, {:missing_tools, ["umoci", "skopeo"]}})
     end
 
-    test "an unrecognised reason never crashes and falls back to INTERNAL" do
+    test "an unrecognised reason falls back to INTERNAL and keeps its detail out of the reply" do
       status = GRPC.Status.internal()
 
-      assert %GRPC.RPCError{status: ^status, message: msg} =
-               Codec.to_grpc({:error, :something_truly_novel})
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert %GRPC.RPCError{status: ^status, message: msg} =
+                   Codec.to_grpc({:error, {:helper_failed, "nft: /etc/secret"}})
 
-      assert msg =~ "something_truly_novel"
+          refute msg =~ "secret"
+        end)
+
+      assert log =~ "secret"
     end
   end
 end

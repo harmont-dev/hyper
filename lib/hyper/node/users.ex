@@ -26,12 +26,12 @@ defmodule Hyper.Node.Users do
     is O(ids handed out and returned), not O(range size).
     """
     @enforce_keys [:max, :next]
-    defstruct [:max, :next, freed: [], owners: %{}]
+    defstruct [:max, :next, freed: :queue.new(), owners: %{}]
 
     @type t :: %__MODULE__{
             max: Hyper.Node.Users.id(),
             next: Hyper.Node.Users.id(),
-            freed: [Hyper.Node.Users.id()],
+            freed: :queue.queue(Hyper.Node.Users.id()),
             owners: %{reference() => Hyper.Node.Users.id()}
           }
   end
@@ -104,18 +104,16 @@ defmodule Hyper.Node.Users do
   end
 
   @impl true
-  def handle_call({:new}, _from, %State{freed: [id | rest]} = state) do
-    {:reply, {:ok, id}, %{state | freed: rest}}
-  end
-
-  @impl true
   def handle_call({:new}, _from, %State{next: next, max: max} = state) when next <= max do
     {:reply, {:ok, next}, %{state | next: next + 1}}
   end
 
   @impl true
-  def handle_call({:new}, _from, %State{} = state) do
-    {:reply, {:error, :exhausted}, state}
+  def handle_call({:new}, _from, %State{freed: freed} = state) do
+    case :queue.out(freed) do
+      {{:value, id}, rest} -> {:reply, {:ok, id}, %{state | freed: rest}}
+      {:empty, _} -> {:reply, {:error, :exhausted}, state}
+    end
   end
 
   @impl true
@@ -126,7 +124,7 @@ defmodule Hyper.Node.Users do
 
   @impl true
   def handle_cast({:free, id}, %State{freed: freed} = state) do
-    {:noreply, %{state | freed: [id | freed]}}
+    {:noreply, %{state | freed: :queue.in(id, freed)}}
   end
 
   @impl true
@@ -136,7 +134,7 @@ defmodule Hyper.Node.Users do
       ) do
     case Map.pop(owners, ref) do
       {nil, _} -> {:noreply, state}
-      {id, owners} -> {:noreply, %{state | owners: owners, freed: [id | freed]}}
+      {id, owners} -> {:noreply, %{state | owners: owners, freed: :queue.in(id, freed)}}
     end
   end
 

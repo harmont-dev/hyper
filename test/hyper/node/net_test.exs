@@ -38,6 +38,20 @@ defmodule Hyper.Node.NetTest do
     assert await_claim() == {:ok, 5}
   end
 
+  test "a released NetId waits until every fresh one is out" do
+    {:ok, first} = Net.claim()
+    Net.release(first)
+
+    assert Net.claim() == {:ok, first + 1}
+  end
+
+  test "released NetIds come back oldest first" do
+    exhaust()
+    for id <- [7, 2, 11], do: Net.release(id)
+
+    assert for(_ <- 1..3, do: Net.claim()) == [{:ok, 7}, {:ok, 2}, {:ok, 11}]
+  end
+
   defp exhaust do
     for _ <- 1..16, do: {:ok, _} = Net.claim()
     {:error, :exhausted} = Net.claim()
