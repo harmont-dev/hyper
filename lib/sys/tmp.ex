@@ -13,6 +13,8 @@ defmodule Sys.Tmp do
   # RNG is broken; a handful of retries distinguishes bad luck from either.
   @attempts 8
 
+  require Logger
+
   @doc """
   Create a fresh temporary directory, pass its path to `fun`, and remove it
   (recursively) afterward - even if `fun` raises. Returns whatever `fun`
@@ -25,7 +27,7 @@ defmodule Sys.Tmp do
     try do
       fun.(dir)
     after
-      File.rm_rf!(dir)
+      remove_tree(dir)
     end
   end
 
@@ -41,6 +43,30 @@ defmodule Sys.Tmp do
       fun.(path)
     after
       _ = File.rm(path)
+    end
+  end
+
+  @spec remove_tree(Path.t()) :: :ok
+  defp remove_tree(dir) do
+    make_traversable(dir)
+
+    case File.rm_rf(dir) do
+      {:ok, _removed} ->
+        :ok
+
+      {:error, reason, path} ->
+        Logger.warning("tmp: failed to remove #{path} under #{dir}: #{inspect(reason)}")
+    end
+  end
+
+  @spec make_traversable(Path.t()) :: :ok
+  defp make_traversable(path) do
+    with {:ok, %File.Stat{type: :directory}} <- File.lstat(path),
+         _ = File.chmod(path, 0o700),
+         {:ok, entries} <- File.ls(path) do
+      Enum.each(entries, &make_traversable(Path.join(path, &1)))
+    else
+      _ -> :ok
     end
   end
 

@@ -83,6 +83,30 @@ defmodule Sys.TmpTest do
       refute File.exists?(dir)
     end
 
+    @tag :tmp_dir
+    test "removes a tree holding a mode-0000 dir without chmodding through symlinks", %{
+      tmp_dir: tmp
+    } do
+      outside = Path.join(tmp, "outside")
+      File.mkdir!(outside)
+      File.chmod!(outside, 0o500)
+
+      dir =
+        Tmp.with_tempdir("tmp-law", fn dir ->
+          locked = Path.join(dir, "locked")
+          File.mkdir!(locked)
+          File.write!(Path.join(locked, "inside"), "x")
+          File.ln_s!(outside, Path.join(locked, "escape"))
+          File.chmod!(locked, 0o000)
+          dir
+        end)
+
+      refute File.exists?(dir)
+      assert File.dir?(outside)
+      assert Bitwise.band(File.stat!(outside).mode, 0o7777) == 0o500
+      File.chmod!(outside, 0o700)
+    end
+
     test "returns exactly what fun returns" do
       assert Tmp.with_tempdir(fn _dir -> {:some, "value"} end) == {:some, "value"}
     end
