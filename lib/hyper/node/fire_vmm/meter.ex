@@ -119,6 +119,9 @@ defmodule Hyper.Node.FireVMM.Meter do
   @spec flush_now(GenServer.server()) :: :ok
   def flush_now(server), do: GenServer.call(server, :flush_now)
 
+  @spec rebase(GenServer.server()) :: :ok
+  def rebase(server), do: GenServer.call(server, :rebase)
+
   @impl true
   def init(%Opts{} = opts) do
     # Trap exits so terminate/2 runs on supervisor shutdown and can flush the
@@ -160,6 +163,10 @@ defmodule Hyper.Node.FireVMM.Meter do
   end
 
   def handle_call(:sample_now, _from, state), do: {:reply, :ok, sample(state)}
+
+  def handle_call(:rebase, _from, state),
+    do: {:reply, :ok, %{state | acc: Accumulator.rebase(state.acc)}}
+
   def handle_call(:flush_now, _from, state), do: {:reply, :ok, flush(state)}
 
   @impl true

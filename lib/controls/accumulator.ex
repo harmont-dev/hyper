@@ -38,6 +38,9 @@ defmodule Controls.Accumulator do
     %{acc | last: value, accrued: accrued + delta}
   end
 
+  @spec rebase(t()) :: t()
+  def rebase(%__MODULE__{zero: zero} = acc), do: %{acc | last: Quantity.value(zero)}
+
   @doc "Consumption accrued since the last `flush/1`."
   @spec total(t()) :: Quantity.t()
   def total(%__MODULE__{zero: zero, accrued: accrued}),

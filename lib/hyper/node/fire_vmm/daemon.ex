@@ -110,7 +110,18 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # is surfaced to the caller; the `Reaper` backstops it.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id}) do
-    SuidHelper.Vm.teardown(id)
+    meter = Hyper.Cluster.Routing.via({id, :meter})
+    _ = meter_call(&Hyper.Node.FireVMM.Meter.sample_now/1, meter)
+    result = SuidHelper.Vm.teardown(id)
+    _ = meter_call(&Hyper.Node.FireVMM.Meter.rebase/1, meter)
+    result
+  end
+
+  @spec meter_call((GenServer.server() -> :ok), GenServer.server()) :: :ok | :no_meter
+  defp meter_call(fun, meter) do
+    fun.(meter)
+  catch
+    _kind, _reason -> :no_meter
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
