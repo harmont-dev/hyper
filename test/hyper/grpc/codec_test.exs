@@ -162,6 +162,8 @@ defmodule Hyper.Grpc.CodecTest do
     test "boot_args are kept when plain, and refused when they could override the host's" do
       rows = [
         {nil, {:ok, nil}},
+        {"", {:ok, nil}},
+        {"nfsaddrs=10.0.0.2::10.0.0.1:255.0.0.0::eth0:off", {:error, :bad_boot_args}},
         {"console=ttyS0 quiet", {:ok, "console=ttyS0 quiet"}},
         {"console=ttyS0 hyper.ip6=2001:db8::1:0:0:9", {:error, :bad_boot_args}},
         {"ip=10.0.0.2::10.0.0.1:255.0.0.0::eth0:off", {:error, :bad_boot_args}},

@@ -33,7 +33,6 @@ defmodule Hyper.Node.FireVMM.StateSetFirewallTest do
     SuidHelperStub.install!(tmp, ~s(echo "$1" >> "#{calls}"; echo '{}'))
 
     rows = [
-      {:awaiting_api, {:error, :not_ready}, Firewall.default(), 0},
       {:stopping, {:error, :stopping}, Firewall.default(), 0},
       {:configuring, :ok, ssh, 1},
       {:running, :ok, ssh, 1}
@@ -47,6 +46,22 @@ defmodule Hyper.Node.FireVMM.StateSetFirewallTest do
       assert Policy.current(vm_id) == policy, inspect(state)
       assert length(read_calls(calls)) == applied, inspect(state)
     end
+  end
+
+  test "a policy set while the jailer is still launching waits for it instead of racing it",
+       %{tmp: tmp, calls: calls, vm_id: vm_id, ssh: ssh} do
+    SuidHelperStub.install!(tmp, ~s(echo "$1" >> "#{calls}"; echo '{}'))
+    from = {self(), make_ref()}
+
+    assert State.handle_event(
+             {:call, from},
+             {:set_firewall, ssh},
+             :awaiting_api,
+             %State{opts: %Opts{vm_id: vm_id}}
+           ) == {:keep_state_and_data, :postpone}
+
+    assert Policy.current(vm_id) == Firewall.default()
+    assert read_calls(calls) == []
   end
 
   test "a policy the helper refuses is not recorded",

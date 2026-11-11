@@ -158,6 +158,7 @@ defmodule Hyper.Grpc.Codec do
 
   @spec boot_args(String.t() | nil) :: {:ok, String.t() | nil} | {:error, :bad_boot_args}
   defp boot_args(nil), do: {:ok, nil}
+  defp boot_args(""), do: {:ok, nil}
 
   defp boot_args(args) when byte_size(args) > @max_boot_args, do: {:error, :bad_boot_args}
 
@@ -169,7 +170,8 @@ defmodule Hyper.Grpc.Codec do
   end
 
   @spec reserved_boot_arg?(String.t()) :: boolean()
-  defp reserved_boot_arg?(arg), do: arg == "--" or String.starts_with?(arg, ["ip=", "hyper."])
+  defp reserved_boot_arg?(arg),
+    do: arg == "--" or String.starts_with?(arg, ["ip=", "nfsaddrs=", "hyper."])
 
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
@@ -208,7 +210,7 @@ defmodule Hyper.Grpc.Codec do
       GRPC.RPCError.exception(
         :invalid_argument,
         "boot_args must be printable ASCII without quotes, at most #{@max_boot_args} bytes, " <>
-          "without `--`, `ip=` or `hyper.*` arguments"
+          "without `--`, `ip=`, `nfsaddrs=` or `hyper.*` arguments"
       )
 
   defp rpc_error(:not_found),

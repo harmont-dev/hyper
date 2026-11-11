@@ -58,6 +58,23 @@ defmodule Hyper.Node.ReclaimTest do
     assert File.exists?(wrong_suffix), "wrong-suffix file must not be removed"
   end
 
+  test "removes stale Firecracker socket pins and leaves look-alikes", %{socket_dir: dir} do
+    rows = [
+      {"fc-vabc123-vsock.sock", false},
+      {"fc-vabc123-api.socket", false},
+      {"fc-vabc123-other.sock", true},
+      {"xfc-vabc123-api.socket", true}
+    ]
+
+    for {name, _} <- rows, do: File.write!(Path.join(dir, name), "")
+
+    Reclaim.reclaim_sockets()
+
+    for {name, kept} <- rows do
+      assert File.exists?(Path.join(dir, name)) == kept, name
+    end
+  end
+
   test "creates socket_dir if it does not exist" do
     new_dir =
       Path.join(

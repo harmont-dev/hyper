@@ -46,7 +46,7 @@ defmodule Hyper.Node.Reclaim do
     case File.ls(dir) do
       {:ok, names} ->
         for name <- names,
-            String.starts_with?(name, "grpc-") and String.ends_with?(name, ".sock") do
+            stale_socket?(name) do
           path = Path.join(dir, name)
 
           case File.rm(path) do
@@ -118,4 +118,9 @@ defmodule Hyper.Node.Reclaim do
       true -> Logger.error("reclaim: could not remove dm devices: #{inspect(failed)}")
     end
   end
+
+  @spec stale_socket?(String.t()) :: boolean()
+  defp stale_socket?("grpc-" <> rest), do: String.ends_with?(rest, ".sock")
+  defp stale_socket?("fc-" <> rest), do: String.ends_with?(rest, ["-vsock.sock", "-api.socket"])
+  defp stale_socket?(_), do: false
 end

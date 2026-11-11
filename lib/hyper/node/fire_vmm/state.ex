@@ -70,9 +70,11 @@ defmodule Hyper.Node.FireVMM.State do
   Replace the running VM `id`'s port policy. The new policy is what `describe/1`
   reports from then on, so a later fork inherits it. Exits if the VM is gone.
   """
+  @set_firewall_timeout Unit.Time.s(30)
+
   @spec set_firewall(Hyper.Vm.Id.t(), Hyper.Vm.Firewall.t()) :: :ok | {:error, term()}
   def set_firewall(id, %Hyper.Vm.Firewall{} = firewall) do
-    :gen_statem.call(via(id), {:set_firewall, firewall})
+    :gen_statem.call(via(id), {:set_firewall, firewall}, Unit.Time.as_ms(@set_firewall_timeout))
   end
 
   @doc """
@@ -136,8 +138,8 @@ defmodule Hyper.Node.FireVMM.State do
     {:keep_state_and_data, [{:reply, from, %{data.opts | firewall: firewall}}]}
   end
 
-  def handle_event({:call, from}, {:set_firewall, _firewall}, :awaiting_api, _data) do
-    {:keep_state_and_data, [{:reply, from, {:error, :not_ready}}]}
+  def handle_event({:call, _from}, {:set_firewall, _firewall}, :awaiting_api, _data) do
+    {:keep_state_and_data, :postpone}
   end
 
   # The VM's namespace exists from launch until teardown, so any state short of
