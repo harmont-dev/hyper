@@ -64,17 +64,39 @@ defmodule Hyper.Node.FireVMM.Agent do
         map_grpc_error(err)
 
       {:ok, ch} ->
-        result =
-          case Stub.exec(ch, req, timeout: timeout) do
-            {:ok, resp} ->
-              {:ok, %{exit_code: resp.exit_code, stdout: resp.stdout, stderr: resp.stderr}}
+        try do
+          ch |> call(req, timeout) |> await(timeout)
+        after
+          _ = GRPC.Stub.disconnect(ch)
+        end
+    end
+  end
 
-            err ->
-              map_grpc_error(err)
-          end
+  @spec call(GRPC.Channel.t(), ExecRequest.t(), timeout()) :: Task.t()
+  defp call(ch, req, timeout) do
+    Task.async(fn ->
+      try do
+        Stub.exec(ch, req, timeout: timeout)
+      rescue
+        e -> {:error, {:bad_agent_reply, e.__struct__}}
+      catch
+        :exit, reason -> {:error, {:bad_agent_reply, reason}}
+      end
+    end)
+  end
 
-        _ = GRPC.Stub.disconnect(ch)
-        result
+  @spec await(Task.t(), timeout()) ::
+          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}} | {:error, term()}
+  defp await(task, timeout) do
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, resp}} ->
+        {:ok, %{exit_code: resp.exit_code, stdout: resp.stdout, stderr: resp.stderr}}
+
+      {:ok, err} ->
+        map_grpc_error(err)
+
+      _ ->
+        {:error, :timeout}
     end
   end
 
