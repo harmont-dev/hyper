@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 //! Host-wide networking, applied by `host_init`.
 
-use super::{Filter, Masquerade, NetId, NON_PUBLIC, TABLE};
+use super::{Filter, Masquerade, NetId, NodePrefix, NON_PUBLIC, TABLE};
+use hyperrs_linux::net::link::LinkError;
 use hyperrs_linux::net::nft::{
     Action, Chain, CtState, Family, Hook, Icmpv6Type, Iface, Match, Nft, NftError, Policy, Rule,
     Table,
 };
-use hyperrs_linux::net::{IfName, IpNet};
+use hyperrs_linux::net::{IfName, IpNet, Rtnl, RtnlOpenError};
 use hyperrs_linux::sysctl::{Sysctl, SysctlError};
+use hyperrs_process::privilege::Root;
 use std::sync::LazyLock;
 use thiserror::Error as ThisError;
 
@@ -20,17 +22,27 @@ pub enum HostNetError {
     Sysctl(#[from] SysctlError),
     #[error("host firewall: {0}")]
     Nft(#[from] NftError),
+    #[error(transparent)]
+    Rtnl(#[from] RtnlOpenError),
+    #[error(transparent)]
+    Link(#[from] LinkError),
+    #[error("uplink {0} is not an interface on this host; set [net] uplink to the one on the default route")]
+    NoUplink(IfName),
 }
 
 /// The host side of VM networking, routed out of `uplink`.
 pub struct HostNet<'a> {
     pub uplink: &'a IfName,
+    pub prefix: NodePrefix,
 }
 
 impl HostNet<'_> {
     /// Forward and proxy NDP for VMs, masquerade their IPv4 out of `uplink`, and
     /// firewall them off from the host, its network, and inbound connections.
-    pub fn init(&self, nft: &Nft) -> Result<(), HostNetError> {
+    pub fn init(&self, root: &Root<'_>, nft: &Nft) -> Result<(), HostNetError> {
+        if Rtnl::open()?.link(self.uplink)?.is_none() {
+            return Err(HostNetError::NoUplink(self.uplink.clone()));
+        }
         Sysctl::net().ipv4().ip_forward(true).write()?;
         Sysctl::net().ipv6().conf_all().forwarding(true).write()?;
         Sysctl::net()
@@ -39,7 +51,7 @@ impl HostNet<'_> {
             .proxy_ndp(true)
             .write()?;
 
-        nft.replace_table(&self.table())?;
+        nft.replace_table(root, &self.table())?;
         Ok(())
     }
 
@@ -54,7 +66,7 @@ impl HostNet<'_> {
                 }
                 .chain(),
                 Self::input(),
-                Self::forward(),
+                self.forward(),
             ],
         }
     }
@@ -84,7 +96,9 @@ impl HostNet<'_> {
 
     /// VMs reach only public addresses. What reaches a VM is its own namespace's
     /// firewall to decide.
-    fn forward() -> Chain {
+    fn forward(&self) -> Chain {
+        let vm_range = Match::Ipv6Daddr(self.prefix.vm_range());
+        let not_vm_range = || Match::Not(Box::new(vm_range.clone()));
         Filter {
             hook: Hook::Forward,
             policy: Policy::Accept,
@@ -97,6 +111,27 @@ impl HostNet<'_> {
                     };
                     Self::from_vms(daddr, Action::Drop)
                 })
+                .chain([
+                    Rule {
+                        matches: vec![
+                            Match::Iifname(VM_VETHS.clone()),
+                            Match::Ipv6Daddr(self.prefix.get()),
+                            not_vm_range(),
+                        ],
+                        action: Action::Drop,
+                    },
+                    Rule {
+                        matches: vec![
+                            Match::Ipv4Daddr(NetId::transit_range()),
+                            Match::CtState(CtState::New),
+                        ],
+                        action: Action::Drop,
+                    },
+                    Rule {
+                        matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
+                        action: Action::Drop,
+                    },
+                ])
                 .collect(),
         }
         .chain()

@@ -57,11 +57,12 @@ impl Op for HostInit {
         let nft = Nft::new(config.nft().map_err(BinError::from)?);
 
         {
-            let _root = token.elevate()?;
+            let root = token.elevate()?;
             HostNet {
                 uplink: net.uplink(),
+                prefix: net.ipv6_prefix(),
             }
-            .init(&nft)?;
+            .init(&root, &nft)?;
         }
 
         Ok(HostInitOut::HostReady {

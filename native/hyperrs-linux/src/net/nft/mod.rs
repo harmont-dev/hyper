@@ -4,6 +4,7 @@
 use super::{IfName, Ipv4Net, Ipv6Net};
 use derive_more::Constructor;
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{Root, RootCommandExt};
 use nix::unistd::Uid;
 use std::io;
 use std::net::Ipv4Addr;
@@ -95,6 +96,7 @@ pub enum Match {
     Icmpv6Type(Icmpv6Type),
     Skuid(Uid),
     Dport(L4Proto, RangeInclusive<u16>),
+    Not(Box<Match>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
@@ -146,21 +148,26 @@ pub struct Nft {
 
 impl Nft {
     /// Atomically create or replace `table` so it holds exactly its chains and rules.
-    pub fn replace_table(&self, table: &Table) -> Result<(), NftError> {
-        self.run(&wire::Ruleset::replace(table))
+    pub fn replace_table(&self, root: &Root<'_>, table: &Table) -> Result<(), NftError> {
+        self.run(root, &wire::Ruleset::replace(table))
     }
 
     /// Delete the table `name` in `family`; a missing table is `Ok`.
-    pub fn delete_table(&self, family: Family, name: &str) -> Result<(), NftError> {
-        self.run(&wire::Ruleset::delete(family, name))
+    pub fn delete_table(
+        &self,
+        root: &Root<'_>,
+        family: Family,
+        name: &str,
+    ) -> Result<(), NftError> {
+        self.run(root, &wire::Ruleset::delete(family, name))
     }
 
-    fn run(&self, ruleset: &wire::Ruleset<'_>) -> Result<(), NftError> {
+    fn run(&self, root: &Root<'_>, ruleset: &wire::Ruleset<'_>) -> Result<(), NftError> {
         let mut child = self
             .bin
             .command()
             .args(["-j", "-f", "-"])
-            .env_clear()
+            .spawn_as_root(root, &[])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -189,6 +196,7 @@ mod tests {
     use crate::net::netns::NetNs;
     use crate::net::{IpNet, Ipv4Net, Ipv6Net};
     use hyperrs_process::binary::RootSafeBin;
+    use hyperrs_process::privilege::Unprivileged;
     use nix::unistd::Uid;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -320,6 +328,8 @@ mod tests {
         let Some(ns) = ScratchNs::new(test) else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let table = table(
             ChainType::Nat,
             Hook::Postrouting,
@@ -331,11 +341,11 @@ mod tests {
         let nft = nft();
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
 
@@ -374,10 +384,15 @@ mod tests {
         "left": {"payload": {"protocol": "tcp", "field": "dport"}}, "right": 25}}))]
     #[case::port_range(Match::Dport(L4Proto::Udp, 6000..=6010), json!({"match": {"op": "==",
         "left": {"payload": {"protocol": "udp", "field": "dport"}}, "right": {"range": [6000, 6010]}}}))]
+    #[case::negated_prefix(Match::Not(Box::new(Match::Ipv6Daddr(v6("2001:db8:0:0:1::/80")))),
+        json!({"match": {"op": "!=", "left": {"payload": {"protocol": "ip6", "field": "daddr"}},
+        "right": prefix("2001:db8:0:0:1::", 80)}}))]
     fn every_match_lists_back_as_given_as_root(#[case] matches: Match, #[case] listed: Value) {
         let Some(ns) = ScratchNs::new("nft-match") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let table = table(
             ChainType::Filter,
             Hook::Forward,
@@ -389,7 +404,7 @@ mod tests {
         let nft = nft();
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
 
@@ -404,6 +419,8 @@ mod tests {
         let Some(ns) = ScratchNs::new("nft-dnat") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let table = table(
             ChainType::Nat,
             Hook::Prerouting,
@@ -415,7 +432,7 @@ mod tests {
         let nft = nft();
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
 
@@ -434,6 +451,8 @@ mod tests {
         let Some(ns) = ScratchNs::new("nft-shrink") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let drop_if0 = Rule {
             matches: vec![Match::Oifname(named("if0"))],
             action: Action::Drop,
@@ -450,12 +469,12 @@ mod tests {
             vec![drop_if0, accept_lan.clone()],
         );
         ns.get()
-            .scoped(|| nft.replace_table(&both))
+            .scoped(|| nft.replace_table(&root, &both))
             .unwrap()
             .unwrap();
         let one = table(ChainType::Filter, Hook::Forward, vec![accept_lan]);
         ns.get()
-            .scoped(|| nft.replace_table(&one))
+            .scoped(|| nft.replace_table(&root, &one))
             .unwrap()
             .unwrap();
 
@@ -472,19 +491,21 @@ mod tests {
         let Some(ns) = ScratchNs::new("nft-delete") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let nft = nft();
         let table = table(ChainType::Nat, Hook::Postrouting, vec![]);
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.delete_table(Family::Inet, TABLE))
+            .scoped(|| nft.delete_table(&root, Family::Inet, TABLE))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.delete_table(Family::Inet, TABLE))
+            .scoped(|| nft.delete_table(&root, Family::Inet, TABLE))
             .unwrap()
             .unwrap();
 

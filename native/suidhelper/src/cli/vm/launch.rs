@@ -85,8 +85,8 @@ impl Op for Launch {
         let teardown = Teardown::new(self.id.clone());
         teardown.teardown(&mut token)?;
 
-        let netns = {
-            let _root = token.elevate()?;
+        let staged = (|| -> Result<_, LaunchError> {
+            let root = token.elevate()?;
             let device = self.device.open()?;
             layout
                 .create_root()?
@@ -94,16 +94,24 @@ impl Op for Launch {
                 .kernel(&kernel)
                 .rootfs(&device)
                 .build()?;
-            teardown
+            Ok(teardown
                 .net()
                 .prepare(
+                    &root,
                     self.net_id,
                     net,
                     &nft,
                     (uid.into(), gid.into()),
                     &self.firewall,
                 )?
-                .path()
+                .path())
+        })();
+        let netns = match staged {
+            Ok(netns) => netns,
+            Err(e) => {
+                let _ = teardown.teardown(&mut token);
+                return Err(e);
+            }
         };
 
         Jailer::builder()

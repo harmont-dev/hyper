@@ -42,13 +42,22 @@ const FILTER_PRIORITY: i32 = 0;
 
 /// Where VMs may not send: private, shared (CGNAT) and link-local ranges, which is
 /// where providers keep their infrastructure and metadata services.
-const NON_PUBLIC: [&str; 6] = [
+const NON_PUBLIC: [&str; 15] = [
+    "0.0.0.0/8",
     "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
     "100.64.0.0/10",
     "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.0.0.0/24",
+    "192.168.0.0/16",
+    "198.18.0.0/15",
+    "240.0.0.0/4",
+    "64:ff9b::/96",
+    "64:ff9b:1::/48",
+    "2002::/16",
     "fc00::/7",
+    "fec0::/10",
+    "::ffff:0:0/96",
 ];
 
 #[derive(Debug, ThisError, PartialEq, Eq)]
@@ -163,6 +172,10 @@ impl FromStr for NodePrefix {
 }
 
 impl NodePrefix {
+    pub fn get(self) -> Ipv6Net {
+        self.0
+    }
+
     /// `<prefix>:1::/80`, the range VM addresses come out of.
     pub fn vm_range(self) -> Ipv6Net {
         Ipv6Net {

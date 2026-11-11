@@ -164,6 +164,15 @@ impl Statement {
                 Expr::payload((*proto).into(), "dport"),
                 Expr::ports(ports),
             ),
+            Match::Not(inner) => {
+                let Self::Match(comparison) = Self::of_match(inner) else {
+                    unreachable!("a match renders as a comparison")
+                };
+                return Self::Match(Comparison {
+                    op: "!=",
+                    ..comparison
+                });
+            }
         };
         Self::Match(Comparison { op, left, right })
     }

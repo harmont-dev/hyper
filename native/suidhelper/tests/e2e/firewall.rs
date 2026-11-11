@@ -26,7 +26,7 @@ mod support;
 use support::{is_root, ScratchNs};
 
 const PORT: u16 = 7070;
-const DROPPED_AFTER: Duration = Duration::from_millis(500);
+const DROPPED_AFTER: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy)]
 enum Side {
@@ -154,7 +154,7 @@ impl Lab {
 #[case::vm_to_a_private_network(Side::Vm, "10.9.0.1", false)]
 #[case::vm_to_cloud_metadata(Side::Vm, "169.254.169.254", false)]
 #[case::host_to_the_vm(Side::Host, "10.200.0.2", true)]
-#[case::internet_to_the_vm(Side::Wan, "10.200.0.2", true)]
+#[case::internet_routing_into_the_transit_range(Side::Wan, "10.200.0.2", false)]
 fn the_host_firewall_confines_vms_as_root(
     #[case] from: Side,
     #[case] to: &str,

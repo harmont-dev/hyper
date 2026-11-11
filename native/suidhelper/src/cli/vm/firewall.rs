@@ -35,8 +35,8 @@ impl Op for SetFirewall {
 
     fn run(self, mut token: Unprivileged) -> Result<VmOut, SetFirewallError> {
         let nft = Nft::new(Config::get().nft().map_err(BinError::from)?);
-        let _root = token.elevate()?;
-        VmNet { id: &self.id }.set_firewall(&nft, &self.firewall)?;
+        let root = token.elevate()?;
+        VmNet { id: &self.id }.set_firewall(&root, &nft, &self.firewall)?;
         Ok(VmOut::FirewallSet)
     }
 }

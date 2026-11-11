@@ -2,7 +2,7 @@
 //! One VM's network namespace: built by `vm_launch`, removed by `vm_teardown`.
 
 use super::firewall::Firewall;
-use super::{Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, TABLE};
+use super::{Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, NON_PUBLIC, TABLE};
 use crate::config::Net;
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file::ValidationError;
@@ -14,11 +14,12 @@ use hyperrs_linux::net::netns::{
     CreateError, EnterError, ForwardingError, NetNs, OpenError, RemoveError, RtnlError, TapError,
 };
 use hyperrs_linux::net::nft::{
-    Action, Chain, ChainType, CtState, Family, Hook, Iface, L4Proto, Match, Nft, NftError, Policy,
-    Rule, Table,
+    Action, Chain, ChainType, CtState, Family, Hook, Icmpv6Type, Iface, L4Proto, Match, Nft,
+    NftError, Policy, Rule, Table,
 };
 use hyperrs_linux::net::route::{Route, RouteError};
 use hyperrs_linux::net::{IfIndex, IfName, IpNet, Ipv4Net, Ipv6Net, Prefix, Rtnl, RtnlOpenError};
+use hyperrs_process::privilege::Root;
 use nix::errno::Errno;
 use nix::unistd::{Gid, Uid};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -94,6 +95,7 @@ impl VmNet<'_> {
     /// Build the VM's namespace, with `tap0` owned by `uid`:`gid` for Firecracker.
     pub fn prepare(
         &self,
+        root: &Root<'_>,
         net_id: NetId,
         net: &Net,
         nft: &Nft,
@@ -173,14 +175,19 @@ impl VmNet<'_> {
         Self::existing(&host, net.uplink())?.add_proxy_neigh(guest)?;
 
         ns.enable_forwarding()?;
-        ns.scoped(|| nft.replace_table(&Self::table(guest, uid, net.resolver().addr())))??;
-        ns.scoped(|| nft.replace_table(&Self::firewall_table(firewall)))??;
+        ns.scoped(|| nft.replace_table(root, &Self::table(guest, uid, net.resolver().addr())))??;
+        ns.scoped(|| nft.replace_table(root, &Self::firewall_table(firewall)))??;
 
         Ok(ns)
     }
 
     /// Replace the running VM's port policy with `firewall`.
-    pub fn set_firewall(&self, nft: &Nft, firewall: &Firewall) -> Result<(), VmNetError> {
+    pub fn set_firewall(
+        &self,
+        root: &Root<'_>,
+        nft: &Nft,
+        firewall: &Firewall,
+    ) -> Result<(), VmNetError> {
         let ns = match NetNs::open(&self.netns_name()) {
             Ok(ns) => ns,
             Err(OpenError::Open(ValidationError::Open(Errno::ENOENT)) | OpenError::NotNetNs(_)) => {
@@ -188,7 +195,7 @@ impl VmNet<'_> {
             }
             Err(e) => return Err(e.into()),
         };
-        ns.scoped(|| nft.replace_table(&Self::firewall_table(firewall)))??;
+        ns.scoped(|| nft.replace_table(root, &Self::firewall_table(firewall)))??;
         Ok(())
     }
 
@@ -258,22 +265,53 @@ impl VmNet<'_> {
                 }
                 .chain(),
                 Filter {
+                    hook: Hook::Input,
+                    policy: Policy::Drop,
+                    rules: [
+                        Match::Iifname(Iface::Named(LO.clone())),
+                        Match::CtState(CtState::Established),
+                        Match::CtState(CtState::Related),
+                        Match::Icmpv6Type(Icmpv6Type::NeighborSolicit),
+                        Match::Icmpv6Type(Icmpv6Type::NeighborAdvert),
+                    ]
+                    .into_iter()
+                    .map(|allowed| Rule {
+                        matches: vec![allowed],
+                        action: Action::Accept,
+                    })
+                    .collect(),
+                }
+                .chain(),
+                Filter {
                     hook: Hook::Forward,
                     policy: Policy::Drop,
-                    rules: vec![
-                        from_guest(Match::Ipv4Saddr(guest_v4)),
-                        from_guest(Match::Ipv6Saddr(Ipv6Net {
-                            addr: guest,
-                            prefix: Self::prefix(128),
-                        })),
-                        Rule {
+                    rules: NON_PUBLIC
+                        .iter()
+                        .map(|range| Rule {
                             matches: vec![
-                                Match::Iifname(Iface::Named(UPLINK.clone())),
-                                Match::Oifname(Iface::Named(TAP.clone())),
+                                Match::Iifname(Iface::Named(TAP.clone())),
+                                match range.parse().expect("the non-public ranges parse") {
+                                    IpNet::V4(net) => Match::Ipv4Daddr(net),
+                                    IpNet::V6(net) => Match::Ipv6Daddr(net),
+                                },
                             ],
-                            action: Action::Accept,
-                        },
-                    ],
+                            action: Action::Drop,
+                        })
+                        .chain([
+                            from_guest(Match::Ipv4Saddr(guest_v4)),
+                            from_guest(Match::Ipv6Saddr(Ipv6Net {
+                                addr: guest,
+                                prefix: Self::prefix(128),
+                            })),
+                            Rule {
+                                matches: vec![
+                                    Match::Iifname(Iface::Named(UPLINK.clone())),
+                                    Match::Oifname(Iface::Named(TAP.clone())),
+                                ],
+                                action: Action::Accept,
+                            },
+                        ])
+                        .collect(),
                 }
                 .chain(),
                 Filter {
@@ -385,6 +423,7 @@ mod tests {
     use hyperrs_linux::net::route::Route;
     use hyperrs_linux::net::{IfIndex, IfName, IpNet, Rtnl};
     use hyperrs_process::binary::RootSafeBin;
+    use hyperrs_process::privilege::Unprivileged;
     use nix::unistd::{setfsuid, Uid};
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -398,6 +437,7 @@ mod tests {
     const CLOSED: u16 = 7072;
     const BLOCKED: u16 = 7073;
     const DNS: u16 = 53;
+    const NAMESPACE: u16 = 7074;
     const DROPPED_AFTER: Duration = Duration::from_secs(3);
     const FIRECRACKER: u32 = 900_001;
     const GUEST_V6: &str = "2001:db8::1:0:0:5";
@@ -475,7 +515,12 @@ mod tests {
             let wan = Self::up(
                 &h,
                 "wan",
-                &["10.200.0.1/30", "fe80::1/64", "2001:db8:ffff::1/128"],
+                &[
+                    "10.200.0.1/30",
+                    "198.51.100.1/32",
+                    "fe80::1/64",
+                    "2001:db8:ffff::1/128",
+                ],
             );
 
             for (rtnl, route) in [
@@ -484,6 +529,7 @@ mod tests {
                 (&v, Self::route("192.0.2.9/32", None, tap)),
                 (&v, Self::route("2001:db8:0:0:1::/80", None, tap)),
                 (&v, Self::route("::/0", Some("fe80::1"), uplink)),
+                (&v, Self::route("0.0.0.0/0", Some("10.200.0.1"), uplink)),
                 (&h, Self::route("192.0.2.9/32", Some("10.200.0.2"), wan)),
                 (&h, Self::route("2001:db8:0:0:1::/80", Some("fe80::2"), wan)),
             ] {
@@ -492,6 +538,8 @@ mod tests {
 
             vm.get().enable_forwarding().unwrap();
             let nft = Nft::new(RootSafeBin::open(Path::new("/usr/sbin/nft")).unwrap());
+            let mut token = Unprivileged::take().unwrap();
+            let root = token.elevate().unwrap();
             let firewall: Firewall = serde_json::from_value(json!({
                 "inbound": [{"protocol": "tcp", "ports": [OPEN, OPEN]}],
                 "outbound_blocked": [{"protocol": "tcp", "ports": [BLOCKED, BLOCKED]}],
@@ -501,12 +549,12 @@ mod tests {
                 VmNet::table(
                     GUEST_V6.parse().unwrap(),
                     Uid::from_raw(FIRECRACKER),
-                    "10.200.0.1".parse().unwrap(),
+                    "198.51.100.1".parse().unwrap(),
                 ),
                 VmNet::firewall_table(&firewall),
             ] {
                 vm.get()
-                    .scoped(|| nft.replace_table(&table))
+                    .scoped(|| nft.replace_table(&root, &table))
                     .unwrap()
                     .unwrap();
             }
@@ -523,6 +571,7 @@ mod tests {
                 listen(&host, OPEN),
                 listen(&host, BLOCKED),
                 listen(&host, DNS),
+                listen(&vm, NAMESPACE),
             ];
             Self {
                 guest,
@@ -586,25 +635,28 @@ mod tests {
     }
 
     #[rstest]
-    #[case::guest_ipv4(Probe::Guest("172.16.0.2"), "10.200.0.1:7071", true)]
-    #[case::spoofed_ipv4(Probe::Guest("192.0.2.9"), "10.200.0.1:7071", false)]
+    #[case::guest_ipv4(Probe::Guest("172.16.0.2"), "198.51.100.1:7071", true)]
+    #[case::spoofed_ipv4(Probe::Guest("192.0.2.9"), "198.51.100.1:7071", false)]
     #[case::guest_ipv6(Probe::Guest(GUEST_V6), "[2001:db8:ffff::1]:7071", true)]
     #[case::spoofed_ipv6(Probe::Guest("2001:db8::1:0:0:6"), "[2001:db8:ffff::1]:7071", false)]
-    #[case::namespace_as_root(Probe::Namespace(0), "10.200.0.1:7071", true)]
-    #[case::namespace_as_firecracker(Probe::Namespace(FIRECRACKER), "10.200.0.1:7071", false)]
+    #[case::guest_to_a_private_range(Probe::Guest("172.16.0.2"), "10.200.0.1:7071", false)]
+    #[case::namespace_as_root(Probe::Namespace(0), "198.51.100.1:7071", true)]
+    #[case::namespace_as_firecracker(Probe::Namespace(FIRECRACKER), "198.51.100.1:7071", false)]
     #[case::inbound_to_an_open_port(Probe::Host, "[2001:db8::1:0:0:5]:7071", true)]
     #[case::inbound_to_a_closed_port(Probe::Host, "[2001:db8::1:0:0:5]:7072", false)]
-    #[case::outbound_to_a_blocked_port(Probe::Guest("172.16.0.2"), "10.200.0.1:7073", false)]
+    #[case::outbound_to_a_blocked_port(Probe::Guest("172.16.0.2"), "198.51.100.1:7073", false)]
     #[case::dns_to_the_gateway_reaches_the_resolver(
         Probe::Guest("172.16.0.2"),
         "172.16.0.1:53",
         true
     )]
-    #[case::other_ports_on_the_gateway_stay_local(
+    #[case::other_ports_on_the_gateway_are_not_forwarded(
         Probe::Guest("172.16.0.2"),
         "172.16.0.1:7071",
         false
     )]
+    #[case::guest_to_a_namespace_service(Probe::Guest("172.16.0.2"), "172.16.0.1:7074", false)]
+    #[case::host_to_a_namespace_service(Probe::Host, "10.200.0.2:7074", false)]
     fn the_vm_namespace_admits_only_what_its_policy_allows_as_root(
         #[case] probe: Probe,
         #[case] to: &str,

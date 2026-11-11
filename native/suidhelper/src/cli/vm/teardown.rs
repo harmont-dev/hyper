@@ -72,11 +72,17 @@ impl Teardown {
         let jail_base = config.jail_base();
         let layout = JailLayout::new(&jail_base, &self.id);
         let _root = token.elevate().map_err(JailRemoveError::from)?;
-        self.remove_cgroup(&cgroup_parent)
-            .map_err(JailRemoveError::from)?;
-        layout.remove().map_err(JailRemoveError::from)?;
-        self.net().teardown(config.net().ok())?;
-        Ok(())
+        let cgroup = self
+            .remove_cgroup(&cgroup_parent)
+            .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
+        let jail = layout
+            .remove()
+            .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
+        let net = self
+            .net()
+            .teardown(config.net().ok())
+            .map_err(TeardownError::from);
+        cgroup.and(jail).and(net)
     }
 
     /// The VM's network, as [`VmNet`] sees it.
