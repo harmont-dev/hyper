@@ -49,7 +49,7 @@ defmodule Redist.Targz do
 
     case :erl_tar.extract(
            String.to_charlist(tar_path),
-           [:compressed, :keep_old_files, {:cwd, String.to_charlist(dest_dir)}]
+           [:compressed, {:cwd, String.to_charlist(dest_dir)}]
          ) do
       :ok -> :ok
       {:error, {name, :unsafe_path}} -> {:error, {:unsafe_tar_entry, to_string(name)}}

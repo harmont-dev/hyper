@@ -371,13 +371,13 @@ fn launch_networks_the_vm_and_teardown_removes_it_as_root(launch: Option<Launch>
 fn teardown_waits_for_the_vm_lock_an_in_flight_launch_holds_as_root(launch: Option<Launch>) {
     let launch = require!(launch);
     let cfg = launch.config("");
-    let locks = PathBuf::from("/run/hyper/locks");
+    let locks = PathBuf::from("/run/hyper-suidhelper/locks");
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(&locks)
         .unwrap();
-    fs::set_permissions("/run/hyper", fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions("/run/hyper-suidhelper", fs::Permissions::from_mode(0o755)).unwrap();
     let locks_path: SafePathBuf<IsAbsolute, StrictComponents> = locks.clone().try_into().unwrap();
     let dir: SafeDir = SafeFile::open(&locks_path, OpenFlags::RDONLY).unwrap();
     let name = format!("vm-{}", launch.id);

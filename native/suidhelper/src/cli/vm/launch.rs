@@ -91,7 +91,7 @@ impl Op for Launch {
         drop(root);
 
         let teardown = Teardown::new(self.id.clone());
-        teardown.teardown(&mut token, &locks)?;
+        teardown.teardown(&mut token)?;
 
         let staged = (|| -> Result<_, LaunchError> {
             let root = token.elevate()?;
@@ -102,7 +102,6 @@ impl Op for Launch {
                 .kernel(&kernel)
                 .rootfs(&device)
                 .build()?;
-            let _net = locks.net(&root)?;
             Ok(teardown
                 .net()
                 .prepare(
@@ -118,7 +117,7 @@ impl Op for Launch {
         let netns = match staged {
             Ok(netns) => netns,
             Err(e) => {
-                let _ = teardown.teardown(&mut token, &locks);
+                let _ = teardown.teardown(&mut token);
                 return Err(e);
             }
         };

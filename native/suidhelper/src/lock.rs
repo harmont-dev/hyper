@@ -11,10 +11,9 @@ use nix::sys::stat::Mode;
 use std::time::Duration;
 use thiserror::Error as ThisError;
 
-const TIMEOUT: Duration = Duration::from_secs(30);
-const HYPER: &StrictComponent = StrictComponent::from_static("hyper");
+const TIMEOUT: Duration = Duration::from_secs(5);
+const HYPER: &StrictComponent = StrictComponent::from_static("hyper-suidhelper");
 const LOCKS: &StrictComponent = StrictComponent::from_static("locks");
-const NET: &StrictComponent = StrictComponent::from_static("net");
 
 type RootDir = SafeFile<IsDirectory, RootOwner, OwnerOnlyWritable>;
 
@@ -58,9 +57,5 @@ impl Locks {
             .try_into()
             .expect("vm-<vm id> is a strict path component");
         Ok(FileLock::acquire(&self.0, name, TIMEOUT)?)
-    }
-
-    pub fn net(&self, _root: &Root<'_>) -> Result<Lock<'_>, LocksError> {
-        Ok(FileLock::acquire(&self.0, NET, TIMEOUT)?)
     }
 }
