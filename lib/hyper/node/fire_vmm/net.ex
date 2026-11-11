@@ -28,7 +28,7 @@ defmodule Hyper.Node.FireVMM.Net do
 
   @doc "The Firecracker NIC spec (guest `eth0` bound to in-netns `tap0`), capped at `net_bw` each way."
   @spec interface(Hyper.Vm.Id.t(), Bandwidth.t()) :: NetworkInterface.t()
-  def interface(vm_id, %Bandwidth{} = net_bw) do
+  def interface(vm_id, net_bw) do
     %NetworkInterface{
       iface_id: @iface,
       host_dev_name: @tap,
