@@ -407,6 +407,9 @@ mod tests {
     #[rstest]
     fn safefile_owner_axis_rejects_non_root_file(plain: (TempDir, ChildPath)) {
         let (_tmp, f) = plain;
+        if nix::unistd::geteuid().is_root() {
+            nix::unistd::chown(f.path(), Some(nix::unistd::Uid::from_raw(65_534)), None).unwrap();
+        }
         assert!(
             SafeFile::<IsRegularFile, RootOwner, Any>::open(&safe(&f), OpenFlags::PATH).is_err()
         );
