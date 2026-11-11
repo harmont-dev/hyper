@@ -168,10 +168,8 @@ impl Statement {
                 let Self::Match(comparison) = Self::of_match(inner) else {
                     unreachable!("a match renders as a comparison")
                 };
-                return Self::Match(Comparison {
-                    op: "!=",
-                    ..comparison
-                });
+                let op = if comparison.op == "!=" { "==" } else { "!=" };
+                return Self::Match(Comparison { op, ..comparison });
             }
         };
         Self::Match(Comparison { op, left, right })

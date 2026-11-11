@@ -13,12 +13,12 @@ use assert_fs::TempDir;
 use hyperrs_linux::net::link::DuplicateAddrDetection;
 use hyperrs_linux::net::netns::NetNs;
 use hyperrs_linux::net::route::Route;
-use hyperrs_linux::net::{IfName, IpNet, Ipv4Net, Rtnl};
+use hyperrs_linux::net::{IfIndex, IfName, IpNet, Rtnl};
 use pretty_assertions::assert_eq;
 use rstest::rstest;
 use serde_json::json;
 use std::fs;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -63,22 +63,50 @@ impl Lab {
         host.create_veth(&Self::name("if0"), &Self::name("wan"), lab.wan.get())
             .unwrap();
         Self::up(&host, "lo", &[]);
-        Self::up(&host, "vm-veth-0", &["10.200.0.1/30"]);
-        Self::up(
+        let veth = Self::up(&host, "vm-veth-0", &["10.200.0.1/30", "fe80::1/64"]);
+        let if0 = Self::up(
             &host,
             "if0",
-            &["203.0.113.2/24", "10.9.0.2/24", "169.254.0.2/16"],
+            &[
+                "203.0.113.2/24",
+                "10.9.0.2/24",
+                "169.254.0.2/16",
+                "fe80::a/64",
+            ],
         );
-        let uplink = Self::up(&vm, "uplink", &["10.200.0.2/30"]);
-        vm.add_route(&Self::v4_route("0.0.0.0/0", "10.200.0.1", uplink))
-            .unwrap();
+        Self::up(&vm, "lo", &["2001:db8:1::9/128"]);
+        let uplink = Self::up(
+            &vm,
+            "uplink",
+            &["10.200.0.2/30", "fe80::2/64", "2001:db8::1:0:0:5/128"],
+        );
+        Self::up(&wan, "lo", &["2001:db8::99/128"]);
         let wan_link = Self::up(
             &wan,
             "wan",
-            &["203.0.113.1/24", "10.9.0.1/24", "169.254.169.254/16"],
+            &[
+                "203.0.113.1/24",
+                "10.9.0.1/24",
+                "169.254.169.254/16",
+                "fe80::b/64",
+                "2001:db8:ffff::1/128",
+            ],
         );
-        wan.add_route(&Self::v4_route("10.200.0.0/16", "203.0.113.2", wan_link))
-            .unwrap();
+        for (rtnl, route) in [
+            (&vm, Self::route("0.0.0.0/0", "10.200.0.1", uplink)),
+            (&vm, Self::route("::/0", "fe80::1", uplink)),
+            (&host, Self::route("2001:db8::1:0:0:5/128", "fe80::2", veth)),
+            (&host, Self::route("2001:db8:1::/64", "fe80::2", veth)),
+            (&host, Self::route("::/0", "fe80::b", if0)),
+            (&wan, Self::route("10.200.0.0/16", "203.0.113.2", wan_link)),
+            (
+                &wan,
+                Self::route("2001:db8:0:0:1::/80", "fe80::a", wan_link),
+            ),
+            (&wan, Self::route("2001:db8:1::/64", "fe80::a", wan_link)),
+        ] {
+            rtnl.add_route(&route).unwrap();
+        }
 
         let tmp = TempDir::new().unwrap();
         let cfg = tmp.path().join("config.toml");
@@ -110,7 +138,7 @@ impl Lab {
         }
     }
 
-    fn connects(&self, from: Side, to: Ipv4Addr) -> bool {
+    fn connects(&self, from: Side, to: IpAddr) -> bool {
         self.ns(from)
             .scoped(|| {
                 TcpStream::connect_timeout(&SocketAddr::from((to, PORT)), DROPPED_AFTER).is_ok()
@@ -118,7 +146,7 @@ impl Lab {
             .unwrap()
     }
 
-    fn up(rtnl: &Rtnl, link: &str, addrs: &[&str]) -> hyperrs_linux::net::IfIndex {
+    fn up(rtnl: &Rtnl, link: &str, addrs: &[&str]) -> IfIndex {
         let link = rtnl.link(&Self::name(link)).unwrap().unwrap();
         for addr in addrs {
             link.add_addr(addr.parse().unwrap(), DuplicateAddrDetection::Disabled)
@@ -132,17 +160,18 @@ impl Lab {
         s.parse().unwrap()
     }
 
-    fn v4_route(dst: &str, via: &str, dev: hyperrs_linux::net::IfIndex) -> Route {
-        let IpNet::V4(dst) = dst.parse::<IpNet>().unwrap() else {
-            unreachable!("{dst} is IPv4")
-        };
-        Route::V4 {
-            dst: Ipv4Net {
-                addr: dst.network(),
-                prefix: dst.prefix,
+    fn route(dst: &str, via: &str, dev: IfIndex) -> Route {
+        match dst.parse::<IpNet>().unwrap() {
+            IpNet::V4(dst) => Route::V4 {
+                dst,
+                via: Some(via.parse().unwrap()),
+                dev,
             },
-            via: Some(via.parse().unwrap()),
-            dev,
+            IpNet::V6(dst) => Route::V6 {
+                dst,
+                via: Some(via.parse().unwrap()),
+                dev,
+            },
         }
     }
 }
@@ -155,6 +184,10 @@ impl Lab {
 #[case::vm_to_cloud_metadata(Side::Vm, "169.254.169.254", false)]
 #[case::host_to_the_vm(Side::Host, "10.200.0.2", true)]
 #[case::internet_routing_into_the_transit_range(Side::Wan, "10.200.0.2", false)]
+#[case::vm_to_the_internet_over_ipv6(Side::Vm, "2001:db8:ffff::1", true)]
+#[case::vm_to_the_node_prefix_outside_the_vm_range(Side::Vm, "2001:db8::99", false)]
+#[case::internet_to_a_guest(Side::Wan, "2001:db8::1:0:0:5", true)]
+#[case::internet_into_a_vm_namespace_outside_the_vm_range(Side::Wan, "2001:db8:1::9", false)]
 fn the_host_firewall_confines_vms_as_root(
     #[case] from: Side,
     #[case] to: &str,
@@ -164,7 +197,11 @@ fn the_host_firewall_confines_vms_as_root(
         eprintln!("SKIP host firewall: needs root");
         return;
     }
-    let lab = Lab::new(&format!("fw-{from:?}-{to}").to_lowercase().replace('.', "-"));
+    let lab = Lab::new(
+        &format!("fw-{from:?}-{to}")
+            .to_lowercase()
+            .replace(['.', ':'], "-"),
+    );
 
     assert_eq!(lab.connects(from, to.parse().unwrap()), reachable);
 }

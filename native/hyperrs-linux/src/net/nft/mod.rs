@@ -387,6 +387,9 @@ mod tests {
     #[case::negated_prefix(Match::Not(Box::new(Match::Ipv6Daddr(v6("2001:db8:0:0:1::/80")))),
         json!({"match": {"op": "!=", "left": {"payload": {"protocol": "ip6", "field": "daddr"}},
         "right": prefix("2001:db8:0:0:1::", 80)}}))]
+    #[case::double_negation(Match::Not(Box::new(Match::Not(Box::new(Match::Ipv4Daddr(v4("10.0.0.0/8")))))),
+        json!({"match": {"op": "==", "left": {"payload": {"protocol": "ip", "field": "daddr"}},
+        "right": prefix("10.0.0.0", 8)}}))]
     fn every_match_lists_back_as_given_as_root(#[case] matches: Match, #[case] listed: Value) {
         let Some(ns) = ScratchNs::new("nft-match") else {
             return;

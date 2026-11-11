@@ -147,6 +147,8 @@ pub enum NodePrefixError {
     NotIpv6(IpNet),
     #[error("{0} is longer than /{NODE_PREFIX_MAX}, leaving no room for <prefix>:1::/80")]
     TooLong(Ipv6Net),
+    #[error("{0} overlaps {1}, which VMs may not reach; use the uplink's public prefix")]
+    NotPublic(Ipv6Net, Ipv6Net),
 }
 
 /// The node's routed IPv6 prefix, `/64` or shorter.
@@ -163,6 +165,34 @@ impl FromStr for NodePrefix {
         };
         if net.prefix.get() > NODE_PREFIX_MAX {
             return Err(NodePrefixError::TooLong(net));
+        }
+        let overlapping = NON_PUBLIC
+            .iter()
+            .filter_map(
+                |range| match range.parse().expect("the non-public ranges parse") {
+                    IpNet::V6(range) => Some(range),
+                    IpNet::V4(_) => None,
+                },
+            )
+            .find(|range: &Ipv6Net| {
+                let shorter = if net.prefix.get() <= range.prefix.get() {
+                    net.prefix
+                } else {
+                    range.prefix
+                };
+                Ipv6Net {
+                    addr: net.addr,
+                    prefix: shorter,
+                }
+                .network()
+                    == Ipv6Net {
+                        addr: range.addr,
+                        prefix: shorter,
+                    }
+                    .network()
+            });
+        if let Some(range) = overlapping {
+            return Err(NodePrefixError::NotPublic(net, range));
         }
         Ok(Self(Ipv6Net {
             addr: net.network(),
@@ -410,6 +440,9 @@ mod tests {
     #[case::too_long("2001:db8::/65", None)]
     #[case::ipv4("10.0.0.0/8", None)]
     #[case::no_prefix("2001:db8::", None)]
+    #[case::unique_local("fd12:3456:789a::/64", None)]
+    #[case::covering_unique_local("fc00::/6", None)]
+    #[case::six_to_four("2002:c000:204::/48", None)]
     fn node_prefixes_are_ipv6_and_at_most_64_bits(#[case] s: &str, #[case] parsed: Option<&str>) {
         assert_eq!(
             s.parse::<NodePrefix>().ok().map(|p| p.to_string()),

@@ -117,6 +117,7 @@ impl HostNet<'_> {
                             Match::Iifname(VM_VETHS.clone()),
                             Match::Ipv6Daddr(self.prefix.get()),
                             not_vm_range(),
+                            Match::CtState(CtState::New),
                         ],
                         action: Action::Drop,
                     },
