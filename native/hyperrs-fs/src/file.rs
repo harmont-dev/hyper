@@ -298,6 +298,12 @@ where
     }
 }
 
+impl<T, R, O> io::Read for SafeFile<T, R, O> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Ok(nix::unistd::read(self.0.as_raw_fd(), buf)?)
+    }
+}
+
 impl<T, R, O> io::Write for SafeFile<T, R, O> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         Ok(nix::unistd::write(&self.0, buf)?)

@@ -8,7 +8,7 @@ use hyperrs_linux::net::nft::{
     Table,
 };
 use hyperrs_linux::net::{IfName, IpNet, Rtnl, RtnlOpenError};
-use hyperrs_linux::sysctl::{Sysctl, SysctlError};
+use hyperrs_linux::sysctl::{AcceptRa, Sysctl, SysctlError};
 use hyperrs_process::privilege::Root;
 use std::sync::LazyLock;
 use thiserror::Error as ThisError;
@@ -42,6 +42,12 @@ impl HostNet<'_> {
     pub fn init(&self, root: &Root<'_>, nft: &Nft) -> Result<(), HostNetError> {
         if Rtnl::open()?.link(self.uplink)?.is_none() {
             return Err(HostNetError::NoUplink(self.uplink.clone()));
+        }
+        let uplink_conf = || Sysctl::net().ipv6().conf(self.uplink);
+        if uplink_conf().current_accept_ra()? == AcceptRa::UnlessForwarding {
+            uplink_conf()
+                .accept_ra(AcceptRa::EvenWhenForwarding)
+                .write()?;
         }
         Sysctl::net().ipv4().ip_forward(true).write()?;
         Sysctl::net().ipv6().conf_all().forwarding(true).write()?;

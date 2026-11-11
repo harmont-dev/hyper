@@ -6,8 +6,9 @@ use hyperrs_fs::dir::SafeDir;
 use hyperrs_fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
 use hyperrs_fs::path::{SafePath, StrictComponent};
 use nix::sys::stat::Mode;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use strum::{EnumString, IntoStaticStr};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -18,6 +19,20 @@ pub enum SysctlError {
     Open(SysctlKey, #[source] file::ValidationError),
     #[error("writing sysctl {0}: {1}")]
     Write(SysctlKey, #[source] io::Error),
+    #[error("reading sysctl {0}: {1}")]
+    Read(SysctlKey, #[source] io::Error),
+    #[error("sysctl {0} holds {1:?}, not one of its known values")]
+    Unknown(SysctlKey, String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr, EnumString)]
+pub enum AcceptRa {
+    #[strum(serialize = "0")]
+    Never,
+    #[strum(serialize = "1")]
+    UnlessForwarding,
+    #[strum(serialize = "2")]
+    EvenWhenForwarding,
 }
 
 /// A path under `/proc/sys`.
@@ -107,6 +122,22 @@ impl Ipv6Conf {
     pub fn proxy_ndp(self, on: bool) -> Setting {
         Setting::flag(self.0.child(StrictComponent::from_static("proxy_ndp")), on)
     }
+
+    pub fn accept_ra(self, mode: AcceptRa) -> Setting {
+        Setting {
+            key: self.0.child(StrictComponent::from_static("accept_ra")),
+            value: mode.into(),
+        }
+    }
+
+    pub fn current_accept_ra(self) -> Result<AcceptRa, SysctlError> {
+        let key = self.0.child(StrictComponent::from_static("accept_ra"));
+        let value = Setting::read(&key)?;
+        value
+            .trim()
+            .parse()
+            .map_err(|_| SysctlError::Unknown(key, value))
+    }
 }
 
 /// A sysctl and the value to give it.
@@ -122,6 +153,18 @@ impl Setting {
             key,
             value: if on { "1" } else { "0" },
         }
+    }
+
+    fn read(key: &SysctlKey) -> Result<String, SysctlError> {
+        let root = SafeDir::open(SafePath::from_static::<"/proc/sys">(), OpenFlags::RDONLY)
+            .map_err(SysctlError::Root)?;
+        let mut file: SafeFile<IsRegularFile, Any, Any> = root
+            .openat(&key.0, OpenFlags::RDONLY, Mode::empty())
+            .map_err(|e| SysctlError::Open(key.clone(), e))?;
+        let mut value = String::new();
+        file.read_to_string(&mut value)
+            .map_err(|e| SysctlError::Read(key.clone(), e))?;
+        Ok(value)
     }
 
     /// Write the value in the calling thread's network namespace.
@@ -140,7 +183,7 @@ impl Setting {
 
 #[cfg(test)]
 mod tests {
-    use super::{Setting, Sysctl};
+    use super::{AcceptRa, Setting, Sysctl};
     use crate::net::netns::NetNs;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -221,5 +264,30 @@ mod tests {
         let flipped = if host_on { "0" } else { "1" };
         assert_eq!(values, [host.as_str(), flipped]);
         assert_eq!(read(path), host);
+    }
+
+    #[rstest]
+    fn accept_ra_reads_back_every_mode_it_is_set_to_as_root() {
+        let Some(ns) = ScratchNs::new("sysctl-accept-ra") else {
+            return;
+        };
+        let modes = [
+            AcceptRa::Never,
+            AcceptRa::EvenWhenForwarding,
+            AcceptRa::UnlessForwarding,
+        ];
+        let lo = || Sysctl::net().ipv6().conf(&"lo".parse().unwrap());
+
+        let read_back = ns
+            .get()
+            .scoped(|| {
+                modes.map(|mode| {
+                    lo().accept_ra(mode).write().unwrap();
+                    lo().current_accept_ra().unwrap()
+                })
+            })
+            .unwrap();
+
+        assert_eq!(read_back, modes);
     }
 }

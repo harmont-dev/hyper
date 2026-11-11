@@ -205,3 +205,20 @@ fn the_host_firewall_confines_vms_as_root(
 
     assert_eq!(lab.connects(from, to.parse().unwrap()), reachable);
 }
+
+#[rstest]
+fn host_init_keeps_honouring_router_advertisements_on_the_uplink_as_root() {
+    if !is_root() {
+        eprintln!("SKIP host firewall: needs root");
+        return;
+    }
+    let lab = Lab::new("fw-accept-ra");
+
+    let accept_ra = lab
+        .host
+        .get()
+        .scoped(|| fs::read_to_string("/proc/sys/net/ipv6/conf/if0/accept_ra").unwrap())
+        .unwrap();
+
+    assert_eq!(accept_ra.trim(), "2");
+}
