@@ -275,6 +275,7 @@ defmodule Hyper.Grpc.CodecTest do
       {:no_capacity, GRPC.Status.resource_exhausted()},
       {:exhausted, GRPC.Status.resource_exhausted()},
       {:bad_boot_args, GRPC.Status.invalid_argument()},
+      {:unknown_image, GRPC.Status.not_found()},
       {:stopping, GRPC.Status.failed_precondition()},
       {:not_ready, GRPC.Status.failed_precondition()}
     ]

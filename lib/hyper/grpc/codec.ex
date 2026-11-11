@@ -214,6 +214,9 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such VM")
 
+  defp rpc_error(:unknown_image),
+    do: GRPC.RPCError.exception(:not_found, "no such image")
+
   defp rpc_error(reason) when reason in [:stopping, :not_ready],
     do: GRPC.RPCError.exception(:failed_precondition, "VM is not running")
 

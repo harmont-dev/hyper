@@ -28,11 +28,15 @@ defmodule Hyper do
       # Rank candidates by how many of the image's layer bytes they already
       # have mounted; a fork's freshly published delta is resident nowhere yet,
       # so its parent's base layers dominate the score — which is the point.
-      layers = Hyper.Img.Db.Image.chain_sizes(spec.img_id)
+      case Hyper.Img.Db.Image.chain_sizes(spec.img_id) do
+        [] ->
+          {:error, :unknown_image}
 
-      case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
-        {:ok, {_node, pid}} -> {:ok, pid}
-        {:error, _} = err -> err
+        layers ->
+          case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
+            {:ok, {_node, pid}} -> {:ok, pid}
+            {:error, _} = err -> err
+          end
       end
     end
   end
