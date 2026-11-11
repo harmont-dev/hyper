@@ -58,6 +58,14 @@ defmodule Hyper.Node.ReclaimTest do
     assert File.exists?(wrong_suffix), "wrong-suffix file must not be removed"
   end
 
+  test "leaves socket_dir private to the node user", %{socket_dir: dir} do
+    File.chmod!(dir, 0o775)
+
+    Reclaim.reclaim_sockets()
+
+    assert File.stat!(dir).mode |> Bitwise.band(0o777) == 0o700
+  end
+
   test "creates socket_dir if it does not exist" do
     new_dir =
       Path.join(

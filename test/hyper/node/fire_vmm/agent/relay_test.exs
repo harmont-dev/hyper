@@ -97,6 +97,10 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
     :socket.close(client)
   end
 
+  test "only the node user can connect to the relay socket", %{listen_path: listen_path} do
+    assert File.stat!(listen_path).mode |> Bitwise.band(0o777) == 0o600
+  end
+
   test "listen_path/1 returns the path the relay is bound to",
        %{relay: relay, listen_path: listen_path} do
     assert Relay.listen_path(relay) == listen_path
