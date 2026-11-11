@@ -18,7 +18,9 @@ use hyperrs_linux::net::nft::{
     NftError, Policy, Rule, Table,
 };
 use hyperrs_linux::net::route::{Route, RouteError};
-use hyperrs_linux::net::{IfIndex, IfName, IpNet, Ipv4Net, Ipv6Net, Prefix, Rtnl, RtnlOpenError};
+use hyperrs_linux::net::{
+    IfIndex, IfName, IpNet, Ipv4Net, Ipv6Net, Prefix, RequestError, Rtnl, RtnlOpenError,
+};
 use hyperrs_process::privilege::Root;
 use nix::errno::Errno;
 use nix::unistd::{Gid, Uid};
@@ -74,6 +76,8 @@ pub enum VmNetError {
     Nft(#[from] NftError),
     #[error("VM {0} has no network namespace")]
     NotFound(VmId),
+    #[error("listing proxy neighbours: {0}")]
+    ProxyNeighs(#[source] RequestError),
 }
 
 /// The network of VM `id`.
@@ -208,6 +212,25 @@ impl VmNet<'_> {
             self.unlink(net_id, net)?;
         }
         NetNs::delete(&self.netns_name())?;
+        if let Some(net) = net {
+            Self::sweep_proxy_neighs(net)?;
+        }
+        Ok(())
+    }
+
+    fn sweep_proxy_neighs(net: &Net) -> Result<(), VmNetError> {
+        let host = Rtnl::open()?;
+        let Some(uplink) = host.link(net.uplink())? else {
+            return Ok(());
+        };
+        for addr in uplink.proxy_neighs().map_err(VmNetError::ProxyNeighs)? {
+            let Some(net_id) = net.ipv6_prefix().guest_net_id(addr) else {
+                continue;
+            };
+            if host.link(&net_id.host_veth())?.is_none() {
+                uplink.delete_proxy_neigh(addr)?;
+            }
+        }
         Ok(())
     }
 
@@ -672,5 +695,43 @@ mod tests {
         let lab = Lab::new(&test);
 
         assert_eq!(lab.connects(probe, to.parse().unwrap()), reachable);
+    }
+
+    #[rstest]
+    fn teardown_drops_proxy_entries_whose_veth_is_gone_and_keeps_the_rest_as_root() {
+        if !nix::unistd::geteuid().is_root() {
+            eprintln!("SKIP proxy sweep: needs root");
+            return;
+        }
+        let host = ScratchNs::new("sweep-host");
+        let peer = ScratchNs::new("sweep-peer");
+        let net: crate::config::Net =
+            serde_json::from_value(json!({"uplink": "up0", "ipv6_prefix": "2001:db8::/64"}))
+                .unwrap();
+        let (live, dead): (Ipv6Addr, Ipv6Addr) = (
+            "2001:db8::1:0:0:4".parse().unwrap(),
+            "2001:db8::1:0:0:3".parse().unwrap(),
+        );
+        let rtnl = host.get().rtnl().unwrap();
+        rtnl.create_veth(&Lab::name("up0"), &Lab::name("wan0"), peer.get())
+            .unwrap();
+        rtnl.create_veth(&Lab::name("vm-veth-4"), &Lab::name("uplink"), peer.get())
+            .unwrap();
+        let uplink = rtnl.link(&Lab::name("up0")).unwrap().unwrap();
+        for addr in [live, dead] {
+            uplink.add_proxy_neigh(addr).unwrap();
+        }
+
+        host.get()
+            .scoped(|| {
+                VmNet {
+                    id: &"vsweepgone".parse().unwrap(),
+                }
+                .teardown(Some(&net))
+            })
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(uplink.proxy_neighs().unwrap(), vec![live]);
     }
 }

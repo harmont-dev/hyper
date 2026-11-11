@@ -167,6 +167,33 @@ impl Link<'_> {
             .map_err(|e| NeighError(addr, e))
     }
 
+    pub fn proxy_neighs(&self) -> Result<Vec<Ipv6Addr>, RequestError> {
+        let mut request = NeighbourMessage::default();
+        request.header.family = AddressFamily::Inet6;
+        request.header.ifindex = self.index.get();
+        request.header.flags = NeighbourFlags::Proxy;
+
+        Ok(self
+            .rtnl
+            .dump(RouteNetlinkMessage::GetNeighbour(request))?
+            .into_iter()
+            .filter_map(|reply| match reply {
+                RouteNetlinkMessage::NewNeighbour(neigh)
+                    if neigh.header.ifindex == self.index.get()
+                        && neigh.header.flags.contains(NeighbourFlags::Proxy) =>
+                {
+                    neigh.attributes.into_iter().find_map(|attr| match attr {
+                        NeighbourAttribute::Destination(NeighbourAddress::Inet6(addr)) => {
+                            Some(addr)
+                        }
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
     /// Stop answering neighbour solicitations for `addr`; a missing entry is `Ok`.
     pub fn delete_proxy_neigh(&self, addr: Ipv6Addr) -> Result<(), NeighError> {
         match self
@@ -431,18 +458,27 @@ mod tests {
     }
 
     #[rstest]
-    fn proxy_neighbours_add_and_delete_idempotently_as_root() {
+    fn proxy_neighbours_add_list_and_delete_idempotently_as_root() {
         let Some(pair) = Pair::new("proxy-neigh") else {
             return;
         };
         let rtnl = pair.host.get().rtnl().unwrap();
         let link = rtnl.link(&Pair::host()).unwrap().unwrap();
+        let lo = rtnl.link(&"lo".parse().unwrap()).unwrap().unwrap();
         let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 1, 0, 0, 5);
+        let other = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 1, 0, 0, 6);
+        lo.add_proxy_neigh(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 1, 0, 0, 7))
+            .unwrap();
 
         link.add_proxy_neigh(addr).unwrap();
         link.add_proxy_neigh(addr).unwrap();
+        link.add_proxy_neigh(other).unwrap();
+        let mut listed = link.proxy_neighs().unwrap();
+        listed.sort();
+        assert_eq!(listed, vec![addr, other]);
+
         link.delete_proxy_neigh(addr).unwrap();
         link.delete_proxy_neigh(addr).unwrap();
-        link.add_proxy_neigh(addr).unwrap();
+        assert_eq!(link.proxy_neighs().unwrap(), vec![other]);
     }
 }

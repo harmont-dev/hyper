@@ -220,6 +220,15 @@ impl NodePrefix {
     pub fn guest(self, id: NetId) -> Ipv6Addr {
         Ipv6Addr::from(u128::from(self.vm_range().addr) | u128::from(id.get()))
     }
+
+    pub fn guest_net_id(self, addr: Ipv6Addr) -> Option<NetId> {
+        let range = self.vm_range();
+        let offset = u128::from(addr).checked_sub(u128::from(range.addr))?;
+        if (Ipv6Net { addr, ..range }).network() != range.addr {
+            return None;
+        }
+        u16::try_from(offset).ok()?.try_into().ok()
+    }
 }
 
 #[derive(Debug, ThisError, PartialEq, Eq)]
@@ -374,6 +383,27 @@ mod tests {
         if let Some(id) = NetId::from_uplink_addr(addr) {
             prop_assert_eq!(id.uplink_addr().addr, addr);
         }
+    }
+
+    #[proptest]
+    fn a_guest_address_maps_back_to_its_net_id(#[strategy(0u16..16_384)] id: u16) {
+        prop_assert_eq!(
+            prefix().guest_net_id(prefix().guest(net_id(id))),
+            Some(net_id(id))
+        );
+    }
+
+    #[proptest]
+    fn only_guest_addresses_map_to_a_net_id(
+        #[strategy(0u128..(1 << 17))] offset: u128,
+        inside: bool,
+    ) {
+        let range = u128::from(prefix().vm_range().addr);
+        let base = if inside { range } else { range ^ (1 << 48) };
+        prop_assert_eq!(
+            prefix().guest_net_id(Ipv6Addr::from(base + offset)),
+            (inside && offset < 16_384).then(|| net_id(u16::try_from(offset).unwrap()))
+        );
     }
 
     #[proptest]
