@@ -36,6 +36,8 @@ defmodule Hyper.Node.FireVMM.JailerTest do
       vm_id: @vm_id,
       uid: 900_001,
       gid: 900_001,
+      net_id: 64,
+      firewall: Hyper.Vm.Firewall.default(),
       type: :micro,
       arch: :x86_64,
       mutable: nil,
@@ -59,8 +61,13 @@ defmodule Hyper.Node.FireVMM.JailerTest do
              "id" => @vm_id,
              "uid" => 900_001,
              "gid" => 900_001,
+             "net_id" => 64,
              "kernel" => "/srv/hyper/redist/vmlinux/vmlinux-x86_64-6.1",
-             "device" => @rootfs
+             "device" => @rootfs,
+             "firewall" => %{
+               "inbound" => [],
+               "outbound_blocked" => [%{"protocol" => "tcp", "ports" => [25, 25]}]
+             }
            } = request()
   end
 
@@ -68,7 +75,7 @@ defmodule Hyper.Node.FireVMM.JailerTest do
     cgroup = Hyper.Vm.Instance.Spec.cgroup_v2(Hyper.Vm.Instance.spec(:micro))
 
     assert Map.keys(request()) |> Enum.sort() ==
-             ~w(device gid id kernel limits op uid)
+             ~w(device firewall gid id kernel limits net_id op uid)
 
     assert request()["limits"]["memory_max"] == cgroup.memory_max
 

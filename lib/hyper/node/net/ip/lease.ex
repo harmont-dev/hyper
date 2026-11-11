@@ -7,10 +7,11 @@ defmodule Hyper.Node.Net.Ip.Lease do
     * `ipv6` - the guest's public adress within the `vm_prefix` subrange
   """
 
-  @enforce_keys [:host_veth, :ipv4, :ipv6]
-  defstruct [:host_veth, :ipv4, :ipv6]
+  @enforce_keys [:net_id, :host_veth, :ipv4, :ipv6]
+  defstruct [:net_id, :host_veth, :ipv4, :ipv6]
 
   @type t :: %__MODULE__{
+          net_id: Hyper.Node.Net.id(),
           host_veth: String.t(),
           ipv4: :inet.ip4_address(),
           ipv6: :inet.ip6_address()

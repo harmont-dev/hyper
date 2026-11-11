@@ -5,8 +5,8 @@ use super::netns::NetNs;
 use super::route::{Route, RouteError};
 use super::{IfIndex, IfName};
 use netlink_packet_core::{
-    DecodeError, ErrorMessage, NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL,
-    NLM_F_REQUEST,
+    DecodeError, ErrorMessage, NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_CREATE, NLM_F_DUMP,
+    NLM_F_EXCL, NLM_F_REQUEST,
 };
 use netlink_packet_route::link::{
     InfoData, InfoKind, InfoVeth, LinkAttribute, LinkInfo, LinkMessage,
@@ -19,6 +19,9 @@ use nix::errno::Errno;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd};
 use thiserror::Error as ThisError;
+
+/// Netlink messages in one datagram start on 4-byte boundaries.
+const NLMSG_ALIGNTO: usize = 4;
 
 #[derive(Debug, ThisError)]
 #[error("opening an rtnetlink socket: {0}")]
@@ -142,6 +145,34 @@ impl Rtnl {
         }
     }
 
+    /// Send a dump request and collect every reply until the kernel marks it done.
+    pub fn dump(
+        &self,
+        message: RouteNetlinkMessage,
+    ) -> Result<Vec<RouteNetlinkMessage>, RequestError> {
+        self.send(message, NLM_F_DUMP)?;
+
+        let mut replies = Vec::new();
+        loop {
+            let (buf, _) = self.0.recv_from_full().map_err(RequestError::Recv)?;
+            let mut rest = buf.as_slice();
+            while !rest.is_empty() {
+                let reply = NetlinkMessage::<RouteNetlinkMessage>::deserialize(rest)
+                    .map_err(RequestError::Decode)?;
+                let len = (reply.header.length as usize).next_multiple_of(NLMSG_ALIGNTO);
+                rest = rest.get(len..).unwrap_or_default();
+                match reply.payload {
+                    NetlinkPayload::InnerMessage(message) => replies.push(message),
+                    NetlinkPayload::Done(_) => return Ok(replies),
+                    NetlinkPayload::Error(ErrorMessage {
+                        code: Some(code), ..
+                    }) => return Err(RequestError::Kernel(Errno::from_raw(-code.get()))),
+                    _ => return Err(RequestError::Unexpected(reply.header.message_type)),
+                }
+            }
+        }
+    }
+
     fn request(
         &self,
         message: RouteNetlinkMessage,
@@ -160,13 +191,7 @@ impl Rtnl {
         message: RouteNetlinkMessage,
         flags: u16,
     ) -> Result<NetlinkMessage<RouteNetlinkMessage>, RequestError> {
-        let mut packet = NetlinkMessage::from(message);
-        packet.header.flags = NLM_F_REQUEST | flags;
-        packet.finalize();
-
-        let mut buf = vec![0; packet.buffer_len()];
-        packet.serialize(&mut buf);
-        self.0.send(&buf, 0).map_err(RequestError::Send)?;
+        self.send(message, flags)?;
 
         let (buf, _) = self.0.recv_from_full().map_err(RequestError::Recv)?;
 
@@ -180,6 +205,17 @@ impl Rtnl {
         }
 
         Ok(reply)
+    }
+
+    fn send(&self, message: RouteNetlinkMessage, flags: u16) -> Result<(), RequestError> {
+        let mut packet = NetlinkMessage::from(message);
+        packet.header.flags = NLM_F_REQUEST | flags;
+        packet.finalize();
+
+        let mut buf = vec![0; packet.buffer_len()];
+        packet.serialize(&mut buf);
+        self.0.send(&buf, 0).map_err(RequestError::Send)?;
+        Ok(())
     }
 }
 

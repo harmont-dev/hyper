@@ -16,6 +16,8 @@
 #   - pre-creating /srv/hyper/layers (install.md documents this too, but it's
 #     load-bearing here since nothing else primes it before the suite boots
 #     the node)
+#   - the 2001:db8::/64 fallback for [net] ipv6_prefix (install.md has the
+#     operator use the uplink's real prefix; the runner has no global IPv6)
 #   - DEBIAN_FRONTEND=noninteractive (install.md is written for an interactive
 #     operator session; CI has no tty to prompt on)
 set -euo pipefail
@@ -31,7 +33,7 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs libc-bin lvm2 skopeo thin-provisioning-tools util-linux
+  coreutils e2fsprogs libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux
 
 modules_extra="linux-modules-extra-$(uname -r)"
 if apt-cache show "${modules_extra}" >/dev/null 2>&1; then
@@ -54,6 +56,44 @@ command -v thin_dump >/dev/null || { echo "ERROR: thin_dump missing (thin-provis
 sudo install -o root -g root -m 0755 "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
 [ ! -L /usr/local/sbin/thin_dump ] || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
 
+uplink="$(ip -o route show default | awk '{print $5; exit}')"
+[ -n "${uplink}" ] || { echo "ERROR: no default route to take the uplink from" >&2; exit 1; }
+
+# Proxy NDP only answers inside the prefix that is on-link at the uplink, so that
+# prefix is the one VMs draw from: the network of the uplink's global, stable,
+# non-ULA address. Several candidates, or one whose address already sits in
+# <prefix>:1::/80 where VMs live, need an operator to choose.
+ipv6_prefix="$(ip -6 -o addr show dev "${uplink}" scope global | python3 -c '
+import ipaddress, sys
+
+ula = ipaddress.ip_network("fc00::/7")
+found = {}
+for line in sys.stdin:
+    fields = line.split()
+    if "inet6" not in fields or "temporary" in fields or "deprecated" in fields:
+        continue
+    iface = ipaddress.ip_interface(fields[fields.index("inet6") + 1])
+    if iface.ip not in ula:
+        found.setdefault(iface.network, iface.ip)
+
+if len(found) > 1:
+    sys.exit("ERROR: several IPv6 prefixes on the uplink; set [net] ipv6_prefix by hand: "
+             + ", ".join(map(str, found)))
+for net, addr in found.items():
+    if net.prefixlen > 64:
+        sys.exit(f"ERROR: the uplink prefix {net} is longer than /64; set [net] ipv6_prefix by hand")
+    vms = ipaddress.ip_network((int(net.network_address) | 1 << 48, 80))
+    if addr in vms:
+        sys.exit(f"ERROR: the uplink address {addr} sits in {vms}, the VM range")
+    print(net)
+')"
+# The runner has no global IPv6, so VMs get a documentation-range prefix: guest
+# IPv6 is unreachable from outside, but outbound IPv4 through the NATs works.
+ipv6_prefix="${ipv6_prefix:-2001:db8::/64}"
+# New veth and tap devices take their IPv6 setting from conf/default; every VM link
+# carries IPv6 link-local addresses, so it must be on.
+sudo sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0
+
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<EOF
 work_dir = "/srv/hyper"
@@ -66,6 +106,10 @@ thin_dump = "/usr/local/sbin/thin_dump"
 [jails]
 uid_gid_range = [900000, 999999]
 cgroup = "hyper"
+
+[net]
+uplink = "${uplink}"
+ipv6_prefix = "${ipv6_prefix}"
 
 # The runner is a dedicated ephemeral host: the soft budget's default
 # cpu_max_load (0.8) refuses VMs with :no_capacity while compile/provision

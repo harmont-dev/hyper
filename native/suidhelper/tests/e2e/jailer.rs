@@ -13,11 +13,16 @@ use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 mod support;
-use support::{is_root, run, MapperDevice};
+use hyperrs_linux::net::netns::NetNs;
+use hyperrs_linux::net::{IfName, Rtnl};
+use support::{is_root, MapperDevice, ScratchNs, NET_TABLE};
 
 const RECORDER_EXIT: i32 = 7;
+
+static LAUNCHES: AtomicU32 = AtomicU32::new(0);
 
 fn install(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
     let path = dir.join(name);
@@ -27,6 +32,8 @@ fn install(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
 }
 
 struct Launch {
+    id: String,
+    ns: ScratchNs,
     tmp: TempDir,
     work: PathBuf,
     jail: PathBuf,
@@ -36,11 +43,17 @@ struct Launch {
     rootfs: MapperDevice,
 }
 
+impl Drop for Launch {
+    fn drop(&mut self) {
+        let _ = NetNs::delete(self.netns().as_str().try_into().unwrap());
+    }
+}
+
 impl Launch {
     fn config(&self, tables: &str) -> PathBuf {
         let p = self.tmp.path().join("config.toml");
         let body = format!(
-            "work_dir = \"{}\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n{tables}",
+            "work_dir = \"{}\"\n[tools]\njailer = \"{}\"\nfirecracker = \"{}\"\n{tables}{NET_TABLE}",
             self.work.display(),
             self.jailer.display(),
             self.firecracker.display(),
@@ -53,12 +66,14 @@ impl Launch {
     fn request(&self, overrides: Value) -> Value {
         let mut request = json!({
             "op": "vm_launch",
-            "id": "vm1",
+            "id": self.id,
             "uid": 900_001,
             "gid": 900_002,
             "kernel": self.kernel,
             "device": self.rootfs.path(),
             "limits": {},
+            "net_id": 0,
+            "firewall": {"inbound": [], "outbound_blocked": []},
         });
         request
             .as_object_mut()
@@ -68,7 +83,7 @@ impl Launch {
     }
 
     fn root(&self) -> PathBuf {
-        self.jail.join("firecracker/vm1/root")
+        self.jail.join(format!("firecracker/{}/root", self.id))
     }
 
     fn plant_stale_jail(&self) -> PathBuf {
@@ -76,6 +91,14 @@ impl Launch {
         fs::create_dir_all(stale.parent().unwrap()).unwrap();
         fs::write(&stale, b"left by a previous incarnation").unwrap();
         stale
+    }
+
+    fn netns(&self) -> String {
+        format!("hyper-{}", self.id)
+    }
+
+    fn run(&self, cfg: &Path, request: Value) -> assert_cmd::assert::Assert {
+        self.ns.run(cfg, request)
     }
 
     fn recorded_argv(&self) -> Option<Vec<String>> {
@@ -106,7 +129,17 @@ fn launch() -> Option<Launch> {
         &format!("hyper-e2e-launch-{}", std::process::id()),
         &backing,
     )?;
+    if !is_root() {
+        return None;
+    }
+    let id = format!(
+        "vm{}x{}",
+        std::process::id(),
+        LAUNCHES.fetch_add(1, Ordering::Relaxed)
+    );
     Some(Launch {
+        ns: ScratchNs::new(&id),
+        id,
         tmp,
         work,
         jail,
@@ -137,7 +170,9 @@ fn launch_clears_the_stale_jail_stages_the_boot_artifacts_then_execs_as_root(
     let cfg = launch.config("");
     let stale = launch.plant_stale_jail();
 
-    run(&cfg, launch.request(json!({}))).code(RECORDER_EXIT);
+    launch
+        .run(&cfg, launch.request(json!({})))
+        .code(RECORDER_EXIT);
 
     assert!(
         !stale.exists(),
@@ -162,16 +197,17 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
     let launch = require!(launch);
     let cfg = launch.config("");
 
-    run(
-        &cfg,
-        launch.request(json!({
-            "limits": {
-                "memory_max": 1_048_576,
-                "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
-            },
-        })),
-    )
-    .code(RECORDER_EXIT);
+    launch
+        .run(
+            &cfg,
+            launch.request(json!({
+                "limits": {
+                    "memory_max": 1_048_576,
+                    "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
+                },
+            })),
+        )
+        .code(RECORDER_EXIT);
 
     let jail = launch.jail.display().to_string();
     let firecracker = launch.firecracker.display().to_string();
@@ -179,7 +215,7 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
         launch.recorded_argv().expect("the jailer was exec'd"),
         [
             "--id",
-            "vm1",
+            &launch.id,
             "--exec-file",
             &firecracker,
             "--uid",
@@ -192,6 +228,8 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
             "2",
             "--parent-cgroup",
             "hyper",
+            "--netns",
+            &format!("/run/netns/{}", launch.netns()),
             "--cgroup",
             "memory.max=1048576",
             "--cgroup",
@@ -244,7 +282,8 @@ fn refused_launches_touch_nothing_and_never_exec_as_root(
     let cfg = launch.config("");
     let stale = launch.plant_stale_jail();
 
-    run(&cfg, launch.request(overrides))
+    launch
+        .run(&cfg, launch.request(overrides))
         .code(2)
         .stderr(contains(stderr));
 
@@ -260,4 +299,62 @@ fn refused_launches_touch_nothing_and_never_exec_as_root(
         !launch.root().join("vmlinux").exists(),
         "nothing may be staged"
     );
+}
+
+#[rstest]
+fn launch_networks_the_vm_and_teardown_removes_it_as_root(launch: Option<Launch>) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let name = |s: &str| -> IfName { s.parse().unwrap() };
+    let links = |rtnl: &Rtnl, names: &[&str]| -> Vec<bool> {
+        names
+            .iter()
+            .map(|n| rtnl.link(&name(n)).unwrap().is_some())
+            .collect()
+    };
+    let host_veth = || {
+        launch
+            .ns
+            .get()
+            .scoped(|| links(&Rtnl::open().unwrap(), &["vm-veth-0"]))
+            .unwrap()
+    };
+
+    launch
+        .run(&cfg, launch.request(json!({})))
+        .code(RECORDER_EXIT);
+
+    let vm_ns = NetNs::open(launch.netns().as_str().try_into().unwrap()).unwrap();
+    assert_eq!(
+        (
+            host_veth(),
+            links(&vm_ns.rtnl().unwrap(), &["uplink", "tap0", "vm-veth-0"]),
+        ),
+        (vec![true], vec![true, true, false])
+    );
+    drop(vm_ns);
+
+    launch
+        .run(
+            &cfg,
+            json!({"op": "vm_firewall", "id": launch.id, "firewall": {
+                "inbound": [{"protocol": "tcp", "ports": [22, 22]}], "outbound_blocked": []}}),
+        )
+        .success()
+        .stdout(contains("firewall_set"));
+
+    launch
+        .run(&cfg, json!({"op": "vm_teardown", "id": launch.id}))
+        .success();
+
+    assert_eq!(host_veth(), vec![false]);
+    assert!(NetNs::open(launch.netns().as_str().try_into().unwrap()).is_err());
+    launch
+        .run(
+            &cfg,
+            json!({"op": "vm_firewall", "id": launch.id, "firewall": {
+                "inbound": [], "outbound_blocked": []}}),
+        )
+        .code(2)
+        .stderr(contains("has no network namespace"));
 }

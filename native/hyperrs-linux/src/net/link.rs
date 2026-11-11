@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-use super::{IfIndex, IfName, IpNet, RequestError, Rtnl, ZeroIfIndex};
+use super::{
+    IfIndex, IfName, IpNet, Ipv4Net, Ipv6Net, PrefixError, RequestError, Rtnl, ZeroIfIndex,
+};
 use derive_more::Constructor;
 use netlink_packet_core::{NLM_F_CREATE, NLM_F_EXCL};
 use netlink_packet_route::address::{AddressAttribute, AddressHeaderFlags, AddressMessage};
@@ -12,7 +14,7 @@ use netlink_packet_route::neighbour::{
 };
 use netlink_packet_route::{AddressFamily, RouteNetlinkMessage};
 use nix::errno::Errno;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -41,6 +43,14 @@ pub enum AddrError {
     Exists(IpNet),
     #[error("address {0}: {1}")]
     Request(IpNet, #[source] RequestError),
+}
+
+#[derive(Debug, ThisError)]
+pub enum AddrListError {
+    #[error("listing addresses: {0}")]
+    Request(#[from] RequestError),
+    #[error("listing addresses: {0}")]
+    Prefix(#[from] PrefixError),
 }
 
 #[derive(Debug, ThisError)]
@@ -120,6 +130,33 @@ impl Link<'_> {
         }
     }
 
+    /// Every address on the link.
+    pub fn addrs(&self) -> Result<Vec<IpNet>, AddrListError> {
+        let mut request = AddressMessage::default();
+        request.header.index = self.index.get();
+
+        self.rtnl
+            .dump(RouteNetlinkMessage::GetAddress(request))?
+            .into_iter()
+            .filter_map(|reply| match reply {
+                RouteNetlinkMessage::NewAddress(addr) if addr.header.index == self.index.get() => {
+                    Some(addr)
+                }
+                _ => None,
+            })
+            .filter_map(|addr| {
+                let len = addr.header.prefix_len;
+                addr.attributes
+                    .into_iter()
+                    .find_map(|attr| match attr {
+                        AddressAttribute::Address(ip) => Some(ip),
+                        _ => None,
+                    })
+                    .map(|ip| Self::net(ip, len))
+            })
+            .collect()
+    }
+
     /// Answer neighbour solicitations for `addr` on this link; adding it again is `Ok`.
     pub fn add_proxy_neigh(&self, addr: Ipv6Addr) -> Result<(), NeighError> {
         self.rtnl
@@ -139,6 +176,19 @@ impl Link<'_> {
             Ok(()) | Err(RequestError::Kernel(Errno::ENOENT)) => Ok(()),
             Err(e) => Err(NeighError(addr, e)),
         }
+    }
+
+    fn net(addr: IpAddr, len: u8) -> Result<IpNet, AddrListError> {
+        Ok(match addr {
+            IpAddr::V4(addr) => IpNet::V4(Ipv4Net {
+                addr,
+                prefix: len.try_into()?,
+            }),
+            IpAddr::V6(addr) => IpNet::V6(Ipv6Net {
+                addr,
+                prefix: len.try_into()?,
+            }),
+        })
     }
 
     fn message(&self) -> LinkMessage {
@@ -350,6 +400,34 @@ mod tests {
         let again = link.add_addr(addr, DuplicateAddrDetection::Disabled);
 
         assert!(matches!(again, Err(AddrError::Exists(a)) if a == addr));
+    }
+
+    #[rstest]
+    fn a_link_lists_exactly_its_own_addresses_as_root() {
+        let Some(pair) = Pair::new("addrs") else {
+            return;
+        };
+        let rtnl = pair.host.get().rtnl().unwrap();
+        let link = rtnl.link(&Pair::host()).unwrap().unwrap();
+        let lo = rtnl.link(&"lo".parse().unwrap()).unwrap().unwrap();
+        let added: Vec<IpNet> = ["10.200.0.1/30", "2001:db8::1:0:0:5/128"]
+            .into_iter()
+            .map(|addr| addr.parse().unwrap())
+            .collect();
+        lo.add_addr(
+            "10.9.0.1/8".parse().unwrap(),
+            DuplicateAddrDetection::Disabled,
+        )
+        .unwrap();
+
+        for addr in &added {
+            link.add_addr(*addr, DuplicateAddrDetection::Disabled)
+                .unwrap();
+        }
+
+        let mut listed = link.addrs().unwrap();
+        listed.sort_by_key(|net| (net.addr(), net.prefix_len()));
+        assert_eq!(listed, added);
     }
 
     #[rstest]

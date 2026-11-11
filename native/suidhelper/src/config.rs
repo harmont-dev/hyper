@@ -11,13 +11,16 @@
 //! absent). Operators narrowing the range must set **both**.
 
 use crate::id::UidGidRange;
+use crate::net::{NodePrefix, Resolver};
 use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use hyperrs_linux::cgroup;
+use hyperrs_linux::net::IfName;
 use hyperrs_process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::{Deserialize, Deserializer};
+use serde_with::{serde_as, DisplayFromStr};
 use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;
 use std::path::{Path, PathBuf};
@@ -44,6 +47,10 @@ pub enum BinError {
     #[error(transparent)]
     Bin(#[from] binary::RootSafeBinError),
 }
+
+#[derive(Debug, Error)]
+#[error("VM networking needs a [net] table in /etc/hyper/config.toml")]
+pub struct NetUnconfigured;
 
 const CONFIG_PATHSTR: &str = "/etc/hyper/config.toml";
 const INSECURE_CONFIG_PATH_ENV: &str = "HYPER_SETUIDHELPER_CONFIG_PATH";
@@ -72,6 +79,39 @@ pub struct Config {
     tools: Tools,
     #[serde(default)]
     jails: Jails,
+    #[serde(default)]
+    net: Option<Net>,
+}
+
+/// The `[net]` table: where VM traffic leaves the host, and which IPv6 prefix it uses.
+///
+/// `uplink` is the host interface VMs reach the outside world through (`if0` in the
+/// networking cookbook); `ipv6_prefix` is the routed prefix on it, `/64` or shorter.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Net {
+    #[serde_as(as = "DisplayFromStr")]
+    uplink: IfName,
+    #[serde_as(as = "DisplayFromStr")]
+    ipv6_prefix: NodePrefix,
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(default)]
+    resolver: Resolver,
+}
+
+impl Net {
+    pub fn uplink(&self) -> &IfName {
+        &self.uplink
+    }
+
+    pub fn ipv6_prefix(&self) -> NodePrefix {
+        self.ipv6_prefix
+    }
+
+    pub fn resolver(&self) -> Resolver {
+        self.resolver
+    }
 }
 
 /// The `[jails]` table: how the helper places and confines each VM jail.
@@ -126,6 +166,8 @@ pub struct Tools {
     dmsetup: PathBuf,
     #[default("/usr/sbin/thin_dump".into())]
     thin_dump: PathBuf,
+    #[default("/usr/sbin/nft".into())]
+    nft: PathBuf,
     firecracker: Option<PathBuf>,
     jailer: Option<PathBuf>,
 }
@@ -187,6 +229,17 @@ impl Config {
     /// will run.
     pub fn thin_dump(&self) -> Result<RootSafeBin<"thin_dump">, binary::RootSafeBinError> {
         RootSafeBin::open(&self.tools.thin_dump)
+    }
+
+    /// The validated `nft` binary (nftables) the helper will run.
+    pub fn nft(&self) -> Result<RootSafeBin<"nft">, binary::RootSafeBinError> {
+        RootSafeBin::open(&self.tools.nft)
+    }
+
+    /// The `[net]` table. Errors [`NetUnconfigured`] when absent: no VM can be networked
+    /// without it.
+    pub fn net(&self) -> Result<&Net, NetUnconfigured> {
+        self.net.as_ref().ok_or(NetUnconfigured)
     }
 
     /// The Firecracker VMM binary, validated as root-owned and correctly named.

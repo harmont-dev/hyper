@@ -31,6 +31,13 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       File.rm(log)
     end)
 
+    unless Process.whereis(Hyper.Cluster.Routing) do
+      _ = Application.ensure_all_started(:horde)
+      start_supervised!(Hyper.Cluster.Routing)
+    end
+
+    start_supervised!({FireVMM.Policy, opts()})
+
     {:ok, log: log, fake: fake}
   end
 
@@ -41,6 +48,8 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       vm_id: @vm_id,
       uid: 900_500,
       gid: 900_500,
+      net_id: 7,
+      firewall: Hyper.Vm.Firewall.default(),
       type: :micro,
       arch: :x86_64,
       mutable: mutable,
@@ -80,13 +89,6 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     log |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
   end
 
-  defp calls(log) do
-    log
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.map(&(&1 |> Jason.decode!() |> Map.fetch!("op")))
-  end
-
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
   # (see `JailerTest`), so every scenario stubs it alongside `tools.suidhelper`
   # to keep it off the real filesystem.
@@ -96,16 +98,23 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
   end
 
   describe "jail lifecycle" do
-    test "start_link boots with one vm_launch carrying the kernel and the volume's device",
+    test "start_link boots with one vm_launch carrying the kernel, the volume's device, and the policy last set",
          %{log: log, fake: fake} do
       put_toml(fake)
+      {:ok, ssh} = Hyper.Vm.Firewall.new([{:tcp, 22..22//1}], [])
+      :ok = FireVMM.Policy.put(@vm_id, ssh)
 
       Process.flag(:trap_exit, true)
       {:ok, pid} = Daemon.start_link(opts(mutable_stub(@rootfs)))
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       assert [
-               %{"op" => "vm_launch", "kernel" => "/nonexistent/vmlinux", "device" => @rootfs}
+               %{
+                 "op" => "vm_launch",
+                 "kernel" => "/nonexistent/vmlinux",
+                 "device" => @rootfs,
+                 "firewall" => %{"inbound" => [%{"protocol" => "tcp", "ports" => [22, 22]}]}
+               }
                | exit
              ] = requests(log)
 
@@ -121,7 +130,7 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                  muontrap: nil
                })
 
-      assert calls(log) == ["vm_teardown"]
+      assert requests(log) == [%{"op" => "vm_teardown", "id" => @vm_id}]
     end
   end
 end

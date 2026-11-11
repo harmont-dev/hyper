@@ -17,7 +17,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 mod support;
-use support::{is_root, run, stdout_json};
+use support::{is_root, run, stdout_json, ScratchNs, NET_TABLE};
 
 #[fixture]
 fn tmp() -> TempDir {
@@ -50,7 +50,14 @@ fn a_trusted_config_loads_and_the_helper_elevates_as_root(
         Some(body) => write_root_config(tmp.path(), body),
         None => tmp.path().join("nope.toml"),
     };
-    let out = run(&cfg, json!({"op": "vm_teardown", "id": "vconfige2e"})).success();
+    let ns = ScratchNs::new(if body.is_some() {
+        "cfg-valid"
+    } else {
+        "cfg-missing"
+    });
+    let out = ns
+        .run(&cfg, json!({"op": "vm_teardown", "id": "vconfige2e"}))
+        .success();
     assert_eq!(stdout_json(&out)["result"], "tore_down");
 }
 
@@ -60,12 +67,57 @@ fn host_init_reports_the_work_dir_the_helper_trusts_as_root(tmp: TempDir) {
         eprintln!("SKIP host_init: needs root");
         return;
     }
-    let cfg = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
+    let cfg = write_root_config(
+        tmp.path(),
+        &format!("work_dir = \"/srv/hyper\"\n{NET_TABLE}"),
+    );
+    let ns = ScratchNs::new("host-init");
 
-    let out = run(&cfg, json!({"op": "host_init"})).success();
-    let json = stdout_json(&out);
-    assert_eq!(json["result"], "host_ready");
-    assert_eq!(json["hyper_base"], "/srv/hyper");
+    let out = ns.run(&cfg, json!({"op": "host_init"})).success();
+
+    assert_eq!(
+        stdout_json(&out),
+        json!({
+            "result": "host_ready",
+            "hyper_base": "/srv/hyper",
+            "net": {
+                "uplink": "lo",
+                "transit_prefix": "10.200.0.0/16",
+                "vm_prefix": "2001:db8:0:0:1::/80",
+            },
+        })
+    );
+    let read = |key: &str| {
+        fs::read_to_string(format!("/proc/sys/{key}"))
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    let sysctls = ns
+        .get()
+        .scoped(|| {
+            [
+                read("net/ipv4/ip_forward"),
+                read("net/ipv6/conf/all/forwarding"),
+                read("net/ipv6/conf/lo/proxy_ndp"),
+            ]
+        })
+        .unwrap();
+    assert_eq!(sysctls, ["1", "1", "1"]);
+}
+
+#[rstest]
+fn host_init_without_a_net_table_is_refused_as_root(tmp: TempDir) {
+    if !is_root() {
+        eprintln!("SKIP host_init without [net]: needs root");
+        return;
+    }
+    let cfg = write_root_config(tmp.path(), "work_dir = \"/srv/hyper\"\n");
+    let ns = ScratchNs::new("host-init-unconfigured");
+
+    ns.run(&cfg, json!({"op": "host_init"}))
+        .code(2)
+        .stderr(contains("[net]"));
 }
 
 #[rstest]

@@ -28,10 +28,9 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
   property "a live vm_id is never a reap candidate" do
     check all(
             live <- id_set(),
-            leaves <- id_list(),
-            rw <- id_list()
+            held <- id_list()
           ) do
-      orphans = Plan.orphans(live, leaves, rw)
+      orphans = Plan.orphans(live, held)
       assert MapSet.disjoint?(orphans, live)
     end
   end
@@ -73,6 +72,16 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
               )
           ) do
       assert Plan.rw_ids([Mutable.dm_name(id)]) == [id]
+    end
+  end
+
+  property "netns_ids/1 recovers every vm_id behind a hyper- namespace and nothing else" do
+    check all(
+            ids <- list_of(string(:alphanumeric, min_length: 1)),
+            foreign <- list_of(string(:alphanumeric, min_length: 1))
+          ) do
+      names = Enum.map(ids, &("hyper-" <> &1)) ++ Enum.map(foreign, &("cni-" <> &1))
+      assert Plan.netns_ids(names) == ids
     end
   end
 end

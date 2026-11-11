@@ -167,6 +167,25 @@ defmodule Hyper do
   end
 
   @doc """
+  Replace the port policy of `vm_id`, wherever it runs in the cluster. Forks
+  taken afterwards inherit the new policy.
+
+  Returns `{:error, :not_found}` when no such VM is registered anywhere, and
+  `{:error, :machine_unreachable}` when the owning node cannot be reached.
+  """
+  @spec set_vm_firewall(Hyper.Vm.Id.t(), Hyper.Vm.Firewall.t()) ::
+          :ok | {:error, :not_found | :machine_unreachable | term()}
+  def set_vm_firewall(vm_id, %Hyper.Vm.Firewall{} = firewall) when is_binary(vm_id) do
+    case Hyper.Cluster.Routing.supervisor_of(vm_id) do
+      nil -> {:error, :not_found}
+      pid -> :erpc.call(node(pid), Hyper.Node.FireVMM.State, :set_firewall, [vm_id, firewall])
+    end
+  catch
+    :error, {:erpc, _} -> {:error, :machine_unreachable}
+    :exit, _ -> {:error, :not_found}
+  end
+
+  @doc """
   Fork the running VM `vm_id`: boot a child from a copy-on-write clone of its
   disk, colocated when the parent's node has room and re-placed cluster-wide
   otherwise. Returns the child VM. See `Hyper.Vm.fork/1` for the semantics.

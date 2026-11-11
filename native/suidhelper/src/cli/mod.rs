@@ -4,7 +4,6 @@ pub mod dm;
 pub mod fork_delta;
 mod host_init;
 pub mod img;
-pub mod net;
 pub mod thin;
 mod version;
 pub mod vm;
@@ -58,6 +57,7 @@ pub enum Request {
     VmClaimApiSocket(vm::claim::ClaimApiSocket),
     VmClaimVsockSocket(vm::claim::ClaimVsockSocket),
     VmTeardown(vm::teardown::Teardown),
+    VmFirewall(vm::firewall::SetFirewall),
     ImgActivate(img::ImgActivate),
     DmRemove(dm::Remove),
     ThinPoolCreate(thin::ThinPoolCreate),
@@ -65,11 +65,6 @@ pub enum Request {
     ThinDestroy(thin::ThinDestroy),
     ThinForkDelta(fork_delta::ThinForkDelta),
     HostInit(host_init::HostInit),
-    NetPrepare(net::NetPrepare),
-    NetTeardown(net::NetTeardown),
-    NetIpHostInit(net::ip::NetIpHostInit),
-    NetIpPrepare(net::ip::NetIpPrepare),
-    NetIpTeardown(net::ip::NetIpTeardown),
     Version(version::Version),
 }
 
@@ -205,9 +200,21 @@ mod tests {
     #[case::foreign_dm_name(json!({"op": "dm_remove", "name": "sda1", "retry": false}))]
     #[case::traversing_vm_id(json!({"op": "vm_claim_api_socket", "id": "../v1"}))]
     #[case::relative_kernel(json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
-        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}}))]
+        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}, "net_id": 0,
+        "firewall": {"inbound": [], "outbound_blocked": []}}))]
     #[case::rootfs_device_by_name(json!({"op": "vm_launch", "id": "v1", "uid": 900_001,
-        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1", "limits": {}}))]
+        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1", "limits": {},
+        "net_id": 0, "firewall": {"inbound": [], "outbound_blocked": []}}))]
+    #[case::launch_net_id_past_the_transit_range(json!({"op": "vm_launch", "id": "v1",
+        "uid": 900_001, "gid": 900_001, "kernel": "/srv/hyper/vmlinux",
+        "device": "/dev/mapper/hyper-v1", "limits": {}, "net_id": 16_384,
+        "firewall": {"inbound": [], "outbound_blocked": []}}))]
+    #[case::firewall_port_zero(json!({"op": "vm_firewall", "id": "v1",
+        "firewall": {"inbound": [{"protocol": "tcp", "ports": [0, 22]}], "outbound_blocked": []}}))]
+    #[case::firewall_without_policy(json!({"op": "vm_firewall", "id": "v1"}))]
+    #[case::teardown_names_a_net_id(json!({"op": "vm_teardown", "id": "v1", "net_id": 0}))]
+    #[case::retired_net_prepare_op(json!({"op": "net_prepare", "id": "v1"}))]
+    #[case::retired_net_ip_prepare_op(json!({"op": "net_ip_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]

@@ -150,6 +150,16 @@ pub struct Ipv6Net {
     pub prefix: Prefix<128>,
 }
 
+impl Ipv6Net {
+    /// The address with its host bits cleared.
+    pub fn network(self) -> Ipv6Addr {
+        let mask = u128::MAX
+            .checked_shl(128 - u32::from(self.prefix.get()))
+            .unwrap_or(0);
+        Ipv6Addr::from(u128::from(self.addr) & mask)
+    }
+}
+
 /// Either an ipv4 or an ipv6 address
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum IpNet {
@@ -225,7 +235,7 @@ impl FromStr for IpNet {
 
 #[cfg(test)]
 mod tests {
-    use super::{IfIndex, IfName, IfNameError, IpNet, Ipv4Net, Prefix};
+    use super::{IfIndex, IfName, IfNameError, IpNet, Ipv4Net, Ipv6Net, Prefix};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
@@ -315,6 +325,20 @@ mod tests {
             u64::from(u32::from(net.network())),
             u64::from(u32::from(addr)) & kept
         );
+    }
+
+    #[proptest]
+    fn an_ipv6_network_keeps_the_prefix_bits_and_clears_the_rest(
+        addr: std::net::Ipv6Addr,
+        #[strategy(0u8..=128)] len: u8,
+    ) {
+        let net = Ipv6Net {
+            addr,
+            prefix: len.try_into().unwrap(),
+        };
+        let bits = u128::from(addr);
+        let kept = (0..u32::from(len)).fold(0u128, |mask, bit| mask | (1u128 << (127 - bit)));
+        prop_assert_eq!(u128::from(net.network()), bits & kept);
     }
 
     #[rstest]

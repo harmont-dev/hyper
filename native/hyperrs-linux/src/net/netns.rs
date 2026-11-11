@@ -166,7 +166,7 @@ impl NetNs {
             Err(e) => return Err(CreateError::MountPoint(name.to_owned(), e)),
         }
 
-        let target = Self::path(name);
+        let target = Self::run_path(name);
         let bound = thread::scope(|scope| {
             let worker = thread::Builder::new()
                 .spawn_scoped(scope, || {
@@ -194,7 +194,7 @@ impl NetNs {
 
     /// Open the namespace pinned at `/run/netns/<name>`.
     pub fn open(name: &StrictComponent) -> Result<Self, OpenError> {
-        let path = Self::path(name);
+        let path = Self::run_path(name);
         let file: SafeFile<Any, Any, Any> = SafeFile::open(&path, OpenFlags::RDONLY)?;
         if fstatfs(&file).map_err(OpenError::Statfs)?.filesystem_type() != NSFS_MAGIC {
             return Err(OpenError::NotNetNs(path.as_path().to_path_buf()));
@@ -209,20 +209,36 @@ impl NetNs {
     pub fn remove(self) -> Result<(), RemoveError> {
         let Self { file, name } = self;
         drop(file);
-        match umount2(Self::path(&name).as_path(), MntFlags::MNT_DETACH) {
+        Self::delete(&name)
+    }
+
+    /// Unpin the namespace named `name`, even one left half-created; a missing one is `Ok`.
+    pub fn delete(name: &StrictComponent) -> Result<(), RemoveError> {
+        match umount2(Self::run_path(name).as_path(), MntFlags::MNT_DETACH) {
             Ok(()) | Err(Errno::EINVAL | Errno::ENOENT) => {}
-            Err(e) => return Err(RemoveError::Unmount(name, e)),
+            Err(e) => return Err(RemoveError::Unmount(name.to_owned(), e)),
         }
-        let netns: SafeDir = SafeFile::open(SafePath::from_static::<RUN_DIR>(), OpenFlags::RDONLY)
-            .map_err(RemoveError::RunDir)?;
-        match netns.unlinkat(&name) {
+
+        let netns: SafeDir =
+            match SafeFile::open(SafePath::from_static::<RUN_DIR>(), OpenFlags::RDONLY) {
+                Ok(dir) => dir,
+                Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()),
+                Err(e) => return Err(RemoveError::RunDir(e)),
+            };
+
+        match netns.unlinkat(name) {
             Ok(()) | Err(Errno::ENOENT) => Ok(()),
-            Err(e) => Err(RemoveError::Unlink(name, e)),
+            Err(e) => Err(RemoveError::Unlink(name.to_owned(), e)),
         }
     }
 
-    fn path(name: &StrictComponent) -> SafePathBuf<IsAbsolute, StrictComponents> {
+    fn run_path(name: &StrictComponent) -> SafePathBuf<IsAbsolute, StrictComponents> {
         SafePath::from_static::<RUN_DIR>().join(name)
+    }
+
+    /// Where the namespace is pinned: `/run/netns/<name>`.
+    pub fn path(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        Self::run_path(&self.name)
     }
 
     /// The name the namespace is pinned under in `/run/netns`.

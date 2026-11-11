@@ -13,6 +13,8 @@ defmodule Hyper.Vm do
   @type source :: %{
           required(:kernel_image_path) => Path.t(),
           required(:root_drive_path) => Path.t(),
+          required(:vm_id) => Hyper.Vm.Id.t(),
+          required(:net) => Hyper.Node.Net.Ip.Lease.t(),
           optional(:boot_args) => String.t()
         }
 

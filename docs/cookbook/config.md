@@ -51,6 +51,7 @@ configurable:
 | `jailer`      | -             | `.jailer`      | -                                   | [Safe Path](#safe-path) |
 | `dmsetup`     | -             | `.dmsetup`     | `"/usr/sbin/dmsetup"`               | [Safe Path](#safe-path) |
 | `losetup`     | -             | `.losetup`     | `"/usr/sbin/losetup"`               | [Safe Path](#safe-path) |
+| `nft`         | -             | `.nft`         | `"/usr/sbin/nft"`                   | [Safe Path](#safe-path). Applies the host's and each VM's IPv4 NAT. |
 | `thin_dump`   | -             | `.thin_dump`   | `"/usr/sbin/thin_dump"`             | [Safe Path](#safe-path). Reads thin snapshot metadata for fork publish; required for `Hyper.Vm.fork/1`'s cross-node path (same-node `fast_fork/1` is unaffected). |
 | `mke2fs`      | `.mke2fs`     | `.mke2fs`      | `$PATH["mke2fs"]`                   |  |
 | `skopeo`      | `.skopeo`     | `.skopeo`      | `$PATH["skopeo"]`                   |  |
@@ -108,9 +109,22 @@ uid_gid_range = [900000, 999999]
 
 ## VM Networking Configuration
 
-VM networking is being rewritten from the ground up and is currently
-unavailable: VMs boot with no NIC, and a node no longer requires or reads a
-`[network]` table (see the [install guide](install.md#vm-networking)).
+| Config Key    | `config.exs` | `config.toml`  | Default | Notes |
+| ------------- | ------------ | -------------- | ------- | ----- |
+| `uplink`      | -            | `.uplink`      | -       | **Required.** The host interface VM traffic leaves through (`if0` in the [networking cookbook](networking.md)). |
+| `ipv6_prefix` | -            | `.ipv6_prefix` | -       | **Required.** The routed IPv6 prefix on `uplink`, `/64` or shorter. VMs take their addresses from `<prefix>:1::/80`. |
+
+A node refuses to start without this table: VM networking is not optional.
+
+<!-- tabs open -->
+### `config.toml`
+
+```toml
+[net]
+uplink = "eth0"
+ipv6_prefix = "2001:db8::/64"
+```
+<!-- tabs close -->
 
 ## gRPC Configuration
 

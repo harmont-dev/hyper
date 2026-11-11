@@ -100,6 +100,8 @@ defmodule Hyper.Node.FireVMM.Jailer do
       id: opts.vm_id,
       uid: opts.uid,
       gid: opts.gid,
+      net_id: opts.net_id,
+      firewall: Hyper.Vm.Firewall.to_request(opts.firewall),
       kernel: opts.kernel,
       device: rootfs_device,
       limits: opts.type |> Instance.spec() |> Instance.Spec.cgroup_v2()

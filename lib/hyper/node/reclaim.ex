@@ -17,6 +17,7 @@ defmodule Hyper.Node.Reclaim do
   collides with its own previous instance's leftovers.
   """
 
+  alias Hyper.Node.Reaper
   alias Hyper.SuidHelper.Dmsetup
 
   require Logger
@@ -25,6 +26,7 @@ defmodule Hyper.Node.Reclaim do
 
   @spec run() :: :ok
   def run do
+    reclaim_vms()
     reclaim_dm()
     reclaim_sockets()
     :ok
@@ -64,6 +66,16 @@ defmodule Hyper.Node.Reclaim do
         Logger.warning("reclaim: could not list socket dir #{dir}: #{inspect(reason)}")
         :ok
     end
+  end
+
+  # Every VM died with the previous BEAM, so whatever still holds per-VM resources
+  # is an orphan. Torn down before the dm sweep, because a firecracker still
+  # alive in its cgroup holds its rw volume open.
+  @spec reclaim_vms() :: :ok
+  defp reclaim_vms do
+    Reaper.resource_ids()
+    |> Enum.uniq()
+    |> Enum.each(&Reaper.reap/1)
   end
 
   defp reclaim_dm do

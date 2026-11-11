@@ -5,7 +5,8 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   instance type), a kernel boot source, and a root drive.
   """
 
-  alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration}
+  alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration, NetworkInterface}
+  alias Hyper.Node.FireVMM.Net
   alias Hyper.Vm.Instance
 
   # Default cmdline. No `console=`: serial printk is synchronous at 115200 baud
@@ -20,22 +21,29 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   defmodule Cold do
     @moduledoc "A resolved cold boot."
     @enforce_keys [:machine_config, :boot_source, :drives]
-    defstruct [:machine_config, :boot_source, drives: []]
+    defstruct [:machine_config, :boot_source, drives: [], network_interfaces: []]
 
     @type t :: %__MODULE__{
             machine_config: MachineConfiguration.t(),
             boot_source: BootSource.t(),
-            drives: [Drive.t()]
+            drives: [Drive.t()],
+            network_interfaces: [NetworkInterface.t()]
           }
   end
 
   @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
+    spec = Instance.spec(type)
+
+    boot_args =
+      Map.get(source, :boot_args, @default_boot_args) <>
+        " " <> Net.cmdline(Map.fetch!(source, :net))
+
     %Cold{
-      machine_config: Instance.Spec.machine_config(Instance.spec(type)),
+      machine_config: Instance.Spec.machine_config(spec),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
-        boot_args: Map.get(source, :boot_args, @default_boot_args)
+        boot_args: boot_args
       },
       drives: [
         %Drive{
@@ -44,7 +52,8 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           is_read_only: false,
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
-      ]
+      ],
+      network_interfaces: [Net.interface(Map.fetch!(source, :vm_id), spec.net_bw)]
     }
   end
 end

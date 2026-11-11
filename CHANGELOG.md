@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Breaking:** VM networking, rebuilt. Each VM runs in its own network
+  namespace: outbound IPv4 through a per-VM and a host-wide NAT (nftables),
+  and a globally routable IPv6 address from `<prefix>:1::/80`, announced to
+  the upstream network by proxy NDP. A node now requires a `[net]` table
+  (`uplink`, `ipv6_prefix`) and the `nft` binary; `host_init` turns on
+  forwarding and proxy NDP itself. The setuid helper's `vm_launch` request
+  takes a `net_id` and a `firewall`, and its `net_*` requests are gone. See
+  `docs/cookbook/networking.md`.
+- VM firewalls. VMs cannot reach the host, private or link-local ranges, or
+  send from addresses that are not theirs. Each VM has a port policy:
+  inbound ports open to it and outbound ports it may not use, set at
+  `CreateVm` (`firewall`, defaulting to nothing open and outbound TCP 25
+  blocked) and replaced at runtime with the new `SetVmFirewall` RPC. Forks
+  inherit the parent's current policy. The setuid helper gains `vm_firewall`.
+
 ### Changed
 - **Breaking:** the gRPC package was promoted `hyper.grpc.v0` -> `hyper.grpc.v1`.
   `google.protobuf.Empty` is replaced by dedicated `StopVmResponse` and
@@ -15,13 +31,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`page_size` / `page_token` / `next_page_token`).
 
 ### Removed
-- **Breaking:** VM networking (per-VM netns + veth + TAP + nftables NAT egress,
-  and the guest `/etc/resolv.conf` from `hyper.resolver=`) has been removed
-  pending a ground-up rewrite. VMs boot with no NIC, a node no longer requires
-  or reads a `[network]` config table, and the
-  `Hyper.SuidHelper.Network` and `Hyper.Node.FireVMM.Net`
-  modules and the setuid helper's `network` subcommands remain as interfaces
-  but return/raise unimplemented.
+- **Breaking:** the previous VM networking is gone, replaced by the design
+  above: the `[network]` config table, the `172.30.0.0/30` guest addressing,
+  the `Hyper.SuidHelper.Network` module and the setuid helper's `network`
+  subcommands. Guests no longer get an `/etc/resolv.conf` from
+  `hyper.resolver=`; DNS configuration is not yet part of the new design.
 
 ## [0.1.0]
 

@@ -1,5 +1,6 @@
 use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
 
+use hyper_guest_agent::net::GuestNet;
 use hyper_guest_agent::{agent, init, pb};
 
 const VSOCK_PORT: u32 = 1024;
@@ -14,6 +15,14 @@ fn main() -> ! {
     // already inherited through the shared mount namespace.
     if let Err(e) = init::setup() {
         eprintln!("hyper-init: mounts failed: {e}");
+    }
+
+    // After /proc is mounted (the address comes from /proc/cmdline). Best-effort: a
+    // guest without IPv6 still boots with the IPv4 the kernel's `ip=` configured. The
+    // re-exec'd child repeats this; configure() keeps what the first pass added.
+    match GuestNet::from_proc().and_then(|net| net.map(GuestNet::configure).transpose()) {
+        Ok(_) => {}
+        Err(e) => eprintln!("hyper-init: IPv6 setup failed: {e}"),
     }
 
     // When run as PID 1, pid1-rs re-execs this binary as a child, stays in the

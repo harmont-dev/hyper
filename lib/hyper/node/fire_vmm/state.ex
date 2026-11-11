@@ -14,7 +14,7 @@ defmodule Hyper.Node.FireVMM.State do
                         answers, or fail the boot if the readiness deadline lapses.
     * `:configuring`  - stage the kernel + rootfs device into the jail chroot
                         (rewriting the spec to in-jail paths), then push
-                        machine-config, boot-source, drives, and
+                        machine-config, boot-source, drives, NICs, and
                         `InstanceStart`.
     * `:running`      - guest is live; handles `stop`.
     * `:stopping`     - teardown requested in-band; reject further calls.
@@ -67,6 +67,15 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @doc """
+  Replace the running VM `id`'s port policy. The new policy is what `describe/1`
+  reports from then on, so a later fork inherits it. Exits if the VM is gone.
+  """
+  @spec set_firewall(Hyper.Vm.Id.t(), Hyper.Vm.Firewall.t()) :: :ok | {:error, term()}
+  def set_firewall(id, %Hyper.Vm.Firewall{} = firewall) do
+    :gen_statem.call(via(id), {:set_firewall, firewall})
+  end
+
+  @doc """
   The start `Opts` of the running VM `id` — how a fork recovers the parent's
   `img_id`/`type`/`arch`/`boot_args` from just a vm_id. Exits if the VM is gone;
   callers translate that to `{:error, :not_found}`.
@@ -85,13 +94,10 @@ defmodule Hyper.Node.FireVMM.State do
   # The daemon is already (being) started by `Core` as our sibling. Read the root
   # device off the per-VM mutable layer, resolve the boot spec, set the readiness
   # deadline, and start probing the API.
-  def init(
-        %Opts{vm_id: id, mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} =
-          opts
-      ) do
+  def init(%Opts{vm_id: id, mutable: mutable, type: type} = opts) do
     case Hyper.Cluster.Routing.register_self({id, :state}) do
       :ok ->
-        source = boot_source(kernel, Mutable.blk_path(mutable), boot_args)
+        source = boot_source(opts, Mutable.blk_path(mutable))
         spec = BootSpec.resolve(source, type)
         deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
         data = %State{opts: opts, spec: spec, boot_deadline: deadline}
@@ -105,18 +111,43 @@ defmodule Hyper.Node.FireVMM.State do
 
   # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +
   # device. `boot_args` is omitted when nil so BootSpec applies its default.
-  @spec boot_source(Path.t(), Path.t(), String.t() | nil) :: Hyper.Vm.source()
-  defp boot_source(kernel, dev, nil),
-    do: %{kernel_image_path: kernel, root_drive_path: dev}
+  @spec boot_source(Opts.t(), Path.t()) :: Hyper.Vm.source()
+  defp boot_source(%Opts{} = opts, dev) do
+    put_boot_args(
+      %{
+        vm_id: opts.vm_id,
+        net: Hyper.Node.Net.lease(opts.net_id),
+        kernel_image_path: opts.kernel,
+        root_drive_path: dev
+      },
+      opts.boot_args
+    )
+  end
 
-  defp boot_source(kernel, dev, boot_args),
-    do: %{kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
+  @spec put_boot_args(Hyper.Vm.source(), String.t() | nil) :: Hyper.Vm.source()
+  defp put_boot_args(source, nil), do: source
+  defp put_boot_args(source, boot_args), do: Map.put(source, :boot_args, boot_args)
 
   @impl :gen_statem
   # Answered in every lifecycle state: the opts are static data, and a fork must
   # be able to describe a parent that is still configuring.
   def handle_event({:call, from}, :describe, _state, data) do
-    {:keep_state_and_data, [{:reply, from, data.opts}]}
+    firewall = Hyper.Node.FireVMM.Policy.current(data.opts.vm_id)
+    {:keep_state_and_data, [{:reply, from, %{data.opts | firewall: firewall}}]}
+  end
+
+  # The VM's namespace exists from launch until teardown, so any state short of
+  # stopping can take a new policy.
+  def handle_event({:call, from}, {:set_firewall, firewall}, state, data)
+      when state != :stopping do
+    case Hyper.SuidHelper.Vm.firewall(data.opts.vm_id, firewall) do
+      :ok ->
+        :ok = Hyper.Node.FireVMM.Policy.put(data.opts.vm_id, firewall)
+        {:keep_state_and_data, [{:reply, from, :ok}]}
+
+      {:error, _} = err ->
+        {:keep_state_and_data, [{:reply, from, err}]}
+    end
   end
 
   def handle_event(type, content, state, data) do
@@ -258,7 +289,7 @@ defmodule Hyper.Node.FireVMM.State do
       {:keep_state_and_data, [{:reply, from, {:error, :not_running}}]}
     end
 
-    # Device PUT sequence: machine-config -> boot-source -> drives -> vsock.
+    # Device PUT sequence: machine-config -> boot-source -> drives -> NICs -> vsock.
     # InstanceStart is deferred until the vsock UDS grant succeeds.
     @spec configure_devices(Hyper.Vm.Id.t(), BootSpec.Cold.t()) :: :ok | {:error, term()}
     @decorate with_span("Hyper.Node.FireVMM.State.Configuring.configure_devices", include: [:id])
@@ -272,6 +303,9 @@ defmodule Hyper.Node.FireVMM.State do
         ] ++
           Enum.map(cold.drives, fn drive ->
             fn opts -> Operations.put_guest_drive_by_id(drive.drive_id, drive, opts) end
+          end) ++
+          Enum.map(cold.network_interfaces, fn nic ->
+            fn opts -> Operations.put_guest_network_interface_by_id(nic.iface_id, nic, opts) end
           end) ++
           [
             fn opts ->

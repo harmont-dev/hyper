@@ -32,6 +32,7 @@ sudo apt update && sudo apt install -y \
   libc-bin \
   linux-modules-extra-$(uname -r) \
   lvm2 \
+  nftables \
   skopeo \
   thin-provisioning-tools \
   util-linux
@@ -49,6 +50,7 @@ sudo dnf install -y \
   glibc-common \
   kernel-modules-extra-$(uname -r) \
   lvm2 \
+  nftables \
   skopeo \
   util-linux
 ```
@@ -165,9 +167,10 @@ firecracker = "/opt/firecracker/firecracker"
 # **required**. basename **must** be 'jailer'.
 jailer = "/opt/firecracker/jailer"
 
-# optional -- privileged device tools, default to /usr/sbin/<name>.
+# optional -- privileged tools, default to /usr/sbin/<name>.
 # dmsetup  = "/usr/sbin/dmsetup"
 # losetup  = "/usr/sbin/losetup"
+# nft      = "/usr/sbin/nft"
 
 # optional -- node-run tools. skopeo/mke2fs default to the name on PATH; omit
 # umoci to let hyper download and cache a pinned release.
@@ -182,6 +185,13 @@ jailer = "/opt/firecracker/jailer"
 uid_gid_range = [900000, 999999]
 # optional
 cgroup = "hyper"
+
+[net]
+# **required**. The interface VM traffic leaves the host through.
+uplink = "eth0"
+# **required**. The IPv6 prefix on-link at `uplink`, /64 or shorter; see
+# "VM networking" below for finding it.
+ipv6_prefix = "2001:db8::/64"
 ```
 
 > #### Security {: .error}
@@ -194,9 +204,60 @@ For more details on configuring and tuning Hyper, we suggest you see the
 
 ### VM networking
 
-VM networking is being rewritten from the ground up and is currently
-unavailable: VMs boot with no NIC, so guests have no egress. No `[network]`
-table, `nftables`, `iproute2` or IPv4 forwarding is needed on the host.
+Every VM gets outbound IPv4 through NAT and a globally routable IPv6 address;
+see the [networking cookbook](networking.md) for the design. The host needs:
+
+- `nftables` (the `nft` binary), which the helper drives for both NATs;
+- IPv6 enabled (`net.ipv6.conf.default.disable_ipv6 = 0`), since every VM link
+  carries IPv6 link-local addresses;
+- a `[net]` table naming the uplink interface and its routed IPv6 prefix, of
+  which Hyper uses `<prefix>:1::/80`.
+
+On start, the helper turns on IPv4 and IPv6 forwarding and proxy NDP on the
+uplink itself; nothing needs to be set by hand.
+
+#### Finding the uplink and its prefix
+
+The uplink is the interface on the host's default route:
+
+```sh
+ip -o route show default | awk '{print $5; exit}'
+```
+
+Proxy NDP only answers for addresses inside the prefix that is on-link at the
+uplink, so `ipv6_prefix` is that prefix. List the uplink's global addresses:
+
+```sh
+ip -6 addr show dev eth0 scope global
+```
+
+Pick the stable address: skip any marked `temporary` or `deprecated`, and any
+unique local address (`fc00::/7`, usually `fd..`). Its network is the prefix:
+`2001:db8::5/64` means `ipv6_prefix = "2001:db8::/64"`.
+
+Set it by hand instead when:
+
+- the uplink carries several prefixes; pick the one your provider routes to
+  this host;
+- the address is a `/128` (some providers hand one out over DHCPv6), so the
+  on-link prefix is not visible on the host; take it from your provider;
+- the host's own address falls inside `<prefix>:1::/80`, where VMs live; give
+  the host a different address first.
+
+> #### Router advertisements {: .warning}
+>
+> With IPv6 forwarding on, the kernel ignores router advertisements on
+> interfaces whose `accept_ra` is `1`. If the uplink takes its IPv6 default
+> route from router advertisements, set
+> `net.ipv6.conf.<uplink>.accept_ra = 2` or the host loses that route.
+
+> #### Other firewalls {: .warning}
+>
+> The helper firewalls VMs in its own `inet hyper` table. nftables only passes a
+> packet that every table on its hook accepts, so another firewall whose
+> forward policy is drop (ufw's default, or Docker's) also drops VM traffic.
+> Allow forwarding to and from `vm-veth-*` there, or turn its forward policy to
+> accept.
 
 ### Cgroups
 

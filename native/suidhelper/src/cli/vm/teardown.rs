@@ -4,6 +4,7 @@
 use super::VmOut;
 use crate::cli::Op;
 use crate::config::Config;
+use crate::net::vm::{VmNet, VmNetError};
 use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
 use hyperrs_firecracker::VmId;
@@ -24,6 +25,8 @@ type LexicalPath = SafePath<IsAbsolute, StrictComponents>;
 pub enum TeardownError {
     #[error(transparent)]
     Jail(#[from] JailRemoveError),
+    #[error(transparent)]
+    Net(#[from] VmNetError),
 }
 
 #[derive(Debug, ThisError)]
@@ -72,7 +75,13 @@ impl Teardown {
         self.remove_cgroup(&cgroup_parent)
             .map_err(JailRemoveError::from)?;
         layout.remove().map_err(JailRemoveError::from)?;
+        self.net().teardown(config.net().ok())?;
         Ok(())
+    }
+
+    /// The VM's network, as [`VmNet`] sees it.
+    pub fn net(&self) -> VmNet<'_> {
+        VmNet { id: &self.id }
     }
 
     pub fn remove_cgroup(&self, parent: &LexicalPath) -> Result<(), CgroupError> {

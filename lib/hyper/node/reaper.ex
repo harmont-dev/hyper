@@ -33,6 +33,7 @@ defmodule Hyper.Node.Reaper do
   alias Hyper.SuidHelper.{Dmsetup, Vm}
 
   @vm_sup Hyper.Node.VMSupervisor
+  @netns_dir "/run/netns"
 
   # Rest between reap ticks. Deliberately not configurable: the two-strike
   # confirmation (`Plan.confirm/2`) already means an orphan is reaped at most one
@@ -82,15 +83,16 @@ defmodule Hyper.Node.Reaper do
   @spec sweep(t()) :: t()
   @decorate with_span("Hyper.Node.Reaper.sweep")
   defp sweep(%__MODULE__{} = state) do
-    live = gather_live()
-    leaves = list_cgroup_leaves()
-    rw = Plan.rw_ids(list_rw_dm())
-
-    current = Plan.orphans(live, leaves, rw)
+    current = Plan.orphans(gather_live(), resource_ids())
     {to_reap, next} = Plan.confirm(current, state.last_orphans)
 
-    Enum.each(to_reap, &reap_one/1)
+    Enum.each(to_reap, &reap/1)
     %{state | last_orphans: next}
+  end
+
+  @spec resource_ids() :: [String.t()]
+  def resource_ids do
+    list_cgroup_leaves() ++ Plan.rw_ids(list_rw_dm()) ++ Plan.netns_ids(list_netns())
   end
 
   # Over-counting "live" only defers a reap (safe); under-counting destroys a live
@@ -150,6 +152,21 @@ defmodule Hyper.Node.Reaper do
     end
   end
 
+  @spec list_netns() :: [String.t()]
+  defp list_netns do
+    case File.ls(@netns_dir) do
+      {:ok, names} ->
+        names
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.warning("reaper: could not list network namespaces: #{inspect(reason)}")
+        []
+    end
+  end
+
   @spec list_rw_dm() :: [String.t()]
   defp list_rw_dm do
     case Sys.Linux.Dm.names() do
@@ -162,9 +179,9 @@ defmodule Hyper.Node.Reaper do
     end
   end
 
-  @spec reap_one(String.t()) :: :ok
-  @decorate with_span("Hyper.Node.Reaper.reap_one", include: [:id])
-  defp reap_one(id) do
+  @spec reap(String.t()) :: :ok
+  @decorate with_span("Hyper.Node.Reaper.reap", include: [:id])
+  def reap(id) do
     Logger.warning("reaper: reaping orphan vm #{id}")
 
     log_result("jail", id, Vm.teardown(id))

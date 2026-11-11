@@ -9,7 +9,11 @@ defmodule Hyper.Grpc.CodecTest do
   alias Hyper.Grpc.V1.ListVmsResponse
   alias Hyper.Grpc.V1.LoadImageRequest
   alias Hyper.Grpc.V1.LoadImageResponse
+  alias Hyper.Grpc.V1.PortRule
+  alias Hyper.Grpc.V1.SetVmFirewallRequest
+  alias Hyper.Grpc.V1.SetVmFirewallResponse
   alias Hyper.Grpc.V1.StopVmResponse
+  alias Hyper.Vm.Firewall
   alias Hyper.Vm.Spec
 
   test "usage encodes as microseconds on the wire" do
@@ -100,12 +104,89 @@ defmodule Hyper.Grpc.CodecTest do
                })
     end
 
+    test "an unset firewall decodes to the default policy" do
+      assert {:ok, %Spec{firewall: firewall}} =
+               Codec.from_grpc(%CreateVmRequest{
+                 img_id: "img",
+                 instance_type: :INSTANCE_TYPE_MICRO,
+                 arch: :ARCHITECTURE_X86_64
+               })
+
+      assert firewall == Firewall.default()
+    end
+
+    test "a firewall decodes rule by rule, single ports and ranges alike" do
+      assert {:ok, %Spec{firewall: firewall}} =
+               Codec.from_grpc(%CreateVmRequest{
+                 img_id: "img",
+                 instance_type: :INSTANCE_TYPE_MICRO,
+                 arch: :ARCHITECTURE_X86_64,
+                 firewall: %Hyper.Grpc.V1.Firewall{
+                   inbound: [
+                     %PortRule{protocol: :PROTOCOL_TCP, first_port: 22, last_port: 22},
+                     %PortRule{protocol: :PROTOCOL_UDP, first_port: 6000, last_port: 6010}
+                   ],
+                   outbound_blocked: []
+                 }
+               })
+
+      assert firewall == %Firewall{
+               inbound: [{:tcp, 22..22//1}, {:udp, 6000..6010//1}],
+               outbound_blocked: []
+             }
+    end
+
+    test "a firewall rule with an unset protocol, port 0, or a reversed range is refused" do
+      rows = [
+        {:PROTOCOL_UNSPECIFIED, 22, 22},
+        {7, 22, 22},
+        {:PROTOCOL_TCP, 0, 22},
+        {:PROTOCOL_TCP, 30, 20},
+        {:PROTOCOL_UDP, 1, 70_000}
+      ]
+
+      for {protocol, first, last} <- rows do
+        rule = %PortRule{protocol: protocol, first_port: first, last_port: last}
+
+        assert {:error, {:bad_firewall_rule, _}} =
+                 Codec.from_grpc(%CreateVmRequest{
+                   img_id: "img",
+                   instance_type: :INSTANCE_TYPE_MICRO,
+                   arch: :ARCHITECTURE_X86_64,
+                   firewall: %Hyper.Grpc.V1.Firewall{inbound: [], outbound_blocked: [rule]}
+                 }),
+               inspect(rule)
+      end
+    end
+
     test "a missing img_id (nil or empty) is refused" do
       assert {:error, :missing_img_id} =
                Codec.from_grpc(%CreateVmRequest{img_id: nil, instance_type: :INSTANCE_TYPE_MICRO})
 
       assert {:error, :missing_img_id} =
                Codec.from_grpc(%CreateVmRequest{img_id: "", instance_type: :INSTANCE_TYPE_MICRO})
+    end
+  end
+
+  describe "from_grpc/1 SetVmFirewallRequest" do
+    test "a request decodes to the vm id and its new policy" do
+      assert {:ok, {"v1", %Firewall{inbound: [{:tcp, 443..443//1}], outbound_blocked: []}}} =
+               Codec.from_grpc(%SetVmFirewallRequest{
+                 vm_id: "v1",
+                 firewall: %Hyper.Grpc.V1.Firewall{
+                   inbound: [%PortRule{protocol: :PROTOCOL_TCP, first_port: 443, last_port: 443}],
+                   outbound_blocked: []
+                 }
+               })
+    end
+
+    test "a request without a firewall is refused, not read as an empty policy" do
+      assert {:error, :missing_firewall} =
+               Codec.from_grpc(%SetVmFirewallRequest{vm_id: "v1", firewall: nil})
+    end
+
+    test "a firewall_set result maps to a SetVmFirewallResponse" do
+      assert %SetVmFirewallResponse{} = Codec.to_grpc(:firewall_set)
     end
   end
 
@@ -156,6 +237,9 @@ defmodule Hyper.Grpc.CodecTest do
       {:missing_img_id, GRPC.Status.invalid_argument()},
       {:missing_image_ref, GRPC.Status.invalid_argument()},
       {:invalid_ref, GRPC.Status.invalid_argument()},
+      {:missing_firewall, GRPC.Status.invalid_argument()},
+      {{:bad_firewall_rule, {:icmp, 1..1//1}}, GRPC.Status.invalid_argument()},
+      {:too_many_firewall_rules, GRPC.Status.invalid_argument()},
       {:machine_unreachable, GRPC.Status.unavailable()},
       {:no_capacity, GRPC.Status.resource_exhausted()},
       {:exhausted, GRPC.Status.resource_exhausted()}

@@ -16,6 +16,7 @@ defmodule Hyper.SuidHelper do
   self-test and reports the base path it was compiled against.
   """
 
+  alias Hyper.Node.Net.Ip.Host
   alias Hyper.SuidHelper.Expected
 
   use OpenTelemetryDecorator
@@ -61,14 +62,48 @@ defmodule Hyper.SuidHelper do
     end
   end
 
-  @spec host_init() :: {:ok, Path.t()} | {:error, err()}
+  @spec host_init() ::
+          {:ok, Path.t(), Host.t()} | {:error, err() | {:malformed_host_net, term()}}
   @decorate with_span("Hyper.SuidHelper.host_init")
   def host_init do
-    case exec(%{op: "host_init"}) do
-      {:ok, %{"result" => "host_ready", "hyper_base" => base}} -> {:ok, base}
-      {:error, _} = err -> err
+    %{op: "host_init"} |> exec() |> host_ready()
+  end
+
+  @spec host_ready({:ok, map()} | {:error, err()}) ::
+          {:ok, Path.t(), Host.t()} | {:error, err() | {:malformed_host_net, term()}}
+  defp host_ready({:ok, %{"result" => "host_ready", "hyper_base" => base, "net" => net}}) do
+    case host_net(net) do
+      {:ok, host} -> {:ok, base, host}
+      :error -> {:error, {:malformed_host_net, net}}
     end
   end
+
+  defp host_ready({:error, _} = err), do: err
+
+  @spec host_net(term()) :: {:ok, Host.t()} | :error
+  defp host_net(%{"uplink" => uplink, "transit_prefix" => transit, "vm_prefix" => vm})
+       when is_binary(uplink) do
+    with {:ok, transit} <- prefix(transit, &:inet.parse_ipv4strict_address/1),
+         {:ok, vm} <- prefix(vm, &:inet.parse_ipv6strict_address/1) do
+      {:ok, %Host{uplink: uplink, transit_prefix: transit, vm_prefix: vm}}
+    end
+  end
+
+  defp host_net(_net), do: :error
+
+  @spec prefix(term(), (charlist() -> {:ok, :inet.ip_address()} | {:error, :einval})) ::
+          {:ok, Host.prefix()} | :error
+  defp prefix(cidr, parse) when is_binary(cidr) do
+    with [addr, len] <- String.split(cidr, "/"),
+         {len, ""} <- Integer.parse(len),
+         {:ok, addr} <- parse.(String.to_charlist(addr)) do
+      {:ok, {addr, len}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp prefix(_cidr, _parse), do: :error
 
   @spec dm_targets_present() :: :ok | {:error, {:missing_dm_targets, [String.t()]}}
   defp dm_targets_present do

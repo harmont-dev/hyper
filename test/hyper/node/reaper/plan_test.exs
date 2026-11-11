@@ -5,26 +5,18 @@ defmodule Hyper.Node.Reaper.PlanTest do
 
   defp set(ids), do: MapSet.new(ids)
 
-  describe "orphans/3" do
-    test "a cgroup-leaf-only orphan is a candidate" do
-      assert Plan.orphans(set([]), ["dead"], []) == set(["dead"])
-    end
+  describe "orphans/2" do
+    test "orphans are the resource-holding ids outside the live set, each once" do
+      rows = [
+        {[], ["dead"], ["dead"]},
+        {[], ["dead", "dead"], ["dead"]},
+        {["alive"], ["alive", "alive"], []},
+        {["alive"], ["alive", "dead", "gone"], ["dead", "gone"]}
+      ]
 
-    test "a dm-only orphan is a candidate" do
-      assert Plan.orphans(set([]), [], ["dead"]) == set(["dead"])
-    end
-
-    test "an id seen in both sources is a single candidate" do
-      assert Plan.orphans(set([]), ["dead"], ["dead"]) == set(["dead"])
-    end
-
-    test "an id present in live is never a candidate, even if it also has resources" do
-      assert Plan.orphans(set(["alive"]), ["alive"], ["alive"]) == set([])
-    end
-
-    test "only the non-live ids survive as candidates" do
-      assert Plan.orphans(set(["alive"]), ["alive", "dead"], ["alive", "gone"]) ==
-               set(["dead", "gone"])
+      for {live, held, orphans} <- rows do
+        assert Plan.orphans(set(live), held) == set(orphans), inspect({live, held})
+      end
     end
   end
 
@@ -61,5 +53,9 @@ defmodule Hyper.Node.Reaper.PlanTest do
 
   test "rw_ids/1 strips the hyper-rw- prefix and ignores thinpool/img names" do
     assert Plan.rw_ids(["hyper-thinpool", "hyper-img-abc-0", "hyper-rw-vabc"]) == ["vabc"]
+  end
+
+  test "netns_ids/1 strips the hyper- prefix and ignores other namespaces" do
+    assert Plan.netns_ids(["hyper-vabc", "cni-1234", "vabc"]) == ["vabc"]
   end
 end

@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run, stdout_json};
+use support::{is_root, run, stdout_json, ScratchNs};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
 /// `work_dir`, followed by `tables`, 0644 so the OwnerOnlyWritable axis passes.
@@ -67,7 +67,9 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
     let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
 
-    let out = run(&cfg, json!({"op": "vm_teardown", "id": "id"})).success();
+    let out = ScratchNs::new("chroot-remove")
+        .run(&cfg, json!({"op": "vm_teardown", "id": "id"}))
+        .success();
     let json = stdout_json(&out);
     assert_eq!(json["result"], "tore_down");
     assert!(!chroot.exists(), "chroot must be gone");
