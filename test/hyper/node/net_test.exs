@@ -1,5 +1,5 @@
 defmodule Hyper.Node.NetTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Hyper.Node.Net
   alias Hyper.Node.Net.Ip.Host
@@ -10,64 +10,65 @@ defmodule Hyper.Node.NetTest do
     vm_prefix: {{0x2001, 0xDB8, 0, 0, 1, 0, 0, 0}, 80}
   }
 
-  setup do
-    start_supervised!({Net, @host})
-    :ok
-  end
-
   test "every NetId is handed out once before the pool is exhausted" do
-    claimed = for _ <- 1..16, do: elem(Net.claim(), 1)
+    {claimed, pool} = claim_n(pool(), 16)
 
     assert Enum.sort(claimed) == Enum.to_list(0..15)
-    assert Net.claim() == {:error, :exhausted}
+    assert claim(pool) |> elem(0) == {:error, :exhausted}
   end
 
   test "a released NetId is handed out again" do
-    exhaust()
-    Net.release(3)
+    pool = pool() |> exhaust() |> release(3)
 
-    assert Net.claim() == {:ok, 3}
+    assert claim(pool) |> elem(0) == {:ok, 3}
   end
 
   test "a NetId bound to an owner is handed out again once the owner dies" do
-    exhaust()
     owner = spawn(fn -> Process.sleep(:infinity) end)
-    :ok = Net.bind(5, owner)
+    {:reply, :ok, pool} = Net.handle_call({:bind, 5, owner}, from(), exhaust(pool()))
     Process.exit(owner, :kill)
+    assert_receive {:DOWN, ref, :process, ^owner, _}
+    {:noreply, pool} = Net.handle_info({:DOWN, ref, :process, owner, :killed}, pool)
 
-    assert await_claim() == {:ok, 5}
+    assert claim(pool) |> elem(0) == {:ok, 5}
   end
 
   test "a released NetId waits until every fresh one is out" do
-    {:ok, first} = Net.claim()
-    Net.release(first)
+    {{:ok, first}, pool} = claim(pool())
 
-    assert Net.claim() == {:ok, first + 1}
+    assert pool |> release(first) |> claim() |> elem(0) == {:ok, first + 1}
   end
 
   test "released NetIds come back oldest first" do
-    exhaust()
-    for id <- [7, 2, 11], do: Net.release(id)
+    pool = Enum.reduce([7, 2, 11], exhaust(pool()), &release(&2, &1))
+    {claimed, _} = claim_n(pool, 3)
 
-    assert for(_ <- 1..3, do: Net.claim()) == [{:ok, 7}, {:ok, 2}, {:ok, 11}]
+    assert claimed == [7, 2, 11]
   end
 
-  defp exhaust do
-    for _ <- 1..16, do: {:ok, _} = Net.claim()
-    {:error, :exhausted} = Net.claim()
+  defp pool do
+    {:ok, state} = Net.init(@host)
+    state
   end
 
-  defp await_claim(tries \\ 200)
-  defp await_claim(0), do: flunk("the dead owner's NetId never returned to the pool")
-
-  defp await_claim(tries) do
-    case Net.claim() do
-      {:error, :exhausted} ->
-        Process.sleep(5)
-        await_claim(tries - 1)
-
-      claimed ->
-        claimed
-    end
+  defp claim(state) do
+    {:reply, reply, state} = Net.handle_call(:claim, from(), state)
+    {reply, state}
   end
+
+  defp claim_n(state, n) do
+    Enum.map_reduce(1..n, state, fn _, state ->
+      {{:ok, id}, state} = claim(state)
+      {id, state}
+    end)
+  end
+
+  defp release(state, id) do
+    {:noreply, state} = Net.handle_cast({:release, id}, state)
+    state
+  end
+
+  defp exhaust(state), do: state |> claim_n(16) |> elem(1)
+
+  defp from, do: {self(), make_ref()}
 end
