@@ -18,10 +18,17 @@ defmodule Hyper.Firecracker.Api.Transport do
 
   use OpenTelemetryDecorator
 
+  alias Unit.Information
+
+  @max_body_bytes Information.as_bytes(Information.mib(1))
+
   @type result ::
           :ok
           | {:ok, term()}
-          | {:error, {:api, pos_integer(), String.t() | nil} | {:transport, term()}}
+          | {:error,
+             {:api, pos_integer(), String.t() | nil}
+             | {:transport, term()}
+             | {:body_too_large, pos_integer()}}
 
   @spec request(map()) :: result()
   @decorate with_span("Hyper.Firecracker.Api.Transport.request", include: [:method, :url])
@@ -36,7 +43,7 @@ defmodule Hyper.Firecracker.Api.Transport do
         receive_timeout: 30_000
       )
 
-    req_opts = [method: method, url: url]
+    req_opts = [method: method, url: url, into: &collect_capped/2]
 
     req_opts =
       if Map.has_key?(info, :body), do: Keyword.put(req_opts, :json, info.body), else: req_opts
@@ -44,11 +51,23 @@ defmodule Hyper.Firecracker.Api.Transport do
     req_opts = if q = info[:query], do: Keyword.put(req_opts, :params, q), else: req_opts
 
     case Req.request(req, req_opts) do
-      {:ok, %Req.Response{status: status, body: body}} ->
-        handle(status, body, Map.get(info, :response, []))
+      {:ok, %Req.Response{status: status, body: body} = response} ->
+        if Req.Response.get_private(response, :body_too_large),
+          do: {:error, {:body_too_large, @max_body_bytes}},
+          else: handle(status, body, Map.get(info, :response, []))
 
       {:error, reason} ->
         {:error, {:transport, reason}}
+    end
+  end
+
+  @spec collect_capped({:data, binary()}, {Req.Request.t(), Req.Response.t()}) ::
+          {:cont | :halt, {Req.Request.t(), Req.Response.t()}}
+  defp collect_capped({:data, data}, {req, %Req.Response{body: body} = resp}) do
+    if byte_size(body) + byte_size(data) > @max_body_bytes do
+      {:halt, {req, %{Req.Response.put_private(resp, :body_too_large, true) | body: ""}}}
+    else
+      {:cont, {req, %{resp | body: body <> data}}}
     end
   end
 

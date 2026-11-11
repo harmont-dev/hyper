@@ -60,6 +60,30 @@ defmodule Hyper.Firecracker.Api.TransportTest do
     assert Transport.request(request(opaque, [])) == {:error, {:api, 500, nil}}
   end
 
+  test "a body past 1 MiB is refused as {:body_too_large, _}; one at the cap still decodes" do
+    cap = Unit.Information.as_bytes(Unit.Information.mib(1))
+
+    rows = [
+      {cap, :decoded},
+      {cap + 1, :refused},
+      {8 * cap, :refused}
+    ]
+
+    for {size, expected} <- rows do
+      body = ~s({"x":") <> String.duplicate("a", size - byte_size(~s({"x":""}))) <> ~s("})
+      path = UnixHttp.start(fn _req -> {200, body} end)
+
+      got =
+        case Transport.request(request(path, [])) do
+          {:ok, %{"x" => _}} -> :decoded
+          {:error, {:body_too_large, ^cap}} -> :refused
+          other -> other
+        end
+
+      assert got == expected, "#{size} bytes"
+    end
+  end
+
   test "a connection failure is {:error, {:transport, _}}, never a raise" do
     missing = Path.join(System.tmp_dir!(), "no-such-#{System.unique_integer([:positive])}.sock")
     assert {:error, {:transport, _reason}} = Transport.request(request(missing, []))

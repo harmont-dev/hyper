@@ -44,7 +44,7 @@ defmodule Hyper.Firecracker.Support.UnixHttp do
         request = read_request(sock)
         send(owner, {:unix_http, request})
         {status, body} = respond.(request)
-        :ok = :gen_tcp.send(sock, response(status, IO.iodata_to_binary(body)))
+        _ = :gen_tcp.send(sock, response(status, IO.iodata_to_binary(body)))
         :gen_tcp.close(sock)
         accept_loop(listen, respond, owner)
 
