@@ -64,23 +64,31 @@ defmodule Hyper.Node do
 
   @impl true
   def init(%Net.Ip.Host{} = host) do
-    children = [
+    vms = [
       Hyper.Node.Users,
+      {Net, host},
+      {Registry, keys: :unique, name: FireVMM.Policy.registry()},
+      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
+    ]
+
+    children = [
       # Layer owns Hyper.Node.Layer.Registry, which Budget.Advertiser queries
       # (via Hyper.Node.Layer.active/0) as it advertises on init - so Layer must
       # be up first.
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
-      {Net, host},
-      {Registry, keys: :unique, name: FireVMM.Policy.registry()},
-      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
+      %{
+        id: :vms,
+        type: :supervisor,
+        start: {Supervisor, :start_link, [vms, [strategy: :rest_for_one]]}
+      },
       Hyper.Node.Img,
       # Last child: :one_for_one starts in order, so the VM supervisor and Img are
       # up before the reaper's first tick can read their liveness.
       Hyper.Node.Reaper
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one)
+    Supervisor.init(children, strategy: :one_for_one)
   end
 
   @doc """

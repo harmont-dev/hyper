@@ -112,15 +112,15 @@ defmodule Hyper.Node.FireVMM.Meter do
   end
 
   @doc false
-  @spec sample_now(GenServer.server()) :: :ok
-  def sample_now(server), do: GenServer.call(server, :sample_now)
+  @spec sample_now(GenServer.server(), timeout()) :: :ok
+  def sample_now(server, timeout \\ 5_000), do: GenServer.call(server, :sample_now, timeout)
 
   @doc false
   @spec flush_now(GenServer.server()) :: :ok
   def flush_now(server), do: GenServer.call(server, :flush_now)
 
   @spec rebase(GenServer.server()) :: :ok
-  def rebase(server), do: GenServer.call(server, :rebase)
+  def rebase(server), do: GenServer.cast(server, :rebase)
 
   @impl true
   def init(%Opts{} = opts) do
@@ -164,10 +164,10 @@ defmodule Hyper.Node.FireVMM.Meter do
 
   def handle_call(:sample_now, _from, state), do: {:reply, :ok, sample(state)}
 
-  def handle_call(:rebase, _from, state),
-    do: {:reply, :ok, %{state | acc: Accumulator.rebase(state.acc)}}
-
   def handle_call(:flush_now, _from, state), do: {:reply, :ok, flush(state)}
+
+  @impl true
+  def handle_cast(:rebase, state), do: {:noreply, %{state | acc: Accumulator.rebase(state.acc)}}
 
   @impl true
   @decorate with_span("Hyper.Node.FireVMM.Meter.terminate", include: [])

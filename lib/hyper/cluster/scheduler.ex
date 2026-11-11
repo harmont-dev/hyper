@@ -97,8 +97,8 @@ defmodule Hyper.Cluster.Scheduler do
     end
   catch
     :error, {:erpc, reason} -> {:error, {:lost_mid_call, reason}}
-    :error, {:exception, reason, _stack} -> {:error, {:remote_exception, reason}}
-    :exit, {:exception, reason} -> {:error, {:remote_exit, reason}}
+    :error, {:exception, reason, _stack} -> {:error, {:lost_mid_call, {:raised, reason}}}
+    :exit, {:exception, reason} -> {:error, {:lost_mid_call, {:exited, reason}}}
   end
 
   @doc "Bytes of `layers` already mounted on `state`'s node."
