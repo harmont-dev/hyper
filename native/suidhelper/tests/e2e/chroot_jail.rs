@@ -11,7 +11,9 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use serde_json::json;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::io::ErrorKind;
+use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 mod support;
@@ -40,6 +42,12 @@ impl Work {
     fn config(&self, tables: &str) -> PathBuf {
         write_config(self.tmp.path(), &self.dir, tables)
     }
+
+    fn socks(&self) -> PathBuf {
+        let socks = self.dir.join("socks");
+        fs::create_dir_all(&socks).unwrap();
+        socks
+    }
 }
 
 #[fixture]
@@ -52,6 +60,12 @@ fn work() -> Work {
         chroot: chroot.to_path_buf(),
         tmp,
     }
+}
+
+fn listen(path: &Path) -> UnixListener {
+    let listener = UnixListener::bind(path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    listener
 }
 
 // `vm teardown` of a real chroot succeeds; the cgroup leaf is given as a
@@ -110,4 +124,63 @@ fn claim_refuses_an_invalid_id(work: Work, #[case] op: &str, #[case] id: &str) {
     let cfg = work.config("");
 
     run(&cfg, json!({"op": op, "id": id})).code(2).stdout("");
+}
+
+#[rstest]
+#[case::api("vm_claim_api_socket", "api.socket")]
+#[case::vsock("vm_claim_vsock_socket", "vsock.sock")]
+fn claim_pins_the_socket_against_a_later_swap_until_teardown_as_root(
+    work: Work,
+    #[case] op: &str,
+    #[case] socket: &str,
+) {
+    if !is_root() {
+        eprintln!("SKIP claim pin: needs root");
+        return;
+    }
+    let pinned = work.socks().join(format!("fc-id-{socket}"));
+    let in_jail = work.chroot.join(socket);
+    let own = listen(&in_jail);
+    let other_vm = listen(&work.tmp.path().join("other-vm.sock"));
+    let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
+
+    let out = run(&cfg, json!({"op": op, "id": "id"})).success();
+    assert_eq!(stdout_json(&out)["result"], "claimed");
+
+    fs::remove_file(&in_jail).unwrap();
+    symlink(work.tmp.path().join("other-vm.sock"), &in_jail).unwrap();
+    UnixStream::connect(&pinned).expect("pinned socket must still accept");
+
+    own.accept()
+        .expect("the claimed socket must receive the connection");
+    assert_eq!(
+        other_vm.accept().err().map(|e| e.kind()),
+        Some(ErrorKind::WouldBlock),
+        "a swapped jail entry must not redirect the pinned socket"
+    );
+
+    ScratchNs::new("claim-pin")
+        .run(&cfg, json!({"op": "vm_teardown", "id": "id"}))
+        .success();
+    assert!(!pinned.exists(), "teardown must remove the pinned socket");
+}
+
+#[rstest]
+fn claim_replaces_a_stale_pin_as_root(work: Work) {
+    if !is_root() {
+        eprintln!("SKIP claim stale pin: needs root");
+        return;
+    }
+    let pinned = work.socks().join("fc-id-api.socket");
+    fs::write(&pinned, b"stale").unwrap();
+    let in_jail = work.chroot.join("api.socket");
+    let _own = listen(&in_jail);
+    let cfg = work.config("");
+
+    run(&cfg, json!({"op": "vm_claim_api_socket", "id": "id"})).success();
+
+    assert_eq!(
+        fs::symlink_metadata(&pinned).unwrap().ino(),
+        fs::symlink_metadata(&in_jail).unwrap().ino()
+    );
 }

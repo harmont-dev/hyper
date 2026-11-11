@@ -160,15 +160,7 @@ defmodule Hyper.Node.FireVMM.Jailer do
   the jailer places the socket, so the path is reconstructed here.
   """
   @spec host_socket(Hyper.Vm.Id.t()) :: Path.t()
-  def host_socket(id) do
-    Path.join([
-      Hyper.Cfg.Dirs.chroot_base(),
-      exec_name(),
-      id,
-      "root",
-      @jail_socket
-    ])
-  end
+  def host_socket(id), do: pinned_socket(id, @jail_socket)
 
   @doc """
   Host-side path of the vsock Unix-domain socket firecracker opens inside the jail.
@@ -178,15 +170,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   alone, mirroring `host_socket/1`.
   """
   @spec host_vsock(Hyper.Vm.Id.t()) :: Path.t()
-  def host_vsock(id) do
-    Path.join([
-      Hyper.Cfg.Dirs.chroot_base(),
-      exec_name(),
-      id,
-      "root",
-      @jail_vsock
-    ])
-  end
+  def host_vsock(id), do: pinned_socket(id, @jail_vsock)
+
+  defp pinned_socket(id, socket), do: Path.join(Hyper.Cfg.Dirs.socket_dir(), "fc-#{id}-#{socket}")
 
   defp exec_name, do: Path.basename(Hyper.Cfg.Tools.firecracker())
 end

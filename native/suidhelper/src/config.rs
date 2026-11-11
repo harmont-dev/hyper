@@ -185,6 +185,8 @@ fn default_work_dir() -> SafePathBuf<IsAbsolute, StrictComponents> {
 
 const JAILS: &StrictComponent = StrictComponent::from_static("jails");
 
+const SOCKS: &StrictComponent = StrictComponent::from_static("socks");
+
 fn default_parent_cgroup() -> StrictComponentBuf {
     // Must match Elixir node's `@parent_cgroup`; operators need to keep them in sync.
     StrictComponent::from_static("hyper").to_owned()
@@ -218,6 +220,10 @@ impl Config {
     /// Hyper's jail root, `<work_dir>/jails`.
     pub fn jail_base(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
         self.work_dir.join(JAILS)
+    }
+
+    pub fn socket_dir(&self) -> SafePathBuf<IsAbsolute, StrictComponents> {
+        self.work_dir.join(SOCKS)
     }
 
     /// The validated `dmsetup` binary the helper will run.

@@ -85,8 +85,9 @@ defmodule Hyper.Node.FireVMM.JailerTest do
            }
   end
 
-  test "host_vsock/1 returns the chroot-rooted host path for vsock.sock" do
-    assert Jailer.host_vsock(@vm_id) ==
-             "/srv/hyper/jails/firecracker/#{@vm_id}/root/vsock.sock"
+  test "the BEAM dials the helper-pinned sockets, never a path inside the jail" do
+    assert {Jailer.host_socket(@vm_id), Jailer.host_vsock(@vm_id)} ==
+             {"/srv/hyper/socks/fc-#{@vm_id}-api.socket",
+              "/srv/hyper/socks/fc-#{@vm_id}-vsock.sock"}
   end
 end
