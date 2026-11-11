@@ -31,9 +31,8 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       File.rm(log)
     end)
 
-    unless Process.whereis(Hyper.Cluster.Routing) do
-      _ = Application.ensure_all_started(:horde)
-      start_supervised!(Hyper.Cluster.Routing)
+    unless Process.whereis(FireVMM.Policy.registry()) do
+      start_supervised!({Registry, keys: :unique, name: FireVMM.Policy.registry()})
     end
 
     start_supervised!({FireVMM.Policy, opts()})
@@ -75,6 +74,26 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
 
     File.chmod!(path, 0o755)
     path
+  end
+
+  defmodule MuonTrapStandIn do
+    @moduledoc false
+    use GenServer
+
+    def start({log, stop}), do: GenServer.start(__MODULE__, {log, stop})
+
+    @impl true
+    def init(args) do
+      Process.flag(:trap_exit, true)
+      {:ok, args}
+    end
+
+    @impl true
+    def terminate(_reason, {log, :obey}) do
+      File.write!(log, ~s({"op":"muontrap_stopped"}\n), [:append])
+    end
+
+    def terminate(_reason, {_log, :hang}), do: Process.sleep(:infinity)
   end
 
   defp mutable_stub(device) do
@@ -131,6 +150,27 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                })
 
       assert requests(log) == [%{"op" => "vm_teardown", "id" => @vm_id}]
+    end
+
+    test "terminate/2 stops the jailer's MuonTrap before tearing down the jail",
+         %{log: log, fake: fake} do
+      put_toml(fake)
+
+      rows = [
+        {:obey, ["muontrap_stopped", "vm_teardown"]},
+        {:hang, ["vm_teardown"]}
+      ]
+
+      for {stop, ops} <- rows do
+        File.write!(log, "")
+        {:ok, muontrap} = MuonTrapStandIn.start({log, stop})
+        ref = Process.monitor(muontrap)
+
+        assert :ok = Daemon.terminate(:shutdown, %Daemon{opts: opts(), muontrap: muontrap})
+
+        assert_receive {:DOWN, ^ref, :process, ^muontrap, _}
+        assert Enum.map(requests(log), & &1["op"]) == ops, inspect(stop)
+      end
     end
   end
 end

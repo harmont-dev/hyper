@@ -11,12 +11,14 @@ defmodule Hyper.Node.FireVMM.Policy do
   alias Hyper.Node.FireVMM.Opts
   alias Hyper.Vm.Firewall
 
+  @registry Hyper.Node.FireVMM.Policy.Registry
+
+  @spec registry() :: atom()
+  def registry, do: @registry
+
   @spec start_link(Opts.t()) :: Agent.on_start()
   def start_link(%Opts{vm_id: vm_id, firewall: %Firewall{} = firewall}) do
-    Agent.start_link(fn ->
-      :ok = Hyper.Cluster.Routing.register_self({vm_id, :policy})
-      firewall
-    end)
+    Agent.start_link(fn -> firewall end, name: via(vm_id))
   end
 
   @spec child_spec(Opts.t()) :: Supervisor.child_spec()
@@ -30,5 +32,5 @@ defmodule Hyper.Node.FireVMM.Policy do
   @spec put(Hyper.Vm.Id.t(), Firewall.t()) :: :ok
   def put(vm_id, %Firewall{} = firewall), do: Agent.update(via(vm_id), fn _ -> firewall end)
 
-  defp via(vm_id), do: Hyper.Cluster.Routing.via({vm_id, :policy})
+  defp via(vm_id), do: {:via, Registry, {@registry, vm_id}}
 end

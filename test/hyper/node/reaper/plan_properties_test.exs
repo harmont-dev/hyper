@@ -77,11 +77,31 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
 
   property "netns_ids/1 recovers every vm_id behind a hyper- namespace and nothing else" do
     check all(
-            ids <- list_of(string(:alphanumeric, min_length: 1)),
+            ids <- list_of(vm_id()),
             foreign <- list_of(string(:alphanumeric, min_length: 1))
           ) do
       names = Enum.map(ids, &("hyper-" <> &1)) ++ Enum.map(foreign, &("cni-" <> &1))
       assert Plan.netns_ids(names) == ids
     end
   end
+
+  property "netns_ids/1 refuses a hyper- namespace whose suffix is not a vm id" do
+    malformed =
+      one_of([
+        map(string(:alphanumeric, min_length: 1), &("hyper-test-" <> &1)),
+        map(vm_id(), fn "v" <> encoded -> "v" <> String.upcase(encoded) end),
+        map(vm_id(), &(&1 <> "a")),
+        map(vm_id(), &String.slice(&1, 0..-2//1)),
+        map(binary(min_length: 1, max_length: 9), &vm_id_of/1),
+        map(binary(length: 10), &Base.encode32(&1, padding: false, case: :lower))
+      ])
+
+    check all(suffixes <- list_of(malformed)) do
+      assert Plan.netns_ids(Enum.map(suffixes, &("hyper-" <> &1))) == []
+    end
+  end
+
+  defp vm_id, do: map(binary(length: 10), &vm_id_of/1)
+
+  defp vm_id_of(bytes), do: "v" <> Base.encode32(bytes, padding: false, case: :lower)
 end

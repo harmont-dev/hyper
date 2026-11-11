@@ -31,6 +31,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   require Logger
 
   @shutdown_timeout Time.s(5)
+  @muontrap_stop_timeout Time.s(2)
 
   defstruct [:opts, :muontrap]
 
@@ -81,7 +82,9 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # here is logged, and the `Reaper` will retry, but it must not crash teardown.
   @impl true
   @decorate with_span("Hyper.Node.FireVMM.Daemon.terminate", include: [:id])
-  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id} = opts}) do
+  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id} = opts, muontrap: muontrap}) do
+    :ok = stop_muontrap(muontrap)
+
     case clear_jail(opts) do
       :ok ->
         :ok
@@ -89,6 +92,18 @@ defmodule Hyper.Node.FireVMM.Daemon do
       {:error, reason} ->
         Logger.error("vm #{id}: teardown failed to clear jail: #{inspect(reason)}")
     end
+  end
+
+  @spec stop_muontrap(pid() | nil) :: :ok
+  defp stop_muontrap(nil), do: :ok
+
+  defp stop_muontrap(muontrap) do
+    Process.unlink(muontrap)
+    GenServer.stop(muontrap, :shutdown, Time.as_ms(@muontrap_stop_timeout))
+  catch
+    :exit, _ ->
+      Process.exit(muontrap, :kill)
+      :ok
   end
 
   # Removes the VM's chroot and kills its cgroup leaf (`vm_teardown`). A failure

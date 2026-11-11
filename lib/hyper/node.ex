@@ -72,6 +72,7 @@ defmodule Hyper.Node do
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
       {Net, host},
+      {Registry, keys: :unique, name: FireVMM.Policy.registry()},
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
       Hyper.Node.Img,
       # Last child: :one_for_one starts in order, so the VM supervisor and Img are
@@ -252,7 +253,8 @@ defmodule Hyper.Node do
              img_id: Hyper.Img.id(),
              type: Hyper.Vm.Instance.t(),
              arch: Hyper.Vm.Instance.arch(),
-             boot_args: String.t() | nil
+             boot_args: String.t() | nil,
+             firewall: Hyper.Vm.Firewall.t()
            }}
           | {:error, term()}
   @decorate with_span("Hyper.Node.publish_fork_image", include: [:vm_id])

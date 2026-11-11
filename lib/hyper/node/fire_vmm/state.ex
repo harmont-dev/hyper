@@ -136,10 +136,14 @@ defmodule Hyper.Node.FireVMM.State do
     {:keep_state_and_data, [{:reply, from, %{data.opts | firewall: firewall}}]}
   end
 
+  def handle_event({:call, from}, {:set_firewall, _firewall}, :awaiting_api, _data) do
+    {:keep_state_and_data, [{:reply, from, {:error, :not_ready}}]}
+  end
+
   # The VM's namespace exists from launch until teardown, so any state short of
   # stopping can take a new policy.
   def handle_event({:call, from}, {:set_firewall, firewall}, state, data)
-      when state != :stopping do
+      when state in [:configuring, :running] do
     case Hyper.SuidHelper.Vm.firewall(data.opts.vm_id, firewall) do
       :ok ->
         :ok = Hyper.Node.FireVMM.Policy.put(data.opts.vm_id, firewall)

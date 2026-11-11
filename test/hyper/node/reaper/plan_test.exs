@@ -55,7 +55,22 @@ defmodule Hyper.Node.Reaper.PlanTest do
     assert Plan.rw_ids(["hyper-thinpool", "hyper-img-abc-0", "hyper-rw-vabc"]) == ["vabc"]
   end
 
-  test "netns_ids/1 strips the hyper- prefix and ignores other namespaces" do
-    assert Plan.netns_ids(["hyper-vabc", "cni-1234", "vabc"]) == ["vabc"]
+  test "netns_ids/1 keeps only hyper- namespaces whose suffix is a real vm id" do
+    id = Hyper.Vm.Id.generate()
+
+    rows = [
+      {"hyper-" <> id, [id]},
+      {"cni-1234", []},
+      {id, []},
+      {"hyper-vabc", []},
+      {"hyper-test-4242-launch", []},
+      {"hyper-" <> String.upcase(id), []},
+      {"hyper-" <> id <> "a", []},
+      {"hyper-" <> String.slice(id, 0..-2//1) <> "1", []}
+    ]
+
+    for {name, ids} <- rows do
+      assert Plan.netns_ids([name]) == ids, name
+    end
   end
 end
