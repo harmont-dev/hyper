@@ -2,6 +2,9 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
   use ExUnit.Case, async: true
 
   alias Hyper.Node.FireVMM.Agent.Relay
+  alias Unit.Information
+
+  @guest_reply_cap Information.mib(16)
 
   defp tmp_path(label) do
     Path.join(System.tmp_dir!(), "relay-#{label}-#{System.unique_integer([:positive])}.sock")
@@ -95,6 +98,37 @@ defmodule Hyper.Node.FireVMM.Agent.RelayTest do
 
     assert collect(client, 6, 2_000) == "hello!"
     :socket.close(client)
+  end
+
+  test "closes the connection once the guest sends more than the reply cap",
+       %{fc_srv: fc_srv, listen_path: listen_path} do
+    chunk = :binary.copy(<<0>>, Information.as_bytes(Information.mib(1)))
+
+    spawn(fn ->
+      {:ok, conn} = :socket.accept(fc_srv)
+      {:ok, _} = :socket.recv(conn)
+      :ok = :socket.send(conn, "OK 5\n")
+      Enum.each(0..Information.as_mib(@guest_reply_cap), fn _ -> :socket.send(conn, chunk) end)
+      Process.sleep(:infinity)
+    end)
+
+    {:ok, client} = :socket.open(:local, :stream)
+    :ok = :socket.connect(client, %{family: :local, path: listen_path})
+
+    assert drain(client, 0) <= Information.as_bytes(@guest_reply_cap)
+  end
+
+  defp drain(sock, total) do
+    case :socket.recv(sock, 0, 5_000) do
+      {:ok, data} ->
+        drain(sock, total + byte_size(data))
+
+      {:error, :closed} ->
+        total
+
+      {:error, reason} ->
+        flunk("relay kept the connection open: #{inspect(reason)} after #{total}B")
+    end
   end
 
   test "listen_path/1 returns the path the relay is bound to",

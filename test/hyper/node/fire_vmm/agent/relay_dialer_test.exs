@@ -19,35 +19,43 @@ defmodule Hyper.Node.FireVMM.Agent.RelayDialerTest do
     {:ok, %{path: path, srv: srv}}
   end
 
-  test "sends CONNECT <port> and returns ok when server replies OK", %{path: path, srv: srv} do
-    spawn(fn ->
-      {:ok, conn} = :socket.accept(srv)
-      {:ok, _} = :socket.recv(conn)
-      :ok = :socket.send(conn, "OK 5\n")
-      Process.sleep(:infinity)
-    end)
+  @dial_timeout_ms 300
 
-    assert {:ok, _sock} = RelayDialer.dial(path, 1024, 2_000)
+  test "the handshake reply decides the dial within one deadline", %{path: path, srv: srv} do
+    rows = [
+      {"OK line", fn conn -> :socket.send(conn, "OK 5\n") end, &match?({:ok, _}, &1)},
+      {"non-OK line", fn conn -> :socket.send(conn, "ERR refused\n") end,
+       &(&1 == {:error, {:vsock_no_ok, "ERR refused"}})},
+      {"overlong line", fn conn -> :socket.send(conn, String.duplicate("O", 4_096)) end,
+       &(&1 == {:error, :vsock_line_too_long})},
+      {"trickled line", &trickle/1, &(&1 == {:error, :timeout})},
+      {"close without reply", &:socket.close/1, &match?({:error, _}, &1)}
+    ]
+
+    for {label, reply, expected?} <- rows do
+      spawn(fn ->
+        {:ok, conn} = :socket.accept(srv)
+        {:ok, _} = :socket.recv(conn)
+        _ = reply.(conn)
+        Process.sleep(:infinity)
+      end)
+
+      {elapsed_us, result} = :timer.tc(fn -> RelayDialer.dial(path, 1024, @dial_timeout_ms) end)
+
+      assert expected?.(result), "#{label}: #{inspect(result)}"
+      assert elapsed_us < (@dial_timeout_ms + 500) * 1_000, "#{label} took #{elapsed_us}us"
+    end
   end
 
-  test "returns error when server closes without replying OK", %{path: path, srv: srv} do
-    spawn(fn ->
-      {:ok, conn} = :socket.accept(srv)
-      :socket.close(conn)
-    end)
+  defp trickle(conn) do
+    case :socket.send(conn, "O") do
+      :ok ->
+        Process.sleep(20)
+        trickle(conn)
 
-    assert {:error, _} = RelayDialer.dial(path, 1024, 2_000)
-  end
-
-  test "returns error when server replies non-OK line", %{path: path, srv: srv} do
-    spawn(fn ->
-      {:ok, conn} = :socket.accept(srv)
-      {:ok, _} = :socket.recv(conn)
-      :ok = :socket.send(conn, "ERR refused\n")
-      Process.sleep(:infinity)
-    end)
-
-    assert {:error, {:vsock_no_ok, "ERR refused"}} = RelayDialer.dial(path, 1024, 2_000)
+      {:error, _} ->
+        :ok
+    end
   end
 
   test "does not swallow bytes that immediately follow the OK line", %{path: path, srv: srv} do
