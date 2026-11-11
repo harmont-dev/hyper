@@ -97,28 +97,40 @@ defmodule Mix.Tasks.Firecracker.Install do
          %{url: url, sha256: sha256, firecracker_path: fc_rel, jailer_path: jailer_rel},
          prefix
        ) do
-    extract_dir = Path.join(prefix, ".firecracker-extract")
-
-    Mix.shell().info("Downloading Firecracker v#{@version} from #{url} ...")
-
-    case Redist.Targz.install(url, sha256, extract_dir) do
-      :ok -> :ok
-      {:error, reason} -> Mix.raise("Download from #{url} failed: #{inspect(reason)}")
-    end
-
     dst_fc = Path.join(prefix, "firecracker")
     dst_jailer = Path.join(prefix, "jailer")
 
-    # The release ships version-stamped names; copy to bare basenames so SafeBin
-    # validation passes. The helper matches on basename, not full path.
-    File.cp!(Path.join(extract_dir, fc_rel), dst_fc)
-    File.cp!(Path.join(extract_dir, jailer_rel), dst_jailer)
-    File.chmod!(dst_fc, 0o755)
-    File.chmod!(dst_jailer, 0o755)
-    _ = File.rm_rf!(extract_dir)
+    Mix.shell().info("Downloading Firecracker v#{@version} from #{url} ...")
+
+    Sys.Tmp.with_tempdir("hyper-firecracker", fn extract_dir ->
+      case Redist.Targz.install(url, sha256, extract_dir) do
+        :ok -> :ok
+        {:error, reason} -> Mix.raise("Download from #{url} failed: #{inspect(reason)}")
+      end
+
+      # The release ships version-stamped names; copy to bare basenames so SafeBin
+      # validation passes. The helper matches on basename, not full path.
+      install_binary!(Path.join(extract_dir, fc_rel), dst_fc)
+      install_binary!(Path.join(extract_dir, jailer_rel), dst_jailer)
+    end)
 
     Mix.shell().info("Installed #{dst_fc}")
     Mix.shell().info("Installed #{dst_jailer}")
+  end
+
+  defp install_binary!(src, dst) do
+    case File.rm(dst) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> Mix.raise("Removing the old #{dst} failed: #{inspect(reason)}")
+    end
+
+    {:ok, {:ok, _bytes}} =
+      File.open(src, [:read, :binary, :raw], fn from ->
+        File.open!(dst, [:write, :exclusive, :binary, :raw], &:file.copy(from, &1))
+      end)
+
+    File.chmod!(dst, 0o755)
   end
 
   defp print_config(prefix) do
