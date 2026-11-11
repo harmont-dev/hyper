@@ -174,6 +174,7 @@ impl OpenFlags {
     pub const RDWR: Self = Self(OFlag::O_RDWR);
     pub const PATH: Self = Self(OFlag::O_PATH);
     pub const TRUNC: Self = Self(OFlag::O_TRUNC);
+    pub const CREATE: Self = Self(OFlag::O_CREAT);
     pub const CREATE_NEW: Self = Self(OFlag::O_CREAT.union(OFlag::O_EXCL));
 }
 

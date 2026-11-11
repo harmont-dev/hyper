@@ -32,7 +32,11 @@ pub fn run(config: &Path, request: serde_json::Value) -> Assert {
 }
 
 pub fn run_args(config: &Path, args: &[&str]) -> Assert {
-    let mut cmd = Command::new(BIN);
+    Command::from_std(command(config, args)).assert()
+}
+
+pub fn command(config: &Path, args: &[&str]) -> Process {
+    let mut cmd = Process::new(BIN);
     cmd.args(args)
         .env_clear()
         .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
@@ -40,7 +44,7 @@ pub fn run_args(config: &Path, args: &[&str]) -> Assert {
     if let Ok(profile) = std::env::var("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", profile);
     }
-    cmd.assert()
+    cmd
 }
 
 /// A `[net]` table that routes VMs out of `lo`, which exists in every namespace.

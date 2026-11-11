@@ -7,6 +7,7 @@ use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config, NetUnconfigured};
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
+use crate::lock::{Locks, LocksError};
 use crate::net::firewall::Firewall;
 use crate::net::vm::VmNetError;
 use crate::net::NetId;
@@ -44,6 +45,8 @@ pub enum LaunchError {
     NetConfig(#[from] NetUnconfigured),
     #[error(transparent)]
     Net(#[from] VmNetError),
+    #[error(transparent)]
+    Lock(#[from] LocksError),
 }
 
 #[serde_as]
@@ -82,8 +85,13 @@ impl Op for Launch {
         let api_sock =
             SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
 
+        let root = token.elevate()?;
+        let locks = Locks::open(&root)?;
+        let _vm = locks.vm(&root, &self.id)?;
+        drop(root);
+
         let teardown = Teardown::new(self.id.clone());
-        teardown.teardown(&mut token)?;
+        teardown.teardown(&mut token, &locks)?;
 
         let staged = (|| -> Result<_, LaunchError> {
             let root = token.elevate()?;
@@ -94,6 +102,7 @@ impl Op for Launch {
                 .kernel(&kernel)
                 .rootfs(&device)
                 .build()?;
+            let _net = locks.net(&root)?;
             Ok(teardown
                 .net()
                 .prepare(
@@ -109,7 +118,7 @@ impl Op for Launch {
         let netns = match staged {
             Ok(netns) => netns,
             Err(e) => {
-                let _ = teardown.teardown(&mut token);
+                let _ = teardown.teardown(&mut token, &locks);
                 return Err(e);
             }
         };

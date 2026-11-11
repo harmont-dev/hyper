@@ -5,6 +5,7 @@ use super::claim::{PinError, SocketPin};
 use super::{VmOut, API_SOCKET, VSOCK_SOCKET};
 use crate::cli::Op;
 use crate::config::Config;
+use crate::lock::{Locks, LocksError};
 use crate::net::vm::{VmNet, VmNetError};
 use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
@@ -31,6 +32,10 @@ pub enum TeardownError {
     Net(#[from] VmNetError),
     #[error(transparent)]
     Unpin(#[from] PinError),
+    #[error(transparent)]
+    Lock(#[from] LocksError),
+    #[error(transparent)]
+    Privilege(#[from] PrivilegeError),
 }
 
 #[derive(Debug, ThisError)]
@@ -64,28 +69,34 @@ impl Op for Teardown {
     type Error = TeardownError;
 
     fn run(self, mut token: Unprivileged) -> Result<VmOut, TeardownError> {
-        self.teardown(&mut token)?;
+        let root = token.elevate()?;
+        let locks = Locks::open(&root)?;
+        let lock = locks.vm(&root, &self.id)?;
+        drop(root);
+        self.teardown(&mut token, &locks)?;
+        let _root = token.elevate()?;
+        lock.remove().map_err(LocksError::Remove)?;
         Ok(VmOut::ToreDown)
     }
 }
 
 impl Teardown {
-    pub fn teardown(&self, token: &mut Unprivileged) -> Result<(), TeardownError> {
+    pub fn teardown(&self, token: &mut Unprivileged, locks: &Locks) -> Result<(), TeardownError> {
         let config = Config::get();
         let cgroup_parent = config.parent_cgroup_dir();
         let jail_base = config.jail_base();
         let layout = JailLayout::new(&jail_base, &self.id);
-        let _root = token.elevate().map_err(JailRemoveError::from)?;
+        let root = token.elevate().map_err(JailRemoveError::from)?;
         let cgroup = self
             .remove_cgroup(&cgroup_parent)
             .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
         let jail = layout
             .remove()
             .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
-        let net = self
-            .net()
-            .teardown(config.net().ok())
-            .map_err(TeardownError::from);
+        let net = locks
+            .net(&root)
+            .map_err(TeardownError::from)
+            .and_then(|_net| Ok(self.net().teardown(config.net().ok())?));
         let pins = self
             .unpin_sockets(&config.socket_dir())
             .map_err(TeardownError::from);
