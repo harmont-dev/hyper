@@ -162,7 +162,7 @@ defmodule Hyper.Grpc.Codec do
   defp boot_args(args) when byte_size(args) > @max_boot_args, do: {:error, :bad_boot_args}
 
   defp boot_args(args) do
-    printable? = args =~ ~r/\A[\x20-\x7e]+\z/
+    printable? = args =~ ~r/\A[\x20-\x21\x23-\x7e]+\z/
     reserved? = args |> String.split(" ", trim: true) |> Enum.any?(&reserved_boot_arg?/1)
 
     if printable? and not reserved?, do: {:ok, args}, else: {:error, :bad_boot_args}
@@ -207,7 +207,7 @@ defmodule Hyper.Grpc.Codec do
     do:
       GRPC.RPCError.exception(
         :invalid_argument,
-        "boot_args must be printable ASCII, at most #{@max_boot_args} bytes, " <>
+        "boot_args must be printable ASCII without quotes, at most #{@max_boot_args} bytes, " <>
           "without `--`, `ip=` or `hyper.*` arguments"
       )
 

@@ -40,7 +40,7 @@ defmodule Hyper.Cluster.Scheduler do
   `Hyper.Node.try_run/3` over `:erpc`). `{:error, :no_capacity}` if all refuse.
   """
   @spec place(Spec.t(), layer_sizes(), (node() -> {:ok, term()} | {:error, term()})) ::
-          {:ok, {node(), term()}} | {:error, :no_capacity}
+          {:ok, {node(), term()}} | {:error, :no_capacity | :node_unreachable}
   @decorate with_span("Hyper.Cluster.Scheduler.place", include: [:spec])
   def place(spec, layers, attempt) do
     spec
@@ -49,6 +49,14 @@ defmodule Hyper.Cluster.Scheduler do
       case attempt.(node) do
         {:ok, result} ->
           {:halt, {:ok, {node, result}}}
+
+        {:error, {:lost_mid_call, _} = reason} ->
+          Logger.error(
+            "scheduler: lost #{inspect(node)} mid-placement (#{inspect(reason)}); " <>
+              "not retrying elsewhere, it may have booted the VM"
+          )
+
+          {:halt, {:error, :node_unreachable}}
 
         {:error, reason} ->
           # The candidate fit the snapshot but refused at confirmation time.
@@ -72,7 +80,7 @@ defmodule Hyper.Cluster.Scheduler do
           layer_sizes(),
           (-> {:ok, pid()} | {:error, term()}),
           (pid() -> :ok)
-        ) :: {:ok, {node(), pid()}} | {:error, :no_capacity}
+        ) :: {:ok, {node(), pid()}} | {:error, :no_capacity | :node_unreachable}
   @decorate with_span("Hyper.Cluster.Scheduler.run", include: [:spec])
   def run(spec, layers, start_fun, stop_fun) do
     attempt = fn target -> try_on(target, spec, start_fun, stop_fun) end
@@ -82,9 +90,13 @@ defmodule Hyper.Cluster.Scheduler do
   @spec try_on(node(), Spec.t(), (-> {:ok, pid()} | {:error, term()}), (pid() -> :ok)) ::
           {:ok, pid()} | {:error, term()}
   defp try_on(target, spec, start_fun, stop_fun) do
-    :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+    if target == node() or target in Node.list() do
+      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+    else
+      {:error, :node_unreachable}
+    end
   catch
-    :error, {:erpc, reason} -> {:error, {:node_unreachable, reason}}
+    :error, {:erpc, reason} -> {:error, {:lost_mid_call, reason}}
     :error, {:exception, reason, _stack} -> {:error, {:remote_exception, reason}}
     :exit, {:exception, reason} -> {:error, {:remote_exit, reason}}
   end

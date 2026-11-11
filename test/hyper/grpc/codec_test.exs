@@ -166,6 +166,8 @@ defmodule Hyper.Grpc.CodecTest do
         {"console=ttyS0 hyper.ip6=2001:db8::1:0:0:9", {:error, :bad_boot_args}},
         {"ip=10.0.0.2::10.0.0.1:255.0.0.0::eth0:off", {:error, :bad_boot_args}},
         {"quiet -- single", {:error, :bad_boot_args}},
+        {~s(quiet "--" single), {:error, :bad_boot_args}},
+        {~s("ip=10.0.0.2::10.0.0.1:255.0.0.0::eth0:off"), {:error, :bad_boot_args}},
         {"quiet\nip=1.2.3.4", {:error, :bad_boot_args}},
         {String.duplicate("a", 1025), {:error, :bad_boot_args}},
         {String.duplicate("a", 1024), {:ok, String.duplicate("a", 1024)}}
