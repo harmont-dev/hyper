@@ -94,13 +94,16 @@ mod tests {
     use assert_fs::TempDir;
     use rstest::{fixture, rstest};
     use std::assert_matches;
+    use std::fs;
+    use std::path::PathBuf;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc;
+    use std::sync::mpsc::{self, Receiver};
     use std::thread;
     use std::time::Duration;
 
     const NAME: &StrictComponent = StrictComponent::from_static("vm.lock");
+    const OTHER: &StrictComponent = StrictComponent::from_static("other.lock");
     const WAIT: Duration = Duration::from_secs(10);
     const HELD_FOR: Duration = Duration::from_millis(300);
 
@@ -116,6 +119,27 @@ mod tests {
             tmp.path().to_path_buf().try_into().unwrap();
         let dir = SafeFile::open(&path, OpenFlags::RDONLY).unwrap();
         Dir { tmp, dir }
+    }
+
+    impl Dir {
+        fn acquire_detached(&self, timeout: Duration) -> Receiver<Result<(), LockError>> {
+            let path: SafePathBuf<IsAbsolute, StrictComponents> =
+                PathBuf::from(self.tmp.path()).try_into().unwrap();
+            let (sent, received) = mpsc::channel();
+            thread::spawn(move || {
+                let dir: SafeDir = SafeFile::open(&path, OpenFlags::RDONLY).unwrap();
+                let _ = sent.send(FileLock::acquire(&dir, NAME, timeout).map(drop));
+            });
+            received
+        }
+    }
+
+    #[rstest]
+    fn a_free_lock_is_taken_at_once(dir: Dir) {
+        assert_matches!(
+            dir.acquire_detached(Duration::ZERO).recv_timeout(WAIT),
+            Ok(Ok(()))
+        );
     }
 
     #[rstest]
@@ -143,9 +167,31 @@ mod tests {
         let _held = FileLock::acquire(&dir.dir, NAME, WAIT).unwrap();
 
         assert_matches!(
-            FileLock::acquire(&dir.dir, NAME, HELD_FOR).err(),
-            Some(LockError::TimedOut(_))
+            dir.acquire_detached(HELD_FOR).recv_timeout(WAIT),
+            Ok(Err(LockError::TimedOut(_)))
         );
+    }
+
+    #[rstest]
+    fn remove_unlinks_the_lock_file(dir: Dir) {
+        FileLock::acquire(&dir.dir, NAME, WAIT)
+            .unwrap()
+            .remove()
+            .unwrap();
+
+        dir.tmp.child("vm.lock").assert(predicates::path::missing());
+    }
+
+    #[rstest]
+    fn a_waiter_never_keeps_a_lock_file_replaced_under_it(dir: Dir) {
+        let held = FileLock::acquire(&dir.dir, NAME, WAIT).unwrap();
+        let waiter = dir.acquire_detached(HELD_FOR * 2);
+        thread::sleep(HELD_FOR / 2);
+        let _replacement = FileLock::acquire(&dir.dir, OTHER, WAIT).unwrap();
+        fs::rename(dir.tmp.child("other.lock"), dir.tmp.child("vm.lock")).unwrap();
+        drop(held);
+
+        assert_matches!(waiter.recv_timeout(WAIT), Ok(Err(LockError::TimedOut(_))));
     }
 
     #[rstest]

@@ -361,7 +361,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::assert_matches;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
@@ -450,6 +450,17 @@ mod tests {
             .unwrap();
         file.write_all(b"hello").unwrap();
         f.assert("hello");
+    }
+
+    #[rstest]
+    fn safefile_read_to_string_reads_through_the_fd(plain: (TempDir, ChildPath)) {
+        let (tmp, f) = plain;
+        f.write_str(&"x".repeat(10_000)).unwrap();
+        let mut file: SafeFile<IsRegularFile, Any, Any> =
+            SafeFile::open(&safe(&tmp.path().join("plain")), OpenFlags::RDONLY).unwrap();
+        let mut read = String::new();
+        file.read_to_string(&mut read).unwrap();
+        assert_eq!(read, "x".repeat(10_000));
     }
 
     #[fixture]
