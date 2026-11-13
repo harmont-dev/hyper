@@ -505,6 +505,12 @@ mod tests {
     }
 
     #[rstest]
+    fn a_root_owned_kernel_is_accepted_from_any_caller() {
+        let opened = KernelImage::open(&strict("/etc/passwd"));
+        assert!(opened.is_ok(), "{:?}", opened.err());
+    }
+
+    #[rstest]
     #[case::jail_uid(900_001, Some(900_001))]
     #[case::root_owned(0, None)]
     fn kernel_owned_by_neither_root_nor_the_caller_is_refused_as_root(
