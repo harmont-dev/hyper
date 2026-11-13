@@ -316,3 +316,23 @@ impl Config {
 
 /// The process-wide config, loaded once on first access via [`Config::get`].
 static CONFIG: LazyLock<Result<Config, LoadingError>> = LazyLock::new(Config::safe_load);
+
+#[cfg(test)]
+mod tests {
+    use super::Net;
+    use crate::net::Resolver;
+    use pretty_assertions::assert_eq;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::configured("resolver = \"9.9.9.9\"", "9.9.9.9")]
+    #[case::defaulted("", "1.1.1.1")]
+    fn the_net_table_yields_its_resolver(#[case] line: &str, #[case] resolver: &str) {
+        let net: Net = toml::from_str(&format!(
+            "uplink = \"eth0\"\nipv6_prefix = \"2001:db8::/64\"\n{line}"
+        ))
+        .unwrap();
+
+        assert_eq!(net.resolver(), resolver.parse::<Resolver>().unwrap());
+    }
+}
