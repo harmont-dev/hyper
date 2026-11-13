@@ -297,7 +297,7 @@ defmodule Hyper.Node.FireVMM.State do
 
     # Attempt to hand the vsock UDS to the node user. Firecracker may not have
     # created the socket yet immediately after PUT /vsock, so retry on
-    # :socket_pending at @probe_interval, mirroring AwaitingApi's grant-api shape.
+    # :socket_pending at @probe_interval, mirroring AwaitingApi's claim_api_socket.
     @spec do_claim_vsock_socket(Hyper.Vm.Id.t(), State.t()) ::
             {:next_state, :running, State.t()}
             | {:keep_state, State.t(), list()}

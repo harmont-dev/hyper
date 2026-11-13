@@ -10,4 +10,5 @@
 pub mod dev;
 pub mod dir;
 pub mod file;
+pub mod lock;
 pub mod path;

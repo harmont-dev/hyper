@@ -30,7 +30,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
 
   require Logger
 
-  @shutdown_timeout Time.s(5)
+  @shutdown_timeout Time.s(15)
   @last_sample_timeout Time.ms(250)
 
   defstruct [:opts, :muontrap]

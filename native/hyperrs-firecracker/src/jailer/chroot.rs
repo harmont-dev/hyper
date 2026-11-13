@@ -39,11 +39,8 @@ const ROOTFS_MODE: Mode = Mode::from_bits_truncate(0o600);
 /// The mode of directories created by this utility in the chrooted jail.
 const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
 
-/// Mode set on `ROOT_NAME`.
-const JAIL_ROOT_MODE: Mode = Mode::from_bits_truncate(0o710);
-
-/// Mode handed to the node: owner+group read/write, no world access.
-const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
+/// Mode handed to the node: owner read/write only.
+const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o600);
 
 #[derive(Debug, ThisError)]
 pub enum KernelError {
@@ -85,10 +82,6 @@ pub enum GrantError {
     Chown(#[source] Errno),
     #[error("chmoding the file: {0}")]
     Chmod(#[source] Errno),
-    #[error("chgrp-ing the jail root dir to the caller: {0}")]
-    ChgrpRoot(#[source] Errno),
-    #[error("chmoding the jail root dir for traversal: {0}")]
-    ChmodRoot(#[source] Errno),
 }
 
 #[derive(Debug, ThisError)]
@@ -176,7 +169,11 @@ impl<'a> JailLayout<'a> {
     }
 
     /// Grant access to a socket `name` to the `owner`.
-    pub fn grant_socket(&self, name: &StrictComponent, owner: Owner) -> Result<(), GrantError> {
+    pub fn grant_socket(
+        &self,
+        name: &StrictComponent,
+        owner: Owner,
+    ) -> Result<SafeFile<IsSocket, Any, Any>, GrantError> {
         let root = match self.open_root() {
             Ok(root) => root,
             Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing),
@@ -253,7 +250,7 @@ impl JailRoot {
         name: &StrictComponent,
         owner: Owner,
         mode: Mode,
-    ) -> Result<(), GrantError> {
+    ) -> Result<SafeFile<T, Any, Any>, GrantError> {
         let file: SafeFile<T, Any, Any> = match self.0.openat(name, OpenFlags::PATH, Mode::empty())
         {
             Ok(file) => file,
@@ -268,15 +265,7 @@ impl JailRoot {
             .map_err(GrantError::Chown)?;
         file.chmod(mode).map_err(GrantError::Chmod)?;
 
-        self.0
-            .chown(None, Some(owner.gid))
-            .map_err(GrantError::ChgrpRoot)?;
-
-        self.0
-            .chmod(JAIL_ROOT_MODE)
-            .map_err(GrantError::ChmodRoot)?;
-
-        Ok(())
+        Ok(file)
     }
 }
 
@@ -547,7 +536,9 @@ mod tests {
     const API_SOCKET: &StrictComponent = StrictComponent::from_static("api.socket");
 
     fn grant(jail_base: &Path) -> Result<(), GrantError> {
-        JailLayout::new(&strict(jail_base), &vm()).grant_socket(API_SOCKET, Owner::caller())
+        JailLayout::new(&strict(jail_base), &vm())
+            .grant_socket(API_SOCKET, Owner::caller())
+            .map(drop)
     }
 
     fn socket_with_mode(path: &Path, mode: u32) {
@@ -571,19 +562,22 @@ mod tests {
     }
 
     #[rstest]
-    fn grant_hands_the_socket_over_and_opens_root_for_traversal(jail: Jail) {
+    fn grant_hands_the_socket_to_the_caller_alone_and_leaves_the_root_alone(jail: Jail) {
         let socket = jail.root_dir.join("api.socket");
         socket_with_mode(&socket, 0o755);
+        fs::set_permissions(&jail.root_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let root_before = fs::symlink_metadata(&jail.root_dir).unwrap();
 
         grant(jail.base()).expect("real socket must grant");
 
         let meta = fs::symlink_metadata(&socket).unwrap();
-        assert_eq!(meta.mode() & 0o777, 0o660);
+        assert_eq!(meta.mode() & 0o777, 0o600);
         assert_eq!(meta.uid(), nix::unistd::getuid().as_raw());
-        assert_eq!(meta.gid(), nix::unistd::getgid().as_raw());
-        let root_meta = fs::symlink_metadata(&jail.root_dir).unwrap();
-        assert_eq!(root_meta.mode() & 0o777, 0o710);
-        assert_eq!(root_meta.gid(), nix::unistd::getgid().as_raw());
+        let root_after = fs::symlink_metadata(&jail.root_dir).unwrap();
+        assert_eq!(
+            (root_after.mode(), root_after.gid()),
+            (root_before.mode(), root_before.gid())
+        );
     }
 
     fn plant_regular_file(jail: &Jail) -> PathBuf {

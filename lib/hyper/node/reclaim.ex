@@ -10,7 +10,10 @@ defmodule Hyper.Node.Reclaim do
   another (the pool under a thin volume, a snapshot under the next in its chain)
   refuses until its dependents are gone, so leftovers are retried until a pass
   removes nothing new. Loop devices backing files under Hyper's data dirs are then
-  detached (the dm devices that held them are gone by that point).
+  detached (the dm devices that held them are gone by that point). Finally, stale
+  sockets in the socket dir are removed: relay sockets (`grpc-<vm>.sock`) and
+  Firecracker socket pins (`fc-<vm>-*`), which after a host reboot nothing else
+  names. The socket dir is (re)set to 0700.
 
   Entirely best-effort: every failure is logged and boot continues. It runs once,
   before any device-owning GenServer starts, so the freshly-booting node never
@@ -40,11 +43,12 @@ defmodule Hyper.Node.Reclaim do
     # Ensure the dir exists: the relay bind needs it, and the sweep is a no-op
     # on a fresh node where it was never created.
     File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
 
     case File.ls(dir) do
       {:ok, names} ->
         for name <- names,
-            String.starts_with?(name, "grpc-") and String.ends_with?(name, ".sock") do
+            stale_socket?(name) do
           path = Path.join(dir, name)
 
           case File.rm(path) do
@@ -52,9 +56,7 @@ defmodule Hyper.Node.Reclaim do
               :ok
 
             {:error, reason} ->
-              Logger.warning(
-                "reclaim: could not remove stale relay socket #{path}: #{inspect(reason)}"
-              )
+              Logger.warning("reclaim: could not remove stale socket #{path}: #{inspect(reason)}")
           end
         end
 
@@ -106,4 +108,9 @@ defmodule Hyper.Node.Reclaim do
       true -> Logger.error("reclaim: could not remove dm devices: #{inspect(failed)}")
     end
   end
+
+  @spec stale_socket?(String.t()) :: boolean()
+  defp stale_socket?("grpc-" <> rest), do: String.ends_with?(rest, ".sock")
+  defp stale_socket?("fc-" <> rest), do: String.ends_with?(rest, ["-vsock.sock", "-api.socket"])
+  defp stale_socket?(_), do: false
 end
