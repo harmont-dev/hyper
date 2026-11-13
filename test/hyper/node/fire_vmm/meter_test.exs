@@ -68,6 +68,22 @@ defmodule Hyper.Node.FireVMM.MeterTest do
     assert Time.as_us(cpu) == 4_000 + 300
   end
 
+  test "a rebased meter bills a recreated cgroup in full, even past the old reading",
+       %{tmp_dir: dir} do
+    write_cpu_stat(dir, 0)
+    meter = start_meter(dir)
+    write_cpu_stat(dir, 10_000)
+    :ok = Meter.sample_now(meter)
+
+    :ok = Meter.rebase(meter)
+    write_cpu_stat(dir, 15_000)
+    :ok = Meter.sample_now(meter)
+    :ok = Meter.flush_now(meter)
+
+    assert_receive {:usage, %{cpu_time: cpu}}
+    assert Time.as_us(cpu) == 10_000 + 15_000
+  end
+
   test "a zero-consumption window is not recorded", %{tmp_dir: dir} do
     write_cpu_stat(dir, 1_000)
     meter = start_meter(dir)

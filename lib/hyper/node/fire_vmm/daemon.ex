@@ -31,6 +31,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   require Logger
 
   @shutdown_timeout Time.s(5)
+  @last_sample_timeout Time.ms(250)
 
   defstruct [:opts, :muontrap]
 
@@ -96,7 +97,19 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # failure); the first error is surfaced to the caller.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
   defp clear_jail(%Opts{vm_id: id, uid: uid}) do
-    SuidHelper.Vm.teardown(id, uid)
+    meter = Hyper.Cluster.Routing.via({id, :meter})
+    _ = last_sample(meter)
+
+    with :ok <- SuidHelper.Vm.teardown(id, uid) do
+      Hyper.Node.FireVMM.Meter.rebase(meter)
+    end
+  end
+
+  @spec last_sample(GenServer.server()) :: :ok | :no_meter
+  defp last_sample(meter) do
+    Hyper.Node.FireVMM.Meter.sample_now(meter, Time.as_ms(@last_sample_timeout))
+  catch
+    _kind, _reason -> :no_meter
   end
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
