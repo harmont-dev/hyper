@@ -39,7 +39,7 @@ const ROOTFS_MODE: Mode = Mode::from_bits_truncate(0o600);
 /// The mode of directories created by this utility in the chrooted jail.
 const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
 
-/// Mode handed to the node: owner+group read/write, no world access.
+/// Mode handed to the node: owner read/write only.
 const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o600);
 
 #[derive(Debug, ThisError)]

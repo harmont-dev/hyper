@@ -13,9 +13,12 @@ defmodule Hyper.Node.FireVMM.Jailer do
   everything else; it also inserts the `--` separator between its own flags and
   firecracker's flags.
 
-  Because firecracker is chrooted to `<chroot_base>/<exec>/<id>/root`, the API
-  socket it opens at `/api.socket` lives at `host_socket` on the host — that's the
-  path the controller connects to.
+  Firecracker is chrooted to `<chroot_base>/<exec>/<id>/root` and opens its API and
+  vsock sockets there, in a directory the jailed VMM owns. The BEAM never dials
+  them by that path: the helper's claim ops verify each socket, hand it to the node
+  user and hard-link it into the node's socket dir, and `host_socket/1` and
+  `host_vsock/1` name those pins. Swapping a path inside the jail cannot change
+  what the BEAM connects to.
   """
 
   use OpenTelemetryDecorator
@@ -189,20 +192,20 @@ defmodule Hyper.Node.FireVMM.Jailer do
   end
 
   @doc """
-  Host-side path of the API socket firecracker opens inside the jail.
+  Host-side pin of the API socket firecracker opens inside the jail:
+  `<socket_dir>/fc-<id>-api.socket`, created by the helper's
+  `vm_claim_api_socket` and removed by `vm_teardown`.
 
   Deterministic in `id` alone, so the controller and the API client can each
-  derive it independently and are guaranteed to agree. We do not control where
-  the jailer places the socket, so the path is reconstructed here.
+  derive it independently and are guaranteed to agree.
   """
   @spec host_socket(Hyper.Vm.Id.t()) :: Path.t()
   def host_socket(id), do: pinned_socket(id, @jail_socket)
 
   @doc """
-  Host-side path of the vsock Unix-domain socket firecracker opens inside the jail.
-
-  Firecracker creates the vsock UDS at `uds_path` relative to its chroot root,
-  so on the host it lives at `<chroot_root>/vsock.sock`. Deterministic in `id`
+  Host-side pin of the vsock Unix-domain socket firecracker opens inside the jail:
+  `<socket_dir>/fc-<id>-vsock.sock`, created by the helper's
+  `vm_claim_vsock_socket` and removed by `vm_teardown`. Deterministic in `id`
   alone, mirroring `host_socket/1`.
   """
   @spec host_vsock(Hyper.Vm.Id.t()) :: Path.t()

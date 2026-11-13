@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-//! `vm grant-api`: hand the firecracker API socket to the node user so the unprivileged controller
-//! can `connect()` to it.
+//! `vm_claim_api_socket` / `vm_claim_vsock_socket`: hand one of firecracker's sockets to the node
+//! user (0600) and hard-link it into the node's socket dir as `fc-<id>-<socket>`, the only path the
+//! BEAM dials. `pending` until firecracker has created the socket.
 
 use super::{VmOut, API_SOCKET, VSOCK_SOCKET};
 use crate::cli::Op;

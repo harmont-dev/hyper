@@ -10,7 +10,10 @@ defmodule Hyper.Node.Reclaim do
   another (the pool under a thin volume, a snapshot under the next in its chain)
   refuses until its dependents are gone, so leftovers are retried until a pass
   removes nothing new. Loop devices backing files under Hyper's data dirs are then
-  detached (the dm devices that held them are gone by that point).
+  detached (the dm devices that held them are gone by that point). Finally, stale
+  sockets in the socket dir are removed: relay sockets (`grpc-<vm>.sock`) and
+  Firecracker socket pins (`fc-<vm>-*`), which after a host reboot nothing else
+  names. The socket dir is (re)set to 0700.
 
   Entirely best-effort: every failure is logged and boot continues. It runs once,
   before any device-owning GenServer starts, so the freshly-booting node never
@@ -53,9 +56,7 @@ defmodule Hyper.Node.Reclaim do
               :ok
 
             {:error, reason} ->
-              Logger.warning(
-                "reclaim: could not remove stale relay socket #{path}: #{inspect(reason)}"
-              )
+              Logger.warning("reclaim: could not remove stale socket #{path}: #{inspect(reason)}")
           end
         end
 
