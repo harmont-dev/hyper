@@ -159,7 +159,8 @@ defmodule Hyper.Grpc.CodecTest do
       {:machine_unreachable, GRPC.Status.unavailable()},
       {:no_capacity, GRPC.Status.resource_exhausted()},
       {:exhausted, GRPC.Status.resource_exhausted()},
-      {:unknown_image, GRPC.Status.not_found()}
+      {:unknown_image, GRPC.Status.not_found()},
+      {:stopping, GRPC.Status.failed_precondition()}
     ]
 
     test "each domain reason maps to its promised gRPC status" do
@@ -177,13 +178,18 @@ defmodule Hyper.Grpc.CodecTest do
              } = Codec.to_grpc({:error, {:missing_tools, ["umoci", "skopeo"]}})
     end
 
-    test "an unrecognised reason never crashes and falls back to INTERNAL" do
+    test "an unrecognised reason falls back to INTERNAL and keeps its detail out of the reply" do
       status = GRPC.Status.internal()
 
-      assert %GRPC.RPCError{status: ^status, message: msg} =
-               Codec.to_grpc({:error, :something_truly_novel})
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert %GRPC.RPCError{status: ^status, message: msg} =
+                   Codec.to_grpc({:error, {:helper_failed, "nft: /etc/secret"}})
 
-      assert msg =~ "something_truly_novel"
+          refute msg =~ "secret"
+        end)
+
+      assert log =~ "secret"
     end
   end
 end
