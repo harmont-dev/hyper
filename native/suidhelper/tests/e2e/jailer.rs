@@ -11,10 +11,17 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use serde_json::{json, Value};
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
 
 mod support;
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{OpenFlags, SafeFile};
+use hyperrs_fs::lock::FileLock;
+use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use support::{is_root, run, MapperDevice};
 
 const RECORDER_EXIT: i32 = 7;
@@ -294,5 +301,51 @@ fn refused_launches_touch_nothing_and_never_exec_as_root(
     assert!(
         !launch.root().join("vmlinux").exists(),
         "nothing may be staged"
+    );
+}
+
+#[rstest]
+fn teardown_waits_for_the_vm_lock_an_in_flight_launch_holds_as_root(launch: Option<Launch>) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let id = format!("lock-{}", std::process::id());
+    let locks = PathBuf::from("/run/hyper-suidhelper/locks");
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&locks)
+        .unwrap();
+    fs::set_permissions("/run/hyper-suidhelper", fs::Permissions::from_mode(0o755)).unwrap();
+    let locks_path: SafePathBuf<IsAbsolute, StrictComponents> = locks.clone().try_into().unwrap();
+    let dir: SafeDir = SafeFile::open(&locks_path, OpenFlags::RDONLY).unwrap();
+    let name = format!("vm-{id}");
+    let held = FileLock::acquire(
+        &dir,
+        name.as_str().try_into().unwrap(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let request = json!({"op": "vm_teardown", "id": id}).to_string();
+    let mut teardown = support::command(&cfg, &[&request])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_millis(500));
+    let waited = teardown.try_wait().unwrap().is_none();
+    drop(held);
+    let out = teardown.wait_with_output().unwrap();
+
+    assert_eq!(
+        (
+            waited,
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).contains("tore_down"),
+            locks.join(&name).exists(),
+        ),
+        (true, true, true, false),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }

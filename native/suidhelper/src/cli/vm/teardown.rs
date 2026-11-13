@@ -5,6 +5,7 @@ use super::claim::{PinError, SocketPin};
 use super::{VmOut, API_SOCKET, VSOCK_SOCKET};
 use crate::cli::Op;
 use crate::config::Config;
+use crate::lock::{Locks, LocksError};
 use crate::network;
 use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
@@ -31,6 +32,10 @@ pub enum TeardownError {
     Network(#[from] network::TeardownError),
     #[error(transparent)]
     Unpin(#[from] PinError),
+    #[error(transparent)]
+    Lock(#[from] LocksError),
+    #[error(transparent)]
+    Privilege(#[from] PrivilegeError),
 }
 
 #[derive(Debug, ThisError)]
@@ -65,8 +70,14 @@ impl Op for Teardown {
     type Error = TeardownError;
 
     fn run(self, mut token: Unprivileged) -> Result<VmOut, TeardownError> {
-        self.teardown(&mut token)?;
-        Ok(VmOut::ToreDown)
+        let root = token.elevate()?;
+        let locks = Locks::open(&root)?;
+        let lock = locks.vm(&root, &self.id)?;
+        drop(root);
+        let torn_down = self.teardown(&mut token);
+        let _root = token.elevate()?;
+        lock.remove().map_err(LocksError::Remove)?;
+        torn_down.map(|()| VmOut::ToreDown)
     }
 }
 

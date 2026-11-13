@@ -7,6 +7,7 @@ use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config};
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
+use crate::lock::{Locks, LocksError};
 use crate::network::{self, prepare::NetworkPrepareError};
 use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
 use hyperrs_firecracker::jailer::{CgroupLimits, Jailer};
@@ -40,6 +41,8 @@ pub enum LaunchError {
     Build(#[from] BuildError),
     #[error(transparent)]
     Privilege(#[from] PrivilegeError),
+    #[error(transparent)]
+    Lock(#[from] LocksError),
 }
 
 #[serde_as]
@@ -76,6 +79,11 @@ impl Op for Launch {
         let layout = JailLayout::new(&jail_base, &self.id);
         let api_sock =
             SafePath::from_static::<"/">().join(StrictComponent::from_static(super::API_SOCKET));
+
+        let root = token.elevate()?;
+        let locks = Locks::open(&root)?;
+        let _vm = locks.vm(&root, &self.id)?;
+        drop(root);
 
         Teardown::new(self.id.clone(), Some(self.uid)).teardown(&mut token)?;
 
