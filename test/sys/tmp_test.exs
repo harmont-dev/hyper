@@ -60,6 +60,7 @@ defmodule Sys.TmpTest do
         Tmp.with_tempdir("tmp-law", fn dir ->
           assert File.dir?(dir)
           assert File.ls!(dir) == []
+          assert File.stat!(dir).mode |> Bitwise.band(0o777) == 0o700
           assert Path.basename(dir) =~ ~r/^tmp-law-[a-z2-7]+$/
           File.write!(Path.join(dir, "nested"), "x")
           dir
