@@ -326,7 +326,7 @@ jobs:
             cargo llvm-cov nextest \
             -p hyper-suidhelper -p hyperrs-fs -p hyperrs-linux -p hyperrs-process \
             --features hyper-suidhelper/insecure_mode \
-            -E 'test(/_as_root$/)' --lcov --output-path lcov-privileged.info
+            -E 'test(/_as_root($|::)/)' --lcov --output-path lcov-privileged.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

@@ -16,6 +16,7 @@ use support::{is_root, run, stdout_json, DmDevice, LoopDevice, MapperDevice};
 const BLOCK_SECTORS: u64 = 128;
 const BLOCK_BYTES: usize = (BLOCK_SECTORS * 512) as usize;
 const SCRATCH_ID: u32 = 9;
+const REAL_POOL_SCRATCH_ID: u32 = 13;
 
 // One superblock, one device (4 mapped blocks: a 3-block range plus a
 // single). Extra attributes mirror real thin_dump output; the parser must
@@ -437,7 +438,7 @@ fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
             "pool": pool_name,
             "meta": meta.path(),
             "parent": parent_name,
-            "scratch_id": SCRATCH_ID,
+            "scratch_id": REAL_POOL_SCRATCH_ID,
             "origin": origin.path(),
             "cow": base.join("cow.img"),
             "chunk_sectors": 8,
@@ -446,7 +447,10 @@ fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
     .success();
 
     assert_eq!(stdout_json(&out)["written_chunks"], 2);
-    for leftover in ["hyper-scratch-9", "hyper-copy-9"] {
+    for leftover in [
+        format!("hyper-scratch-{REAL_POOL_SCRATCH_ID}"),
+        format!("hyper-copy-{REAL_POOL_SCRATCH_ID}"),
+    ] {
         assert!(
             !Path::new(&format!("/dev/mapper/{leftover}")).exists(),
             "{leftover} must not outlive the call"
