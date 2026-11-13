@@ -112,7 +112,32 @@ defmodule Hyper.Img.OciLoader do
   @spec stage_agent_from(Path.t(), Path.t()) :: :ok | {:error, term()}
   def stage_agent_from(rootfs, agent_bin) do
     dest = Path.join(rootfs, "hyper-init")
-    with :ok <- File.cp(agent_bin, dest), do: File.chmod(dest, 0o755)
+
+    with :ok <- unlink_staging_target(dest),
+         :ok <- copy_exclusive(agent_bin, dest) do
+      File.chmod(dest, 0o755)
+    end
+  end
+
+  @spec unlink_staging_target(Path.t()) :: :ok | {:error, term()}
+  defp unlink_staging_target(dest) do
+    case File.lstat(dest) do
+      {:ok, %File.Stat{type: :directory}} -> {:error, {:bad_image, :hyper_init_is_a_directory}}
+      {:ok, _} -> File.rm(dest)
+      {:error, :enoent} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
+  @spec copy_exclusive(Path.t(), Path.t()) :: :ok | {:error, term()}
+  defp copy_exclusive(src, dest) do
+    with {:ok, opened} <-
+           File.open(src, [:read, :binary, :raw], fn from ->
+             File.open(dest, [:write, :exclusive, :binary, :raw], &:file.copy(from, &1))
+           end),
+         {:ok, copied} <- opened,
+         {:ok, _bytes} <- copied,
+         do: :ok
   end
 
   # `du` apparent bytes undercount ext4 block usage and the default inode ratio
