@@ -374,6 +374,7 @@ mod tests {
         fn kernel_source(&self, name: &str, contents: &str) -> ChildPath {
             let src = self.base.child(name);
             src.write_str(contents).unwrap();
+            fs::set_permissions(&src, fs::Permissions::from_mode(0o644)).unwrap();
             src
         }
     }
