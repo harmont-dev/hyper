@@ -58,6 +58,10 @@ defmodule Hyper.Node.Vmlinux do
   end
 
   defp present(path) do
-    if File.regular?(path), do: :ok, else: {:error, {:vmlinux_missing, path}}
+    cond do
+      not File.regular?(path) -> {:error, {:vmlinux_missing, path}}
+      not Provider.usable?(path) -> {:error, {:vmlinux_untrusted, path}}
+      true -> :ok
+    end
   end
 end

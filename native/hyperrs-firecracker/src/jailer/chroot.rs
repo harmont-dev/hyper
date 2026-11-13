@@ -6,16 +6,18 @@ use crate::VmId;
 use hyperrs_fs::dev::DeviceNode;
 use hyperrs_fs::dir::{self, SafeDir};
 use hyperrs_fs::file::{
-    self, Any, FileType, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, Owner, SafeFile,
+    self, Any, FileType, IsBlockDevice, IsRegularFile, IsSocket, OpenFlags, Owner,
+    OwnerOnlyWritable, SafeFile,
 };
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents,
 };
 use nix::errno::Errno;
-use nix::sys::stat::Mode;
+use nix::sys::stat::{fstat, Mode};
+use nix::unistd::{getuid, Uid};
 use std::fs::File;
 use std::io::{self, Seek};
-use std::os::unix::io::{AsFd, OwnedFd};
+use std::os::unix::io::{AsFd, AsRawFd, OwnedFd};
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
@@ -58,6 +60,14 @@ pub enum KernelError {
         #[source]
         source: file::ValidationError,
     },
+    #[error("stat-ing kernel source {path:?}: {source}")]
+    Stat {
+        path: PathBuf,
+        #[source]
+        source: Errno,
+    },
+    #[error("kernel source {path:?} is owned by uid {uid}; only root or the caller may own it")]
+    Owner { path: PathBuf, uid: Uid },
 }
 
 #[derive(Debug, ThisError)]
@@ -93,7 +103,7 @@ pub enum RemoveError {
 }
 
 /// Kernel image [`SafeFile`] to be loaded into the firecracker chroot jail.
-pub struct KernelImage(SafeFile<IsRegularFile, Any, Any>);
+pub struct KernelImage(SafeFile<IsRegularFile, Any, OwnerOnlyWritable>);
 
 impl KernelImage {
     pub fn open(path: &SafePath<IsAbsolute, StrictComponents>) -> Result<Self, KernelError> {
@@ -103,11 +113,23 @@ impl KernelImage {
                 source,
             })?;
         let real: SafePathBuf<IsAbsolute, StrictComponents> = real.try_into()?;
-        let file =
+        let file: SafeFile<IsRegularFile, Any, OwnerOnlyWritable> =
             SafeFile::open(&real, OpenFlags::RDONLY).map_err(|source| KernelError::Open {
                 path: real.as_path().to_path_buf(),
                 source,
             })?;
+        let uid = fstat(file.as_raw_fd())
+            .map(|stat| Uid::from_raw(stat.st_uid))
+            .map_err(|source| KernelError::Stat {
+                path: real.as_path().to_path_buf(),
+                source,
+            })?;
+        if !uid.is_root() && uid != getuid() {
+            return Err(KernelError::Owner {
+                path: real.as_path().to_path_buf(),
+                uid,
+            });
+        }
         Ok(Self(file))
     }
 }
@@ -341,6 +363,7 @@ mod tests {
         fn kernel_source(&self, name: &str, contents: &str) -> ChildPath {
             let src = self.base.child(name);
             src.write_str(contents).unwrap();
+            fs::set_permissions(&src, fs::Permissions::from_mode(0o644)).unwrap();
             src
         }
     }
@@ -449,6 +472,55 @@ mod tests {
     fn missing_kernel_is_a_resolve_error(tmp: TempDir) {
         let err = KernelImage::open(&strict(tmp.child("nope"))).err();
         assert_matches!(err, Some(KernelError::Resolve { .. }));
+    }
+
+    #[rstest]
+    #[case::group_writable(0o664)]
+    #[case::other_writable(0o646)]
+    #[case::world_writable(0o666)]
+    fn kernel_writable_by_group_or_other_is_refused(tmp: TempDir, #[case] mode: u32) {
+        let src = tmp.child("vmlinux");
+        src.write_str("kernel").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(mode)).unwrap();
+
+        let err = KernelImage::open(&strict(&src)).err();
+        assert_matches!(
+            err,
+            Some(KernelError::Open {
+                source: file::ValidationError::GroupOrOtherWritable,
+                ..
+            })
+        );
+    }
+
+    #[rstest]
+    fn a_root_owned_kernel_is_accepted_from_any_caller() {
+        let opened = KernelImage::open(&strict("/etc/passwd"));
+        assert!(opened.is_ok(), "{:?}", opened.err());
+    }
+
+    #[rstest]
+    #[case::jail_uid(900_001, Some(900_001))]
+    #[case::root_owned(0, None)]
+    fn kernel_owned_by_neither_root_nor_the_caller_is_refused_as_root(
+        tmp: TempDir,
+        #[case] uid: u32,
+        #[case] refused_uid: Option<u32>,
+    ) {
+        if !is_root() {
+            eprintln!("SKIP kernel_owned_by_neither_root_nor_the_caller_is_refused_as_root: needs root to chown");
+            return;
+        }
+        let src = tmp.child("vmlinux");
+        src.write_str("kernel").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::chown(&src, Some(uid), Some(uid)).unwrap();
+
+        let got = KernelImage::open(&strict(&src)).err().map(|e| match e {
+            KernelError::Owner { uid, .. } => uid.as_raw(),
+            other => panic!("expected an owner refusal, got {other:?}"),
+        });
+        assert_eq!(got, refused_uid);
     }
 
     #[rstest]
