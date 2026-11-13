@@ -176,7 +176,11 @@ impl<'a> JailLayout<'a> {
     }
 
     /// Grant access to a socket `name` to the `owner`.
-    pub fn grant_socket(&self, name: &StrictComponent, owner: Owner) -> Result<(), GrantError> {
+    pub fn grant_socket(
+        &self,
+        name: &StrictComponent,
+        owner: Owner,
+    ) -> Result<SafeFile<IsSocket, Any, Any>, GrantError> {
         let root = match self.open_root() {
             Ok(root) => root,
             Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(GrantError::Missing),
@@ -253,7 +257,7 @@ impl JailRoot {
         name: &StrictComponent,
         owner: Owner,
         mode: Mode,
-    ) -> Result<(), GrantError> {
+    ) -> Result<SafeFile<T, Any, Any>, GrantError> {
         let file: SafeFile<T, Any, Any> = match self.0.openat(name, OpenFlags::PATH, Mode::empty())
         {
             Ok(file) => file,
@@ -276,7 +280,7 @@ impl JailRoot {
             .chmod(JAIL_ROOT_MODE)
             .map_err(GrantError::ChmodRoot)?;
 
-        Ok(())
+        Ok(file)
     }
 }
 
@@ -547,7 +551,9 @@ mod tests {
     const API_SOCKET: &StrictComponent = StrictComponent::from_static("api.socket");
 
     fn grant(jail_base: &Path) -> Result<(), GrantError> {
-        JailLayout::new(&strict(jail_base), &vm()).grant_socket(API_SOCKET, Owner::caller())
+        JailLayout::new(&strict(jail_base), &vm())
+            .grant_socket(API_SOCKET, Owner::caller())
+            .map(drop)
     }
 
     fn socket_with_mode(path: &Path, mode: u32) {

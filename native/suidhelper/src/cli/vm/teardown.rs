@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 //! `vm teardown`: delete a VM's stale chroot and cgroup leaf before relaunching the jailer.
 
-use super::VmOut;
+use super::claim::{PinError, SocketPin};
+use super::{VmOut, API_SOCKET, VSOCK_SOCKET};
 use crate::cli::Op;
 use crate::config::Config;
 use crate::network;
 use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
 use hyperrs_firecracker::VmId;
-use hyperrs_fs::file;
+use hyperrs_fs::dir::SafeDir;
+use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
 use hyperrs_linux::cgroup::{self, Cgroup};
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -27,6 +29,8 @@ pub enum TeardownError {
     Jail(#[from] JailRemoveError),
     #[error(transparent)]
     Network(#[from] network::TeardownError),
+    #[error(transparent)]
+    Unpin(#[from] PinError),
 }
 
 #[derive(Debug, ThisError)]
@@ -87,7 +91,21 @@ impl Teardown {
                 .and_then(|net| net.run(token))
                 .map_err(|e| TeardownError::Network(e.into())),
         };
-        jail.and(net)
+        let pins = self
+            .unpin_sockets(&config.socket_dir())
+            .map_err(TeardownError::from);
+        jail.and(net).and(pins)
+    }
+
+    pub fn unpin_sockets(&self, socket_dir: &LexicalPath) -> Result<(), PinError> {
+        let dir = match SafeDir::open(socket_dir, OpenFlags::RDONLY) {
+            Ok(dir) => dir,
+            Err(file::ValidationError::Open(Errno::ENOENT)) => return Ok(()),
+            Err(e) => return Err(PinError::Open(e)),
+        };
+        [API_SOCKET, VSOCK_SOCKET]
+            .into_iter()
+            .try_for_each(|socket| SocketPin::new(&self.id, socket).unpin(&dir))
     }
 
     pub fn remove_cgroup(&self, parent: &LexicalPath) -> Result<(), CgroupError> {
