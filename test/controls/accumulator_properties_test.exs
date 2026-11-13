@@ -49,6 +49,21 @@ defmodule Controls.AccumulatorPropertiesTest do
     end
   end
 
+  property "after a rebase, a recreated counter's readings accrue in full, whatever the old one read" do
+    check all(old <- readings(), new <- readings()) do
+      sorted = Enum.sort(new)
+
+      acc =
+        Accumulator.new(Time.zero())
+        |> fold(old)
+        |> Accumulator.flush()
+        |> Accumulator.rebase()
+        |> fold(sorted)
+
+      assert Time.as_us(Accumulator.total(acc)) == List.last(sorted)
+    end
+  end
+
   property "observing the same reading twice adds nothing" do
     check all(values <- readings()) do
       doubled = Enum.flat_map(values, &[&1, &1])

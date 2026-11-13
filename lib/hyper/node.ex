@@ -284,7 +284,7 @@ defmodule Hyper.Node do
   def try_run(spec, start_fun, stop_fun) do
     case start_fun.() do
       {:ok, pid} ->
-        case Hyper.Node.Budget.admit(spec, pid) do
+        case admit(spec, pid) do
           :ok ->
             {:ok, pid}
 
@@ -296,6 +296,13 @@ defmodule Hyper.Node do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @spec admit(Hyper.Vm.Instance.Spec.t(), pid()) :: :ok | {:error, term()}
+  defp admit(spec, pid) do
+    Hyper.Node.Budget.admit(spec, pid)
+  catch
+    kind, reason -> {:error, {:admission_failed, {kind, reason}}}
   end
 
   @spec test_system :: :ok | {:error, term()}
@@ -361,10 +368,15 @@ defmodule Hyper.Node do
       {:ok, pid} ->
         {:ok, pid}
 
-      {:error, reason} ->
+      failed ->
         Img.Mutable.release(mutable)
         Users.release(uid)
-        {:error, reason}
+        start_failure(failed)
     end
   end
+
+  @spec start_failure(:ignore | {:ok, pid(), term()} | {:error, term()}) :: {:error, term()}
+  defp start_failure(:ignore), do: {:error, :vm_id_in_use}
+  defp start_failure({:error, reason}), do: {:error, reason}
+  defp start_failure(other), do: {:error, {:unexpected_start, other}}
 end

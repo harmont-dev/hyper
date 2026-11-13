@@ -23,6 +23,8 @@ defmodule Hyper.Grpc.Codec do
 
   alias Hyper.Vm.Spec
 
+  require Logger
+
   @instance_types %{
     INSTANCE_TYPE_MICRO: :micro,
     INSTANCE_TYPE_MILLI: :milli,
@@ -142,6 +144,12 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such VM")
 
+  defp rpc_error(:unknown_image),
+    do: GRPC.RPCError.exception(:not_found, "no such image")
+
+  defp rpc_error(:stopping),
+    do: GRPC.RPCError.exception(:failed_precondition, "VM is not running")
+
   defp rpc_error(:machine_unreachable),
     do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
 
@@ -164,6 +172,8 @@ defmodule Hyper.Grpc.Codec do
         "node is missing required image tools: #{Enum.join(tools, ", ")}"
       )
 
-  defp rpc_error(reason),
-    do: GRPC.RPCError.exception(:internal, "internal error: #{inspect(reason)}")
+  defp rpc_error(reason) do
+    Logger.error("rpc failed: #{inspect(reason)}")
+    GRPC.RPCError.exception(:internal, "internal error")
+  end
 end
