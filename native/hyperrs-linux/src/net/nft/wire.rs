@@ -262,3 +262,49 @@ impl Expr {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Statement;
+    use crate::net::nft::{L4Proto, Match};
+    use crate::net::IpNet;
+    use pretty_assertions::assert_eq;
+    use rstest::rstest;
+    use serde_json::{json, Value};
+
+    fn not(m: Match) -> Match {
+        Match::Not(Box::new(m))
+    }
+
+    fn v4_daddr(net: &str) -> Match {
+        let IpNet::V4(net) = net.parse().unwrap() else {
+            unreachable!("{net} is IPv4")
+        };
+        Match::Ipv4Daddr(net)
+    }
+
+    fn tcp_dport(right: Value) -> Value {
+        json!({"left": {"payload": {"protocol": "tcp", "field": "dport"}}, "right": right})
+    }
+
+    #[rstest]
+    #[case::single_port(Match::Dport(L4Proto::Tcp, 25..=25), "==", tcp_dport(json!(25)))]
+    #[case::port_range(Match::Dport(L4Proto::Tcp, 25..=26), "==", tcp_dport(json!({"range": [25, 26]})))]
+    #[case::negated(not(Match::Dport(L4Proto::Tcp, 25..=25)), "!=", tcp_dport(json!(25)))]
+    #[case::double_negation(not(not(Match::Dport(L4Proto::Tcp, 25..=25))), "==", tcp_dport(json!(25)))]
+    #[case::negated_prefix(not(v4_daddr("10.0.0.0/8")), "!=", json!({
+        "left": {"payload": {"protocol": "ip", "field": "daddr"}},
+        "right": {"prefix": {"addr": "10.0.0.0", "len": 8}}}))]
+    fn a_match_renders_its_operator_and_operands(
+        #[case] m: Match,
+        #[case] op: &str,
+        #[case] mut operands: Value,
+    ) {
+        operands["op"] = json!(op);
+
+        assert_eq!(
+            serde_json::to_value(Statement::of_match(&m)).unwrap(),
+            json!({"match": operands})
+        );
+    }
+}
