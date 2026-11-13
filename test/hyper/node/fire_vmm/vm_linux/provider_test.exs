@@ -107,4 +107,22 @@ defmodule Hyper.Node.FireVMM.VmLinux.ProviderTest do
     File.chmod!(path, 0o644)
     %{build | sha256: Base.encode16(:crypto.hash(:sha256, content), case: :lower)}
   end
+
+  test "usable?/2 takes a kernel owned by root or the node user that no one else can write",
+       %{dir: dir, owner: owner} do
+    path = Path.join(dir, "vmlinux-probe")
+    File.write!(path, "kernel")
+
+    rows = [
+      {0o644, owner, true},
+      {0o644, owner + 1, false},
+      {0o664, owner, false},
+      {0o646, owner, false}
+    ]
+
+    for {mode, as, usable} <- rows do
+      File.chmod!(path, mode)
+      assert Provider.usable?(path, as) == usable, inspect({mode, as})
+    end
+  end
 end

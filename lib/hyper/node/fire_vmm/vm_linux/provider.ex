@@ -61,7 +61,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   sit at the same asset paths, and skipping the hash check would keep booting
   guests on the previous release forever.
   """
-  @spec install_state(Path.t(), [Manifest.Build.t()], non_neg_integer()) ::
+  @spec install_state(Path.t(), [Manifest.Build.t()], non_neg_integer() | nil) ::
           :ok | {:error, :not_installed | :bad_install}
   def install_state(dir, builds, owner) do
     installed = Enum.count(builds, &installed?(dir, &1, owner))
@@ -75,11 +75,14 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
 
   defp installed?(dir, build, owner) do
     path = build_path(dir, build)
+    usable?(path, owner) and Redist.Sha256.file(path) == build.sha256
+  end
 
+  @spec usable?(Path.t(), non_neg_integer() | nil) :: boolean()
+  def usable?(path, owner \\ node_uid()) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular, uid: ^owner, mode: mode}}
-      when Bitwise.band(mode, @group_or_other_write) == 0 ->
-        Redist.Sha256.file(path) == build.sha256
+      {:ok, %File.Stat{type: :regular, uid: uid, mode: mode}} ->
+        (uid == 0 or uid == owner) and Bitwise.band(mode, @group_or_other_write) == 0
 
       _ ->
         false
@@ -103,7 +106,12 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
     end
   end
 
-  defp node_uid, do: File.stat!("/proc/self").uid
+  defp node_uid do
+    case File.stat("/proc/self") do
+      {:ok, %File.Stat{uid: uid}} -> uid
+      {:error, _} -> nil
+    end
+  end
 
   # Safe to wipe wholesale: install_dir/0 is Hyper's own redist cache
   # (<work_dir>/redist/vmlinux), never operator data.
