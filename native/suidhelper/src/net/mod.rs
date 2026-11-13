@@ -222,11 +222,7 @@ impl NodePrefix {
     }
 
     pub fn guest_net_id(self, addr: Ipv6Addr) -> Option<NetId> {
-        let range = self.vm_range();
-        let offset = u128::from(addr).checked_sub(u128::from(range.addr))?;
-        if (Ipv6Net { addr, ..range }).network() != range.addr {
-            return None;
-        }
+        let offset = u128::from(addr).checked_sub(u128::from(self.vm_range().addr))?;
         u16::try_from(offset).ok()?.try_into().ok()
     }
 }
