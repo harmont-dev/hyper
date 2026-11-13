@@ -50,7 +50,7 @@ defmodule Hyper.E2e.CreateVmRefusalPropertiesTest do
       before = snapshot()
       spec = %Hyper.Vm.Spec{img_id: img_id, type: type, arch: arch}
 
-      assert Hyper.create_vm(spec) == {:error, :no_capacity}
+      assert Hyper.create_vm(spec) == {:error, :unknown_image}
 
       assert leaks_since(before) == %{dm: MapSet.new(), routing: MapSet.new()},
              "refused create_vm for unknown image #{img_id} leaked cluster state"

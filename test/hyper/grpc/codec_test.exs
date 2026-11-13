@@ -158,7 +158,8 @@ defmodule Hyper.Grpc.CodecTest do
       {:invalid_ref, GRPC.Status.invalid_argument()},
       {:machine_unreachable, GRPC.Status.unavailable()},
       {:no_capacity, GRPC.Status.resource_exhausted()},
-      {:exhausted, GRPC.Status.resource_exhausted()}
+      {:exhausted, GRPC.Status.resource_exhausted()},
+      {:unknown_image, GRPC.Status.not_found()}
     ]
 
     test "each domain reason maps to its promised gRPC status" do

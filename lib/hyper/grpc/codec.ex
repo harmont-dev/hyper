@@ -142,6 +142,9 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such VM")
 
+  defp rpc_error(:unknown_image),
+    do: GRPC.RPCError.exception(:not_found, "no such image")
+
   defp rpc_error(:machine_unreachable),
     do: GRPC.RPCError.exception(:unavailable, "VM's host node is unreachable")
 

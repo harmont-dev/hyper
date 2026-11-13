@@ -24,14 +24,13 @@ defmodule Hyper.E2e.CreateVmRefusalTest do
   import Hyper.E2e
 
   @moduletag :integration
-  @moduletag timeout: :timer.minutes(2)
+  @moduletag :external
+  @moduletag timeout: :timer.minutes(5)
 
-  # sha256-shaped but never loaded; irrelevant here (refusal happens before
-  # any node resolves the image), pinned well-formed so a future early
-  # validation of img_id shape cannot silently change what this test proves.
-  @img_id String.duplicate("0", 64)
+  @image System.get_env("HYPER_E2E_IMAGE", "public.ecr.aws/docker/library/alpine:3.19")
 
   test "every unfittable instance type is refused with :no_capacity, atomically" do
+    assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
     states = Hyper.Cluster.Budget.all_states()
     assert states != [], "no NodeState published — is the budget advertiser up?"
 
@@ -48,7 +47,7 @@ defmodule Hyper.E2e.CreateVmRefusalTest do
     before = snapshot()
 
     for type <- unfittable, arch <- [nil, host_arch] do
-      spec = %Hyper.Vm.Spec{img_id: @img_id, type: type, arch: arch}
+      spec = %Hyper.Vm.Spec{img_id: img_id, type: type, arch: arch}
 
       assert Hyper.create_vm(spec) == {:error, :no_capacity},
              "type #{inspect(type)} (arch #{inspect(arch)}) must refuse with :no_capacity"
