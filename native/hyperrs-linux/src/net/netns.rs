@@ -326,10 +326,10 @@ impl AsFd for NetNs {
 
 #[cfg(test)]
 mod tests {
-    use super::{NetNs, TapError};
+    use super::{NetNs, TapError, RUN_DIR};
     use crate::net::{IfName, Rtnl};
     use assert_fs::TempDir;
-    use nix::mount::{mount, MsFlags};
+    use nix::mount::{mount, umount, MsFlags};
     use nix::sched::{unshare, CloneFlags};
     use nix::unistd::{Gid, Uid};
     use pretty_assertions::assert_eq;
@@ -470,5 +470,55 @@ mod tests {
         let again = create();
 
         assert!(matches!(again, Err(TapError::Exists(ref name)) if *name == tap0()));
+    }
+
+    #[rstest]
+    fn removing_a_namespace_unpins_it_as_root() {
+        let Some(mut scratch) = ScratchNs::new("remove") else {
+            return;
+        };
+        let ns = scratch.0.take().expect("a fresh scratch namespace");
+        let pin = ns.path();
+
+        ns.remove().unwrap();
+
+        assert!(!pin.as_path().exists());
+    }
+
+    #[rstest]
+    fn deleting_never_unmounts_through_a_symlinked_pin_as_root() {
+        if !nix::unistd::geteuid().is_root() {
+            eprintln!("SKIP deleting_never_unmounts_through_a_symlinked_pin: needs root to mount");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("mnt");
+        fs::create_dir(&target).unwrap();
+        mount(
+            Some("tmpfs"),
+            &target,
+            Some("tmpfs"),
+            MsFlags::empty(),
+            None::<&str>,
+        )
+        .unwrap();
+        let name = format!("hyper-test-{}-symlinked-pin", std::process::id());
+        fs::create_dir_all(RUN_DIR).unwrap();
+        let pin = std::path::Path::new(RUN_DIR).join(&name);
+        std::os::unix::fs::symlink(&target, &pin).unwrap();
+
+        let deleted = NetNs::delete(name.as_str().try_into().unwrap());
+        let still_mounted = fs::read_to_string("/proc/self/mountinfo")
+            .unwrap()
+            .lines()
+            .any(|line| line.split(' ').nth(4) == target.to_str());
+        let _ = umount(&target);
+
+        assert!(deleted.is_ok(), "{:?}", deleted.err());
+        assert!(still_mounted, "delete unmounted the symlink's target");
+        assert!(
+            fs::symlink_metadata(&pin).is_err(),
+            "the symlinked pin is left behind"
+        );
     }
 }
