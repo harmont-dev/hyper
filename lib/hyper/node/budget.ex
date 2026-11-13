@@ -1,8 +1,8 @@
 defmodule Hyper.Node.Budget do
   @moduledoc """
-  Public entry point for this node's resource budget. Thin facade over
-  `Hyper.Node.Budget.Hard`, the per-node accounting GenServer supervised by
-  `Hyper.Node.Budget.Supervisor`.
+  Public entry point for this node's resource budget, fronting leases. Thin
+  facade over `Hyper.Node.Budget.Hard`, the per-node accounting GenServer
+  supervised by `Hyper.Node.Budget.Supervisor`.
   """
 
   alias Hyper.Node.Budget.Hard
@@ -10,24 +10,25 @@ defmodule Hyper.Node.Budget do
 
   use OpenTelemetryDecorator
 
-  @doc "Can this node run the given vm spec? `:ok` if yes, `{:error, reason}` otherwise."
-  @spec can_run(Hyper.Vm.Instance.Spec.t()) :: :ok | {:error, term()}
-  defdelegate can_run(vm_spec), to: Hard
-
-  @doc "Reserve the spec's budget, run `callable`, and release the budget afterwards."
-  @spec with_budget(Hyper.Vm.Instance.Spec.t(), (-> result)) :: result | {:error, term()}
-        when result: var
-  defdelegate with_budget(vm_spec, callable), to: Hard
-
   @doc """
-  Authoritatively confirm this node can run `spec`, reserving its budget for the
-  lifetime of `owner`. Live soft-load check first, then an atomic hard reserve.
+  Provisionally admit `spec` for `vm_id` on this node, before anything is built.
+
+  Live soft-load check first, then an atomic hard lease. Returns a token for
+  `drop/2`; the VM turns the lease into its own reservation with `claim/2`.
   """
-  @spec admit(Spec.t(), pid()) :: :ok | {:error, term()}
-  @decorate with_span("Hyper.Node.Budget.admit", include: [:spec])
-  def admit(spec, owner) do
+  @spec lease(Hyper.Vm.Id.t(), Spec.t()) :: {:ok, reference()} | {:error, term()}
+  @decorate with_span("Hyper.Node.Budget.lease", include: [:vm_id, :spec])
+  def lease(vm_id, spec) do
     with :ok <- Hyper.Node.Budget.Soft.can_run(spec) do
-      Hard.reserve(spec, owner)
+      Hard.lease(vm_id, spec)
     end
   end
+
+  @doc "Bind `vm_id`'s leased capacity to `owner` for that process's lifetime."
+  @spec claim(Hyper.Vm.Id.t(), pid()) :: :ok | {:error, :no_lease}
+  defdelegate claim(vm_id, owner), to: Hard
+
+  @doc "Release the lease `token` identifies. A no-op once the VM has claimed it."
+  @spec drop(Hyper.Vm.Id.t(), reference()) :: :ok
+  defdelegate drop(vm_id, token), to: Hard
 end

@@ -5,7 +5,7 @@ defmodule Hyper.Cluster.Scheduler do
   nodes that cannot fit the spec, and ranks survivors by how many bytes of the
   VM's image layers they already have mounted (`colo(N, VM) = sum of |L|` over
   shared mounted layers). The result is an ordered candidate list; the chosen
-  node confirms authoritatively via `Hyper.Node.Budget.admit/2` (see `place/3`).
+  node confirms authoritatively via `Hyper.Node.Budget.lease/2` (see `place/3`).
 
   All filtering is best-effort on a possibly-stale snapshot: a node that no
   longer fits simply refuses at confirmation time.
@@ -63,20 +63,20 @@ defmodule Hyper.Cluster.Scheduler do
   @doc """
   Place and boot `spec` somewhere in the cluster.
 
-  Confirms each candidate by RPC-ing `Hyper.Node.try_run/3` on it; the first node
-  to boot the VM and reserve its budget wins. `start_fun`/`stop_fun` describe how
-  to boot/tear down the VM on the target node.
+  Confirms each candidate by RPC-ing `Hyper.Node.try_run/3` on it; the first
+  node to admit `spec` and boot it wins. A candidate that refuses has built
+  nothing, so walking the list is cheap.
   """
   @spec run(
+          Hyper.Vm.Id.t(),
           Spec.t(),
           layer_sizes(),
-          (-> {:ok, pid()} | {:error, term()}),
-          (pid() -> :ok)
+          (-> {:ok, pid()} | {:error, term()})
         ) :: {:ok, {node(), pid()}} | {:error, :no_capacity}
-  @decorate with_span("Hyper.Cluster.Scheduler.run", include: [:spec])
-  def run(spec, layers, start_fun, stop_fun) do
+  @decorate with_span("Hyper.Cluster.Scheduler.run", include: [:vm_id, :spec])
+  def run(vm_id, spec, layers, start_fun) do
     attempt = fn target ->
-      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+      :erpc.call(target, Hyper.Node, :try_run, [vm_id, spec, start_fun])
     end
 
     place(spec, layers, attempt)

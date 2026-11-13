@@ -30,7 +30,9 @@ defmodule Hyper.Cfg.BudgetTest do
              disk_bw_cap: Unit.Bandwidth.gibps(1),
              disk_bw_max_load: 0.8,
              net_bw_cap: Unit.Bandwidth.gibps(1),
-             net_bw_max_load: 0.8
+             net_bw_max_load: 0.8,
+             boot_lease_ttl: Unit.Time.s(300),
+             restart_grace: Unit.Time.s(5)
            }
   end
 
@@ -59,13 +61,22 @@ defmodule Hyper.Cfg.BudgetTest do
     assert config.cpu_max_cap == nil
   end
 
+  test "the lease timings are overridable from the [budget] TOML table" do
+    Toml.put_cache(%{"budget" => %{"boot_lease_ttl" => "30s", "restart_grace" => "250ms"}})
+
+    assert {:ok, config} = Budget.load()
+    assert config.boot_lease_ttl == Unit.Time.s(30)
+    assert config.restart_grace == Unit.Time.ms(250)
+  end
+
   # Refusal contracts on bad budget values: each must fail load with a specific
   # error naming the offending key, never silently coerce or crash. Table-driven:
   # one assertion shape, rows differ only in the bad env and expected error.
   @bad_budgets [
     {[mem_max: 123], {:error, {:bad_value, :mem_max, 123}}},
     {[mem_max: "notabytes"], {:error, {:bad_value, :mem_max, "notabytes"}}},
-    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}}
+    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}},
+    {[boot_lease_ttl: "forever"], {:error, {:bad_value, :boot_lease_ttl, "forever"}}}
   ]
 
   for {env, expected} <- @bad_budgets do
