@@ -74,6 +74,7 @@ fn host_init_reports_the_work_dir_the_helper_trusts_as_root(tmp: TempDir) {
         &format!("work_dir = \"/srv/hyper\"\n{NET_TABLE}"),
     );
     let ns = ScratchNs::new("host-init");
+    ns.get().enable_forwarding().unwrap();
 
     let out = ns.run(&cfg, json!({"op": "host_init"})).success();
 
@@ -106,6 +107,43 @@ fn host_init_reports_the_work_dir_the_helper_trusts_as_root(tmp: TempDir) {
         })
         .unwrap();
     assert_eq!(sysctls, ["1", "1", "1"]);
+}
+
+#[rstest]
+fn host_init_leaves_forwarding_to_the_operator_as_root(tmp: TempDir) {
+    if !is_root() {
+        eprintln!("SKIP host_init without forwarding: needs root");
+        return;
+    }
+    let cfg = write_root_config(
+        tmp.path(),
+        &format!("work_dir = \"/srv/hyper\"\n{NET_TABLE}"),
+    );
+    let ns = ScratchNs::new("host-init-no-fwd");
+    let forwarding = ["net/ipv4/ip_forward", "net/ipv6/conf/all/forwarding"];
+    ns.get()
+        .scoped(|| {
+            for key in forwarding {
+                fs::write(format!("/proc/sys/{key}"), "0").unwrap();
+            }
+        })
+        .unwrap();
+
+    ns.run(&cfg, json!({"op": "host_init"}))
+        .code(2)
+        .stderr(contains("net.ipv4.ip_forward is off"));
+    let after = ns
+        .get()
+        .scoped(|| {
+            forwarding.map(|key| {
+                fs::read_to_string(format!("/proc/sys/{key}"))
+                    .unwrap()
+                    .trim()
+                    .to_owned()
+            })
+        })
+        .unwrap();
+    assert_eq!(after, ["0", "0"]);
 }
 
 #[rstest]

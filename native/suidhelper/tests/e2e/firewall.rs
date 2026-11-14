@@ -17,8 +17,10 @@ use hyperrs_linux::net::{IfIndex, IfName, IpNet, Rtnl};
 use pretty_assertions::assert_eq;
 use rstest::rstest;
 use serde_json::json;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::fs;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::io::Read;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
@@ -116,6 +118,7 @@ impl Lab {
         )
         .unwrap();
         fs::set_permissions(&cfg, fs::Permissions::from_mode(0o644)).unwrap();
+        lab.host.get().enable_forwarding().unwrap();
         lab.host.run(&cfg, json!({"op": "host_init"})).success();
 
         let listen = |ns: &ScratchNs| {
@@ -144,6 +147,60 @@ impl Lab {
                 TcpStream::connect_timeout(&SocketAddr::from((to, PORT)), DROPPED_AFTER).is_ok()
             })
             .unwrap()
+    }
+
+    fn invalid_segment_arrives_from(&self, to: SocketAddrV4) -> Vec<Ipv4Addr> {
+        let capture = self
+            .wan
+            .get()
+            .scoped(|| Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::TCP)))
+            .unwrap()
+            .unwrap();
+        capture.set_read_timeout(Some(DROPPED_AFTER)).unwrap();
+        let src: Ipv4Addr = "10.200.0.2".parse().unwrap();
+        let mut segment = [0u8; 20];
+        segment[0..2].copy_from_slice(&40_000u16.to_be_bytes());
+        segment[2..4].copy_from_slice(&to.port().to_be_bytes());
+        segment[4..8].copy_from_slice(&1u32.to_be_bytes());
+        segment[12] = 5 << 4;
+        segment[13] = 0x03;
+        segment[14..16].copy_from_slice(&64_240u16.to_be_bytes());
+        let pseudo: Vec<u8> = [&src.octets()[..], &to.ip().octets()[..], &[0, 6, 0, 20]]
+            .concat()
+            .into_iter()
+            .chain(segment)
+            .collect();
+        let sum = pseudo
+            .chunks(2)
+            .map(|w| u32::from(u16::from_be_bytes([w[0], w[1]])))
+            .sum::<u32>();
+        let folded = !(((sum & 0xffff) + (sum >> 16)) as u16);
+        segment[16..18].copy_from_slice(&folded.to_be_bytes());
+        self.vm
+            .get()
+            .scoped(|| {
+                let send = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::TCP)).unwrap();
+                send.bind(&SocketAddr::new(src.into(), 0).into()).unwrap();
+                send.send_to(&segment, &SocketAddr::new((*to.ip()).into(), 0).into())
+                    .unwrap();
+            })
+            .unwrap();
+
+        let mut seen = Vec::new();
+        let mut packet = [0u8; 1500];
+        while let Ok(n) = (&capture).read(&mut packet) {
+            let ihl = usize::from(packet[0] & 0x0f) * 4;
+            if n < ihl + 4 {
+                continue;
+            }
+            let port = u16::from_be_bytes([packet[ihl + 2], packet[ihl + 3]]);
+            if port == to.port() {
+                seen.push(Ipv4Addr::new(
+                    packet[12], packet[13], packet[14], packet[15],
+                ));
+            }
+        }
+        seen
     }
 
     fn up(rtnl: &Rtnl, link: &str, addrs: &[&str]) -> IfIndex {
@@ -221,4 +278,18 @@ fn host_init_keeps_honouring_router_advertisements_on_the_uplink_as_root() {
         .unwrap();
 
     assert_eq!(accept_ra.trim(), "2");
+}
+
+#[rstest]
+fn an_invalid_segment_from_a_vm_never_leaves_the_host_as_root() {
+    if !is_root() {
+        eprintln!("SKIP invalid segment: needs root");
+        return;
+    }
+    let lab = Lab::new("fw-invalid");
+
+    assert_eq!(
+        lab.invalid_segment_arrives_from(SocketAddrV4::new("203.0.113.1".parse().unwrap(), 7075)),
+        Vec::<Ipv4Addr>::new()
+    );
 }
