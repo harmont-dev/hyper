@@ -14,12 +14,17 @@ defmodule Hyper.Node do
 
     * `Hyper.Node.VMSupervisor` - a **local** `DynamicSupervisor` that starts one
       `Hyper.Node.FireVMM` per VM. Local on purpose: a firecracker VM is pinned to
-      this machine's kernel/rootfs/cgroup/tap devices and cannot migrate, so we
+      this machine's kernel/rootfs/cgroup and cannot migrate, so we
       deliberately avoid `Horde.DynamicSupervisor` (which would try to restart
       VMs on a surviving node - cold-booting a ghost).
 
-    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its own user id
-      and group id.
+    * `Hyper.Node.Users` - manages an availability pool of users. Each VM gets its
+      own user id and group id.
+
+    * `Hyper.Node.Net` - this node's VM networking: applies the host setup on
+      start, then hands out per-VM network leases bound to each VM's lifetime.
+      Started before the VM supervisor so the host is networked before any VM
+      boots.
 
     * `Hyper.Node.Budget.Supervisor` - the node's resource budget: hard
       memory/disk accounting (`Hyper.Node.Budget.Hard`) plus the `Sys.Mon`
@@ -38,18 +43,19 @@ defmodule Hyper.Node do
 
   alias Hyper.Node.FireVMM
   alias Hyper.Node.Img
+  alias Hyper.Node.Net
   alias Hyper.Node.Users
   alias Hyper.Node.Vmlinux
 
   @vm_sup Hyper.Node.VMSupervisor
 
-  def start_link(opts \\ []) do
+  def start_link(_opts \\ []) do
     case test_system() do
-      :ok ->
+      {:ok, host} ->
         # Clear any dm/loop devices a previous unclean shutdown left behind,
         # before the device-owning children start and collide with them.
         :ok = Hyper.Node.Reclaim.run()
-        Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+        Supervisor.start_link(__MODULE__, host, name: __MODULE__)
 
       {:error, reason} ->
         {:error, reason}
@@ -57,15 +63,24 @@ defmodule Hyper.Node do
   end
 
   @impl true
-  def init(_opts) do
-    children = [
+  def init(%Net.Ip.Host{} = host) do
+    vms = [
       Hyper.Node.Users,
+      {Net, host},
+      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
+    ]
+
+    children = [
       # Layer owns Hyper.Node.Layer.Registry, which Budget.Advertiser queries
       # (via Hyper.Node.Layer.active/0) as it advertises on init - so Layer must
       # be up first.
       Hyper.Node.Layer,
       Hyper.Node.Budget.Supervisor,
-      {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one},
+      %{
+        id: :vms,
+        type: :supervisor,
+        start: {Supervisor, :start_link, [vms, [strategy: :rest_for_one]]}
+      },
       Hyper.Node.Img,
       # Last child: :one_for_one starts in order, so the VM supervisor and Img are
       # up before the reaper's first tick can read their liveness.
@@ -83,10 +98,10 @@ defmodule Hyper.Node do
   @spec start_image_vm(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
-    with {:ok, uid} <- Users.claim(),
+    with {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
-           acquire_or_release(uid, fn -> Img.create_mutable(spec.img_id, vm_id) end) do
-      boot_with_mutable(vm_id, spec, uid, mutable)
+           acquire_or_release(uid, net_id, fn -> Img.create_mutable(spec.img_id, vm_id) end) do
+      boot_with_mutable(vm_id, spec, uid, net_id, mutable)
     end
   end
 
@@ -105,26 +120,27 @@ defmodule Hyper.Node do
       boot_args: parent.boot_args
     }
 
-    with {:ok, uid} <- Users.claim(),
+    with {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
-           acquire_or_release(uid, fn ->
+           acquire_or_release(uid, net_id, fn ->
              Img.create_fork(parent.img_id, parent.vm_id, child_vm_id)
            end) do
-      boot_with_mutable(child_vm_id, spec, uid, mutable)
+      boot_with_mutable(child_vm_id, spec, uid, net_id, mutable)
     end
   end
 
   # The shared boot tail: kernel + opts + VM supervisor, binding uid and mutable
   # to the supervisor's lifetime (previously inline in start_image_vm/2).
-  @spec boot_with_mutable(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid()) ::
+  @spec boot_with_mutable(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), Net.id(), pid()) ::
           {:ok, pid()} | {:error, term()}
-  defp boot_with_mutable(vm_id, spec, uid, mutable) do
+  defp boot_with_mutable(vm_id, spec, uid, net_id, mutable) do
     kernel = Vmlinux.path(spec.arch)
-    opts = build_opts(vm_id, spec, uid, mutable, kernel)
+    opts = build_opts(vm_id, spec, uid, net_id, mutable, kernel)
 
-    case start_vm_or_release(opts, uid, mutable) do
+    case start_vm_or_release(opts, mutable) do
       {:ok, pid} ->
         :ok = Users.bind(uid, pid)
+        :ok = Net.bind(net_id, pid)
         :ok = Img.Mutable.acquire(mutable, pid)
         :ok = Img.Mutable.release(mutable)
         {:ok, pid}
@@ -136,18 +152,40 @@ defmodule Hyper.Node do
 
   # Start a mutable layer (plain or fork) holding it against idle-reap during
   # boot; on failure free the uid (generalizes start_mutable_or_release/3).
-  @spec acquire_or_release(Users.id(), (-> {:ok, pid()} | {:error, term()})) ::
+  @spec acquire_or_release(Users.id(), Net.id(), (-> {:ok, pid()} | {:error, term()})) ::
           {:ok, pid()} | {:error, term()}
-  defp acquire_or_release(uid, start_fun) do
+  defp acquire_or_release(uid, net_id, start_fun) do
     case start_fun.() do
       {:ok, mutable} ->
         :ok = Img.Mutable.acquire(mutable)
         {:ok, mutable}
 
       {:error, reason} ->
-        Users.release(uid)
+        release_ids(uid, net_id)
         {:error, reason}
     end
+  end
+
+  @spec claim_ids() :: {:ok, Users.id(), Net.id()} | {:error, :exhausted}
+  defp claim_ids do
+    with {:ok, uid} <- Users.claim() do
+      pair_net_id(uid, Net.claim())
+    end
+  end
+
+  @spec pair_net_id(Users.id(), {:ok, Net.id()} | {:error, :exhausted}) ::
+          {:ok, Users.id(), Net.id()} | {:error, :exhausted}
+  defp pair_net_id(uid, {:ok, net_id}), do: {:ok, uid, net_id}
+
+  defp pair_net_id(uid, {:error, _} = err) do
+    Users.release(uid)
+    err
+  end
+
+  @spec release_ids(Users.id(), Net.id()) :: :ok
+  defp release_ids(uid, net_id) do
+    Users.release(uid)
+    Net.release(net_id)
   end
 
   @doc "Tear down an image-backed VM started by `start_image_vm/2`."
@@ -245,13 +283,15 @@ defmodule Hyper.Node do
   def unflushed_usage(vm_id), do: FireVMM.Meter.unflushed(vm_id)
 
   @doc false
-  @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), pid(), Path.t()) ::
+  @spec build_opts(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t(), Users.id(), Net.id(), pid(), Path.t()) ::
           FireVMM.Opts.t()
-  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, mutable, kernel) do
+  def build_opts(vm_id, %Hyper.Vm.Spec{} = spec, uid, net_id, mutable, kernel) do
     %FireVMM.Opts{
       vm_id: vm_id,
       uid: uid,
       gid: uid,
+      net_id: net_id,
+      firewall: Hyper.Vm.Firewall.default(),
       type: spec.type,
       arch: spec.arch,
       img_id: spec.img_id,
@@ -298,14 +338,14 @@ defmodule Hyper.Node do
     end
   end
 
-  @spec admit(Hyper.Vm.Instance.Spec.t(), pid()) :: :ok | {:error, term()}
+  @spec admit(Hyper.Vm.Spec.t(), pid()) :: :ok | {:error, term()}
   defp admit(spec, pid) do
     Hyper.Node.Budget.admit(spec, pid)
   catch
     kind, reason -> {:error, {:admission_failed, {kind, reason}}}
   end
 
-  @spec test_system :: :ok | {:error, term()}
+  @spec test_system :: {:ok, Net.Ip.Host.t()} | {:error, term()}
   def test_system do
     with {:ok, _} <- Hyper.Cfg.Budget.load(),
          :ok <- check_firecracker_bins(),
@@ -316,22 +356,10 @@ defmodule Hyper.Node do
          :ok <- Hyper.Node.Users.test_system(),
          :ok <- Hyper.Node.Layer.Repo.test_system(),
          :ok <- Hyper.SuidHelper.test_system(),
-         {:ok, base} <- init_network(),
-         :ok <- check_helper_base(base) do
-      Hyper.Node.FireVMM.test_system()
-    end
-  end
-
-  # VM networking is mandatory: refuse to start unless `[network]` is
-  # configured, then idempotently reconcile the host-wide `hyper` nftables
-  # table. Runs after `Hyper.SuidHelper.test_system/0` so the helper is
-  # confirmed present first.
-  @spec init_network :: {:ok, Path.t()} | {:error, term()}
-  defp init_network do
-    if Hyper.Cfg.Network.configured?() do
-      Hyper.SuidHelper.host_init()
-    else
-      {:error, :network_not_configured}
+         {:ok, base, host} <- Hyper.SuidHelper.host_init(),
+         :ok <- check_helper_base(base),
+         :ok <- Hyper.Node.FireVMM.test_system() do
+      {:ok, host}
     end
   end
 
@@ -363,14 +391,14 @@ defmodule Hyper.Node do
     end
   end
 
-  defp start_vm_or_release(opts, uid, mutable) do
+  defp start_vm_or_release(%FireVMM.Opts{} = opts, mutable) do
     case start_vm(opts) do
       {:ok, pid} ->
         {:ok, pid}
 
       failed ->
         Img.Mutable.release(mutable)
-        Users.release(uid)
+        release_ids(opts.uid, opts.net_id)
         start_failure(failed)
     end
   end

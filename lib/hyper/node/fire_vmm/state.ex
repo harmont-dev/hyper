@@ -85,13 +85,10 @@ defmodule Hyper.Node.FireVMM.State do
   # The daemon is already (being) started by `Core` as our sibling. Read the root
   # device off the per-VM mutable layer, resolve the boot spec, set the readiness
   # deadline, and start probing the API.
-  def init(
-        %Opts{vm_id: id, mutable: mutable, kernel: kernel, boot_args: boot_args, type: type} =
-          opts
-      ) do
+  def init(%Opts{vm_id: id, mutable: mutable, type: type} = opts) do
     case Hyper.Cluster.Routing.register_self({id, :state}) do
       :ok ->
-        source = boot_source(id, kernel, Mutable.blk_path(mutable), boot_args)
+        source = boot_source(opts, Mutable.blk_path(mutable))
         spec = BootSpec.resolve(source, type)
         deadline = System.monotonic_time(:millisecond) + Time.as_ms(@ready_timeout)
         data = %State{opts: opts, spec: spec, boot_deadline: deadline}
@@ -104,15 +101,23 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   # Assemble the `Hyper.Vm.source()` BootSpec expects from the resolved kernel +
-  # device. `boot_args` is omitted when nil so BootSpec applies its default;
-  # `vm_id` is always included (networking is mandatory — BootSpec derives the
-  # guest NIC from it).
-  @spec boot_source(Hyper.Vm.Id.t(), Path.t(), Path.t(), String.t() | nil) :: Hyper.Vm.source()
-  defp boot_source(vm_id, kernel, dev, nil),
-    do: %{vm_id: vm_id, kernel_image_path: kernel, root_drive_path: dev}
+  # device. `boot_args` is omitted when nil so BootSpec applies its default.
+  @spec boot_source(Opts.t(), Path.t()) :: Hyper.Vm.source()
+  defp boot_source(%Opts{} = opts, dev) do
+    put_boot_args(
+      %{
+        vm_id: opts.vm_id,
+        net: Hyper.Node.Net.lease(opts.net_id),
+        kernel_image_path: opts.kernel,
+        root_drive_path: dev
+      },
+      opts.boot_args
+    )
+  end
 
-  defp boot_source(vm_id, kernel, dev, boot_args),
-    do: %{vm_id: vm_id, kernel_image_path: kernel, root_drive_path: dev, boot_args: boot_args}
+  @spec put_boot_args(Hyper.Vm.source(), String.t() | nil) :: Hyper.Vm.source()
+  defp put_boot_args(source, nil), do: source
+  defp put_boot_args(source, boot_args), do: Map.put(source, :boot_args, boot_args)
 
   @impl :gen_statem
   # Answered in every lifecycle state: the opts are static data, and a fork must

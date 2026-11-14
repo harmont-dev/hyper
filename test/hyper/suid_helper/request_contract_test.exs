@@ -11,6 +11,8 @@ defmodule Hyper.SuidHelper.RequestContractTest do
 
   @vm_id "v1"
 
+  @unsent_by_beam ~w(vm_firewall)
+
   setup do
     tmp = Path.join(System.tmp_dir!(), "request-contract-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -40,10 +42,7 @@ defmodule Hyper.SuidHelper.RequestContractTest do
         {~s({"result":"claimed"}), fn -> SuidHelper.Vm.claim_api_socket(@vm_id) end},
       "vm_claim_vsock_socket" =>
         {~s({"result":"claimed"}), fn -> SuidHelper.Vm.claim_vsock_socket(@vm_id) end},
-      "vm_teardown" =>
-        {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id, 900_001) end},
-      "vm_teardown_orphan" =>
-        {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id, nil) end},
+      "vm_teardown" => {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id) end},
       "img_activate" =>
         {~s({"result":"activated","device":"/dev/mapper/hyper-img-x","names":[]}),
          fn ->
@@ -92,7 +91,8 @@ defmodule Hyper.SuidHelper.RequestContractTest do
            )
          end},
       "host_init" =>
-        {~s({"result":"host_ready","hyper_base":"/srv/hyper"}), fn -> SuidHelper.host_init() end},
+        {~s({"result":"host_ready","hyper_base":"/srv/hyper","net":{"uplink":"if0","transit_prefix":"10.200.0.0/16","vm_prefix":"2001:db8:0:0:1::/80"}}),
+         fn -> SuidHelper.host_init() end},
       "version" =>
         {~s({"version":"0","checksum_blake3":"0"}), fn -> SuidHelper.verify_version() end}
     }
@@ -131,18 +131,23 @@ defmodule Hyper.SuidHelper.RequestContractTest do
   defp shape(value) when is_boolean(value), do: :boolean
   defp shape(nil), do: nil
 
-  defp fixture, do: @fixture |> File.read!() |> Jason.decode!()
+  defp fixture, do: @fixture |> File.read!() |> Jason.decode!() |> Map.drop(@unsent_by_beam)
 
   defp launch_opts do
     %FireVMM.Opts{
       vm_id: @vm_id,
       uid: 900_001,
       gid: 900_001,
+      net_id: 0,
       type: :micro,
       arch: :x86_64,
       mutable: nil,
       kernel: "/srv/hyper/vmlinux",
-      boot_args: nil
+      boot_args: nil,
+      firewall: %Hyper.Vm.Firewall{
+        inbound: [{:tcp, 22..22//1}],
+        outbound_blocked: [{:tcp, 25..25//1}]
+      }
     }
   end
 end

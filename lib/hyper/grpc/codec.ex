@@ -51,13 +51,14 @@ defmodule Hyper.Grpc.Codec do
 
   def from_grpc(%CreateVmRequest{} = req) do
     with {:ok, type} <- instance_type(req.instance_type),
-         {:ok, arch} <- arch(req.arch) do
+         {:ok, arch} <- arch(req.arch),
+         {:ok, boot_args} <- boot_args(req.boot_args) do
       {:ok,
        %Spec{
          img_id: req.img_id,
          type: type,
          arch: arch,
-         boot_args: req.boot_args
+         boot_args: boot_args
        }}
     end
   end
@@ -122,6 +123,25 @@ defmodule Hyper.Grpc.Codec do
 
   defp arch(_unrecognised), do: {:error, :bad_arch}
 
+  @max_boot_args 1024
+
+  @spec boot_args(String.t() | nil) :: {:ok, String.t() | nil} | {:error, :bad_boot_args}
+  defp boot_args(nil), do: {:ok, nil}
+  defp boot_args(""), do: {:ok, nil}
+
+  defp boot_args(args) when byte_size(args) > @max_boot_args, do: {:error, :bad_boot_args}
+
+  defp boot_args(args) do
+    printable? = args =~ ~r/\A[\x20-\x21\x23-\x7e]+\z/
+    reserved? = args |> String.split(" ", trim: true) |> Enum.any?(&reserved_boot_arg?/1)
+
+    if printable? and not reserved?, do: {:ok, args}, else: {:error, :bad_boot_args}
+  end
+
+  @spec reserved_boot_arg?(String.t()) :: boolean()
+  defp reserved_boot_arg?(arg),
+    do: arg == "--" or String.starts_with?(arg, ["ip=", "nfsaddrs=", "hyper."])
+
   @spec rpc_error(term()) :: GRPC.RPCError.t()
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
@@ -141,13 +161,21 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:bad_arch),
     do: GRPC.RPCError.exception(:invalid_argument, "arch holds an unrecognised value")
 
+  defp rpc_error(:bad_boot_args),
+    do:
+      GRPC.RPCError.exception(
+        :invalid_argument,
+        "boot_args must be printable ASCII without quotes, at most #{@max_boot_args} bytes, " <>
+          "without `--`, `ip=`, `nfsaddrs=` or `hyper.*` arguments"
+      )
+
   defp rpc_error(:not_found),
     do: GRPC.RPCError.exception(:not_found, "no such VM")
 
   defp rpc_error(:unknown_image),
     do: GRPC.RPCError.exception(:not_found, "no such image")
 
-  defp rpc_error(:stopping),
+  defp rpc_error(reason) when reason in [:stopping, :not_ready],
     do: GRPC.RPCError.exception(:failed_precondition, "VM is not running")
 
   defp rpc_error(:machine_unreachable),
