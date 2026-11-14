@@ -132,6 +132,7 @@ pub enum SnapshotError {
 #[derive(Debug, Clone)]
 pub struct ThinPool<'a> {
     device: Device<'a>,
+    metadata: DeviceNumber,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,11 +151,19 @@ pub struct Thin<'a, S> {
 impl<'a> ThinPool<'a> {
     pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
         let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
-        match table.lines().collect::<Vec<_>>().as_slice() {
-            [line] if line.split_whitespace().nth(2) == Some("thin-pool") => Ok(Self {
+        let metadata = match table.lines().collect::<Vec<_>>()[..] {
+            [line] => match line.split_whitespace().collect::<Vec<_>>()[..] {
+                [_, _, "thin-pool", metadata, ..] => metadata.parse().ok(),
+                _ => None,
+            },
+            _ => None,
+        };
+        match metadata {
+            Some(metadata) => Ok(Self {
                 device: dmsetup.device(name),
+                metadata,
             }),
-            _ => Err(ThinPoolError::NotAThinPool {
+            None => Err(ThinPoolError::NotAThinPool {
                 name: name.clone(),
                 table,
             }),
@@ -163,6 +172,10 @@ impl<'a> ThinPool<'a> {
 
     pub fn device(&self) -> &Device<'a> {
         &self.device
+    }
+
+    pub fn metadata(&self) -> DeviceNumber {
+        self.metadata
     }
 
     pub fn create_thin(&self, id: ThinId) -> Result<Thin<'a, Inactive>, RunError> {
