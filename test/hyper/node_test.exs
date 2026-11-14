@@ -12,7 +12,7 @@ defmodule Hyper.NodeTest do
 
     result =
       Hyper.Node.try_run(
-        Hyper.Vm.Instance.spec(:micro),
+        %Hyper.Vm.Spec{img_id: "img", type: :micro},
         fn -> {:ok, vm} end,
         fn pid ->
           send(test, {:stopped, pid})

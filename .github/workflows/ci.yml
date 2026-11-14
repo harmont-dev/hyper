@@ -276,7 +276,7 @@ jobs:
         run: git diff --relative "origin/${{ github.base_ref }}...HEAD" > mutants.diff
 
       - name: cargo mutants
-        run: cargo mutants --in-diff mutants.diff --no-shuffle
+        run: cargo mutants --in-place --in-diff mutants.diff --no-shuffle
 
       - name: Upload mutants report
         if: ${{ !cancelled() }}

@@ -31,6 +31,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
   require Logger
 
   @shutdown_timeout Time.s(15)
+  @muontrap_stop_timeout Time.s(2)
   @last_sample_timeout Time.ms(250)
 
   defstruct [:opts, :muontrap]
@@ -82,7 +83,9 @@ defmodule Hyper.Node.FireVMM.Daemon do
   # here is logged, and the `Reaper` will retry, but it must not crash teardown.
   @impl true
   @decorate with_span("Hyper.Node.FireVMM.Daemon.terminate", include: [:id])
-  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id} = opts}) do
+  def terminate(_reason, %__MODULE__{opts: %Opts{vm_id: id} = opts, muontrap: muontrap}) do
+    :ok = stop_muontrap(muontrap)
+
     case clear_jail(opts) do
       :ok ->
         :ok
@@ -92,15 +95,26 @@ defmodule Hyper.Node.FireVMM.Daemon do
     end
   end
 
-  # Best-effort: both the chroot/cgroup removal and the network teardown are
-  # attempted regardless of the other's outcome (a `Reaper` backstops either
-  # failure); the first error is surfaced to the caller.
+  @spec stop_muontrap(pid() | nil) :: :ok
+  defp stop_muontrap(nil), do: :ok
+
+  defp stop_muontrap(muontrap) do
+    Process.unlink(muontrap)
+    GenServer.stop(muontrap, :shutdown, Time.as_ms(@muontrap_stop_timeout))
+  catch
+    :exit, _ ->
+      Process.exit(muontrap, :kill)
+      :ok
+  end
+
+  # Removes the VM's chroot and kills its cgroup leaf (`vm_teardown`). A failure
+  # is surfaced to the caller; the `Reaper` backstops it.
   @spec clear_jail(Opts.t()) :: :ok | {:error, term()}
-  defp clear_jail(%Opts{vm_id: id, uid: uid}) do
+  defp clear_jail(%Opts{vm_id: id}) do
     meter = Hyper.Cluster.Routing.via({id, :meter})
     _ = last_sample(meter)
 
-    with :ok <- SuidHelper.Vm.teardown(id, uid) do
+    with :ok <- SuidHelper.Vm.teardown(id) do
       Hyper.Node.FireVMM.Meter.rebase(meter)
     end
   end
@@ -114,6 +128,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
   defp launch(%Opts{vm_id: id, mutable: mutable} = opts) do
+    opts = %{opts | firewall: Hyper.Node.FireVMM.Policy.current(id)}
     cmd = Jailer.command(opts, Hyper.Node.Img.Mutable.blk_path(mutable))
 
     # Surface what the jailed process actually does: `log_output` routes the

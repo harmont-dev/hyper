@@ -65,8 +65,8 @@ pub struct Jailer<'a> {
     limits: CgroupLimits,
     /// The path to the Firecracker API socket.
     api_sock: &'a SafePath<IsAbsolute, StrictComponents>,
-    /// The netns the jailer must enter (`--netns`).
-    netns: Option<&'a SafePath<IsAbsolute, StrictComponents>>,
+    /// The pinned network namespace the jailer joins before starting Firecracker.
+    netns: &'a SafePath<IsAbsolute, StrictComponents>,
 }
 
 impl Jailer<'_> {
@@ -85,7 +85,9 @@ impl Jailer<'_> {
             .arg("--cgroup-version")
             .arg("2")
             .arg("--parent-cgroup")
-            .arg(self.parent_cgroup);
+            .arg(self.parent_cgroup)
+            .arg("--netns")
+            .arg(self.netns.as_path());
 
         if let Some(bytes) = self.limits.memory_max {
             cmd.arg("--cgroup").arg(format!("memory.max={bytes}"));
@@ -98,10 +100,6 @@ impl Jailer<'_> {
         {
             cmd.arg("--cgroup")
                 .arg(format!("cpu.max={quota_us} {period_us}"));
-        }
-
-        if let Some(netns) = self.netns {
-            cmd.arg("--netns").arg(netns.as_path());
         }
 
         cmd.arg("--").arg("--api-sock").arg(self.api_sock.as_path());

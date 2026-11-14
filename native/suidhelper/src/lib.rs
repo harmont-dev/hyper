@@ -14,4 +14,4 @@ pub mod dm;
 pub mod id;
 pub mod insecure_mode;
 pub mod lock;
-pub mod network;
+pub mod net;

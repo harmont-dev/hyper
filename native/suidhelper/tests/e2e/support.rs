@@ -14,6 +14,7 @@
 
 use assert_cmd::assert::Assert;
 use assert_cmd::Command;
+use hyperrs_linux::net::netns::NetNs;
 use std::fs;
 use std::path::Path;
 use std::process::Command as Process;
@@ -44,6 +45,39 @@ pub fn command(config: &Path, args: &[&str]) -> Process {
         cmd.env("LLVM_PROFILE_FILE", profile);
     }
     cmd
+}
+
+/// A `[net]` table that routes VMs out of `lo`, which exists in every namespace.
+pub const NET_TABLE: &str = "[net]\nuplink = \"lo\"\nipv6_prefix = \"2001:db8::/64\"\n";
+
+/// A throwaway network namespace to run the helper in, so its network changes never reach
+/// the host's own namespace. Root only.
+pub struct ScratchNs(Option<NetNs>);
+
+impl ScratchNs {
+    pub fn new(test: &str) -> Self {
+        let name = format!("hyper-e2e-{}-{test}", std::process::id());
+        Self(Some(
+            NetNs::create(name.as_str().try_into().unwrap()).unwrap(),
+        ))
+    }
+
+    pub fn get(&self) -> &NetNs {
+        self.0.as_ref().expect("the namespace lives until drop")
+    }
+
+    /// [`run`] the helper with this namespace as its own.
+    pub fn run(&self, config: &Path, request: serde_json::Value) -> Assert {
+        self.get().scoped(|| run(config, request)).unwrap()
+    }
+}
+
+impl Drop for ScratchNs {
+    fn drop(&mut self) {
+        if let Some(ns) = self.0.take() {
+            let _ = ns.remove();
+        }
+    }
 }
 
 pub fn stdout_json(assert: &Assert) -> serde_json::Value {

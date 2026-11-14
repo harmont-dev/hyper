@@ -6,18 +6,21 @@ defmodule Hyper.Vm.Spec do
   `type` defaults to `:base`. `arch` defaults to `nil`, meaning "resolve to the
   scheduling node's architecture at create time" (`Hyper.create_vm/1` fills it in
   via `Sys.Arch.current/0`). `boot_args` defaults to `nil`, meaning the standard
-  serial-console cmdline (`Hyper.Node.FireVMM.BootSpec`'s default).
+  serial-console cmdline (`Hyper.Node.FireVMM.BootSpec`'s default). `firewall`
+  defaults to `Hyper.Vm.Firewall.default/0`.
   """
 
+  alias Hyper.Vm.Firewall
   alias Hyper.Vm.Instance
 
   @enforce_keys [:img_id]
-  defstruct [:img_id, :arch, :boot_args, type: :base]
+  defstruct [:img_id, :arch, :boot_args, type: :base, firewall: Firewall.default()]
 
   @type t :: %__MODULE__{
           img_id: Hyper.Img.id(),
           type: Instance.t(),
           arch: Instance.arch() | nil,
-          boot_args: String.t() | nil
+          boot_args: String.t() | nil,
+          firewall: Firewall.t()
         }
 end

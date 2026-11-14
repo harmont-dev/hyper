@@ -28,20 +28,12 @@ name = "config_seam"
 path = "tests/config_seam.rs"
 
 [[test]]
-name = "network_addr"
-path = "tests/network/addr.rs"
-
-[[test]]
-name = "network_args"
-path = "tests/network/args.rs"
-
-[[test]]
-name = "network_host_init"
-path = "tests/network/host_init.rs"
-
-[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
+
+[[test]]
+name = "e2e_firewall"
+path = "tests/e2e/firewall.rs"
 
 [[test]]
 name = "e2e_argv"
@@ -74,10 +66,6 @@ path = "tests/e2e/img.rs"
 [[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
-
-[[test]]
-name = "config_network"
-path = "tests/config_network.rs"
 
 [[test]]
 name = "config_paths"
@@ -113,4 +101,5 @@ predicates = "3.1.4"
 pretty_assertions = "1"
 proptest = "1"
 rstest = "0.28"
+socket2 = { version = "0.6", features = ["all"] }
 test-strategy = "0.4"
