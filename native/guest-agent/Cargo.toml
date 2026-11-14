@@ -30,9 +30,14 @@ tonic-prost-build = "0.14"
 
 [dev-dependencies]
 pretty_assertions = "1"
+proptest = "1"
 rstest = "0.28"
 tokio-stream = "0.1"
 
 [[test]]
 name = "exec"
 path = "tests/exec.rs"
+
+[[test]]
+name = "exec_properties"
+path = "tests/exec_properties.rs"

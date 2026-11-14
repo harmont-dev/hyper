@@ -564,6 +564,10 @@ mod tests {
 
     impl Lab {
         fn new(test: &str) -> Self {
+            Self::with_blocked(test, &Blocked::default())
+        }
+
+        fn with_blocked(test: &str, blocked: &Blocked) -> Self {
             let guest = ScratchNs::new(&format!("{test}-guest"));
             let vm = ScratchNs::new(&format!("{test}-vm"));
             let host = ScratchNs::new(&format!("{test}-host"));
@@ -630,7 +634,7 @@ mod tests {
                     GUEST_V6.parse().unwrap(),
                     Uid::from_raw(FIRECRACKER),
                     "198.51.100.1".parse().unwrap(),
-                    &Blocked::default(),
+                    blocked,
                     &HOST_ADDRS.map(|addr| addr.parse().unwrap()),
                 ),
                 VmNet::firewall_table(&firewall),
@@ -869,5 +873,254 @@ mod tests {
             .unwrap();
 
         assert_eq!(uplink.proxy_neighs().unwrap(), vec![live]);
+    }
+
+    mod hostile_guest {
+        //! A guest that forges, impersonates and probes, against the namespace's tables.
+        //!
+        //! Laws:
+        //! - a TCP segment whose source port's high byte reads as a neighbour-discovery
+        //!   type is not neighbour discovery: it never reaches a namespace service;
+        //! - the namespace's link-local and uplink addresses serve the guest nothing;
+        //! - the DNS redirect never carries a forged source to the resolver;
+        //! - the jailed Firecracker reaches not even its own guest;
+        //! - with `[net] blocked` empty, the host's addresses and the transit range stay
+        //!   unreachable from the guest;
+        //! - a router advertisement from the guest never reaches the namespace, even on a
+        //!   `tap0` that would otherwise act on it.
+
+        use super::{Lab, Probe, DROPPED_AFTER, FIRECRACKER, NAMESPACE};
+        use crate::net::Blocked;
+        use pretty_assertions::assert_eq;
+        use rstest::rstest;
+        use socket2::{Domain, Protocol, Socket, Type};
+        use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+        use std::process::Command;
+        use std::time::Duration;
+
+        const SOLICIT_SPORT: u16 = 135 << 8;
+        const ADVERT_SPORT: u16 = 136 << 8;
+        const ROUTER_ADVERT: u8 = 134;
+        const RA_PREFIX: &str = "2001:db8:bad::";
+
+        fn skip_unless_root(test: &str) -> bool {
+            if nix::unistd::geteuid().is_root() {
+                return false;
+            }
+            eprintln!("SKIP {test}: needs root");
+            true
+        }
+
+        fn lab_name(parts: &str) -> String {
+            let mut name: String = parts
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect();
+            name.truncate(40);
+            name
+        }
+
+        fn eth0(lab: &Lab) -> u32 {
+            lab.guest
+                .get()
+                .rtnl()
+                .unwrap()
+                .link(&Lab::name("eth0"))
+                .unwrap()
+                .unwrap()
+                .index()
+                .get()
+        }
+
+        /// Link-local destinations are scoped to the guest's `eth0`.
+        fn target(lab: &Lab, to: &str) -> SocketAddr {
+            let to: SocketAddr = to.parse().unwrap();
+            match to {
+                SocketAddr::V6(v6) if v6.ip().is_unicast_link_local() => {
+                    SocketAddrV6::new(*v6.ip(), v6.port(), 0, eth0(lab)).into()
+                }
+                to => to,
+            }
+        }
+
+        fn guest_connects(lab: &Lab, src: Option<&str>, sport: u16, to: &str) -> bool {
+            let to = target(lab, to);
+            lab.guest
+                .get()
+                .scoped(|| {
+                    let socket = Socket::new(Domain::for_address(to), Type::STREAM, None).unwrap();
+                    socket.set_reuse_address(true).unwrap();
+                    let src: IpAddr = match (src, to) {
+                        (Some(src), _) => src.parse().unwrap(),
+                        (None, SocketAddr::V4(_)) => IpAddr::from([0, 0, 0, 0]),
+                        (None, SocketAddr::V6(_)) => Ipv6Addr::UNSPECIFIED.into(),
+                    };
+                    socket.bind(&SocketAddr::new(src, sport).into()).unwrap();
+                    socket.connect_timeout(&to.into(), DROPPED_AFTER).is_ok()
+                })
+                .unwrap()
+        }
+
+        #[rstest]
+        #[case::solicit_lookalike_to_a_namespace_service(
+            None,
+            SOLICIT_SPORT,
+            "172.16.0.1:7074",
+            false
+        )]
+        #[case::advert_lookalike_to_a_namespace_service(
+            None,
+            ADVERT_SPORT,
+            "172.16.0.1:7074",
+            false
+        )]
+        #[case::solicit_lookalike_over_link_local(None, SOLICIT_SPORT, "[fe80::1]:7074", false)]
+        #[case::advert_lookalike_over_link_local(None, ADVERT_SPORT, "[fe80::1]:7074", false)]
+        #[case::link_local_to_a_namespace_service(None, 0, "[fe80::1]:7074", false)]
+        #[case::uplink_address_to_a_namespace_service(None, 0, "10.200.0.2:7074", false)]
+        #[case::forged_source_through_the_dns_redirect(
+            Some("192.0.2.9"),
+            0,
+            "172.16.0.1:53",
+            false
+        )]
+        #[case::forged_ipv6_source_to_the_host(
+            Some("2001:db8::1:0:0:6"),
+            SOLICIT_SPORT,
+            "[2001:db8:ffff::1]:7071",
+            false
+        )]
+        #[case::lookalike_port_still_reaches_the_internet(
+            None,
+            SOLICIT_SPORT,
+            "198.51.100.1:7071",
+            true
+        )]
+        fn a_hostile_guest_reaches_only_what_policy_allows_as_root(
+            #[case] src: Option<&str>,
+            #[case] sport: u16,
+            #[case] to: &str,
+            #[case] reachable: bool,
+        ) {
+            if skip_unless_root("hostile guest") {
+                return;
+            }
+            let lab = Lab::new(&lab_name(&format!("hg-{src:?}-{sport}-{to}")));
+
+            assert_eq!(guest_connects(&lab, src, sport, to), reachable);
+        }
+
+        #[rstest]
+        #[case::as_firecracker(FIRECRACKER, false)]
+        #[case::as_root(0, true)]
+        fn the_jailed_firecracker_cannot_reach_its_own_guest_as_root(
+            #[case] uid: u32,
+            #[case] reachable: bool,
+        ) {
+            if skip_unless_root("namespace to guest") {
+                return;
+            }
+            let lab = Lab::new(&format!("hg-fc-{uid}"));
+
+            assert_eq!(
+                lab.connects(Probe::Namespace(uid), "172.16.0.2:7071".parse().unwrap()),
+                reachable
+            );
+        }
+
+        #[rstest]
+        #[case::the_host_veth("10.200.0.1:7071", false)]
+        #[case::a_host_address("198.51.100.2:7071", false)]
+        #[case::a_host_address_over_ipv6("[2001:db8:ffff::2]:7071", false)]
+        #[case::the_internet("198.51.100.1:7071", true)]
+        fn with_nothing_blocked_the_guest_still_never_reaches_the_host_as_root(
+            #[case] to: &str,
+            #[case] reachable: bool,
+        ) {
+            if skip_unless_root("empty blocked") {
+                return;
+            }
+            let lab = Lab::with_blocked(
+                &lab_name(&format!("hg-nb-{to}")),
+                &Blocked::try_from(Vec::new()).unwrap(),
+            );
+
+            assert_eq!(guest_connects(&lab, None, 0, to), reachable);
+        }
+
+        /// An RA from `fe80::2` on `eth0` announcing `RA_PREFIX/64` and itself as a default
+        /// router.
+        fn send_router_advert(lab: &Lab) {
+            let index = eth0(lab);
+            lab.guest
+                .get()
+                .scoped(|| {
+                    let socket =
+                        Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6)).unwrap();
+                    socket.set_multicast_hops_v6(255).unwrap();
+                    socket.set_unicast_hops_v6(255).unwrap();
+                    socket.set_multicast_if_v6(index).unwrap();
+                    let src = SocketAddrV6::new("fe80::2".parse().unwrap(), 0, 0, index);
+                    socket.bind(&src.into()).unwrap();
+                    let mut ra = vec![ROUTER_ADVERT, 0, 0, 0, 64, 0];
+                    ra.extend_from_slice(&1800u16.to_be_bytes());
+                    ra.extend_from_slice(&[0; 8]);
+                    ra.extend_from_slice(&[3, 4, 64, 0xc0]);
+                    ra.extend_from_slice(&86_400u32.to_be_bytes());
+                    ra.extend_from_slice(&14_400u32.to_be_bytes());
+                    ra.extend_from_slice(&[0; 4]);
+                    ra.extend_from_slice(&RA_PREFIX.parse::<Ipv6Addr>().unwrap().octets());
+                    let all_nodes = SocketAddrV6::new("ff02::1".parse().unwrap(), 0, 0, index);
+                    socket.send_to(&ra, &all_nodes.into()).unwrap();
+                })
+                .unwrap();
+        }
+
+        fn namespace_routes(lab: &Lab) -> String {
+            let out = lab
+                .vm
+                .get()
+                .scoped(|| Command::new("ip").args(["-6", "route", "show"]).output())
+                .unwrap()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        }
+
+        #[rstest]
+        fn a_router_advert_from_the_guest_never_reaches_the_namespace_as_root() {
+            if skip_unless_root("guest router advert") {
+                return;
+            }
+            let lab = Lab::new("hg-ra");
+            lab.vm
+                .get()
+                .scoped(|| {
+                    std::fs::write("/proc/sys/net/ipv6/conf/tap0/accept_ra", "2").unwrap();
+                })
+                .unwrap();
+
+            send_router_advert(&lab);
+            std::thread::sleep(Duration::from_secs(1));
+
+            let routes = namespace_routes(&lab);
+            assert!(
+                !routes.contains("proto ra") && !routes.contains(RA_PREFIX.trim_end_matches(':')),
+                "{routes}"
+            );
+        }
+
+        #[rstest]
+        fn a_namespace_service_is_reachable_from_the_namespace_itself_as_root() {
+            if skip_unless_root("namespace service control") {
+                return;
+            }
+            let lab = Lab::new("hg-ctl");
+
+            assert!(lab.connects(
+                Probe::Namespace(0),
+                format!("127.0.0.1:{NAMESPACE}").parse().unwrap()
+            ));
+        }
     }
 }

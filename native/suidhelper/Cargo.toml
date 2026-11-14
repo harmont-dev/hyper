@@ -28,12 +28,36 @@ name = "config_seam"
 path = "tests/config_seam.rs"
 
 [[test]]
+name = "caller_authorize"
+path = "tests/caller_authorize.rs"
+
+[[test]]
+name = "cli_request"
+path = "tests/cli_request.rs"
+
+[[test]]
+name = "request_wire_properties"
+path = "tests/request_wire_properties.rs"
+
+[[test]]
 name = "e2e_config"
 path = "tests/e2e/config.rs"
 
 [[test]]
 name = "e2e_firewall"
 path = "tests/e2e/firewall.rs"
+
+[[test]]
+name = "e2e_vm_net"
+path = "tests/e2e/vm_net.rs"
+
+[[test]]
+name = "e2e_vm_net_traffic"
+path = "tests/e2e/vm_net_traffic.rs"
+
+[[test]]
+name = "e2e_caller_gate"
+path = "tests/e2e/caller_gate.rs"
 
 [[test]]
 name = "e2e_argv"
@@ -48,6 +72,18 @@ name = "e2e_chroot_jail"
 path = "tests/e2e/chroot_jail.rs"
 
 [[test]]
+name = "e2e_socket_pin"
+path = "tests/e2e/socket_pin.rs"
+
+[[test]]
+name = "e2e_lock_dir_hostile"
+path = "tests/e2e/lock_dir_hostile.rs"
+
+[[test]]
+name = "e2e_claim_privacy"
+path = "tests/e2e/claim_privacy.rs"
+
+[[test]]
 name = "e2e_version"
 path = "tests/e2e/version.rs"
 
@@ -60,6 +96,10 @@ name = "e2e_fork_delta"
 path = "tests/e2e/fork_delta.rs"
 
 [[test]]
+name = "e2e_fork_delta_live"
+path = "tests/e2e/fork_delta_live.rs"
+
+[[test]]
 name = "e2e_img"
 path = "tests/e2e/img.rs"
 
@@ -70,6 +110,10 @@ path = "tests/config_uid_gid_range.rs"
 [[test]]
 name = "config_paths"
 path = "tests/config_paths.rs"
+
+[[test]]
+name = "net_addressing"
+path = "tests/net_addressing.rs"
 
 [[test]]
 name = "dm_backing"
