@@ -6,7 +6,7 @@ use super::file::{
     Any, DeviceType, FileType, IsDirectory, OpenFlags, Owner, Ownership, SafeFile, ValidationError,
     Writability,
 };
-use super::path::{StrictComponent, StrictComponentBuf};
+use super::path::{LooseComponent, LooseComponentBuf, StrictComponent};
 use nix::dir::{Dir, Type};
 use nix::errno::Errno;
 use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
@@ -28,6 +28,8 @@ pub enum DirError {
     Sys(#[from] Errno),
     #[error(transparent)]
     Io(#[from] io::Error),
+    #[error("directory moved while it was being removed")]
+    Moved,
     #[error("existing device node is {found}, expected {expected}")]
     DeviceMismatch {
         expected: DeviceNumber,
@@ -41,9 +43,20 @@ impl DirError {
         match self {
             DirError::Open(ValidationError::Open(errno) | ValidationError::Fstat(errno))
             | DirError::Sys(errno) => Some(*errno),
-            DirError::Open(_) | DirError::Io(_) | DirError::DeviceMismatch { .. } => None,
+            DirError::Open(_)
+            | DirError::Io(_)
+            | DirError::Moved
+            | DirError::DeviceMismatch { .. } => None,
         }
     }
+}
+
+type FileId = (libc::dev_t, libc::ino_t);
+
+struct Ancestor {
+    id: FileId,
+    name: LooseComponentBuf,
+    subdirs: Vec<LooseComponentBuf>,
 }
 
 /// See [`SafeFile<IsDirectory, R, O>`].
@@ -57,13 +70,13 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
         flags: OpenFlags,
         mode: Mode,
     ) -> Result<SafeFile<T, R2, O2>, ValidationError> {
-        let how = OpenHow::new()
-            .flags(OFlag::from(flags) | T::OPEN_FLAGS | OFlag::O_CLOEXEC)
-            .mode(mode)
-            .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_BENEATH);
-        let raw = openat2(self.as_raw_fd(), name.as_ref(), how).map_err(ValidationError::Open)?;
-        // SAFETY: openat2 just handed us this fd; nobody else owns it.
-        SafeFile::try_from(unsafe { OwnedFd::from_raw_fd(raw) })
+        SafeFile::open_at(
+            self.as_raw_fd(),
+            name.as_ref(),
+            flags,
+            mode,
+            ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_BENEATH,
+        )
     }
 
     /// Create file `name` in this directory, failing if it exists.
@@ -154,7 +167,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     ///
     /// Note that this must remain private as this function is a footgun. It's very dangerous and
     /// risky to use this function as it causes an array of TOCTOU bugs.
-    fn statat(&self, name: &StrictComponent) -> nix::Result<FileStat> {
+    fn statat(&self, name: &LooseComponent) -> nix::Result<FileStat> {
         let how = OpenHow::new()
             .flags(OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC)
             .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_BENEATH);
@@ -184,21 +197,73 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
 
     /// Recursively, without following symlinks, remove child `name` and everything under it.
     pub fn rmdirat_recursive(&self, name: &StrictComponent) -> Result<(), DirError> {
-        let child: SafeDir = self.openat(name, OpenFlags::RDONLY, Mode::empty())?;
-        let entries = child.entries()?.collect::<nix::Result<Vec<_>>>()?;
-        for (entry, ty) in entries {
-            match ty {
-                Type::Directory => child.rmdirat_recursive(&entry)?,
-                _ => child.unlinkat(&entry)?,
+        // Walk with no fd held per level, so depth is bounded by memory rather than
+        // RLIMIT_NOFILE; climbing through `..` is confined by matching the recorded parent inode.
+        let mut dir: SafeDir = self.openat(name, OpenFlags::RDONLY, Mode::empty())?;
+        let mut subdirs = dir.unlink_non_dirs()?;
+        let mut ancestors: Vec<Ancestor> = Vec::new();
+        loop {
+            if let Some(sub) = subdirs.pop() {
+                let child: SafeDir = dir.openat(&sub, OpenFlags::RDONLY, Mode::empty())?;
+                ancestors.push(Ancestor {
+                    id: dir.id()?,
+                    name: sub,
+                    subdirs: std::mem::replace(&mut subdirs, child.unlink_non_dirs()?),
+                });
+                dir = child;
+            } else if let Some(ancestor) = ancestors.pop() {
+                let parent = dir.parent()?;
+                if parent.id()? != ancestor.id {
+                    return Err(DirError::Moved);
+                }
+                unlinkat(
+                    Some(parent.as_raw_fd()),
+                    ancestor.name.as_path(),
+                    UnlinkatFlags::RemoveDir,
+                )?;
+                dir = parent;
+                subdirs = ancestor.subdirs;
+            } else {
+                break;
             }
         }
+        drop(dir);
         Ok(self.rmdirat(name)?)
+    }
+
+    fn unlink_non_dirs(&self) -> Result<Vec<LooseComponentBuf>, DirError> {
+        let mut subdirs = Vec::new();
+        for entry in self.entries()? {
+            match entry? {
+                (name, Type::Directory) => subdirs.push(name),
+                (name, _) => unlinkat(
+                    Some(self.as_raw_fd()),
+                    name.as_path(),
+                    UnlinkatFlags::NoRemoveDir,
+                )?,
+            }
+        }
+        Ok(subdirs)
+    }
+
+    fn parent(&self) -> Result<SafeDir, ValidationError> {
+        SafeFile::open_at(
+            self.as_raw_fd(),
+            Path::new(".."),
+            OpenFlags::RDONLY,
+            Mode::empty(),
+            ResolveFlag::RESOLVE_NO_SYMLINKS,
+        )
+    }
+
+    fn id(&self) -> nix::Result<FileId> {
+        fstat(self.as_raw_fd()).map(|stat| (stat.st_dev, stat.st_ino))
     }
 
     /// Get an iterator through all the entries in this directory.
     pub fn entries(
         &self,
-    ) -> Result<impl Iterator<Item = nix::Result<(StrictComponentBuf, Type)>> + '_, DirError> {
+    ) -> Result<impl Iterator<Item = nix::Result<(LooseComponentBuf, Type)>> + '_, DirError> {
         let fresh: SafeDir = self.openat(Path::new("."), OpenFlags::RDONLY, Mode::empty())?;
 
         Ok(Dir::from(OwnedFd::from(fresh))?
@@ -214,7 +279,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
                     return None;
                 }
 
-                let name: &StrictComponent = match OsStr::from_bytes(bytes).try_into() {
+                let name: &LooseComponent = match OsStr::from_bytes(bytes).try_into() {
                     Ok(name) => name,
                     Err(_) => return Some(Err(Errno::EINVAL)),
                 };
