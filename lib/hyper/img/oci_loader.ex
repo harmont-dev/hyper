@@ -216,19 +216,22 @@ defmodule Hyper.Img.OciLoader do
           {:ok, Path.t()} | {:error, term()}
   defp build_ext4(rootfs, {size, inodes}) do
     Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs (#{inodes} inodes)")
-    File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
+    :ok = Sys.Posix.mkdir_private(Hyper.Cfg.Dirs.layer_dir())
 
     staged =
-      Path.join(Hyper.Cfg.Dirs.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
+      Path.join(
+        Hyper.Cfg.Dirs.layer_dir(),
+        ".incoming-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}.img"
+      )
 
     args =
       ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
         ["#{Information.as_mib(size)}M"]
 
-    case tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs) do
-      :ok ->
-        {:ok, staged}
-
+    with :ok <- Sys.Posix.create_private_file(staged),
+         :ok <- tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs) do
+      {:ok, staged}
+    else
       {:error, _} = err ->
         _ = File.rm(staged)
         err

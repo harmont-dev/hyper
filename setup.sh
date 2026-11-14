@@ -111,11 +111,9 @@ echo 'd /sys/fs/cgroup/hyper 0755 root root -' \
   | sudo tee /etc/tmpfiles.d/hyper-cgroup.conf >/dev/null
 
 info "work dir ($WORK_DIR)"
-sudo mkdir -p "$WORK_DIR"
-sudo chown "$(id -u):$(id -g)" "$WORK_DIR"
 # layers/ must pre-exist: boot validation (Layer.Repo.test_system) checks
 # it, and the node only creates it lazily on first image load.
-mkdir -p "$WORK_DIR/layers"
+sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0700 "$WORK_DIR" "$WORK_DIR/layers"
 
 info "compiling hyper (first run builds two Rust crates -- takes a while)"
 mix deps.get

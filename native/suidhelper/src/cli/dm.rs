@@ -48,6 +48,8 @@ pub enum DmError {
     #[error(transparent)]
     LoopControl(#[from] loopdev::OpenError),
     #[error(transparent)]
+    Backing(#[from] loopdev::BackingError),
+    #[error(transparent)]
     Attach(#[from] loopdev::AttachError),
     #[error(transparent)]
     Run(#[from] dm::RunError),
@@ -103,17 +105,17 @@ impl HyperDmTable {
         token: &mut Unprivileged,
     ) -> Result<Created, DmError> {
         let dm = dm::Dmsetup::new(Config::get().dmsetup()?);
+        let backings = self.open_loop_backings(|role| match role {
+            Role::Origin => Access::ReadOnly,
+            Role::Cow => access,
+            Role::Metadata | Role::Data => Access::ReadWrite,
+        })?;
         let (device, loops) = {
             let _root = token.elevate()?;
             let control = LoopControl::open()?;
             let mut loops = BTreeMap::new();
-            let mut attached = self.attach(|role, backing| {
-                let role_access = match role {
-                    Role::Origin => Access::ReadOnly,
-                    Role::Cow => access,
-                    Role::Metadata | Role::Data => Access::ReadWrite,
-                };
-                let device = control.attach(backing.file(), role_access, ATTACH_TIMEOUT)?;
+            let mut attached = self.attach(|role, _| {
+                let device = control.attach(&backings[&role], ATTACH_TIMEOUT)?;
                 let path = device.path().to_owned();
                 loops.insert(role, device);
                 Ok::<_, DmError>(path)

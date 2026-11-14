@@ -320,8 +320,7 @@ subdirectory already exists -- the node only creates it lazily on first image
 load, so pre-create it now:
 
 ```sh
-sudo mkdir -p /srv/hyper/layers
-sudo chown -R hyper:hyper /srv/hyper
+sudo install -d -o hyper -g hyper -m 0700 /srv/hyper /srv/hyper/layers
 ```
 
 ## Installation

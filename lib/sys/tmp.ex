@@ -37,7 +37,7 @@ defmodule Sys.Tmp do
   """
   @spec with_tmpfile(String.t(), (Path.t() -> result)) :: result when result: var
   def with_tmpfile(prefix \\ "hyper", fun) when is_function(fun, 1) do
-    path = create_exclusive!(prefix, &touch_exclusive/1, @attempts)
+    path = create_exclusive!(prefix, &Sys.Posix.create_private_file/1, @attempts)
 
     try do
       fun.(path)
@@ -73,15 +73,6 @@ defmodule Sys.Tmp do
   @spec mkdir_private(Path.t()) :: :ok | {:error, File.posix()}
   defp mkdir_private(path) do
     with :ok <- File.mkdir(path), do: File.chmod(path, 0o700)
-  end
-
-  # O_CREAT|O_EXCL: fails :eexist on any pre-existing path, symlinks included.
-  @spec touch_exclusive(Path.t()) :: :ok | {:error, File.posix()}
-  defp touch_exclusive(path) do
-    case File.open(path, [:write, :exclusive]) do
-      {:ok, io} -> File.close(io)
-      {:error, _} = err -> err
-    end
   end
 
   @spec create_exclusive!(String.t(), (Path.t() -> :ok | {:error, File.posix()}), pos_integer()) ::

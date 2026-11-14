@@ -120,4 +120,60 @@ defmodule Sys.PosixTest do
       end
     end
   end
+
+  defp mode(path), do: Bitwise.band(File.lstat!(path).mode, 0o7777)
+
+  describe "create_private_file/1" do
+    test "creates an empty 0600 regular file" do
+      Tmp.with_tempdir(fn dir ->
+        path = Path.join(dir, "f")
+        assert Posix.create_private_file(path) == :ok
+        assert %File.Stat{type: :regular, size: 0} = File.lstat!(path)
+        assert mode(path) == 0o600
+      end)
+    end
+
+    test "refuses any existing path with :eexist and leaves it as it was" do
+      Tmp.with_tempdir(fn dir ->
+        file = regular_file(dir, 0o644)
+        link = Path.join(dir, "link")
+        File.ln_s!(Path.join(dir, "missing"), link)
+
+        for path <- [file, link, dir] do
+          before = File.lstat!(path)
+          assert Posix.create_private_file(path) == {:error, :eexist}, path
+          assert File.lstat!(path) == before, path
+        end
+
+        refute File.exists?(Path.join(dir, "missing"))
+      end)
+    end
+  end
+
+  describe "ensure_private_file/1" do
+    test "tightens an existing file to 0600 and keeps its bytes" do
+      Tmp.with_tempdir(fn dir ->
+        path = regular_file(dir, 0o664)
+        assert Posix.ensure_private_file(path) == :ok
+        assert mode(path) == 0o600
+        assert File.read!(path) == "x"
+      end)
+    end
+
+    test "creates a missing file 0600" do
+      Tmp.with_tempdir(fn dir ->
+        path = Path.join(dir, "f")
+        assert Posix.ensure_private_file(path) == :ok
+        assert mode(path) == 0o600
+      end)
+    end
+  end
+
+  describe "mkdir_private/1" do
+    test "refuses a path that is a regular file with :eexist" do
+      Tmp.with_tempdir(fn dir ->
+        assert Posix.mkdir_private(regular_file(dir, 0o644)) == {:error, :eexist}
+      end)
+    end
+  end
 end

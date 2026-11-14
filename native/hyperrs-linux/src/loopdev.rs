@@ -109,8 +109,6 @@ pub enum OpenError {
 
 #[derive(Debug, ThisError)]
 pub enum AttachError {
-    #[error("reopening backing file: {0}")]
-    Backing(#[source] file::ValidationError),
     #[error("LOOP_CTL_GET_FREE: {0}")]
     GetFree(#[source] Errno),
     #[error("kernel returned invalid loop number {0}")]
@@ -121,6 +119,29 @@ pub enum AttachError {
     Configure(#[source] Errno),
     #[error("no free loop device after {0:?}")]
     TimedOut(Duration),
+}
+
+#[derive(Debug, ThisError)]
+#[error("reopening backing file: {0}")]
+pub struct BackingError(#[source] file::ValidationError);
+
+pub struct LoopBacking {
+    file: SafeFile<IsRegularFile, Any, Any>,
+    access: Access,
+}
+
+impl LoopBacking {
+    pub fn open(
+        backing: &SafeFile<IsRegularFile, Any, Any>,
+        access: Access,
+    ) -> Result<Self, BackingError> {
+        let flags = match access {
+            Access::ReadOnly => OpenFlags::RDONLY,
+            Access::ReadWrite => OpenFlags::RDWR,
+        };
+        let file = backing.reopen(flags).map_err(BackingError)?;
+        Ok(Self { file, access })
+    }
 }
 
 pub struct LoopControl(SafeFile<IsCharDevice, Any, Any>);
@@ -139,26 +160,20 @@ impl LoopControl {
         Ok(Self(file))
     }
 
-    pub fn attach<R, O>(
+    pub fn attach(
         &self,
-        backing: &SafeFile<IsRegularFile, R, O>,
-        access: Access,
+        backing: &LoopBacking,
         timeout: Duration,
-    ) -> Result<LoopDevice, AttachError>
-    where
-        R: file::Ownership,
-        O: file::Writability,
-    {
+    ) -> Result<LoopDevice, AttachError> {
         let deadline = Instant::now() + timeout;
 
-        let (open_flags, lo_flags) = match access {
-            Access::ReadOnly => (OpenFlags::RDONLY, LO_FLAGS_AUTOCLEAR | LO_FLAGS_READ_ONLY),
-            Access::ReadWrite => (OpenFlags::RDWR, LO_FLAGS_AUTOCLEAR),
+        let lo_flags = match backing.access {
+            Access::ReadOnly => LO_FLAGS_AUTOCLEAR | LO_FLAGS_READ_ONLY,
+            Access::ReadWrite => LO_FLAGS_AUTOCLEAR,
         };
 
-        let backing = backing.reopen(open_flags).map_err(AttachError::Backing)?;
         let config = LoopConfig {
-            fd: backing.as_raw_fd() as u32,
+            fd: backing.file.as_raw_fd() as u32,
             info: LoopInfo64 {
                 lo_flags,
                 ..LoopInfo64::default()
@@ -220,11 +235,61 @@ impl LoopDevice {
 
 #[cfg(test)]
 mod tests {
-    use super::LoopDevNum;
+    use super::{BackingError, LoopBacking, LoopDevNum};
+    use crate::Access;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
+    use hyperrs_fs::file::{Any, IsRegularFile, OpenFlags, SafeFile, ValidationError};
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use nix::errno::Errno;
+    use nix::fcntl::{fcntl, FcntlArg, OFlag};
+    use nix::unistd::geteuid;
     use proptest::prelude::*;
     use rstest::rstest;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::io::AsRawFd;
     use std::path::Path;
     use test_strategy::proptest;
+
+    fn backing_file(dir: &TempDir, mode: u32) -> SafeFile<IsRegularFile, Any, Any> {
+        let file = dir.child("backing.img");
+        file.touch().unwrap();
+        std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+        let path: SafePathBuf<IsAbsolute, StrictComponents> =
+            file.path().to_path_buf().try_into().unwrap();
+        SafeFile::open(&path, OpenFlags::PATH).unwrap()
+    }
+
+    #[rstest]
+    #[case::read_only(Access::ReadOnly, OFlag::O_RDONLY)]
+    #[case::read_write(Access::ReadWrite, OFlag::O_RDWR)]
+    fn backing_is_opened_with_the_access_it_attaches_with(
+        #[case] access: Access,
+        #[case] expected: OFlag,
+    ) {
+        let dir = TempDir::new().unwrap();
+        let backing = LoopBacking::open(&backing_file(&dir, 0o600), access).unwrap();
+        let flags =
+            OFlag::from_bits_truncate(fcntl(backing.file.as_raw_fd(), FcntlArg::F_GETFL).unwrap());
+        assert_eq!(flags & OFlag::O_ACCMODE, expected);
+    }
+
+    #[test]
+    fn backing_the_caller_cannot_write_is_refused_read_write() {
+        if geteuid().is_root() {
+            eprintln!(
+                "SKIP backing_the_caller_cannot_write_is_refused_read_write: root bypasses DAC"
+            );
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let file = backing_file(&dir, 0o400);
+        assert!(LoopBacking::open(&file, Access::ReadOnly).is_ok());
+        assert!(matches!(
+            LoopBacking::open(&file, Access::ReadWrite),
+            Err(BackingError(ValidationError::Open(Errno::EACCES)))
+        ));
+    }
 
     #[proptest]
     fn canonical_names_round_trip(n: u32) {
