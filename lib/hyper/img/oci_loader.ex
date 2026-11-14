@@ -20,7 +20,9 @@ defmodule Hyper.Img.OciLoader do
 
   use Unit.Operators
 
-  alias Hyper.Img.OciLoader.Umoci
+  import Bitwise
+
+  alias Hyper.Img.OciLoader.{Debugfs, Mtree, Rootfs, Umoci}
   alias Hyper.Node.FireVMM.GuestAgent
   alias Unit.Information
 
@@ -63,10 +65,15 @@ defmodule Hyper.Img.OciLoader do
          {:ok, arch} <- Sys.Arch.current() do
       Sys.Tmp.with_tempdir("hyper-oci", fn tmp ->
         with {:ok, rootfs} <- pull_and_unpack(source, Sys.Arch.goarch(arch), tmp),
+             {:ok, owners} <- Mtree.read_owners(Path.dirname(rootfs)),
+             {:ok, entries} <- Rootfs.unlock(rootfs),
+             {:ok, script} <- Debugfs.script(Rootfs.fixups(entries, owners)),
+             script_path = Path.join(tmp, "ext4-ownership"),
+             :ok <- File.write(script_path, script),
              :ok <- stage_agent(rootfs, arch),
              {:ok, {content, files}} <- dir_usage(rootfs),
              params = ext4_params(content, files),
-             {:ok, staged} <- build_ext4(rootfs, params) do
+             {:ok, staged} <- build_ext4(rootfs, params, script_path) do
           Hyper.Img.create(staged, label: label)
         end
       end)
@@ -84,7 +91,8 @@ defmodule Hyper.Img.OciLoader do
       tools = [
         {"skopeo", Hyper.Cfg.Tools.skopeo()},
         {"umoci", Umoci.bin()},
-        {"mke2fs", Hyper.Cfg.Tools.mke2fs()}
+        {"mke2fs", Hyper.Cfg.Tools.mke2fs()},
+        {"debugfs", Hyper.Cfg.Tools.debugfs()}
       ]
 
       missing = for {name, path} <- tools, System.find_executable(path) == nil, do: name
@@ -113,9 +121,48 @@ defmodule Hyper.Img.OciLoader do
   def stage_agent_from(rootfs, agent_bin) do
     dest = Path.join(rootfs, "hyper-init")
 
-    with :ok <- unlink_staging_target(dest),
-         :ok <- copy_exclusive(agent_bin, dest) do
-      File.chmod(dest, 0o755)
+    with_owner_write(rootfs, fn ->
+      with :ok <- unlink_staging_target(dest), do: install(agent_bin, rootfs, dest)
+    end)
+  end
+
+  @spec with_owner_write(Path.t(), (-> result)) :: result | {:error, term()} when result: term()
+  defp with_owner_write(dir, fun) do
+    case File.lstat(dir) do
+      {:ok, %File.Stat{type: :directory, mode: mode}} when band(mode, 0o200) != 0 ->
+        fun.()
+
+      {:ok, %File.Stat{type: :directory, mode: mode}} ->
+        with :ok <- File.chmod(dir, band(mode, 0o7777) ||| 0o200) do
+          result = fun.()
+          with :ok <- File.chmod(dir, band(mode, 0o7777)), do: result
+        end
+
+      {:ok, _} ->
+        {:error, :enotdir}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # The agent is written and chmodded inside a directory this call just made,
+  # so no image-controlled name is ever resolved; rename(2) then replaces
+  # whatever sits at `dest` without following it.
+  @spec install(Path.t(), Path.t(), Path.t()) :: :ok | {:error, term()}
+  defp install(agent_bin, rootfs, dest) do
+    private = Path.join(rootfs, ".hyper-init-#{System.unique_integer([:positive])}")
+
+    with :ok <- File.mkdir(private) do
+      staged = Path.join(private, "hyper-init")
+
+      try do
+        with :ok <- copy_exclusive(agent_bin, staged),
+             :ok <- File.chmod(staged, 0o755),
+             do: File.rename(staged, dest)
+      after
+        File.rm_rf(private)
+      end
     end
   end
 
@@ -212,9 +259,9 @@ defmodule Hyper.Img.OciLoader do
   # Staged inside `layer_dir` so the later publish is an atomic same-filesystem
   # rename. `-N` pins the inode count (the default ratio starves file-dense
   # trees); the staged file is removed if mke2fs fails.
-  @spec build_ext4(Path.t(), {Information.t(), pos_integer()}) ::
+  @spec build_ext4(Path.t(), {Information.t(), pos_integer()}, Path.t()) ::
           {:ok, Path.t()} | {:error, term()}
-  defp build_ext4(rootfs, {size, inodes}) do
+  defp build_ext4(rootfs, {size, inodes}, ownership_script) do
     Logger.debug("oci: building #{Information.as_mib(size)} MiB ext4 rootfs (#{inodes} inodes)")
     File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
 
@@ -225,10 +272,10 @@ defmodule Hyper.Img.OciLoader do
       ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
         ["#{Information.as_mib(size)}M"]
 
-    case tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs) do
-      :ok ->
-        {:ok, staged}
-
+    with :ok <- tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs),
+         :ok <- Debugfs.apply_script(staged, ownership_script) do
+      {:ok, staged}
+    else
       {:error, _} = err ->
         _ = File.rm(staged)
         err
