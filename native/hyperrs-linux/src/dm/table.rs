@@ -1,13 +1,10 @@
 use super::name::MAPPER_PREFIX;
+use super::{DevPath, DevPathError};
 use super::{DmName, ParseDmDeviceError, ParseThinIdError, ThinId};
 use derive_more::{Display, TryUnwrap};
-use hyperrs_fs::path::{self, IsAbsolute, SafePathBuf, StrictComponents};
 use std::num::ParseIntError;
 use std::str::FromStr;
 use thiserror::Error as ThisError;
-
-/// A table `<dev path>` operand: an absolute path to a block device.
-pub type DevPath = SafePathBuf<IsAbsolute, StrictComponents>;
 
 /// Dmsetup tables. See `man dmsetup` for more info, under the `--table` docs.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -117,7 +114,7 @@ pub enum ParseTableError {
     Device(#[from] ParseDmDeviceError),
     /// A backing operand that is not an absolute, strict path.
     #[error("backing file path: {0}")]
-    Path(#[from] path::ValidationError),
+    Path(#[from] DevPathError),
     /// A sector count, chunk size, block size, or low-water mark that is not a `u64`.
     #[error("table number: {0}")]
     Number(#[from] ParseIntError),

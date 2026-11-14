@@ -1,5 +1,6 @@
 //! Utilities for operating on linux `dsetup`.
 
+mod dev_path;
 mod device;
 mod name;
 mod table;
@@ -8,14 +9,15 @@ pub mod thin_dump;
 
 use super::Access;
 use derive_more::Constructor;
+pub use dev_path::{DevPath, DevPathError};
 pub use device::{Device, NumberError};
 use hyperrs_process::binary::RootSafeBin;
 pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError, SizeError};
 use std::ffi::OsStr;
 use std::io;
 pub use table::{
-    DevPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable,
-    ThinPoolTable, ThinTable,
+    DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable, ThinPoolTable,
+    ThinTable,
 };
 pub use thin::{
     Active, Inactive, OpenThinError, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin,

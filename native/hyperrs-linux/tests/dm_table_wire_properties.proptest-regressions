@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc da0f31d7af3ccca07c38170ba58f18f369fb6034e6a8315ff1d8e861fb79492d # shrinks to input = _ABackingPathUnderDevMapperKeepsItsRoleAcrossRenderingArgs { name: DmName("hyper-a") }
+cc 4021084dbc75c230b1b47d408a02f10d14030163cc01ea52b8451b88200f2444 # shrinks to input = _AnyConstructibleTableRoundTripsThroughItsRenderingArgs { t: ThinPool(ThinPoolTable { sectors: 0, metadata: SafePathBuf("/a", PhantomData<(hyperrs_fs::path::IsAbsolute, hyperrs_fs::path::StrictComponents)>), data: SafePathBuf("/\u{a0}", PhantomData<(hyperrs_fs::path::IsAbsolute, hyperrs_fs::path::StrictComponents)>), block_sectors: 0, low_water: 0 }) }
