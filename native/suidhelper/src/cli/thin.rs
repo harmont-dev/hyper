@@ -99,13 +99,13 @@ impl Op for ThinPoolCreate {
                     return Err(e.into());
                 }
             }
-            let metadata = table.backing(Role::Metadata).ok_or(ThinError::NoMetadata)?;
-            metadata
-                .file()
-                .reopen(OpenFlags::WRONLY)?
-                .write_all(&[0; METADATA_HEADER_BYTES])
-                .map_err(ThinError::Zero)?;
         }
+        let metadata = table.backing(Role::Metadata).ok_or(ThinError::NoMetadata)?;
+        metadata
+            .file()
+            .reopen(OpenFlags::WRONLY)?
+            .write_all(&[0; METADATA_HEADER_BYTES])
+            .map_err(ThinError::Zero)?;
         Ok(table.create(&self.name, Access::ReadWrite, &mut token)?)
     }
 }

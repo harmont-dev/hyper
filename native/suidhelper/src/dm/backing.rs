@@ -5,6 +5,8 @@ use hyperrs_fs::dir::SafeDir;
 use hyperrs_fs::file::{self, Any, IsRegularFile, OpenFlags, SafeFile};
 use hyperrs_fs::path::{IsAbsolute, SafePath, StrictComponents};
 use hyperrs_linux::dm::{DevPath, DmTable, Role};
+use hyperrs_linux::loopdev::{self, LoopBacking};
+use hyperrs_linux::Access;
 use nix::sys::stat::Mode;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -74,6 +76,16 @@ impl HyperDmTable {
 
     pub fn backing(&self, role: Role) -> Option<&BackingFile> {
         self.backing.get(&role)
+    }
+
+    pub fn open_loop_backings(
+        &self,
+        access: impl Fn(Role) -> Access,
+    ) -> Result<BTreeMap<Role, LoopBacking>, loopdev::BackingError> {
+        self.backing
+            .iter()
+            .map(|(&role, backing)| Ok((role, LoopBacking::open(backing.file(), access(role))?)))
+            .collect()
     }
 
     pub fn attach<E>(
