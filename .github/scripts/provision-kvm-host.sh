@@ -93,6 +93,7 @@ ipv6_prefix="${ipv6_prefix:-2001:db8::/64}"
 # New veth and tap devices take their IPv6 setting from conf/default; every VM link
 # carries IPv6 link-local addresses, so it must be on.
 sudo sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0
+sudo sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<EOF

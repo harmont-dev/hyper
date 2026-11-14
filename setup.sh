@@ -53,6 +53,11 @@ printf 'dm_snapshot\ndm_thin_pool\nloop\n' \
 sudo dmsetup targets | grep -q thin-pool \
   || fail "thin-pool dm target missing after modprobe"
 
+info "forwarding"
+printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' \
+  | sudo tee /etc/sysctl.d/90-hyper.conf >/dev/null
+sudo sysctl -q -p /etc/sysctl.d/90-hyper.conf
+
 # Ubuntu ships thin_dump as a symlink into pdata_tools; the helper's SafeBin
 # rejects symlinks, so install a dereferenced hard copy under the name the
 # multi-call binary dispatches on. Skip when a prior run already placed it --
