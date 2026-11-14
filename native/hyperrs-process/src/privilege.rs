@@ -141,11 +141,11 @@ impl Unprivileged {
 
     pub fn elevate(&mut self) -> Result<Root<'_>, PrivilegeError> {
         seteuid(ROOT_UID).map_err(PrivilegeError::RaiseUser)?;
-        setegid(ROOT_GID).map_err(PrivilegeError::RaiseGroup)?;
-
+        // Held before the egid raise so that, if it fails, dropping the guard lowers euid again.
         let root = Root {
             _token: PhantomData,
         };
+        setegid(ROOT_GID).map_err(PrivilegeError::RaiseGroup)?;
 
         Ok(root)
     }
