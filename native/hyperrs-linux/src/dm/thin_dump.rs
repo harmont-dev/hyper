@@ -3,15 +3,14 @@ use super::ThinId;
 use derive_more::{Constructor, Into};
 use hyperrs_fs::file::{IsBlockDevice, SafeFile};
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{self, RootCommandExt};
 use serde::Deserialize;
 use std::io;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsFd, AsRawFd};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum DumpError {
-    #[error("passing the metadata device: {0}")]
-    Inherit(#[source] nix::Error),
     #[error("running thin_dump: {0}")]
     Spawn(#[source] io::Error),
     #[error("thin_dump failed: {0}")]
@@ -44,16 +43,17 @@ pub struct ThinDump {
 impl ThinDump {
     pub fn dump<R, O>(
         &self,
+        root: &privilege::Root<'_>,
         metadata: &SafeFile<IsBlockDevice, R, O>,
         id: ThinId,
     ) -> Result<MetadataDump, DumpError> {
-        let inherited = metadata.inheritable().map_err(DumpError::Inherit)?;
         let out = self
             .bin
             .command()
             .args(["--metadata-snap", "--dev-id", &id.to_string()])
-            .arg(format!("/proc/self/fd/{}", inherited.as_raw_fd()))
-            .env_clear()
+            .arg(format!("/proc/self/fd/{}", metadata.as_raw_fd()))
+            // The binary fd stays open so an interpreted tool can reopen itself via /proc/self/fd.
+            .spawn_as_root(root, &[self.bin.as_fd(), metadata.as_fd()])
             .output()
             .map_err(DumpError::Spawn)?;
 

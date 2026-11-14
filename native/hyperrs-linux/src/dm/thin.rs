@@ -4,6 +4,7 @@ use super::{
 use crate::Access;
 use derive_more::{Display, Into};
 use hyperrs_fs::dev::DeviceNumber;
+use hyperrs_process::privilege::Root;
 use std::ffi::OsStr;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -149,11 +150,15 @@ pub struct Thin<'a, S> {
 }
 
 impl<'a> ThinPool<'a> {
-    pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
-        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
+    pub(super) fn open(
+        dmsetup: &'a Dmsetup,
+        root: &'a Root<'a>,
+        name: &DmName,
+    ) -> Result<Self, ThinPoolError> {
+        let table = dmsetup.run(root, [OsStr::new("table"), name.as_ref()])?;
         match Self::pool_metadata(&table) {
             Some(metadata) => Ok(Self {
-                device: dmsetup.device(name),
+                device: dmsetup.device(root, name),
                 metadata,
             }),
             None => Err(ThinPoolError::NotAThinPool {
@@ -191,8 +196,8 @@ impl<'a> ThinPool<'a> {
     }
 
     pub fn open_thin(&self, name: &DmName) -> Result<Thin<'a, Active<'a>>, OpenThinError> {
-        let dmsetup = self.device.dmsetup;
-        let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
+        let Device { dmsetup, root, .. } = self.device;
+        let table = dmsetup.run(root, [OsStr::new("table"), name.as_ref()])?;
         let pool = self.device.number()?;
         let not_a_thin = || OpenThinError::NotAThin {
             name: name.clone(),
@@ -206,7 +211,7 @@ impl<'a> ThinPool<'a> {
                 Ok(Thin {
                     pool: self.clone(),
                     id: id.parse()?,
-                    state: Active(dmsetup.device(name)),
+                    state: Active(dmsetup.device(root, name)),
                 })
             }
             _ => Err(not_a_thin()),
@@ -233,12 +238,15 @@ impl<'a> ThinPool<'a> {
         let message = message.to_string();
         self.device
             .dmsetup
-            .run([
-                OsStr::new("message"),
-                self.device.name().as_ref(),
-                OsStr::new("0"),
-                OsStr::new(&message),
-            ])
+            .run(
+                self.device.root,
+                [
+                    OsStr::new("message"),
+                    self.device.name().as_ref(),
+                    OsStr::new("0"),
+                    OsStr::new(&message),
+                ],
+            )
             .map(drop)
     }
 }
@@ -262,11 +270,8 @@ impl<'a> Thin<'a, Inactive> {
             id: self.id,
             origin,
         });
-        let device = self
-            .pool
-            .device
-            .dmsetup
-            .create(name, &table, Access::ReadWrite)?;
+        let Device { dmsetup, root, .. } = self.pool.device;
+        let device = dmsetup.create(root, name, &table, Access::ReadWrite)?;
         Ok(Thin {
             pool: self.pool,
             id: self.id,
@@ -329,6 +334,7 @@ mod tests {
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
     use hyperrs_process::binary::RootSafeBin;
+    use hyperrs_process::privilege::Unprivileged;
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
@@ -544,8 +550,10 @@ mod tests {
             eprintln!("SKIP thin_pool_refuses: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::new(table, &[]);
-        let got = fake.dmsetup.thin_pool(&name("hyper-x"));
+        let got = fake.dmsetup.thin_pool(&root, &name("hyper-x"));
         assert_matches!(got, Err(ThinPoolError::NotAThinPool { .. }));
         assert_eq!(fake.calls(), ["table hyper-x"]);
     }
@@ -569,8 +577,10 @@ mod tests {
             eprintln!("SKIP snapshot_always_resumes: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::new(POOL_TABLE, failing);
-        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
         let active = pool
             .create_thin(ThinId::new(1).unwrap())
             .unwrap()
@@ -589,8 +599,10 @@ mod tests {
             eprintln!("SKIP delete_removes: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::new(POOL_TABLE, &[]);
-        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
         pool.create_thin(ThinId::new(1).unwrap())
             .unwrap()
             .activate(&name("hyper-vol"), 100, None)
@@ -612,6 +624,8 @@ mod tests {
             eprintln!("SKIP open_thin: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::with_tables(
             &[
                 ("hyper-pool", POOL_TABLE),
@@ -619,7 +633,7 @@ mod tests {
             ],
             &[],
         );
-        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
 
         let snap = pool
             .open_thin(&name("hyper-vol"))
@@ -652,8 +666,10 @@ mod tests {
             eprintln!("SKIP open_thin refusal: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], &[]);
-        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
 
         assert_matches!(
             pool.open_thin(&name("hyper-vol")),
@@ -669,8 +685,10 @@ mod tests {
             eprintln!("SKIP open_thin id: needs root to own the fake dmsetup");
             return;
         }
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let fake = Fake::with_tables(&[("hyper-pool", POOL_TABLE), ("hyper-vol", table)], &[]);
-        let pool = fake.dmsetup.thin_pool(&name("hyper-pool")).unwrap();
+        let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
 
         assert_matches!(
             pool.open_thin(&name("hyper-vol")),
