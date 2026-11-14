@@ -33,7 +33,7 @@ fn prepare_creates_netns_first_and_default_route_last() {
     // The default route (guest reachability) must come after the veth is up.
     let route_idx = cmds
         .iter()
-        .position(|c| c.argv.contains(&"default".to_string()))
+        .position(|c| c.argv.iter().any(|a| a == "default"))
         .unwrap();
     let veth_up_idx = cmds
         .iter()
@@ -68,13 +68,13 @@ fn teardown_orphan_is_exactly_ip_netns_del_by_id_alone() {
 #[rstest]
 fn host_init_masquerades_pool_out_uplink() {
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
-    assert!(cmds.iter().any(
-        |c| c.argv.contains(&"masquerade".to_string()) && c.argv.contains(&"eth0".to_string())
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| c.argv.iter().any(|a| a == "masquerade") && c.argv.iter().any(|a| a == "eth0")));
     // metadata IP is dropped
     assert!(cmds
         .iter()
-        .any(|c| c.argv.contains(&"169.254.169.254".to_string())));
+        .any(|c| c.argv.iter().any(|a| a == "169.254.169.254")));
 }
 
 #[rstest]
@@ -88,10 +88,10 @@ fn host_init_drops_guest_traffic_to_host() {
     // this isolation.
     let cmds = args::host_init_commands("eth0", "172.31.0.0/16");
     assert!(cmds.iter().any(|c| c.bin == Which::Nft
-        && c.argv.contains(&"input".to_string())
-        && c.argv.contains(&"saddr".to_string())
-        && c.argv.contains(&"172.31.0.0/16".to_string())
-        && c.argv.contains(&"drop".to_string())));
+        && c.argv.iter().any(|a| a == "input")
+        && c.argv.iter().any(|a| a == "saddr")
+        && c.argv.iter().any(|a| a == "172.31.0.0/16")
+        && c.argv.iter().any(|a| a == "drop")));
 }
 
 fn cmd(bin: Which, argv: &[&str]) -> args::Command {

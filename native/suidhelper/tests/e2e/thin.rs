@@ -205,7 +205,9 @@ fn forked_volume_freezes_the_parent_only_around_create_snap_as_root(
         after_suspend
     );
     if after_suspend.contains(&"msg-create_snap") {
-        assert!(calls.contains(&"message hyper-pool 0 create_snap 8 7".to_string()));
+        assert!(calls
+            .iter()
+            .any(|c| c == "message hyper-pool 0 create_snap 8 7"));
     }
     if succeeds {
         assert_eq!(
