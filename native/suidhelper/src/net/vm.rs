@@ -2,7 +2,7 @@
 //! One VM's network namespace: built by `vm_launch`, removed by `vm_teardown`.
 
 use super::firewall::Firewall;
-use super::{Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, NON_PUBLIC, TABLE};
+use super::{Blocked, Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, TABLE};
 use crate::config::Net;
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file::ValidationError;
@@ -179,7 +179,12 @@ impl VmNet<'_> {
         Self::existing(&host, net.uplink())?.add_proxy_neigh(guest)?;
 
         ns.enable_forwarding()?;
-        ns.scoped(|| nft.replace_table(root, &Self::table(guest, uid, net.resolver().addr())))??;
+        ns.scoped(|| {
+            nft.replace_table(
+                root,
+                &Self::table(guest, uid, net.resolver().addr(), net.blocked()),
+            )
+        })??;
         ns.scoped(|| nft.replace_table(root, &Self::firewall_table(firewall)))??;
 
         Ok(ns)
@@ -268,7 +273,7 @@ impl VmNet<'_> {
 
     /// Only the guest's own addresses leave `tap0`, and the jailed Firecracker (`uid`)
     /// sends nothing from the namespace itself.
-    fn table(guest: Ipv6Addr, uid: Uid, resolver: Ipv4Addr) -> Table {
+    fn table(guest: Ipv6Addr, uid: Uid, resolver: Ipv4Addr, blocked: &Blocked) -> Table {
         let guest_v4 = Ipv4Net {
             addr: GUEST_ADDR,
             prefix: Self::prefix(32),
@@ -308,12 +313,12 @@ impl VmNet<'_> {
                 Filter {
                     hook: Hook::Forward,
                     policy: Policy::Drop,
-                    rules: NON_PUBLIC
-                        .iter()
+                    rules: blocked
+                        .ranges()
                         .map(|range| Rule {
                             matches: vec![
                                 Match::Iifname(Iface::Named(TAP.clone())),
-                                match range.parse().expect("the non-public ranges parse") {
+                                match range {
                                     IpNet::V4(net) => Match::Ipv4Daddr(net),
                                     IpNet::V6(net) => Match::Ipv6Daddr(net),
                                 },
@@ -439,7 +444,7 @@ impl VmNet<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Firewall, VmNet, TAP, UPLINK};
+    use super::{Blocked, Firewall, VmNet, TAP, UPLINK};
     use hyperrs_linux::net::link::DuplicateAddrDetection;
     use hyperrs_linux::net::netns::NetNs;
     use hyperrs_linux::net::nft::Nft;
@@ -573,6 +578,7 @@ mod tests {
                     GUEST_V6.parse().unwrap(),
                     Uid::from_raw(FIRECRACKER),
                     "198.51.100.1".parse().unwrap(),
+                    &Blocked::default(),
                 ),
                 VmNet::firewall_table(&firewall),
             ] {

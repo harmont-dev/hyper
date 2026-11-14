@@ -33,6 +33,7 @@ const UPLINK_END: u32 = 2;
 const VM_RANGE_PREFIX: u8 = 80;
 const VM_RANGE_TAG: u128 = 1 << 48;
 const NODE_PREFIX_MAX: u8 = 64;
+const GLOBAL_UNICAST_PREFIX: u8 = 3;
 
 const TABLE: &str = "hyper";
 const FIREWALL_TABLE: &str = "hyper-firewall";
@@ -40,9 +41,9 @@ const DSTNAT_PRIORITY: i32 = -100;
 const SRCNAT_PRIORITY: i32 = 100;
 const FILTER_PRIORITY: i32 = 0;
 
-/// Where VMs may not send: private, shared (CGNAT) and link-local ranges, which is
-/// where providers keep their infrastructure and metadata services.
-const NON_PUBLIC: [&str; 15] = [
+/// The default `[net] blocked`: special-purpose ranges that aren't globally routable, where
+/// providers keep their infrastructure and metadata services ([IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/), [IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry/)).
+const DEFAULT_BLOCKED: [&str; 15] = [
     "0.0.0.0/8",
     "10.0.0.0/8",
     "100.64.0.0/10",
@@ -59,6 +60,63 @@ const NON_PUBLIC: [&str; 15] = [
     "fec0::/10",
     "::ffff:0:0/96",
 ];
+
+/// The destinations VMs may not send to, `[net] blocked`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "Vec<String>")]
+pub struct Blocked(Vec<IpNet>);
+
+impl TryFrom<Vec<String>> for Blocked {
+    type Error = IpNetParseError;
+
+    fn try_from(ranges: Vec<String>) -> Result<Self, Self::Error> {
+        ranges
+            .iter()
+            .map(|range| range.parse())
+            .collect::<Result<_, _>>()
+            .map(Self)
+    }
+}
+
+impl Default for Blocked {
+    fn default() -> Self {
+        Self(
+            DEFAULT_BLOCKED
+                .iter()
+                .map(|range| range.parse().expect("the default blocked ranges parse"))
+                .collect(),
+        )
+    }
+}
+
+impl Blocked {
+    pub fn ranges(&self) -> impl Iterator<Item = IpNet> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// The first blocked range sharing any address with `net`.
+    pub fn overlapping(&self, net: IpNet) -> Option<IpNet> {
+        self.ranges().find(|range| match (net, *range) {
+            (IpNet::V4(a), IpNet::V4(b)) => {
+                let prefix = if a.prefix.get() <= b.prefix.get() {
+                    a.prefix
+                } else {
+                    b.prefix
+                };
+                Ipv4Net { prefix, ..a }.network() == Ipv4Net { prefix, ..b }.network()
+            }
+            (IpNet::V6(a), IpNet::V6(b)) => {
+                let prefix = if a.prefix.get() <= b.prefix.get() {
+                    a.prefix
+                } else {
+                    b.prefix
+                };
+                Ipv6Net { prefix, ..a }.network() == Ipv6Net { prefix, ..b }.network()
+            }
+            (IpNet::V4(_), IpNet::V6(_)) | (IpNet::V6(_), IpNet::V4(_)) => false,
+        })
+    }
+}
 
 #[derive(Debug, ThisError, PartialEq, Eq)]
 #[error("net id {0} is past the last one, {max}", max = NetId::COUNT - 1)]
@@ -147,8 +205,8 @@ pub enum NodePrefixError {
     NotIpv6(IpNet),
     #[error("{0} is longer than /{NODE_PREFIX_MAX}, leaving no room for <prefix>:1::/80")]
     TooLong(Ipv6Net),
-    #[error("{0} overlaps {1}, which VMs may not reach; use the uplink's public prefix")]
-    NotPublic(Ipv6Net, Ipv6Net),
+    #[error("{0} is not global unicast (2000::/3)")]
+    NotGlobalUnicast(Ipv6Net),
 }
 
 /// The node's routed IPv6 prefix, `/64` or shorter.
@@ -166,33 +224,8 @@ impl FromStr for NodePrefix {
         if net.prefix.get() > NODE_PREFIX_MAX {
             return Err(NodePrefixError::TooLong(net));
         }
-        let overlapping = NON_PUBLIC
-            .iter()
-            .filter_map(
-                |range| match range.parse().expect("the non-public ranges parse") {
-                    IpNet::V6(range) => Some(range),
-                    IpNet::V4(_) => None,
-                },
-            )
-            .find(|range: &Ipv6Net| {
-                let shorter = if net.prefix.get() <= range.prefix.get() {
-                    net.prefix
-                } else {
-                    range.prefix
-                };
-                Ipv6Net {
-                    addr: net.addr,
-                    prefix: shorter,
-                }
-                .network()
-                    == Ipv6Net {
-                        addr: range.addr,
-                        prefix: shorter,
-                    }
-                    .network()
-            });
-        if let Some(range) = overlapping {
-            return Err(NodePrefixError::NotPublic(net, range));
+        if net.prefix.get() < GLOBAL_UNICAST_PREFIX || u128::from(net.addr) >> 125 != 0b001 {
+            return Err(NodePrefixError::NotGlobalUnicast(net));
         }
         Ok(Self(Ipv6Net {
             addr: net.network(),
@@ -231,8 +264,8 @@ impl NodePrefix {
 pub enum ResolverError {
     #[error(transparent)]
     Parse(#[from] AddrParseError),
-    #[error("resolver {0} is not a public unicast address, and VMs may only reach public ones")]
-    NotPublic(Ipv4Addr),
+    #[error("resolver {0} is not a unicast address")]
+    NotUnicast(Ipv4Addr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
@@ -248,17 +281,8 @@ impl FromStr for Resolver {
             || addr.is_loopback()
             || addr.is_multicast()
             || addr.is_broadcast();
-        let non_public = NON_PUBLIC
-            .iter()
-            .filter_map(
-                |range| match range.parse().expect("the non-public ranges parse") {
-                    IpNet::V4(net) => Some(net),
-                    IpNet::V6(_) => None,
-                },
-            )
-            .any(|range: Ipv4Net| Ipv4Net { addr, ..range }.network() == range.network());
-        if special || non_public {
-            return Err(ResolverError::NotPublic(addr));
+        if special {
+            return Err(ResolverError::NotUnicast(addr));
         }
         Ok(Self(addr))
     }
@@ -324,7 +348,7 @@ impl Filter {
 
 #[cfg(test)]
 mod tests {
-    use super::{NetId, NodePrefix, Resolver, ResolverError};
+    use super::{Blocked, NetId, NodePrefix, Resolver};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
@@ -466,9 +490,12 @@ mod tests {
     #[case::too_long("2001:db8::/65", None)]
     #[case::ipv4("10.0.0.0/8", None)]
     #[case::no_prefix("2001:db8::", None)]
+    #[case::link_local("fe80::/64", None)]
+    #[case::multicast("ff02::/64", None)]
+    #[case::loopback("::1/128", None)]
     #[case::unique_local("fd12:3456:789a::/64", None)]
-    #[case::covering_unique_local("fc00::/6", None)]
-    #[case::six_to_four("2002:c000:204::/48", None)]
+    #[case::wider_than_global_unicast("::/0", None)]
+    #[case::all_of_global_unicast("2000::/3", Some("2000::/3"))]
     fn node_prefixes_are_ipv6_and_at_most_64_bits(#[case] s: &str, #[case] parsed: Option<&str>) {
         assert_eq!(
             s.parse::<NodePrefix>().ok().map(|p| p.to_string()),
@@ -479,38 +506,37 @@ mod tests {
     #[rstest]
     #[case::public("1.1.1.1", Some("1.1.1.1"))]
     #[case::public_next_to_a_private_range("11.0.0.1", Some("11.0.0.1"))]
-    #[case::private("10.0.0.53", None)]
-    #[case::private_top_of_range("172.31.255.255", None)]
-    #[case::home("192.168.1.1", None)]
-    #[case::cgnat("100.64.0.1", None)]
-    #[case::link_local("169.254.169.254", None)]
     #[case::loopback("127.0.0.53", None)]
     #[case::unspecified("0.0.0.0", None)]
     #[case::multicast("224.0.0.251", None)]
     #[case::broadcast("255.255.255.255", None)]
     #[case::ipv6("2606:4700:4700::1111", None)]
-    fn only_public_ipv4_resolvers_are_accepted(#[case] s: &str, #[case] parsed: Option<&str>) {
+    fn only_unicast_ipv4_resolvers_are_accepted(#[case] s: &str, #[case] parsed: Option<&str>) {
         assert_eq!(
             s.parse::<Resolver>().ok().map(|r| r.to_string()),
             parsed.map(str::to_owned)
         );
     }
 
-    #[proptest]
-    fn every_address_in_a_vm_unreachable_range_is_refused_as_a_resolver(
-        #[strategy(prop_oneof![
-            (0u32..1 << 24).prop_map(|host| (10u32 << 24) | host),
-            (0u32..1 << 20).prop_map(|host| ((172u32 << 24) | (16 << 16)) | host),
-            (0u32..1 << 16).prop_map(|host| ((192u32 << 24) | (168 << 16)) | host),
-            (0u32..1 << 22).prop_map(|host| ((100u32 << 24) | (64 << 16)) | host),
-            (0u32..1 << 16).prop_map(|host| ((169u32 << 24) | (254 << 16)) | host),
-        ])]
-        addr: u32,
+    #[rstest]
+    #[case::ipv4_inside("10.200.0.0/16", Some("10.0.0.0/8"))]
+    #[case::ipv4_covering("0.0.0.0/0", Some("0.0.0.0/8"))]
+    #[case::ipv4_beside("11.0.0.0/8", None)]
+    #[case::ipv6_inside("fd12:3456:789a::/64", Some("fc00::/7"))]
+    #[case::ipv6_beside("2001:db8::/32", None)]
+    fn a_range_overlaps_the_first_blocked_range_sharing_an_address(
+        #[case] net: &str,
+        #[case] overlapping: Option<&str>,
     ) {
-        let addr = Ipv4Addr::from(addr);
-        prop_assert_eq!(
-            addr.to_string().parse::<Resolver>(),
-            Err(ResolverError::NotPublic(addr))
+        assert_eq!(
+            Blocked::default().overlapping(net.parse().unwrap()),
+            overlapping.map(|range| range.parse().unwrap())
         );
+    }
+
+    #[rstest]
+    fn blocked_ranges_must_be_cidrs() {
+        assert!(Blocked::try_from(vec!["10.0.0.0".to_owned()]).is_err());
+        assert!(Blocked::try_from(vec!["10.0.0.0/8".to_owned()]).is_ok());
     }
 }
