@@ -10,3 +10,6 @@ retries = 1
 path = "junit.xml"
 store-success-output = false
 store-failure-output = true
+
+[profile.mutants]
+slow-timeout = { period = "5s", terminate-after = 2 }

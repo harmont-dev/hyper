@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 //! nftables tables, applied through `nft`.
 
-use super::{IfName, Ipv4Net};
+use super::{IfName, Ipv4Net, Ipv6Net};
 use derive_more::Constructor;
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{Root, RootCommandExt};
+use nix::unistd::Uid;
 use std::io;
+use std::net::Ipv4Addr;
+use std::ops::RangeInclusive;
 use std::process::Stdio;
 use strum::IntoStaticStr;
 use thiserror::Error as ThisError;
@@ -83,7 +87,49 @@ pub struct Rule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Match {
     Ipv4Saddr(Ipv4Net),
-    Oifname(IfName),
+    Ipv4Daddr(Ipv4Net),
+    Ipv6Saddr(Ipv6Net),
+    Ipv6Daddr(Ipv6Net),
+    Iifname(Iface),
+    Oifname(Iface),
+    CtState(CtState),
+    Icmpv6Type(Icmpv6Type),
+    Skuid(Uid),
+    Dport(L4Proto, RangeInclusive<u16>),
+    Not(Box<Match>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum L4Proto {
+    Tcp,
+    Udp,
+}
+
+/// The interfaces a name match covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Iface {
+    /// Exactly this interface.
+    Named(IfName),
+    /// Every interface whose name starts with this.
+    Prefixed(IfName),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum CtState {
+    New,
+    Established,
+    Related,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+pub enum Icmpv6Type {
+    #[strum(serialize = "nd-neighbor-solicit")]
+    NeighborSolicit,
+    #[strum(serialize = "nd-neighbor-advert")]
+    NeighborAdvert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +137,7 @@ pub enum Action {
     Accept,
     Drop,
     Masquerade,
+    Dnat(Ipv4Addr),
 }
 
 /// Type-safe interface to `nft`, acting on the calling thread's network namespace.
@@ -101,21 +148,26 @@ pub struct Nft {
 
 impl Nft {
     /// Atomically create or replace `table` so it holds exactly its chains and rules.
-    pub fn replace_table(&self, table: &Table) -> Result<(), NftError> {
-        self.run(&wire::Ruleset::replace(table))
+    pub fn replace_table(&self, root: &Root<'_>, table: &Table) -> Result<(), NftError> {
+        self.run(root, &wire::Ruleset::replace(table))
     }
 
     /// Delete the table `name` in `family`; a missing table is `Ok`.
-    pub fn delete_table(&self, family: Family, name: &str) -> Result<(), NftError> {
-        self.run(&wire::Ruleset::delete(family, name))
+    pub fn delete_table(
+        &self,
+        root: &Root<'_>,
+        family: Family,
+        name: &str,
+    ) -> Result<(), NftError> {
+        self.run(root, &wire::Ruleset::delete(family, name))
     }
 
-    fn run(&self, ruleset: &wire::Ruleset<'_>) -> Result<(), NftError> {
+    fn run(&self, root: &Root<'_>, ruleset: &wire::Ruleset<'_>) -> Result<(), NftError> {
         let mut child = self
             .bin
             .command()
             .args(["-j", "-f", "-"])
-            .env_clear()
+            .spawn_as_root(root, &[])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -137,10 +189,15 @@ impl Nft {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Chain, ChainType, Family, Hook, Match, Nft, Policy, Rule, Table};
+    use super::{
+        Action, Chain, ChainType, CtState, Family, Hook, Icmpv6Type, Iface, L4Proto, Match, Nft,
+        Policy, Rule, Table,
+    };
     use crate::net::netns::NetNs;
-    use crate::net::{IpNet, Ipv4Net};
+    use crate::net::{IpNet, Ipv4Net, Ipv6Net};
     use hyperrs_process::binary::RootSafeBin;
+    use hyperrs_process::privilege::Unprivileged;
+    use nix::unistd::Uid;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
     use serde_json::{json, Value};
@@ -188,9 +245,20 @@ mod tests {
         net
     }
 
+    fn v6(net: &str) -> Ipv6Net {
+        let IpNet::V6(net) = net.parse().unwrap() else {
+            unreachable!("{net} is IPv6")
+        };
+        net
+    }
+
+    fn named(name: &str) -> Iface {
+        Iface::Named(name.parse().unwrap())
+    }
+
     fn table(kind: ChainType, hook: Hook, rules: Vec<Rule>) -> Table {
         Table {
-            family: Family::Ip,
+            family: Family::Inet,
             name: TABLE.to_owned(),
             chains: vec![Chain {
                 name: "chain".to_owned(),
@@ -223,7 +291,7 @@ mod tests {
         let out = ns
             .scoped(|| {
                 Command::new(NFT)
-                    .args(["-j", "list", "table", "ip", TABLE])
+                    .args(["-j", "list", "table", "inet", TABLE])
                     .output()
                     .unwrap()
             })
@@ -260,25 +328,24 @@ mod tests {
         let Some(ns) = ScratchNs::new(test) else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let table = table(
             ChainType::Nat,
             Hook::Postrouting,
             vec![Rule {
-                matches: vec![
-                    Match::Ipv4Saddr(v4(src)),
-                    Match::Oifname(out.parse().unwrap()),
-                ],
+                matches: vec![Match::Ipv4Saddr(v4(src)), Match::Oifname(named(out))],
                 action: Action::Masquerade,
             }],
         );
         let nft = nft();
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
 
@@ -291,12 +358,106 @@ mod tests {
     }
 
     #[rstest]
+    #[case::ipv4_daddr(Match::Ipv4Daddr(v4("169.254.0.0/16")), json!({"match": {"op": "==",
+        "left": {"payload": {"protocol": "ip", "field": "daddr"}},
+        "right": prefix("169.254.0.0", 16)}}))]
+    #[case::ipv6_saddr(Match::Ipv6Saddr(v6("2001:db8::1:0:0:5/128")), json!({"match": {"op": "==",
+        "left": {"payload": {"protocol": "ip6", "field": "saddr"}},
+        "right": "2001:db8::1:0:0:5"}}))]
+    #[case::ipv6_daddr(Match::Ipv6Daddr(v6("fc00::/7")), json!({"match": {"op": "==",
+        "left": {"payload": {"protocol": "ip6", "field": "daddr"}},
+        "right": prefix("fc00::", 7)}}))]
+    #[case::iifname_exact(Match::Iifname(named("tap0")), json!({"match": {"op": "==",
+        "left": {"meta": {"key": "iifname"}}, "right": "tap0"}}))]
+    #[case::iifname_prefix(Match::Iifname(Iface::Prefixed("vm-veth-".parse().unwrap())),
+        json!({"match": {"op": "==", "left": {"meta": {"key": "iifname"}}, "right": "vm-veth-*"}}))]
+    #[case::oifname_literal_star(Match::Oifname(named("a*")), json!({"match": {"op": "==",
+        "left": {"meta": {"key": "oifname"}}, "right": "a\\*"}}))]
+    #[case::ct_state(Match::CtState(CtState::Established), json!({"match": {"op": "in",
+        "left": {"ct": {"key": "state"}}, "right": "established"}}))]
+    #[case::icmpv6_type(Match::Icmpv6Type(Icmpv6Type::NeighborSolicit), json!({"match": {
+        "op": "==", "left": {"payload": {"protocol": "icmpv6", "field": "type"}},
+        "right": "nd-neighbor-solicit"}}))]
+    #[case::skuid(Match::Skuid(Uid::from_raw(900_001)), json!({"match": {"op": "==",
+        "left": {"meta": {"key": "skuid"}}, "right": 900_001}}))]
+    #[case::single_port(Match::Dport(L4Proto::Tcp, 25..=25), json!({"match": {"op": "==",
+        "left": {"payload": {"protocol": "tcp", "field": "dport"}}, "right": 25}}))]
+    #[case::port_range(Match::Dport(L4Proto::Udp, 6000..=6010), json!({"match": {"op": "==",
+        "left": {"payload": {"protocol": "udp", "field": "dport"}}, "right": {"range": [6000, 6010]}}}))]
+    #[case::negated_prefix(Match::Not(Box::new(Match::Ipv6Daddr(v6("2001:db8:0:0:1::/80")))),
+        json!({"match": {"op": "!=", "left": {"payload": {"protocol": "ip6", "field": "daddr"}},
+        "right": prefix("2001:db8:0:0:1::", 80)}}))]
+    #[case::double_negation(Match::Not(Box::new(Match::Not(Box::new(Match::Ipv4Daddr(v4("10.0.0.0/8")))))),
+        json!({"match": {"op": "==", "left": {"payload": {"protocol": "ip", "field": "daddr"}},
+        "right": prefix("10.0.0.0", 8)}}))]
+    fn every_match_lists_back_as_given_as_root(#[case] matches: Match, #[case] listed: Value) {
+        let Some(ns) = ScratchNs::new("nft-match") else {
+            return;
+        };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
+        let table = table(
+            ChainType::Filter,
+            Hook::Forward,
+            vec![Rule {
+                matches: vec![matches],
+                action: Action::Drop,
+            }],
+        );
+        let nft = nft();
+
+        ns.get()
+            .scoped(|| nft.replace_table(&root, &table))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            listed_rules(ns.get()),
+            Some(vec![json!([listed, {"drop": null}])])
+        );
+    }
+
+    #[rstest]
+    fn a_dnat_lists_back_as_given_as_root() {
+        let Some(ns) = ScratchNs::new("nft-dnat") else {
+            return;
+        };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
+        let table = table(
+            ChainType::Nat,
+            Hook::Prerouting,
+            vec![Rule {
+                matches: vec![Match::Dport(L4Proto::Udp, 53..=53)],
+                action: Action::Dnat("192.0.2.53".parse().unwrap()),
+            }],
+        );
+        let nft = nft();
+
+        ns.get()
+            .scoped(|| nft.replace_table(&root, &table))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            listed_rules(ns.get()),
+            Some(vec![json!([
+                {"match": {"op": "==",
+                    "left": {"payload": {"protocol": "udp", "field": "dport"}}, "right": 53}},
+                {"dnat": {"family": "ip", "addr": "192.0.2.53"}},
+            ])])
+        );
+    }
+
+    #[rstest]
     fn replacing_drops_rules_the_new_table_no_longer_has_as_root() {
         let Some(ns) = ScratchNs::new("nft-shrink") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let drop_if0 = Rule {
-            matches: vec![Match::Oifname("if0".parse().unwrap())],
+            matches: vec![Match::Oifname(named("if0"))],
             action: Action::Drop,
         };
         let accept_lan = Rule {
@@ -311,12 +472,12 @@ mod tests {
             vec![drop_if0, accept_lan.clone()],
         );
         ns.get()
-            .scoped(|| nft.replace_table(&both))
+            .scoped(|| nft.replace_table(&root, &both))
             .unwrap()
             .unwrap();
         let one = table(ChainType::Filter, Hook::Forward, vec![accept_lan]);
         ns.get()
-            .scoped(|| nft.replace_table(&one))
+            .scoped(|| nft.replace_table(&root, &one))
             .unwrap()
             .unwrap();
 
@@ -333,19 +494,21 @@ mod tests {
         let Some(ns) = ScratchNs::new("nft-delete") else {
             return;
         };
+        let mut token = Unprivileged::take().unwrap();
+        let root = token.elevate().unwrap();
         let nft = nft();
         let table = table(ChainType::Nat, Hook::Postrouting, vec![]);
 
         ns.get()
-            .scoped(|| nft.replace_table(&table))
+            .scoped(|| nft.replace_table(&root, &table))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.delete_table(Family::Ip, TABLE))
+            .scoped(|| nft.delete_table(&root, Family::Inet, TABLE))
             .unwrap()
             .unwrap();
         ns.get()
-            .scoped(|| nft.delete_table(Family::Ip, TABLE))
+            .scoped(|| nft.delete_table(&root, Family::Inet, TABLE))
             .unwrap()
             .unwrap();
 

@@ -1,4 +1,19 @@
 test_tool = "nextest"
 all_features = true
 test_workspace = true
+# A mutant that makes a lock or read spin must fail its test, not time the whole run out.
+additional_cargo_test_args = ["--profile", "mutants"]
 exclude_globs = ["suidhelper/xtask/**"]
+exclude_re = [
+    # rtnetlink, netns, nftables and sysctl wrappers act on a network namespace and need
+    # root; killed by their _as_root tests in the privileged E2E job. Flag `|` -> `^`
+    # mutants among them are equivalent (the flag bits never overlap), as is `|` -> `&`
+    # in Link::add_addr (the kernel answers EEXIST without NLM_F_REPLACE either way); the
+    # dump error arm in Rtnl::dump has no request the kernel rejects to provoke it.
+    "hyperrs-linux/src/net/link\\.rs:.*Link<'_>::",
+    "hyperrs-linux/src/net/netns\\.rs:.*NetNs::",
+    "hyperrs-linux/src/net/rtnl\\.rs:.*Rtnl::",
+    "hyperrs-linux/src/net/route\\.rs:.*Route::rtnl_message",
+    "hyperrs-linux/src/net/nft/mod\\.rs:.*Nft::",
+    "hyperrs-linux/src/sysctl\\.rs:.*Setting::(read|write)",
+]
