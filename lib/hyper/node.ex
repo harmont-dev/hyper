@@ -67,6 +67,7 @@ defmodule Hyper.Node do
     vms = [
       Hyper.Node.Users,
       {Net, host},
+      {Registry, keys: :unique, name: FireVMM.Policy.registry()},
       {DynamicSupervisor, name: @vm_sup, strategy: :one_for_one}
     ]
 
@@ -117,7 +118,8 @@ defmodule Hyper.Node do
       img_id: parent.img_id,
       type: parent.type,
       arch: parent.arch,
-      boot_args: parent.boot_args
+      boot_args: parent.boot_args,
+      firewall: parent.firewall
     }
 
     with {:ok, uid, net_id} <- claim_ids(),
@@ -259,7 +261,8 @@ defmodule Hyper.Node do
              img_id: Hyper.Img.id(),
              type: Hyper.Vm.Instance.t(),
              arch: Hyper.Vm.Instance.arch(),
-             boot_args: String.t() | nil
+             boot_args: String.t() | nil,
+             firewall: Hyper.Vm.Firewall.t()
            }}
           | {:error, term()}
   @decorate with_span("Hyper.Node.publish_fork_image", include: [:vm_id])
@@ -269,7 +272,13 @@ defmodule Hyper.Node do
 
       with {:ok, img_id} <- Img.Publish.fork_image(vm_id, parent.img_id) do
         {:ok,
-         %{img_id: img_id, type: parent.type, arch: parent.arch, boot_args: parent.boot_args}}
+         %{
+           img_id: img_id,
+           type: parent.type,
+           arch: parent.arch,
+           boot_args: parent.boot_args,
+           firewall: parent.firewall
+         }}
       end
     end
   end
@@ -291,7 +300,7 @@ defmodule Hyper.Node do
       uid: uid,
       gid: uid,
       net_id: net_id,
-      firewall: Hyper.Vm.Firewall.default(),
+      firewall: spec.firewall,
       type: spec.type,
       arch: spec.arch,
       img_id: spec.img_id,

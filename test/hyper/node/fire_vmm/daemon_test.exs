@@ -31,6 +31,12 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       File.rm(log)
     end)
 
+    unless Process.whereis(FireVMM.Policy.registry()) do
+      start_supervised!({Registry, keys: :unique, name: FireVMM.Policy.registry()})
+    end
+
+    start_supervised!({FireVMM.Policy, opts()})
+
     {:ok, log: log, fake: fake}
   end
 
@@ -111,16 +117,23 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
   end
 
   describe "jail lifecycle" do
-    test "start_link boots with one vm_launch carrying the kernel and the volume's device",
+    test "start_link boots with one vm_launch carrying the kernel, the volume's device, and the policy last set",
          %{log: log, fake: fake} do
       put_toml(fake)
+      {:ok, ssh} = Hyper.Vm.Firewall.new([{:tcp, 22..22//1}], [])
+      :ok = FireVMM.Policy.put(@vm_id, ssh)
 
       Process.flag(:trap_exit, true)
       {:ok, pid} = Daemon.start_link(opts(mutable_stub(@rootfs)))
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       assert [
-               %{"op" => "vm_launch", "kernel" => "/nonexistent/vmlinux", "device" => @rootfs}
+               %{
+                 "op" => "vm_launch",
+                 "kernel" => "/nonexistent/vmlinux",
+                 "device" => @rootfs,
+                 "firewall" => %{"inbound" => [%{"protocol" => "tcp", "ports" => [22, 22]}]}
+               }
                | exit
              ] = requests(log)
 

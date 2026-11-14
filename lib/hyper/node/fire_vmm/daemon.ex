@@ -128,6 +128,7 @@ defmodule Hyper.Node.FireVMM.Daemon do
 
   @spec launch(Opts.t()) :: {:ok, pid()} | {:error, term()}
   defp launch(%Opts{vm_id: id, mutable: mutable} = opts) do
+    opts = %{opts | firewall: Hyper.Node.FireVMM.Policy.current(id)}
     cmd = Jailer.command(opts, Hyper.Node.Img.Mutable.blk_path(mutable))
 
     # Surface what the jailed process actually does: `log_output` routes the

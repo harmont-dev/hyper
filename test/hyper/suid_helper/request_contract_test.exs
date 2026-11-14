@@ -11,8 +11,6 @@ defmodule Hyper.SuidHelper.RequestContractTest do
 
   @vm_id "v1"
 
-  @unsent_by_beam ~w(vm_firewall)
-
   setup do
     tmp = Path.join(System.tmp_dir!(), "request-contract-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -43,6 +41,12 @@ defmodule Hyper.SuidHelper.RequestContractTest do
       "vm_claim_vsock_socket" =>
         {~s({"result":"claimed"}), fn -> SuidHelper.Vm.claim_vsock_socket(@vm_id) end},
       "vm_teardown" => {~s({"result":"tore_down"}), fn -> SuidHelper.Vm.teardown(@vm_id) end},
+      "vm_firewall" =>
+        {~s({"result":"firewall_set"}),
+         fn ->
+           {:ok, firewall} = Hyper.Vm.Firewall.new([{:udp, 6000..6010//1}], [])
+           SuidHelper.Vm.firewall(@vm_id, firewall)
+         end},
       "img_activate" =>
         {~s({"result":"activated","device":"/dev/mapper/hyper-img-x","names":[]}),
          fn ->
@@ -131,7 +135,7 @@ defmodule Hyper.SuidHelper.RequestContractTest do
   defp shape(value) when is_boolean(value), do: :boolean
   defp shape(nil), do: nil
 
-  defp fixture, do: @fixture |> File.read!() |> Jason.decode!() |> Map.drop(@unsent_by_beam)
+  defp fixture, do: @fixture |> File.read!() |> Jason.decode!()
 
   defp launch_opts do
     %FireVMM.Opts{

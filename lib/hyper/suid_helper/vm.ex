@@ -13,6 +13,13 @@ defmodule Hyper.SuidHelper.Vm do
     run(%{op: "vm_teardown", id: vm_id})
   end
 
+  @doc "Replace the running VM's port policy with `firewall`."
+  @spec firewall(Hyper.Vm.Id.t(), Hyper.Vm.Firewall.t()) :: :ok | {:error, err()}
+  @decorate with_span("Hyper.SuidHelper.Vm.firewall", include: [:vm_id])
+  def firewall(vm_id, %Hyper.Vm.Firewall{} = firewall) do
+    run(%{op: "vm_firewall", id: vm_id, firewall: Hyper.Vm.Firewall.to_request(firewall)})
+  end
+
   @doc """
   Hand the firecracker API `socket` to the node user so the unprivileged
   controller can `connect()` to it. The jailer drops firecracker to a per-VM

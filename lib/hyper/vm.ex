@@ -90,13 +90,21 @@ defmodule Hyper.Vm do
         {:error, :not_found}
 
       vm_id ->
-        with {:ok, %{img_id: img_id, type: type, arch: arch, boot_args: boot_args}} <-
+        with {:ok,
+              %{
+                img_id: img_id,
+                type: type,
+                arch: arch,
+                boot_args: boot_args,
+                firewall: firewall
+              }} <-
                publish_on_owner(node(vm), vm_id) do
           Hyper.create_vm(%Hyper.Vm.Spec{
             img_id: img_id,
             type: type,
             arch: arch,
-            boot_args: boot_args
+            boot_args: boot_args,
+            firewall: firewall
           })
         end
     end
