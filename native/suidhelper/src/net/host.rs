@@ -109,39 +109,43 @@ impl HostNet<'_> {
         Filter {
             hook: Hook::Forward,
             policy: Policy::Accept,
-            rules: self
-                .blocked
-                .ranges()
-                .map(|range| {
-                    let daddr = match range {
-                        IpNet::V4(net) => Match::Ipv4Daddr(net),
-                        IpNet::V6(net) => Match::Ipv6Daddr(net),
-                    };
-                    Self::from_vms(daddr, Action::Drop)
-                })
-                .chain([
-                    Rule {
-                        matches: vec![
-                            Match::Iifname(VM_VETHS.clone()),
-                            Match::Ipv6Daddr(self.prefix.get()),
-                            not_vm_range(),
-                            Match::CtState(CtState::New),
-                        ],
-                        action: Action::Drop,
-                    },
-                    Rule {
-                        matches: vec![
-                            Match::Ipv4Daddr(NetId::transit_range()),
-                            Match::CtState(CtState::New),
-                        ],
-                        action: Action::Drop,
-                    },
-                    Rule {
-                        matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
-                        action: Action::Drop,
-                    },
-                ])
-                .collect(),
+            rules: [
+                Match::CtState(CtState::Invalid),
+                Match::Not(Box::new(Match::Ipv4Saddr(NetId::transit_range()))),
+                Match::Not(Box::new(Match::Ipv6Saddr(self.prefix.vm_range()))),
+            ]
+            .into_iter()
+            .map(|matches| Self::from_vms(matches, Action::Drop))
+            .chain(self.blocked.ranges().map(|range| {
+                let daddr = match range {
+                    IpNet::V4(net) => Match::Ipv4Daddr(net),
+                    IpNet::V6(net) => Match::Ipv6Daddr(net),
+                };
+                Self::from_vms(daddr, Action::Drop)
+            }))
+            .chain([
+                Rule {
+                    matches: vec![
+                        Match::Iifname(VM_VETHS.clone()),
+                        Match::Ipv6Daddr(self.prefix.get()),
+                        not_vm_range(),
+                        Match::CtState(CtState::New),
+                    ],
+                    action: Action::Drop,
+                },
+                Rule {
+                    matches: vec![
+                        Match::Ipv4Daddr(NetId::transit_range()),
+                        Match::CtState(CtState::New),
+                    ],
+                    action: Action::Drop,
+                },
+                Rule {
+                    matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
+                    action: Action::Drop,
+                },
+            ])
+            .collect(),
         }
         .chain()
     }
