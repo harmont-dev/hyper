@@ -35,6 +35,10 @@ defmodule Hyper.Cfg.Tools do
   @spec mke2fs :: String.t()
   def mke2fs, do: get_cfg(runtime: {__MODULE__, :mke2fs}, toml: "tools.mke2fs", default: "mke2fs")
 
+  @spec debugfs :: String.t()
+  def debugfs,
+    do: get_cfg(runtime: {__MODULE__, :debugfs}, toml: "tools.debugfs", default: "debugfs")
+
   @doc "umoci binary (node tool), or `nil` to let Hyper download a pinned release."
   @spec umoci :: String.t() | nil
   def umoci, do: get_cfg(runtime: {__MODULE__, :umoci}, toml: "tools.umoci", default: nil)
