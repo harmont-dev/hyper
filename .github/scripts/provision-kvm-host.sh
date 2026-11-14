@@ -125,9 +125,7 @@ echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control >/dev
 # The BEAM (the `runner` user -- Hyper refuses to run as root) owns work_dir.
 # layers/ must pre-exist: boot validation (Layer.Repo.test_system) checks it,
 # and the node only creates it lazily on first image load.
-sudo mkdir -p /srv/hyper
-sudo chown "$(id -u):$(id -g)" /srv/hyper
-mkdir -p /srv/hyper/layers
+sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0700 /srv/hyper /srv/hyper/layers
 
 # firecracker.install writes into /opt/firecracker as the invoking user, then
 # the helper requires both binaries root-owned and not group/world-writable.
