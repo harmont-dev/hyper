@@ -16,6 +16,8 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     and close both sockets cleanly. When either worker ends, the handler
     unlinks the sibling before killing it so the resulting `:killed` exit does
     not cascade back to the handler via the link.
+  - The guest-to-host worker stops after 16 MiB, closing the connection, so a
+    hostile guest cannot stream an unbounded reply into the client.
   - `terminate/2` closes the listen socket (which causes the acceptor to
     exit on its next accept call) and removes the socket file so a
     subsequent `start_link` with the same path can rebind.
@@ -24,9 +26,11 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
   use GenServer
 
   alias Hyper.Node.FireVMM.Agent.RelayDialer
+  alias Unit.Information
 
   @vsock_port 1024
   @dial_timeout_ms 5_000
+  @guest_reply_cap Information.mib(16)
 
   @spec child_spec(%{
           required(:vm_id) => term(),
@@ -120,8 +124,13 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
         # workers are reaped via the link rather than orphaned holding FDs.
         # pipe_bytes always exits :normal, so normal worker exits do not
         # propagate to this handler; only unexpected panics would cascade.
-        p1 = spawn_link(fn -> pipe_bytes(client_sock, upstream_sock) end)
-        p2 = spawn_link(fn -> pipe_bytes(upstream_sock, client_sock) end)
+        p1 = spawn_link(fn -> pipe_bytes(client_sock, upstream_sock, :infinity) end)
+
+        p2 =
+          spawn_link(fn ->
+            pipe_bytes(upstream_sock, client_sock, Information.as_bytes(@guest_reply_cap))
+          end)
+
         ref1 = Process.monitor(p1)
         ref2 = Process.monitor(p2)
         await_pipe_end(client_sock, upstream_sock, p1, p2, ref1, ref2)
@@ -151,18 +160,19 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     end
   end
 
-  defp pipe_bytes(from, to) do
-    case :socket.recv(from) do
-      {:ok, data} ->
-        case send_all(to, data) do
-          :ok -> pipe_bytes(from, to)
-          {:error, _} -> :ok
-        end
-
-      {:error, _} ->
-        :ok
+  defp pipe_bytes(from, to, budget) do
+    with {:ok, data} <- :socket.recv(from),
+         {:ok, left} <- spend(budget, byte_size(data)),
+         :ok <- send_all(to, data) do
+      pipe_bytes(from, to, left)
+    else
+      _ -> :ok
     end
   end
+
+  defp spend(:infinity, _n), do: {:ok, :infinity}
+  defp spend(budget, n) when n <= budget, do: {:ok, budget - n}
+  defp spend(_budget, _n), do: {:error, :guest_reply_cap}
 
   defp send_all(sock, data) do
     case :socket.send(sock, data) do
