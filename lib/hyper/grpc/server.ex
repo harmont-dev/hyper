@@ -6,7 +6,10 @@ defmodule Hyper.Grpc.Server do
   `Hyper.Grpc.Codec.to_grpc/1` (raising the `GRPC.RPCError` it returns on error).
   """
 
-  use GRPC.Server, service: Hyper.Grpc.V1.Hyper.Service
+  use GRPC.Server,
+    service: Hyper.Grpc.V1.Hyper.Service,
+    codecs: [Hyper.Grpc.Undecodable, GRPC.Codec.WebText, GRPC.Codec.JSON]
+
   use OpenTelemetryDecorator
 
   alias Hyper.Grpc.Codec
@@ -101,9 +104,11 @@ defmodule Hyper.Grpc.Server do
 
   @spec get_vm_usage(GetVmUsageRequest.t(), GRPC.Server.Stream.t()) :: GetVmUsageResponse.t()
   @decorate with_span("Hyper.Grpc.Server.get_vm_usage", include: [:vm_id])
-  def get_vm_usage(%GetVmUsageRequest{vm_id: vm_id}, _stream) do
-    case Hyper.usage(vm_id) do
-      {:ok, cpu_time} -> Codec.to_grpc({:usage, vm_id, cpu_time})
+  def get_vm_usage(%GetVmUsageRequest{vm_id: vm_id} = req, _stream) do
+    with {:ok, ^vm_id} <- Codec.from_grpc(req),
+         {:ok, cpu_time} <- Hyper.usage(vm_id) do
+      Codec.to_grpc({:usage, vm_id, cpu_time})
+    else
       {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
   end

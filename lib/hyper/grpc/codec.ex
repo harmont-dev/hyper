@@ -13,6 +13,7 @@ defmodule Hyper.Grpc.Codec do
     CreateVmResponse,
     ForkVmResponse,
     GetVmResponse,
+    GetVmUsageRequest,
     GetVmUsageResponse,
     ListVmsResponse,
     LoadImageRequest,
@@ -25,6 +26,7 @@ defmodule Hyper.Grpc.Codec do
   }
 
   alias Hyper.Grpc.V1.Firewall, as: FirewallPb
+  alias Hyper.Img.Db.Repo
   alias Hyper.Vm.Firewall
   alias Hyper.Vm.Spec
 
@@ -57,13 +59,14 @@ defmodule Hyper.Grpc.Codec do
     do: {:error, :missing_img_id}
 
   def from_grpc(%CreateVmRequest{} = req) do
-    with {:ok, type} <- instance_type(req.instance_type),
+    with {:ok, img_id} <- img_id(req.img_id),
+         {:ok, type} <- instance_type(req.instance_type),
          {:ok, arch} <- arch(req.arch),
          {:ok, boot_args} <- boot_args(req.boot_args),
          {:ok, firewall} <- firewall(req.firewall) do
       {:ok,
        %Spec{
-         img_id: req.img_id,
+         img_id: img_id,
          type: type,
          arch: arch,
          boot_args: boot_args,
@@ -81,13 +84,21 @@ defmodule Hyper.Grpc.Codec do
   end
 
   @spec from_grpc(LoadImageRequest.t()) ::
-          {:ok, {String.t(), keyword()}} | {:error, :missing_image_ref}
+          {:ok, {String.t(), keyword()}} | {:error, :missing_image_ref | :bad_label}
   def from_grpc(%LoadImageRequest{image_ref: ref}) when ref in [nil, ""],
     do: {:error, :missing_image_ref}
 
   def from_grpc(%LoadImageRequest{image_ref: ref, label: label}) do
-    opts = if label in [nil, ""], do: [], else: [label: label]
-    {:ok, {ref, opts}}
+    cond do
+      label in [nil, ""] -> {:ok, {ref, []}}
+      Repo.storable_text?(label) -> {:ok, {ref, [label: label]}}
+      true -> {:error, :bad_label}
+    end
+  end
+
+  @spec from_grpc(GetVmUsageRequest.t()) :: {:ok, Hyper.Vm.Id.t()} | {:error, :not_found}
+  def from_grpc(%GetVmUsageRequest{vm_id: vm_id}) do
+    if Repo.storable_text?(vm_id), do: {:ok, vm_id}, else: {:error, :not_found}
   end
 
   @doc "Convert a domain result to an outbound response message, or an error to `GRPC.RPCError`."
@@ -126,6 +137,12 @@ defmodule Hyper.Grpc.Codec do
 
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
   defp vm({vm_id, node}), do: %Vm{vm_id: vm_id, node: to_string(node)}
+
+  # An id the image DB cannot store names no image there.
+  @spec img_id(String.t()) :: {:ok, Hyper.Img.id()} | {:error, :unknown_image}
+  defp img_id(img_id) do
+    if Repo.storable_text?(img_id), do: {:ok, img_id}, else: {:error, :unknown_image}
+  end
 
   @spec instance_type(term()) ::
           {:ok, Hyper.Vm.Instance.t()} | {:error, :missing_instance_type | :bad_instance_type}
@@ -230,6 +247,12 @@ defmodule Hyper.Grpc.Codec do
 
   defp rpc_error(reason) when reason in [:no_capacity, :exhausted],
     do: GRPC.RPCError.exception(:resource_exhausted, "no capacity")
+
+  defp rpc_error(:bad_label),
+    do: GRPC.RPCError.exception(:invalid_argument, "label must not contain NUL")
+
+  defp rpc_error({:undecodable, reason}),
+    do: GRPC.RPCError.exception(:invalid_argument, "request is malformed: #{reason}")
 
   defp rpc_error(:missing_image_ref),
     do: GRPC.RPCError.exception(:invalid_argument, "image_ref is required")
