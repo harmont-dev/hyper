@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Host-wide networking, applied by `host_init`.
 
-use super::{Filter, Masquerade, NetId, NodePrefix, NON_PUBLIC, TABLE};
+use super::{Blocked, Filter, Masquerade, NetId, NodePrefix, TABLE};
 use hyperrs_linux::net::link::LinkError;
 use hyperrs_linux::net::nft::{
     Action, Chain, CtState, Family, Hook, Icmpv6Type, Iface, Match, Nft, NftError, Policy, Rule,
@@ -34,6 +34,7 @@ pub enum HostNetError {
 pub struct HostNet<'a> {
     pub uplink: &'a IfName,
     pub prefix: NodePrefix,
+    pub blocked: &'a Blocked,
 }
 
 impl HostNet<'_> {
@@ -108,10 +109,11 @@ impl HostNet<'_> {
         Filter {
             hook: Hook::Forward,
             policy: Policy::Accept,
-            rules: NON_PUBLIC
-                .iter()
+            rules: self
+                .blocked
+                .ranges()
                 .map(|range| {
-                    let daddr = match range.parse().expect("the non-public ranges parse") {
+                    let daddr = match range {
                         IpNet::V4(net) => Match::Ipv4Daddr(net),
                         IpNet::V6(net) => Match::Ipv6Daddr(net),
                     };
