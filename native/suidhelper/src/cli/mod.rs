@@ -8,6 +8,7 @@ pub mod thin;
 mod version;
 pub mod vm;
 
+use crate::caller::{Caller, NodeGroup};
 use crate::config::Config;
 use crate::dm::HyperDmName;
 use enum_dispatch::enum_dispatch;
@@ -97,6 +98,9 @@ impl Request {
                 // Privileges are already dropped to the real uid by a pre-main constructor
                 // (see `setuid_privileged`); root is only re-acquired inside `Privileged`.
                 if !matches!(request, Request::Version(_)) {
+                    Caller::current()
+                        .and_then(|caller| caller.authorize(NodeGroup::installed()))
+                        .map_err(|e| format!("hyper-suidhelper: {e}"))?;
                     Config::init().map_err(|e| format!("hyper-suidhelper: {e}"))?;
                 }
                 request.dispatch(token)

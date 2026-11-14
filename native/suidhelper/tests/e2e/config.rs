@@ -14,10 +14,12 @@ use serde_json::json;
 use std::assert_matches;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::process::Command as Process;
 
 mod support;
-use support::{is_root, run, stdout_json, ScratchNs, NET_TABLE};
+use support::{is_root, run, stdout_json, ScratchNs, BIN, NET_TABLE};
 
 #[fixture]
 fn tmp() -> TempDir {
@@ -211,4 +213,50 @@ fn firecracker_and_jailer_return_ok_when_root_owned_as_root(tmp: TempDir) {
         config.jailer().is_ok(),
         "root-owned jailer with correct basename must be accepted"
     );
+}
+
+#[rstest]
+#[case::its_group_runs_privileged_ops(None, json!({"op": "vm_teardown", "id": "vconfige2e"}), "")]
+#[case::another_group_is_refused(Some("daemon"), json!({"op": "vm_teardown", "id": "vconfige2e"}), "is not in the helper's group")]
+#[case::a_root_group_refuses_everyone_but_root(Some("root"), json!({"op": "vm_teardown", "id": "vconfige2e"}), "installed with group root")]
+#[case::version_answers_anyone(Some("root"), json!({"op": "version"}), "")]
+fn only_root_and_the_helpers_group_may_run_privileged_ops_as_root(
+    tmp: TempDir,
+    #[case] installed_group: Option<&str>,
+    #[case] request: serde_json::Value,
+    #[case] refusal: &str,
+) {
+    if !is_root() {
+        eprintln!("SKIP caller authorization: needs root to install the helper and switch uid");
+        return;
+    }
+    let nobody = nix::unistd::User::from_name("nobody").unwrap().unwrap();
+    let group = installed_group.map_or(nobody.gid, |name| {
+        nix::unistd::Group::from_name(name).unwrap().unwrap().gid
+    });
+    fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let bin = tmp.path().join("hyper-suidhelper");
+    fs::copy(BIN, &bin).unwrap();
+    nix::unistd::chown(&bin, None, Some(group)).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut cmd = Process::new(&bin);
+    cmd.arg(request.to_string())
+        .env_clear()
+        .env("HYPER_SETUIDHELPER_IS_INSECURE_MODE", "1")
+        .env(
+            "HYPER_SETUIDHELPER_CONFIG_PATH",
+            tmp.path().join("absent.toml"),
+        )
+        .uid(nobody.uid.as_raw())
+        .gid(nobody.gid.as_raw());
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if refusal.is_empty() {
+        assert!(!stderr.contains("may run it"), "{stderr}");
+    } else {
+        assert_eq!(output.status.code(), Some(2), "{stderr}");
+        assert!(stderr.contains(refusal), "{stderr}");
+    }
 }
