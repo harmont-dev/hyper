@@ -36,6 +36,10 @@ name = "e2e_firewall"
 path = "tests/e2e/firewall.rs"
 
 [[test]]
+name = "e2e_net_hostile"
+path = "tests/e2e/net_hostile.rs"
+
+[[test]]
 name = "e2e_argv"
 path = "tests/e2e/argv.rs"
 
