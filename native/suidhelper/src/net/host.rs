@@ -28,6 +28,10 @@ pub enum HostNetError {
     Link(#[from] LinkError),
     #[error("uplink {0} is not an interface on this host; set [net] uplink to the one on the default route")]
     NoUplink(IfName),
+    #[error(
+        "{0} is off; VMs need the host to forward: set {0}=1 (and persist it in /etc/sysctl.d)"
+    )]
+    ForwardingOff(&'static str),
 }
 
 /// The host side of VM networking, routed out of `uplink`.
@@ -44,14 +48,18 @@ impl HostNet<'_> {
         if Rtnl::open()?.link(self.uplink)?.is_none() {
             return Err(HostNetError::NoUplink(self.uplink.clone()));
         }
+        if !Sysctl::net().ipv4().current_ip_forward()? {
+            return Err(HostNetError::ForwardingOff("net.ipv4.ip_forward"));
+        }
+        if !Sysctl::net().ipv6().conf_all().current_forwarding()? {
+            return Err(HostNetError::ForwardingOff("net.ipv6.conf.all.forwarding"));
+        }
         let uplink_conf = || Sysctl::net().ipv6().conf(self.uplink);
         if uplink_conf().current_accept_ra()? == AcceptRa::UnlessForwarding {
             uplink_conf()
                 .accept_ra(AcceptRa::EvenWhenForwarding)
                 .write()?;
         }
-        Sysctl::net().ipv4().ip_forward(true).write()?;
-        Sysctl::net().ipv6().conf_all().forwarding(true).write()?;
         Sysctl::net()
             .ipv6()
             .conf(self.uplink)

@@ -118,6 +118,7 @@ impl Lab {
         )
         .unwrap();
         fs::set_permissions(&cfg, fs::Permissions::from_mode(0o644)).unwrap();
+        lab.host.get().enable_forwarding().unwrap();
         lab.host.run(&cfg, json!({"op": "host_init"})).success();
 
         let listen = |ns: &ScratchNs| {

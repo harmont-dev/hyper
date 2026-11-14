@@ -79,6 +79,11 @@ impl Ipv4 {
     pub fn ip_forward(self, on: bool) -> Setting {
         Setting::flag(self.0.child(StrictComponent::from_static("ip_forward")), on)
     }
+
+    /// Whether `net/ipv4/ip_forward` is on ([ip-sysctl](https://docs.kernel.org/networking/ip-sysctl.html#proc-sys-net-ipv4-variables)).
+    pub fn current_ip_forward(self) -> Result<bool, SysctlError> {
+        Setting::read_flag(self.0.child(StrictComponent::from_static("ip_forward")))
+    }
 }
 
 /// `net/ipv6/`.
@@ -118,6 +123,11 @@ impl Ipv6Conf {
         Setting::flag(self.0.child(StrictComponent::from_static("forwarding")), on)
     }
 
+    /// Whether `net/ipv6/conf/<…>/forwarding` is on ([ip-sysctl](https://docs.kernel.org/networking/ip-sysctl.html#proc-sys-net-ipv6-variables)).
+    pub fn current_forwarding(self) -> Result<bool, SysctlError> {
+        Setting::read_flag(self.0.child(StrictComponent::from_static("forwarding")))
+    }
+
     /// `net/ipv6/conf/<…>/proxy_ndp`.
     pub fn proxy_ndp(self, on: bool) -> Setting {
         Setting::flag(self.0.child(StrictComponent::from_static("proxy_ndp")), on)
@@ -154,6 +164,15 @@ impl Setting {
         Self {
             key,
             value: if on { "1" } else { "0" },
+        }
+    }
+
+    fn read_flag(key: SysctlKey) -> Result<bool, SysctlError> {
+        let value = Self::read(&key)?;
+        match value.trim() {
+            "0" => Ok(false),
+            "1" => Ok(true),
+            _ => Err(SysctlError::Unknown(key, value)),
         }
     }
 
