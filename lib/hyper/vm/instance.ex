@@ -123,8 +123,9 @@ defmodule Hyper.Vm.Instance do
 
   @doc """
   The full resource bundle for a `type`. `vcpus` and `mem` feed both the cgroup
-  caps and firecracker's machine-config; `disk` sizes the rootfs image; the
-  `disk_bw`/`net_bw` throughputs feed firecracker's drive/NIC rate limiters.
+  caps and firecracker's machine-config; `disk` sizes the rootfs image;
+  `disk_bw`/`net_bw` are the per-VM throughput budgets the node's soft
+  admission checks account against.
   """
   @spec spec(t()) :: Spec.t()
   def spec(type) when is_map_key(@specs, type), do: @specs[type]

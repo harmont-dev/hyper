@@ -1,38 +1,19 @@
 defmodule Hyper.Node.FireVMM.Net do
-  @moduledoc """
-  The per-VM *inner-world* networking contract. Every VM's netns is identical —
-  `tap0` at 172.30.0.1/30, guest at 172.30.0.2/30 — so a snapshot clone restores
-  a correct network with zero renumbering; host-side uniqueness is the helper's
-  job (see `Hyper.SuidHelper.Network`). This module owns the three values that
-  must agree between the guest kernel cmdline, the Firecracker NIC config, and
-  the helper: the guest MAC, the `ip=` autoconfig string, and the NIC spec.
-  """
-  alias Hyper.Firecracker.Api.NetworkInterface
+  @moduledoc "Firecracker network configuration for a particular VM."
 
-  @guest_ip "172.30.0.2"
-  @tap_ip "172.30.0.1"
-  @netmask "255.255.255.252"
+  alias Hyper.Firecracker.Api.{NetworkInterface, RateLimiter, TokenBucket}
+  alias Hyper.Node.Net.Ip
+  alias Unit.Bandwidth
+  alias Unit.Time
+
   @iface "eth0"
   @tap "tap0"
 
-  @doc "Kernel `ip=` autoconfig fragment appended to every networked VM's cmdline."
-  @spec ip_cmdline() :: String.t()
-  def ip_cmdline, do: "ip=#{@guest_ip}::#{@tap_ip}:#{@netmask}::#{@iface}:off"
+  # Firecracker refills a bucket of `size` bytes every `refill_time`; a one-second
+  # refill makes the bucket hold exactly one second of the instance's bandwidth.
+  @refill Time.s(1)
 
-  @doc """
-  Kernel `hyper.resolver=` cmdline fragment carrying the DNS resolver IP the
-  PID-1 guest agent writes to `/etc/resolv.conf` — kernel `ip=` autoconfig sets
-  the guest's address/route but never DNS, so this closes that gap. Pure:
-  callers (`BootSpec.resolve/2`) read the configured resolver themselves.
-  """
-  @spec resolver_cmdline(String.t()) :: String.t()
-  def resolver_cmdline(resolver), do: "hyper.resolver=#{resolver}"
-
-  @doc """
-  Stable locally-administered unicast MAC for `vm_id`. Derived from a SHA-256 of
-  the id so it is deterministic on any node (aids debugging); duplicate MACs are
-  harmless since no two guests ever share an L2 segment (each is alone in its netns).
-  """
+  @doc "MAC for `vm_id`."
   @spec guest_mac(Hyper.Vm.Id.t()) :: String.t()
   def guest_mac(vm_id) do
     # Six octets: the fixed locally-administered-unicast leading byte plus five
@@ -45,9 +26,29 @@ defmodule Hyper.Node.FireVMM.Net do
     |> String.downcase()
   end
 
-  @doc "The Firecracker NIC spec for `vm_id` (guest `eth0` bound to in-netns `tap0`)."
-  @spec interface(Hyper.Vm.Id.t()) :: NetworkInterface.t()
-  def interface(vm_id) do
-    %NetworkInterface{iface_id: @iface, host_dev_name: @tap, guest_mac: guest_mac(vm_id)}
+  @doc "The Firecracker NIC spec (guest `eth0` bound to in-netns `tap0`), capped at `net_bw` each way."
+  @spec interface(Hyper.Vm.Id.t(), Bandwidth.t()) :: NetworkInterface.t()
+  def interface(vm_id, net_bw) do
+    %NetworkInterface{
+      iface_id: @iface,
+      host_dev_name: @tap,
+      guest_mac: guest_mac(vm_id),
+      rx_rate_limiter: rate_limiter(net_bw),
+      tx_rate_limiter: rate_limiter(net_bw)
+    }
   end
+
+  @spec rate_limiter(Bandwidth.t()) :: RateLimiter.t()
+  defp rate_limiter(net_bw) do
+    %RateLimiter{
+      bandwidth: %TokenBucket{
+        size: Bandwidth.as_bytes_per_sec(net_bw) * Time.as_s(@refill),
+        refill_time: Time.as_ms(@refill)
+      }
+    }
+  end
+
+  @doc "Kernel cmdline fragments."
+  @spec cmdline(Ip.Lease.t()) :: String.t()
+  def cmdline(%Ip.Lease{} = lease), do: lease |> Ip.guest_args() |> Enum.join(" ")
 end

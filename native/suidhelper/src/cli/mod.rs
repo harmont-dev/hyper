@@ -15,6 +15,7 @@ use enum_dispatch::enum_dispatch;
 use hyperrs_process::privilege::Unprivileged;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_with::DeserializeAs;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Display;
 use thiserror::Error as ThisError;
@@ -57,6 +58,7 @@ pub enum Request {
     VmClaimApiSocket(vm::claim::ClaimApiSocket),
     VmClaimVsockSocket(vm::claim::ClaimVsockSocket),
     VmTeardown(vm::teardown::Teardown),
+    VmFirewall(vm::firewall::SetFirewall),
     ImgActivate(img::ImgActivate),
     DmRemove(dm::Remove),
     ThinPoolCreate(thin::ThinPoolCreate),
@@ -83,6 +85,7 @@ impl Request {
             return Err(RequestError::Arity);
         };
         let request = request.into_string().map_err(|_| RequestError::Utf8)?;
+        serde_json::from_str::<BTreeMap<String, de::IgnoredAny>>(&request)?;
         Ok(serde_json::from_str(&request)?)
     }
 
@@ -165,7 +168,6 @@ mod tests {
     fn dropping_any_required_field_is_refused() {
         for request in valid_requests() {
             let optional: &[&str] = match request["op"].as_str().unwrap() {
-                "vm_teardown" => &["uid"],
                 "thin_volume_create" => &["parent"],
                 _ => &[],
             };
@@ -183,6 +185,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_positional_array_form_of_every_op_is_refused() {
+        for request in valid_requests() {
+            let positional = Value::Array(request.as_object().unwrap().values().cloned().collect());
+            assert!(
+                matches!(parse(&positional), Err(RequestError::Json(_))),
+                "{positional}"
+            );
+        }
+    }
+
     #[rstest]
     #[case::unknown_op(json!({"op": "dmsetup", "args": ["ls"]}))]
     #[case::missing_op(json!({"id": "v1"}))]
@@ -191,9 +204,21 @@ mod tests {
     #[case::foreign_dm_name(json!({"op": "dm_remove", "name": "sda1", "retry": false}))]
     #[case::traversing_vm_id(json!({"op": "vm_claim_api_socket", "id": "../v1"}))]
     #[case::relative_kernel(json!({"op": "vm_launch", "id": "v1", "uid": 900_001, "gid": 900_001,
-        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}}))]
+        "kernel": "vmlinux", "device": "/dev/mapper/hyper-v1", "limits": {}, "net_id": 0,
+        "firewall": {"inbound": [], "outbound_blocked": []}}))]
     #[case::rootfs_device_by_name(json!({"op": "vm_launch", "id": "v1", "uid": 900_001,
-        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1", "limits": {}}))]
+        "gid": 900_001, "kernel": "/srv/hyper/vmlinux", "device": "hyper-v1", "limits": {},
+        "net_id": 0, "firewall": {"inbound": [], "outbound_blocked": []}}))]
+    #[case::launch_net_id_past_the_transit_range(json!({"op": "vm_launch", "id": "v1",
+        "uid": 900_001, "gid": 900_001, "kernel": "/srv/hyper/vmlinux",
+        "device": "/dev/mapper/hyper-v1", "limits": {}, "net_id": 16_384,
+        "firewall": {"inbound": [], "outbound_blocked": []}}))]
+    #[case::firewall_port_zero(json!({"op": "vm_firewall", "id": "v1",
+        "firewall": {"inbound": [{"protocol": "tcp", "ports": [0, 22]}], "outbound_blocked": []}}))]
+    #[case::firewall_without_policy(json!({"op": "vm_firewall", "id": "v1"}))]
+    #[case::teardown_names_a_net_id(json!({"op": "vm_teardown", "id": "v1", "net_id": 0}))]
+    #[case::retired_net_prepare_op(json!({"op": "net_prepare", "id": "v1"}))]
+    #[case::retired_net_ip_prepare_op(json!({"op": "net_ip_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]

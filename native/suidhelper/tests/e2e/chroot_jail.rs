@@ -3,11 +3,6 @@
 //! never touch /etc/hyper or /srv. Root-gated: the helper acquires privileges for
 //! mknod/chown, so these self-skip without root. The cgroup half is exercised
 //! only with a MISSING leaf (idempotent, mutates nothing on the real host).
-//!
-//! The `dev/net/tun` node `prepare` creates when `[network]` is configured is
-//! likewise privileged `mknod` — no unit-level substitute exists; it is proven
-//! only here, root-gated, with the insecure config seam supplying a `[network]`
-//! table.
 #![cfg(feature = "insecure_mode")]
 
 use assert_fs::prelude::*;
@@ -22,7 +17,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 mod support;
-use support::{is_root, run, stdout_json};
+use support::{is_root, run, stdout_json, ScratchNs};
 
 /// Write a root-owned (because this test runs as root) config whose work_dir is
 /// `work_dir`, followed by `tables`, 0644 so the OwnerOnlyWritable axis passes.
@@ -86,7 +81,9 @@ fn remove_succeeds_and_is_idempotent_as_root(work: Work) {
     fs::write(chroot.join("vmlinux"), b"x").unwrap();
     let cfg = work.config("[jails]\ncgroup = \"hyper-e2e-does-not-exist\"\n");
 
-    let out = run(&cfg, json!({"op": "vm_teardown", "id": "id"})).success();
+    let out = ScratchNs::new("chroot-remove")
+        .run(&cfg, json!({"op": "vm_teardown", "id": "id"}))
+        .success();
     let json = stdout_json(&out);
     assert_eq!(json["result"], "tore_down");
     assert!(!chroot.exists(), "chroot must be gone");
@@ -162,7 +159,9 @@ fn claim_pins_the_socket_against_a_later_swap_until_teardown_as_root(
         "a swapped jail entry must not redirect the pinned socket"
     );
 
-    run(&cfg, json!({"op": "vm_teardown", "id": "id"})).success();
+    ScratchNs::new("claim-pin")
+        .run(&cfg, json!({"op": "vm_teardown", "id": "id"}))
+        .success();
     assert!(!pinned.exists(), "teardown must remove the pinned socket");
 }
 

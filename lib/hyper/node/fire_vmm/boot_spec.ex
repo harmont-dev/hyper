@@ -5,7 +5,8 @@ defmodule Hyper.Node.FireVMM.BootSpec do
   instance type), a kernel boot source, and a root drive.
   """
 
-  alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration}
+  alias Hyper.Firecracker.Api.{BootSource, Drive, MachineConfiguration, NetworkInterface}
+  alias Hyper.Node.FireVMM.Net
   alias Hyper.Vm.Instance
 
   # Default cmdline. No `console=`: serial printk is synchronous at 115200 baud
@@ -26,25 +27,20 @@ defmodule Hyper.Node.FireVMM.BootSpec do
             machine_config: MachineConfiguration.t(),
             boot_source: BootSource.t(),
             drives: [Drive.t()],
-            network_interfaces: [Hyper.Firecracker.Api.NetworkInterface.t()]
+            network_interfaces: [NetworkInterface.t()]
           }
   end
 
   @spec resolve(Hyper.Vm.source(), Instance.t()) :: Cold.t()
   def resolve(source, type) when is_map(source) do
-    # Networking is mandatory: every VM gets a NIC on the uniform inner-world
-    # address plus the kernel `ip=`/`hyper.resolver=` cmdline. A node that
-    # reached here has already passed the startup network preflight.
-    vm_id = Map.fetch!(source, :vm_id)
+    spec = Instance.spec(type)
 
     boot_args =
       Map.get(source, :boot_args, @default_boot_args) <>
-        " " <>
-        Hyper.Node.FireVMM.Net.ip_cmdline() <>
-        " " <> Hyper.Node.FireVMM.Net.resolver_cmdline(Hyper.Cfg.Network.resolver())
+        " " <> Net.cmdline(Map.fetch!(source, :net))
 
     %Cold{
-      machine_config: Instance.Spec.machine_config(Instance.spec(type)),
+      machine_config: Instance.Spec.machine_config(spec),
       boot_source: %BootSource{
         kernel_image_path: Map.fetch!(source, :kernel_image_path),
         boot_args: boot_args
@@ -57,7 +53,7 @@ defmodule Hyper.Node.FireVMM.BootSpec do
           path_on_host: Map.fetch!(source, :root_drive_path)
         }
       ],
-      network_interfaces: [Hyper.Node.FireVMM.Net.interface(vm_id)]
+      network_interfaces: [Net.interface(Map.fetch!(source, :vm_id), spec.net_bw)]
     }
   end
 end

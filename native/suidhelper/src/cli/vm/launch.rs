@@ -4,18 +4,20 @@
 use super::teardown::{Teardown, TeardownError};
 use super::VmOut;
 use crate::cli::{MapperPath, Op};
-use crate::config::{BinError, Config};
+use crate::config::{BinError, Config, NetUnconfigured};
 use crate::dm::HyperDmName;
 use crate::id::{IdError, JailOwner};
 use crate::lock::{Locks, LocksError};
-use crate::network::{self, prepare::NetworkPrepareError};
+use crate::net::firewall::Firewall;
+use crate::net::vm::VmNetError;
+use crate::net::NetId;
 use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
 use hyperrs_firecracker::jailer::{CgroupLimits, Jailer};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::DirError;
 use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
 use hyperrs_linux::dm::OpenDeviceError;
-use hyperrs_linux::netns;
+use hyperrs_linux::net::nft::Nft;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -31,8 +33,6 @@ pub enum LaunchError {
     Kernel(#[from] KernelError),
     #[error(transparent)]
     Teardown(#[from] TeardownError),
-    #[error(transparent)]
-    Network(#[from] NetworkPrepareError),
     #[error("creating the jail root: {0}")]
     Root(#[from] DirError),
     #[error("opening rootfs device: {0}")]
@@ -41,6 +41,10 @@ pub enum LaunchError {
     Build(#[from] BuildError),
     #[error(transparent)]
     Privilege(#[from] PrivilegeError),
+    #[error(transparent)]
+    NetConfig(#[from] NetUnconfigured),
+    #[error(transparent)]
+    Net(#[from] VmNetError),
     #[error(transparent)]
     Lock(#[from] LocksError),
 }
@@ -56,6 +60,8 @@ pub struct Launch {
     #[serde_as(as = "MapperPath")]
     device: HyperDmName,
     limits: CgroupLimits,
+    net_id: NetId,
+    firewall: Firewall,
 }
 
 impl Op for Launch {
@@ -68,13 +74,12 @@ impl Op for Launch {
         let jailer = config.jailer()?;
         let firecracker = config.firecracker()?;
         let jail_base = config.jail_base();
+        let net = config.net()?;
+        let nft = Nft::new(config.nft().map_err(BinError::from)?);
         let range = config.uid_gid_range();
         let uid = range.uid(self.uid)?;
         let gid = range.gid(self.gid)?;
         let kernel = KernelImage::open(&self.kernel)?;
-        let netns = config
-            .network()
-            .map(|_| SafePath::from_static::<{ netns::DIR }>().join(&self.id));
 
         let layout = JailLayout::new(&jail_base, &self.id);
         let api_sock =
@@ -85,14 +90,11 @@ impl Op for Launch {
         let _vm = locks.vm(&root, &self.id)?;
         drop(root);
 
-        Teardown::new(self.id.clone(), Some(self.uid)).teardown(&mut token)?;
+        let teardown = Teardown::new(self.id.clone());
+        teardown.teardown(&mut token)?;
 
-        if netns.is_some() {
-            network::prepare::Prepare::new(self.uid, &self.id)?.run(&mut token)?;
-        }
-
-        {
-            let _root = token.elevate()?;
+        let staged = (|| -> Result<_, LaunchError> {
+            let root = token.elevate()?;
             let device = self.device.open()?;
             layout
                 .create_root()?
@@ -100,7 +102,25 @@ impl Op for Launch {
                 .kernel(&kernel)
                 .rootfs(&device)
                 .build()?;
-        }
+            Ok(teardown
+                .net()
+                .prepare(
+                    &root,
+                    self.net_id,
+                    net,
+                    &nft,
+                    (uid.into(), gid.into()),
+                    &self.firewall,
+                )?
+                .path())
+        })();
+        let netns = match staged {
+            Ok(netns) => netns,
+            Err(e) => {
+                let _ = teardown.teardown(&mut token);
+                return Err(e);
+            }
+        };
 
         Jailer::builder()
             .jailer(&jailer)
@@ -111,7 +131,7 @@ impl Op for Launch {
             .gid(gid.into())
             .limits(self.limits)
             .api_sock(&api_sock)
-            .maybe_netns(netns.as_deref())
+            .netns(&netns)
             .build()
             .invoke(token)
     }
@@ -132,6 +152,8 @@ mod tests {
             "kernel": "/srv/hyper/vmlinux",
             "device": "/dev/mapper/hyper-vm1",
             "limits": {},
+            "net_id": 0,
+            "firewall": {"inbound": [], "outbound_blocked": []},
         });
         request
             .as_object_mut()

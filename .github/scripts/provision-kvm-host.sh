@@ -16,11 +16,10 @@
 #   - pre-creating /srv/hyper/layers (install.md documents this too, but it's
 #     load-bearing here since nothing else primes it before the suite boots
 #     the node)
+#   - the 2001:db8::/64 fallback for [net] ipv6_prefix (install.md has the
+#     operator use the uplink's real prefix; the runner has no global IPv6)
 #   - DEBIAN_FRONTEND=noninteractive (install.md is written for an interactive
 #     operator session; CI has no tty to prompt on)
-#   - [network] is always written here (install.md presents it as an optional
-#     section) since the runner's default route interface is detected fresh
-#     each run and integration coverage wants egress networking exercised
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -34,7 +33,7 @@ sudo udevadm trigger --name-match=kvm
 
 sudo apt-get update
 sudo apt-get install -y \
-  coreutils e2fsprogs iproute2 libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux
+  coreutils e2fsprogs libc-bin lvm2 nftables skopeo thin-provisioning-tools util-linux
 
 modules_extra="linux-modules-extra-$(uname -r)"
 if apt-cache show "${modules_extra}" >/dev/null 2>&1; then
@@ -45,15 +44,7 @@ fi
 
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
 # PARAMETERS of the first, and the load fails.
-#
-# nf_tables + nf_nat back host-init's `hyper` nftables table and its
-# masquerade/SNAT/DNAT rules. A fresh GitHub-hosted runner does not have them
-# loaded, and the netfilter family does not always autoload on first `nft` use,
-# so `nft add table ip hyper` fails (empty stderr, non-zero exit) and the node
-# refuses to start. Load the base explicitly, as we do for the dm modules; the
-# nat expression sub-modules (nft_chain_nat, nft_masq) autoload once the base is
-# present and a rule is issued.
-sudo modprobe -av dm_snapshot dm_thin_pool loop nf_tables nf_nat
+sudo modprobe -av dm_snapshot dm_thin_pool loop
 targets="$(sudo dmsetup targets)"
 echo "dmsetup targets: ${targets}"
 grep -q thin-pool <<<"${targets}" || { echo "ERROR: thin-pool dm target missing" >&2; exit 1; }
@@ -65,32 +56,44 @@ command -v thin_dump >/dev/null || { echo "ERROR: thin_dump missing (thin-provis
 sudo install -o root -g root -m 0755 "$(readlink -f "$(command -v thin_dump)")" /usr/local/sbin/thin_dump
 [ ! -L /usr/local/sbin/thin_dump ] || { echo "ERROR: /usr/local/sbin/thin_dump is still a symlink" >&2; exit 1; }
 
-# host-init (run by the node at start) asserts ip_forward=1 rather than
-# setting it, so provisioning must turn it on and persist it across reboots.
-sudo sysctl -w net.ipv4.ip_forward=1
-echo 'net.ipv4.ip_forward=1' \
-  | sudo tee /etc/sysctl.d/99-hyper-ip-forward.conf >/dev/null
+uplink="$(ip -o route show default | awk '{print $5; exit}')"
+[ -n "${uplink}" ] || { echo "ERROR: no default route to take the uplink from" >&2; exit 1; }
 
-# GitHub-hosted runners ship Docker, which sets the iptables `filter` FORWARD
-# policy to DROP and only admits its own bridge traffic. Hyper's guest egress is
-# *forwarded* (per-VM netns veth -> uplink), so Docker's drop silently eats
-# every packet the guest sends — the guest configures its NIC fine but nothing
-# ever returns. Admit the clone pool (172.31.0.0/16, the helper's default) both
-# directions via DOCKER-USER, which Docker evaluates before its own drops; the
-# `hyper` nftables forward chain still enforces guest isolation. Fall back to an
-# accepting FORWARD policy on a host without Docker's chain.
-clone_pool="172.31.0.0/16"
-if sudo iptables -L DOCKER-USER >/dev/null 2>&1; then
-  sudo iptables -I DOCKER-USER -s "${clone_pool}" -j ACCEPT
-  sudo iptables -I DOCKER-USER -d "${clone_pool}" -j ACCEPT
-else
-  sudo iptables -P FORWARD ACCEPT
-fi
+# Proxy NDP only answers inside the prefix that is on-link at the uplink, so that
+# prefix is the one VMs draw from: the network of the uplink's global, stable,
+# non-ULA address. Several candidates, or one whose address already sits in
+# <prefix>:1::/80 where VMs live, need an operator to choose.
+ipv6_prefix="$(ip -6 -o addr show dev "${uplink}" scope global | python3 -c '
+import ipaddress, sys
 
-# The default-route interface is the uplink guests NAT egress through.
-uplink="$(ip route show default | awk '{print $5; exit}')"
-[ -n "${uplink}" ] || { echo "ERROR: could not detect default-route uplink interface" >&2; exit 1; }
-echo "detected uplink: ${uplink}"
+ula = ipaddress.ip_network("fc00::/7")
+found = {}
+for line in sys.stdin:
+    fields = line.split()
+    if "inet6" not in fields or "temporary" in fields or "deprecated" in fields:
+        continue
+    iface = ipaddress.ip_interface(fields[fields.index("inet6") + 1])
+    if iface.ip not in ula:
+        found.setdefault(iface.network, iface.ip)
+
+if len(found) > 1:
+    sys.exit("ERROR: several IPv6 prefixes on the uplink; set [net] ipv6_prefix by hand: "
+             + ", ".join(map(str, found)))
+for net, addr in found.items():
+    if net.prefixlen > 64:
+        sys.exit(f"ERROR: the uplink prefix {net} is longer than /64; set [net] ipv6_prefix by hand")
+    vms = ipaddress.ip_network((int(net.network_address) | 1 << 48, 80))
+    if addr in vms:
+        sys.exit(f"ERROR: the uplink address {addr} sits in {vms}, the VM range")
+    print(net)
+')"
+# The runner has no global IPv6, so VMs get a documentation-range prefix: guest
+# IPv6 is unreachable from outside, but outbound IPv4 through the NATs works.
+ipv6_prefix="${ipv6_prefix:-2001:db8::/64}"
+# New veth and tap devices take their IPv6 setting from conf/default; every VM link
+# carries IPv6 link-local addresses, so it must be on.
+sudo sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0
+sudo sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<EOF
@@ -105,16 +108,15 @@ thin_dump = "/usr/local/sbin/thin_dump"
 uid_gid_range = [900000, 999999]
 cgroup = "hyper"
 
+[net]
+uplink = "${uplink}"
+ipv6_prefix = "${ipv6_prefix}"
+
 # The runner is a dedicated ephemeral host: the soft budget's default
 # cpu_max_load (0.8) refuses VMs with :no_capacity while compile/provision
 # load is still decaying, and nothing else runs here worth protecting.
 [budget]
 cpu_max_load = 4.0
-
-# Enables per-VM egress NAT. The nft table itself is owned by host-init
-# (created idempotently at node start), not by this script.
-[network]
-uplink = "${uplink}"
 EOF
 sudo chown root:root /etc/hyper/config.toml
 sudo chmod 0644 /etc/hyper/config.toml

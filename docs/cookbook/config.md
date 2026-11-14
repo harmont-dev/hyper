@@ -51,6 +51,7 @@ configurable:
 | `jailer`      | -             | `.jailer`      | -                                   | [Safe Path](#safe-path) |
 | `dmsetup`     | -             | `.dmsetup`     | `"/usr/sbin/dmsetup"`               | [Safe Path](#safe-path) |
 | `losetup`     | -             | `.losetup`     | `"/usr/sbin/losetup"`               | [Safe Path](#safe-path) |
+| `nft`         | -             | `.nft`         | `"/usr/sbin/nft"`                   | [Safe Path](#safe-path). Applies the host's and each VM's IPv4 NAT. |
 | `thin_dump`   | -             | `.thin_dump`   | `"/usr/sbin/thin_dump"`             | [Safe Path](#safe-path). Reads thin snapshot metadata for fork publish; required for `Hyper.Vm.fork/1`'s cross-node path (same-node `fast_fork/1` is unaffected). |
 | `mke2fs`      | `.mke2fs`     | `.mke2fs`      | `$PATH["mke2fs"]`                   |  |
 | `skopeo`      | `.skopeo`     | `.skopeo`      | `$PATH["skopeo"]`                   |  |
@@ -108,29 +109,24 @@ uid_gid_range = [900000, 999999]
 
 ## VM Networking Configuration
 
-**Required.** Every VM gets NAT'd egress out through a physical host interface,
-and a node refuses to start without a `[network]` table (see the
-[install guide](install.md#vm-networking-required) for the host prerequisites:
-`iproute2`/`nftables` and `net.ipv4.ip_forward=1`). `config.toml`-only — the
-setuid helper reads the same `uplink` and `clone_pool` to build each VM's netns,
-veth pair, and NAT rules, so it cannot live in `config.exs`.
+| Config Key    | `config.exs` | `config.toml`  | Default | Notes |
+| ------------- | ------------ | -------------- | ------- | ----- |
+| `uplink`      | -            | `.uplink`      | -       | **Required.** The host interface VM traffic leaves through (`if0` in the [networking cookbook](networking.md)). |
+| `ipv6_prefix` | -            | `.ipv6_prefix` | -       | **Required.** The routed IPv6 prefix on `uplink`, global unicast and `/64` or shorter. VMs take their addresses from `<prefix>:1::/80`. |
+| `resolver`    | -            | `.resolver`    | `"1.1.1.1"` | The IPv4 DNS resolver guests reach through their gateway, `172.16.0.1`. |
+| `blocked`     | -            | `.blocked`     | special-purpose ranges | CIDRs VMs may not send to. The default is the [IANA special-purpose](https://www.iana.org/assignments/iana-ipv4-special-registry/) ranges providers keep their networks and metadata services in; a list replaces it, and `[]` blocks nothing. `ipv6_prefix` and `resolver` may not overlap it. |
 
+A node refuses to start without this table: VM networking is not optional.
+
+<!-- tabs open -->
 ### `config.toml`
 
 ```toml
-[network]
-# **required**. The physical uplink interface guest egress is NAT'd out through.
-# On a single-uplink host, the default-route NIC is the usual choice:
-#   ip route show default | awk '{print $5; exit}'
+[net]
 uplink = "eth0"
-
-# optional -- defaults shown. The IPv4 CIDR the per-VM /30s are carved from.
-clone_pool = "172.31.0.0/16"
-
-# optional -- defaults shown. DNS resolver handed to guests via the kernel
-# cmdline (the guest agent writes it to /etc/resolv.conf).
-resolver = "1.1.1.1"
+ipv6_prefix = "2001:db8::/64"
 ```
+<!-- tabs close -->
 
 ## gRPC Configuration
 
