@@ -90,10 +90,10 @@ impl Op for ThinPoolCreate {
         .map_err(DmError::from)?;
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         {
-            let _root = token.elevate()?;
-            if let Err(e) = dm.device(&self.name).remove(RemoveMode::Retry) {
+            let root = token.elevate()?;
+            if let Err(e) = dm.device(&root, &self.name).remove(RemoveMode::Retry) {
                 if !matches!(
-                    dm.device(&self.name).number(),
+                    dm.device(&root, &self.name).number(),
                     Err(NumberError::Run(RunError::Failed(_)))
                 ) {
                     return Err(e.into());
@@ -116,9 +116,9 @@ impl Op for ThinVolumeCreate {
 
     fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
-        let _root = token.elevate()?;
+        let root = token.elevate()?;
         let sectors = self.origin.sectors().map_err(DmError::from)?;
-        let pool = dm.thin_pool(&self.pool)?;
+        let pool = dm.thin_pool(&root, &self.pool)?;
         let thin = match &self.parent {
             None => pool.create_thin(self.thin_id)?,
             Some(parent) => match pool.open_thin(parent)?.snapshot(self.thin_id) {
@@ -149,8 +149,8 @@ impl Op for ThinDestroy {
 
     fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
-        let _root = token.elevate()?;
-        dm.thin_pool(&self.pool)?
+        let root = token.elevate()?;
+        dm.thin_pool(&root, &self.pool)?
             .open_thin(&self.name)?
             .deactivate()?
             .delete()?;

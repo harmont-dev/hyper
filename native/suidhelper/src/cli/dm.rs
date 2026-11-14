@@ -75,8 +75,8 @@ impl Op for Remove {
             RemoveMode::Once
         };
         let dm = dm::Dmsetup::new(Config::get().dmsetup()?);
-        let _root = token.elevate()?;
-        dm.device(&name).remove(mode)?;
+        let root = token.elevate()?;
+        dm.device(&root, &name).remove(mode)?;
         Ok(DmOut::Removed)
     }
 }
@@ -104,7 +104,7 @@ impl HyperDmTable {
     ) -> Result<Created, DmError> {
         let dm = dm::Dmsetup::new(Config::get().dmsetup()?);
         let (device, loops) = {
-            let _root = token.elevate()?;
+            let root = token.elevate()?;
             let control = LoopControl::open()?;
             let mut loops = BTreeMap::new();
             let mut attached = self.attach(|role, backing| {
@@ -124,7 +124,10 @@ impl HyperDmTable {
                 DmTable::ThinPool(t) => t.sectors = sectors,
                 DmTable::Thin(t) => t.sectors = sectors,
             }
-            (dm.create(name, &attached, access)?.path().into(), loops)
+            (
+                dm.create(&root, name, &attached, access)?.path().into(),
+                loops,
+            )
         };
         Ok(Created {
             device,
