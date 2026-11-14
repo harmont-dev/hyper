@@ -379,14 +379,13 @@ operations. This is achieved through a side-car binary called
 Run it as the `hyper` user to build and install it:
 
 ```sh
-mix suidhelper.install
+mix suidhelper.install --group hyper
 ```
 
 The helper runs privileged operations only for root and for members of the
 group it is installed with, so that group must contain the node's account and
 no one else. `useradd --system hyper` above creates such a `hyper` group; the
-task uses your primary group (or `--group GROUP`) and refuses one shared with
-other accounts. If `sudo` needs a password, the task builds and stamps the
+task requires `--group` and refuses a group shared with other accounts. If `sudo` needs a password, the task builds and stamps the
 binary, then prints the exact privileged commands for you to run yourself:
 
 ```sh

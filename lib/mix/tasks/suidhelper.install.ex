@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
   @moduledoc """
   Builds, stamps, and installs the Rust setuid helper.
 
-      mix suidhelper.install [--group GROUP]
+      mix suidhelper.install --group GROUP
 
   Two steps:
 
@@ -13,8 +13,8 @@ defmodule Mix.Tasks.Suidhelper.Install do
     2. The stamped binary is copied setuid-root to
        `/usr/local/libexec/hyper/hyper-suidhelper`, owned `root:GROUP`, mode
        `4750`, inside a `root:GROUP` `0750` directory: only root and GROUP may
-       run it, and the helper refuses anyone else. GROUP defaults to your
-       primary group and must contain no other account.
+       run it, and the helper refuses anyone else. GROUP is required, must
+       include you, and must contain no other account.
 
   The copy needs root, but Mix runs every subprocess in its own session with no
   controlling terminal (`erl_child_setup` calls `setsid`), so a nested `sudo`
@@ -48,17 +48,24 @@ defmodule Mix.Tasks.Suidhelper.Install do
 
   defp group_option(argv) do
     case Enum.split_while(argv, &(&1 != "--group")) do
-      {before, ["--group", group | rest]} -> {group, before ++ rest}
-      {argv, _} -> {nil, argv}
+      {before, ["--group", group | rest]} ->
+        {group, before ++ rest}
+
+      _ ->
+        Mix.raise("""
+        Pass the node's dedicated group: mix suidhelper.install --group GROUP
+
+        The setuid helper runs privileged operations only for root and members of
+        GROUP, so GROUP must contain the node's account and no other.
+        """)
     end
   end
 
   # The helper trusts every member of its group, so the group must hold the
   # node's account alone: listed members and accounts with it as their primary
   # group both count.
-  defp node_group!(requested) do
+  defp node_group!(group) do
     me = id!(["-un"])
-    group = requested || id!(["-gn"])
 
     unless group in String.split(id!(["-Gn"])) do
       Mix.raise("#{me} is not in group #{group}; the node must run in the helper's group")

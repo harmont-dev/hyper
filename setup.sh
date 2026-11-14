@@ -132,7 +132,7 @@ sudo chown root:root /opt/firecracker/firecracker /opt/firecracker/jailer
 sudo chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
 
 info "setuid helper"
-mix suidhelper.install
+mix suidhelper.install --group "$(id -gn)"
 [ -u /usr/local/libexec/hyper/hyper-suidhelper ] \
   || fail "hyper-suidhelper missing or not setuid-root"
 
