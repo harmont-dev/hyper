@@ -8,8 +8,6 @@ defmodule Hyper.Vm.Firewall do
   `[first, last]` pair per rule, in order.
   """
 
-  @smtp 25
-
   @type protocol :: :tcp | :udp
   @type rule :: {protocol(), Range.t()}
 
@@ -18,9 +16,9 @@ defmodule Hyper.Vm.Firewall do
 
   @type t :: %__MODULE__{inbound: [rule()], outbound_blocked: [rule()]}
 
-  @doc "Nothing open inbound; outbound SMTP blocked, the usual abuse vector."
+  @doc "Nothing open inbound and nothing blocked outbound."
   @spec default() :: t()
-  def default, do: %__MODULE__{inbound: [], outbound_blocked: [{:tcp, @smtp..@smtp}]}
+  def default, do: %__MODULE__{inbound: [], outbound_blocked: []}
 
   @spec to_request(t()) :: %{inbound: [map()], outbound_blocked: [map()]}
   def to_request(%__MODULE__{inbound: inbound, outbound_blocked: outbound_blocked}) do

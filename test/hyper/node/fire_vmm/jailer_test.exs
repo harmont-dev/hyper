@@ -37,7 +37,7 @@ defmodule Hyper.Node.FireVMM.JailerTest do
       uid: 900_001,
       gid: 900_001,
       net_id: 64,
-      firewall: Hyper.Vm.Firewall.default(),
+      firewall: %Hyper.Vm.Firewall{inbound: [], outbound_blocked: [{:tcp, 25..25}]},
       type: :micro,
       arch: :x86_64,
       mutable: nil,
