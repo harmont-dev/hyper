@@ -21,4 +21,8 @@ defmodule Hyper.Img.Db.Repo do
   def init(_context, config) do
     {:ok, Keyword.merge(config, Hyper.Cfg.Img.Db.repo_opts())}
   end
+
+  # Postgres `text` refuses NUL and invalid UTF-8 by raising, not by an error tuple.
+  @spec storable_text?(binary()) :: boolean()
+  def storable_text?(value), do: String.valid?(value) and not String.contains?(value, <<0>>)
 end
