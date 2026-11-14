@@ -174,7 +174,7 @@ jailer = "/opt/firecracker/jailer"
 # skopeo     = "skopeo"
 # mke2fs     = "mke2fs"
 # umoci      = "/usr/bin/umoci"
-# suidhelper = "/usr/local/bin/hyper-suidhelper"
+# suidhelper = "/usr/local/libexec/hyper/hyper-suidhelper"
 
 [jails]
 # The valid range of user/group IDs in which new VMs will be spawned. Hyper
@@ -376,20 +376,29 @@ operations. This is achieved through a side-car binary called
 > checksum differs is refused. A binary from another machine or build will not
 > pass -- always install the helper from the same tree you compiled.
 
-Build and install it with:
+Run it as the `hyper` user to build and install it:
 
 ```sh
 mix suidhelper.install
 ```
 
-If `sudo` needs a password, the task builds and stamps the binary, then prints
-the exact privileged copy for you to run yourself:
+The helper runs privileged operations only for root and for members of the
+group it is installed with, so that group must contain the node's account and
+no one else. `useradd --system hyper` above creates such a `hyper` group; the
+task uses your primary group (or `--group GROUP`) and refuses one shared with
+other accounts. If `sudo` needs a password, the task builds and stamps the
+binary, then prints the exact privileged commands for you to run yourself:
 
 ```sh
-sudo install -o root -g root -m 4755 \
+sudo install -d -o root -g hyper -m 0750 /usr/local/libexec/hyper
+sudo install -o root -g hyper -m 4750 \
   path/to/built/hyper-suidhelper \
-  /usr/local/bin/hyper-suidhelper
+  /usr/local/libexec/hyper/hyper-suidhelper
+sudo rm -f /usr/local/bin/hyper-suidhelper
 ```
+
+The last line removes a helper left at the pre-0.1.1 path, which any local
+account could run.
 
 ### Database Migrations
 

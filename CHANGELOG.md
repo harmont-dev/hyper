@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Breaking:** the setuid helper now runs privileged operations only for root
+  and for members of the group it is installed with, and moves to
+  `/usr/local/libexec/hyper/hyper-suidhelper` (`root:<node group>`, mode
+  `4750`, in a `0750` directory). Previously any local account could drive it
+  against every VM: claim a VM's vsock socket (root exec in the guest), tear
+  VMs down, or map files under `work_dir`. Upgrade by running
+  `mix suidhelper.install` as the node's account, or the commands in
+  `docs/cookbook/install.md`; this also removes the old
+  `/usr/local/bin/hyper-suidhelper`, which must not be left behind. A helper
+  installed with group `root` refuses everyone but root. (#117)
+
 ### Changed
 - **Breaking:** the gRPC package was promoted `hyper.grpc.v0` -> `hyper.grpc.v1`.
   `google.protobuf.Empty` is replaced by dedicated `StopVmResponse` and

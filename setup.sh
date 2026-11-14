@@ -133,7 +133,7 @@ sudo chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
 
 info "setuid helper"
 mix suidhelper.install
-[ -u /usr/local/bin/hyper-suidhelper ] \
+[ -u /usr/local/libexec/hyper/hyper-suidhelper ] \
   || fail "hyper-suidhelper missing or not setuid-root"
 
 info "postgres ($PG_CONTAINER)"

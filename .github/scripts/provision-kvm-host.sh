@@ -139,6 +139,6 @@ sudo chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
 
 # With passwordless sudo the task installs setuid-root itself.
 mix suidhelper.install
-[ -u /usr/local/bin/hyper-suidhelper ] || { echo "ERROR: hyper-suidhelper missing or not setuid-root" >&2; exit 1; }
+[ -u /usr/local/libexec/hyper/hyper-suidhelper ] || { echo "ERROR: hyper-suidhelper missing or not setuid-root" >&2; exit 1; }
 
 echo "provisioned: kvm=$(ls -l /dev/kvm)"

@@ -18,11 +18,13 @@ cargo build --release --target aarch64-unknown-linux-musl
 ```
 
 Both are statically linked (no libc dependency on the target host). Install the
-one matching the host, setuid root:
+one matching the host, setuid root, with the node's dedicated group (only root
+and that group may run it):
 
 ```sh
-sudo install -o root -g root -m 4755 \
-  ../target/x86_64-unknown-linux-musl/release/hyper-suidhelper /usr/local/bin/hyper-suidhelper
+sudo install -d -o root -g hyper -m 0750 /usr/local/libexec/hyper
+sudo install -o root -g hyper -m 4750 \
+  ../target/x86_64-unknown-linux-musl/release/hyper-suidhelper /usr/local/libexec/hyper/hyper-suidhelper
 ```
 
 Then point Hyper at it (runtime config). The tool paths must be absolute (the
@@ -31,7 +33,7 @@ helper execs the path passed via `--bin`):
 ```elixir
 # config/runtime.exs (or per-host config)
 config :hyper,
-  suid_helper: "/usr/local/bin/hyper-suidhelper",
+  suid_helper: "/usr/local/libexec/hyper/hyper-suidhelper",
   losetup_path: "/usr/sbin/losetup",
   dmsetup_path: "/usr/sbin/dmsetup",
   blockdev_path: "/usr/sbin/blockdev"
