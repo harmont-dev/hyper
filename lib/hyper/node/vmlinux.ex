@@ -60,8 +60,23 @@ defmodule Hyper.Node.Vmlinux do
   defp present(path) do
     cond do
       not File.regular?(path) -> {:error, {:vmlinux_missing, path}}
-      not Provider.usable?(path) -> {:error, {:vmlinux_untrusted, path}}
+      not Provider.usable?(resolve(path)) -> {:error, {:vmlinux_untrusted, path}}
       true -> :ok
+    end
+  end
+
+  # The helper canonicalizes the kernel path before vetting it, so a symlink is
+  # judged by its target here too. Past the hop bound the link itself is
+  # returned, which `Provider.usable?/1` refuses.
+  @max_link_hops 40
+
+  defp resolve(path, hops \\ @max_link_hops)
+  defp resolve(path, 0), do: path
+
+  defp resolve(path, hops) do
+    case :file.read_link_all(path) do
+      {:ok, target} -> resolve(Path.expand(to_string(target), Path.dirname(path)), hops - 1)
+      {:error, _} -> path
     end
   end
 end
