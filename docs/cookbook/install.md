@@ -204,17 +204,26 @@ For more details on configuring and tuning Hyper, we suggest you see the
 
 ### VM networking
 
-Every VM gets outbound IPv4 through NAT and a globally routable IPv6 address.
-The host needs:
+Every VM gets outbound IPv4 through NAT and a globally routable IPv6 address;
+see the [networking cookbook](networking.md) for the design. The host needs:
 
 - `nftables` (the `nft` binary), which the helper drives for both NATs;
 - IPv6 enabled (`net.ipv6.conf.default.disable_ipv6 = 0`), since every VM link
   carries IPv6 link-local addresses;
+- IPv4 and IPv6 forwarding on;
 - a `[net]` table naming the uplink interface and its routed IPv6 prefix, of
   which Hyper uses `<prefix>:1::/80`.
 
-On start, the helper turns on IPv4 and IPv6 forwarding and proxy NDP on the
-uplink itself; nothing needs to be set by hand.
+Turn forwarding on, and keep it on across reboots:
+
+```sh
+printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' \
+  | sudo tee /etc/sysctl.d/90-hyper.conf
+sudo sysctl -p /etc/sysctl.d/90-hyper.conf
+```
+
+The helper refuses to start with either off. It turns on proxy NDP on the uplink
+itself.
 
 #### Finding the uplink and its prefix
 

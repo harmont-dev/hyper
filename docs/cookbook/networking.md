@@ -182,7 +182,7 @@ The veth domain is specified to be `10.200.0.0/16`. This allows for `16,384`
 possible veth pairs. Each host side of the veth pair gets a `10.200.X.1+4*Y`
 address, while the namespace side gets a `10.200.X.2+4*Y` address. For example:
 
-| Slot  | Subnet            | vm-veth        | uplink         |
+| NetId | Subnet            | vm-veth        | uplink         |
 |-------|-------------------|----------------|----------------|
 | 0     | 10.200.0.0/30     | 10.200.0.1     | 10.200.0.2     |
 | 1     | 10.200.0.4/30     | 10.200.0.5     | 10.200.0.6     |
@@ -267,10 +267,10 @@ flowchart TD
 ### Addressing
 
 Each hypervisor node owns an IPv6 **prefix**. Hyper reserves the
-`<prefix>:1::/80` sub-range for VMs. A VM in slot `N` gets
+`<prefix>:1::/80` sub-range for VMs. A VM with NetId `N` gets
 `<prefix>:1:0:0:N/128`:
 
-| Slot  | VM address              |
+| NetId | VM address              |
 |-------|-------------------------|
 | 0     | `2001:db8::1:0:0:0`     |
 | 1     | `2001:db8::1:0:0:1`     |
@@ -320,11 +320,16 @@ The host's `inet hyper` table holds the rules that are the same for every VM:
 - **No host access.** Traffic from a `vm-veth-*` to any of the host's own
   addresses is dropped, except replies to connections the host opened and the
   neighbour discovery the link needs.
-- **No infrastructure access.** Traffic from a VM to private (`10/8`,
-  `172.16/12`, `192.168/16`), shared (`100.64/10`) and link-local (`169.254/16`)
-  IPv4, and to unique local IPv6 (`fc00::/7`), is dropped. This is where
-  providers keep their networks and metadata services, and it also stops VMs
-  talking to each other over the transit network.
+- **No infrastructure access.** Traffic from a VM to the `[net] blocked` ranges
+  is dropped. By default these are the special-purpose ranges providers keep
+  their networks and metadata services in: private, shared and link-local IPv4,
+  unique local IPv6, and the NAT64, 6to4 and IPv4-mapped prefixes that lead
+  back to them.
+- **No transit access.** New connections into the transit network are dropped
+  whatever `blocked` says, so VMs can't talk to each other over it.
+- **No untranslated traffic.** Packets conntrack can't track are dropped, as is
+  anything from a VM whose source is outside the transit network and the VM
+  range.
 
 ### VM namespace
 
@@ -333,14 +338,20 @@ Each VM's namespace holds the rules that are specific to it.
 - **No spoofing.** Only packets from the guest's own `172.16.0.2` and its own
   IPv6 address leave `tap0`. The jailed Firecracker process cannot send from the
   namespace at all.
+- **No host access.** New connections from the guest to the host's uplink
+  addresses are dropped here too, so the host stays out of reach if its own
+  table is flushed.
+- **DNS.** The guest's resolver is its gateway, `172.16.0.1`; UDP and TCP port
+  53 there are redirected to `[net] resolver`. Nothing else on the gateway
+  answers, so the guest can't ping it.
 - **Port policy.** Inbound, only replies and the VM's open ports reach the
   guest; outbound, the VM's blocked ports never leave it. Both lists are
   `tcp`/`udp` port ranges.
 
 The port policy is set when the VM is created (`CreateVm`'s `firewall`) and
 can be replaced while it runs (`SetVmFirewall`); a fork starts with its
-parent's current policy. Unset, nothing is open inbound and outbound TCP 25
-(SMTP) is blocked.
+parent's current policy. Unset, nothing is open inbound and nothing is blocked
+outbound.
 
 VMs reach each other only through their public IPv6 addresses, and only on
 ports the receiving VM has opened, exactly like any other host on the

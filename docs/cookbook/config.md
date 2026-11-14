@@ -111,8 +111,10 @@ uid_gid_range = [900000, 999999]
 
 | Config Key    | `config.exs` | `config.toml`  | Default | Notes |
 | ------------- | ------------ | -------------- | ------- | ----- |
-| `uplink`      | -            | `.uplink`      | -       | **Required.** The host interface VM traffic leaves through. |
-| `ipv6_prefix` | -            | `.ipv6_prefix` | -       | **Required.** The routed IPv6 prefix on `uplink`, `/64` or shorter. VMs take their addresses from `<prefix>:1::/80`. |
+| `uplink`      | -            | `.uplink`      | -       | **Required.** The host interface VM traffic leaves through (`if0` in the [networking cookbook](networking.md)). |
+| `ipv6_prefix` | -            | `.ipv6_prefix` | -       | **Required.** The routed IPv6 prefix on `uplink`, global unicast and `/64` or shorter. VMs take their addresses from `<prefix>:1::/80`. |
+| `resolver`    | -            | `.resolver`    | `"1.1.1.1"` | The IPv4 DNS resolver guests reach through their gateway, `172.16.0.1`. |
+| `blocked`     | -            | `.blocked`     | special-purpose ranges | CIDRs VMs may not send to. The default is the [IANA special-purpose](https://www.iana.org/assignments/iana-ipv4-special-registry/) ranges providers keep their networks and metadata services in; a list replaces it, and `[]` blocks nothing. `ipv6_prefix` and `resolver` may not overlap it. |
 
 A node refuses to start without this table: VM networking is not optional.
 
