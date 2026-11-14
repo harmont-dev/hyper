@@ -20,6 +20,8 @@ defmodule Hyper.Img.OciLoader do
 
   use Unit.Operators
 
+  import Bitwise
+
   alias Hyper.Img.OciLoader.Umoci
   alias Hyper.Node.FireVMM.GuestAgent
   alias Unit.Information
@@ -113,9 +115,48 @@ defmodule Hyper.Img.OciLoader do
   def stage_agent_from(rootfs, agent_bin) do
     dest = Path.join(rootfs, "hyper-init")
 
-    with :ok <- unlink_staging_target(dest),
-         :ok <- copy_exclusive(agent_bin, dest) do
-      File.chmod(dest, 0o755)
+    with_owner_write(rootfs, fn ->
+      with :ok <- unlink_staging_target(dest), do: install(agent_bin, rootfs, dest)
+    end)
+  end
+
+  @spec with_owner_write(Path.t(), (-> result)) :: result | {:error, term()} when result: term()
+  defp with_owner_write(dir, fun) do
+    case File.lstat(dir) do
+      {:ok, %File.Stat{type: :directory, mode: mode}} when band(mode, 0o200) != 0 ->
+        fun.()
+
+      {:ok, %File.Stat{type: :directory, mode: mode}} ->
+        with :ok <- File.chmod(dir, band(mode, 0o7777) ||| 0o200) do
+          result = fun.()
+          with :ok <- File.chmod(dir, band(mode, 0o7777)), do: result
+        end
+
+      {:ok, _} ->
+        {:error, :enotdir}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # The agent is written and chmodded inside a directory this call just made,
+  # so no image-controlled name is ever resolved; rename(2) then replaces
+  # whatever sits at `dest` without following it.
+  @spec install(Path.t(), Path.t(), Path.t()) :: :ok | {:error, term()}
+  defp install(agent_bin, rootfs, dest) do
+    private = Path.join(rootfs, ".hyper-init-#{System.unique_integer([:positive])}")
+
+    with :ok <- File.mkdir(private) do
+      staged = Path.join(private, "hyper-init")
+
+      try do
+        with :ok <- copy_exclusive(agent_bin, staged),
+             :ok <- File.chmod(staged, 0o755),
+             do: File.rename(staged, dest)
+      after
+        File.rm_rf(private)
+      end
     end
   end
 
