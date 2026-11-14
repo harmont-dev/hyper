@@ -1,14 +1,5 @@
 defmodule Hyper.Node.FireVMM.GuestCpu do
-  @moduledoc """
-  The CPU features a guest boots with.
-
-  Guests never see a hardware-virtualization extension. Firecracker passes VMX
-  and SVM through from the host unmasked, so on a host whose KVM offers nested
-  virt (the `kvm_intel`/`kvm_amd` default) every guest could run its own
-  hypervisor on top of the host's nested-paging code (CVE-2026-53359). KVM
-  refuses CR4.VMXE and EFER.SVME when the guest's CPUID lacks the bit, so the
-  mask holds whatever the host's `nested` parameter says.
-  """
+  @moduledoc "The CPU features a guest boots with."
 
   alias Hyper.Firecracker.Api.{CpuConfig, CpuidLeafModifier, CpuidRegisterModifier}
 
