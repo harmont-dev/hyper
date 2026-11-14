@@ -113,8 +113,9 @@ impl KernelImage {
                 source,
             })?;
         let real: SafePathBuf<IsAbsolute, StrictComponents> = real.try_into()?;
-        let file: SafeFile<IsRegularFile, Any, OwnerOnlyWritable> =
-            SafeFile::open(&real, OpenFlags::RDONLY).map_err(|source| KernelError::Open {
+        let file = SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&real, OpenFlags::PATH)
+            .and_then(|vetted| vetted.reopen(OpenFlags::RDONLY))
+            .map_err(|source| KernelError::Open {
                 path: real.as_path().to_path_buf(),
                 source,
             })?;
@@ -131,6 +132,11 @@ impl KernelImage {
             });
         }
         Ok(Self(file))
+    }
+
+    fn is_set_id(&self) -> nix::Result<bool> {
+        let set_id = Mode::S_ISUID | Mode::S_ISGID;
+        Ok(fstat(self.0.as_raw_fd())?.st_mode & set_id.bits() != 0)
     }
 }
 
@@ -239,19 +245,23 @@ impl JailRoot {
 
     /// Put the kernel image in the chroot jail.
     pub fn stage_kernel(&self, kernel: &KernelImage) -> Result<(), dir::DirError> {
-        self.0
-            .linkat(&kernel.0, KERNEL_NAME)
-            .or_else(|errno| -> Result<(), dir::DirError> {
-                if errno != Errno::EXDEV {
-                    return Err(errno.into());
-                }
+        // A root-made hard link would hand the jail a set-id inode that `protected_hardlinks`
+        // refuses unprivileged users; the copy is written at `KERNEL_MODE` instead.
+        if kernel.is_set_id()? {
+            return self.copy_kernel(kernel);
+        }
+        match self.0.linkat(&kernel.0, KERNEL_NAME) {
+            Err(Errno::EXDEV) => self.copy_kernel(kernel),
+            linked => Ok(linked?),
+        }
+    }
 
-                let dest = self.0.mkfileat(KERNEL_NAME, KERNEL_MODE)?;
-                let mut src = File::from(kernel.0.as_fd().try_clone_to_owned()?);
-                src.rewind()?;
-                io::copy(&mut src, &mut File::from(OwnedFd::from(dest)))?;
-                Ok(())
-            })
+    fn copy_kernel(&self, kernel: &KernelImage) -> Result<(), dir::DirError> {
+        let dest = self.0.mkfileat(KERNEL_NAME, KERNEL_MODE)?;
+        let mut src = File::from(kernel.0.as_fd().try_clone_to_owned()?);
+        src.rewind()?;
+        io::copy(&mut src, &mut File::from(OwnedFd::from(dest)))?;
+        Ok(())
     }
 
     /// Add the rootfs block device into the chroot jail.
@@ -536,6 +546,43 @@ mod tests {
 
         let err = root.stage_kernel(&kernel).unwrap_err();
         assert_eq!(err.errno(), Some(Errno::EEXIST), "got {err:?}");
+    }
+
+    #[rstest]
+    fn a_staged_kernel_never_carries_a_set_id_bit_as_root(
+        jail: Jail,
+        #[values(0o4755, 0o2755, 0o6755)] mode: u32,
+        #[values(false, true)] cross_device: bool,
+    ) {
+        if !is_root() {
+            eprintln!("SKIP a_staged_kernel_never_carries_a_set_id_bit_as_root");
+            return;
+        }
+        let src_dir = if cross_device {
+            match TempDir::new_in("/dev/shm") {
+                Ok(d) => d,
+                Err(_) => return,
+            }
+        } else {
+            TempDir::new_in(jail.base()).unwrap()
+        };
+        let src = src_dir.child("vmlinux");
+        src.write_str("kernel").unwrap();
+        std::os::unix::fs::chown(&src, Some(0), Some(0)).unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(mode)).unwrap();
+
+        jail.open_root()
+            .stage_kernel(&KernelImage::open(&strict(&src)).unwrap())
+            .unwrap();
+
+        let staged = fs::symlink_metadata(jail.root_dir.join("vmlinux"))
+            .unwrap()
+            .mode();
+        assert_eq!(
+            staged & 0o6000,
+            0,
+            "staged vmlinux is {staged:o} from a {mode:o} source"
+        );
     }
 
     #[rstest]

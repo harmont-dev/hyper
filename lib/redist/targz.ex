@@ -45,15 +45,32 @@ defmodule Redist.Targz do
   end
 
   defp extract(tar_path, dest_dir) do
-    File.mkdir_p!(dest_dir)
+    tar = String.to_charlist(tar_path)
 
-    case :erl_tar.extract(
-           String.to_charlist(tar_path),
-           [:compressed, {:cwd, String.to_charlist(dest_dir)}]
-         ) do
-      :ok -> :ok
-      {:error, {name, :unsafe_path}} -> {:error, {:unsafe_tar_entry, to_string(name)}}
-      {:error, reason} -> {:error, {:extract_failed, reason}}
+    with :ok <- refuse_symlinks(tar) do
+      File.mkdir_p!(dest_dir)
+
+      case :erl_tar.extract(tar, [:compressed, {:cwd, String.to_charlist(dest_dir)}]) do
+        :ok -> :ok
+        {:error, {name, :unsafe_path}} -> {:error, {:unsafe_tar_entry, to_string(name)}}
+        {:error, reason} -> {:error, {:extract_failed, reason}}
+      end
+    end
+  end
+
+  # A chain of individually in-tree links (`s -> .`, `t -> s/..`) followed by
+  # an entry written through it spins `:erl_tar.extract/2` forever. No release
+  # this installs ships a symlink, so none is accepted.
+  defp refuse_symlinks(tar) do
+    case :erl_tar.table(tar, [:compressed, :verbose]) do
+      {:ok, entries} ->
+        case Enum.find(entries, &(elem(&1, 1) == :symlink)) do
+          nil -> :ok
+          entry -> {:error, {:unsafe_tar_entry, to_string(elem(entry, 0))}}
+        end
+
+      {:error, reason} ->
+        {:error, {:extract_failed, reason}}
     end
   end
 
