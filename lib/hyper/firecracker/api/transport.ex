@@ -58,7 +58,6 @@ defmodule Hyper.Firecracker.Api.Transport do
     end
   end
 
-  @spec encode(atom(), String.t(), map()) :: iodata()
   defp encode(method, url, info) do
     target = if q = info[:query], do: url <> "?" <> URI.encode_query(q), else: url
 
@@ -178,7 +177,7 @@ defmodule Hyper.Firecracker.Api.Transport do
   defp read_to_close(sock, acc, size, deadline) do
     case recv(sock, 0, deadline) do
       {:ok, data} when size + byte_size(data) > @max_body_bytes -> {:error, :body_too_large}
-      {:ok, data} -> read_to_close(sock, [acc | data], size + byte_size(data), deadline)
+      {:ok, data} -> read_to_close(sock, [acc, data], size + byte_size(data), deadline)
       {:error, :closed} -> {:ok, IO.iodata_to_binary(acc)}
       {:error, _} = err -> err
     end
@@ -197,7 +196,7 @@ defmodule Hyper.Firecracker.Api.Transport do
         true ->
           with {:ok, chunk} <- recv(sock, chunk_size, deadline),
                :ok <- expect_crlf(sock, deadline) do
-            read_chunks(sock, [acc | chunk], size + chunk_size, deadline)
+            read_chunks(sock, [acc, chunk], size + chunk_size, deadline)
           end
       end
     end
