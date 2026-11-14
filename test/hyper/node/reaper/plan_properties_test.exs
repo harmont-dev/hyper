@@ -28,23 +28,10 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
   property "a live vm_id is never a reap candidate" do
     check all(
             live <- id_set(),
-            leaves <- id_list(),
-            rw <- id_list(),
-            netns <- id_list()
+            held <- id_list()
           ) do
-      orphans = Plan.orphans(live, leaves, rw, netns)
+      orphans = Plan.orphans(live, held)
       assert MapSet.disjoint?(orphans, live)
-    end
-  end
-
-  property "every orphan netns name not in live is a candidate, and none from live are" do
-    check all(
-            live <- id_set(),
-            netns <- id_list()
-          ) do
-      orphans = Plan.orphans(live, [], [], netns)
-      expected = MapSet.difference(MapSet.new(netns), live)
-      assert orphans == expected
     end
   end
 
@@ -87,4 +74,34 @@ defmodule Hyper.Node.Reaper.PlanPropertiesTest do
       assert Plan.rw_ids([Mutable.dm_name(id)]) == [id]
     end
   end
+
+  property "netns_ids/1 recovers every vm_id behind a hyper- namespace and nothing else" do
+    check all(
+            ids <- list_of(vm_id()),
+            foreign <- list_of(string(:alphanumeric, min_length: 1))
+          ) do
+      names = Enum.map(ids, &("hyper-" <> &1)) ++ Enum.map(foreign, &("cni-" <> &1))
+      assert Plan.netns_ids(names) == ids
+    end
+  end
+
+  property "netns_ids/1 refuses a hyper- namespace whose suffix is not a vm id" do
+    malformed =
+      one_of([
+        map(string(:alphanumeric, min_length: 1), &("hyper-test-" <> &1)),
+        map(vm_id(), fn "v" <> encoded -> "v" <> String.upcase(encoded) end),
+        map(vm_id(), &(&1 <> "a")),
+        map(vm_id(), &String.slice(&1, 0..-2//1)),
+        map(binary(min_length: 1, max_length: 9), &vm_id_of/1),
+        map(binary(length: 10), &Base.encode32(&1, padding: false, case: :lower))
+      ])
+
+    check all(suffixes <- list_of(malformed)) do
+      assert Plan.netns_ids(Enum.map(suffixes, &("hyper-" <> &1))) == []
+    end
+  end
+
+  defp vm_id, do: map(binary(length: 10), &vm_id_of/1)
+
+  defp vm_id_of(bytes), do: "v" <> Base.encode32(bytes, padding: false, case: :lower)
 end

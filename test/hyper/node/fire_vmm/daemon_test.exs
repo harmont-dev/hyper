@@ -1,19 +1,17 @@
 defmodule Hyper.Node.FireVMM.DaemonTest do
   @moduledoc """
-  `Daemon` shells every privileged step (netns prepare/teardown, chroot
-  removal, jailer launch) through the setuid helper binary named by
-  `Hyper.Cfg.Tools.suidhelper/0`. These tests point that at a small fake
-  script instead of the real setuid helper — the same seam `JailerTest` uses
-  for `tools.firecracker`/`tools.jailer` — so they can observe real call
-  order and gating without root, a real netns, or a real firecracker process.
+  `Daemon` shells every privileged step (jail teardown, jailer launch)
+  through the setuid helper binary named by `Hyper.Cfg.Tools.suidhelper/0`.
+  These tests point that at a small fake script instead of the real setuid
+  helper — the same seam `JailerTest` uses for `tools.firecracker`/`tools.jailer`
+  — so they can observe the real calls without root or a real firecracker
+  process.
 
-  Invariants under test (networking is mandatory — these fire unconditionally,
-  even with no `[network]` table in config):
+  Invariants under test:
 
-    * the jailer enters the netns via `--netns` (Task 8), so it must already
-      exist: `network prepare` must run before the `jailer` launch.
-    * jail clearing (`chroot-jail remove`) and network teardown both fire
-      wherever the jail is cleared (stale-reset on relaunch, and terminate).
+    * `start_link` boots with one `vm_launch` carrying the kernel and the
+      volume's device.
+    * `terminate/2` clears the jail with `vm_teardown`.
   """
 
   use ExUnit.Case, async: false
@@ -33,6 +31,12 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       File.rm(log)
     end)
 
+    unless Process.whereis(FireVMM.Policy.registry()) do
+      start_supervised!({Registry, keys: :unique, name: FireVMM.Policy.registry()})
+    end
+
+    start_supervised!({FireVMM.Policy, opts()})
+
     {:ok, log: log, fake: fake}
   end
 
@@ -43,6 +47,8 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
       vm_id: @vm_id,
       uid: 900_500,
       gid: 900_500,
+      net_id: 7,
+      firewall: Hyper.Vm.Firewall.default(),
       type: :micro,
       arch: :x86_64,
       mutable: mutable,
@@ -70,6 +76,26 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     path
   end
 
+  defmodule MuonTrapStandIn do
+    @moduledoc false
+    use GenServer
+
+    def start({log, stop}), do: GenServer.start(__MODULE__, {log, stop})
+
+    @impl true
+    def init(args) do
+      Process.flag(:trap_exit, true)
+      {:ok, args}
+    end
+
+    @impl true
+    def terminate(_reason, {log, :obey}) do
+      File.write!(log, ~s({"op":"muontrap_stopped"}\n), [:append])
+    end
+
+    def terminate(_reason, {_log, :hang}), do: Process.sleep(:infinity)
+  end
+
   defp mutable_stub(device) do
     spawn_link(fn ->
       receive do
@@ -82,13 +108,6 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     log |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
   end
 
-  defp calls(log) do
-    log
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.map(&(&1 |> Jason.decode!() |> Map.fetch!("op")))
-  end
-
   # `Jailer.chroot_dir/1` derives the in-jail exec name from `tools.firecracker`
   # (see `JailerTest`), so every scenario stubs it alongside `tools.suidhelper`
   # to keep it off the real filesystem.
@@ -97,24 +116,31 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
     Hyper.Cfg.Toml.put_cache(%{"tools" => tools})
   end
 
-  describe "netns lifecycle (mandatory)" do
-    test "start_link boots with one vm_launch carrying the kernel and the volume's device",
+  describe "jail lifecycle" do
+    test "start_link boots with one vm_launch carrying the kernel, the volume's device, and the policy last set",
          %{log: log, fake: fake} do
       put_toml(fake)
+      {:ok, ssh} = Hyper.Vm.Firewall.new([{:tcp, 22..22//1}], [])
+      :ok = FireVMM.Policy.put(@vm_id, ssh)
 
       Process.flag(:trap_exit, true)
       {:ok, pid} = Daemon.start_link(opts(mutable_stub(@rootfs)))
       assert_receive {:EXIT, ^pid, _reason}, 2_000
 
       assert [
-               %{"op" => "vm_launch", "kernel" => "/nonexistent/vmlinux", "device" => @rootfs}
+               %{
+                 "op" => "vm_launch",
+                 "kernel" => "/nonexistent/vmlinux",
+                 "device" => @rootfs,
+                 "firewall" => %{"inbound" => [%{"protocol" => "tcp", "ports" => [22, 22]}]}
+               }
                | exit
              ] = requests(log)
 
       assert Enum.map(exit, & &1["op"]) == ["vm_teardown"]
     end
 
-    test "terminate/2 tears down the jail and its network", %{log: log, fake: fake} do
+    test "terminate/2 tears down the jail", %{log: log, fake: fake} do
       put_toml(fake)
 
       assert :ok =
@@ -123,7 +149,28 @@ defmodule Hyper.Node.FireVMM.DaemonTest do
                  muontrap: nil
                })
 
-      assert calls(log) == ["vm_teardown"]
+      assert requests(log) == [%{"op" => "vm_teardown", "id" => @vm_id}]
+    end
+
+    test "terminate/2 stops the jailer's MuonTrap before tearing down the jail",
+         %{log: log, fake: fake} do
+      put_toml(fake)
+
+      rows = [
+        {:obey, ["muontrap_stopped", "vm_teardown"]},
+        {:hang, ["vm_teardown"]}
+      ]
+
+      for {stop, ops} <- rows do
+        File.write!(log, "")
+        {:ok, muontrap} = MuonTrapStandIn.start({log, stop})
+        ref = Process.monitor(muontrap)
+
+        assert :ok = Daemon.terminate(:shutdown, %Daemon{opts: opts(), muontrap: muontrap})
+
+        assert_receive {:DOWN, ^ref, :process, ^muontrap, _}
+        assert Enum.map(requests(log), & &1["op"]) == ops, inspect(stop)
+      end
     end
   end
 end

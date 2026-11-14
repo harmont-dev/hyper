@@ -70,12 +70,12 @@ defmodule Sys.Tmp do
     end
   end
 
+  # O_CREAT|O_EXCL: fails :eexist on any pre-existing path, symlinks included.
   @spec mkdir_private(Path.t()) :: :ok | {:error, File.posix()}
   defp mkdir_private(path) do
     with :ok <- File.mkdir(path), do: File.chmod(path, 0o700)
   end
 
-  # O_CREAT|O_EXCL: fails :eexist on any pre-existing path, symlinks included.
   @spec touch_exclusive(Path.t()) :: :ok | {:error, File.posix()}
   defp touch_exclusive(path) do
     case File.open(path, [:write, :exclusive]) do

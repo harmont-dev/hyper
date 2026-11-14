@@ -163,6 +163,7 @@ defmodule Hyper.Node.FireVMM.Meter do
   end
 
   def handle_call(:sample_now, _from, state), do: {:reply, :ok, sample(state)}
+
   def handle_call(:flush_now, _from, state), do: {:reply, :ok, flush(state)}
 
   @impl true

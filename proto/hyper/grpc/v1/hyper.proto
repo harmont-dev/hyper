@@ -51,6 +51,17 @@ service Hyper {
   //   UNAVAILABLE -- the VM's host node is unreachable.
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
 
+  // Replace a running microVM's port policy. Takes effect immediately; forks
+  // taken afterwards inherit the new policy.
+  //
+  // Errors:
+  //   INVALID_ARGUMENT -- a rule's protocol is unrecognised, its ports are not
+  //                       an ascending range within 1..65535, or a direction
+  //                       holds more than 128 rules.
+  //   NOT_FOUND        -- no VM with this `vm_id` is running in the cluster.
+  //   UNAVAILABLE      -- the VM's host node is unreachable.
+  rpc SetVmFirewall(SetVmFirewallRequest) returns (SetVmFirewallResponse);
+
   // Locate a microVM: report the cluster node it currently runs on.
   //
   // Errors:
@@ -127,6 +138,10 @@ message CreateVmRequest {
   // Optional. Extra kernel command-line arguments. If unset, the server's
   // standard serial-console cmdline is used.
   optional string boot_args = 4;
+
+  // Optional. The VM's port policy. If unset, nothing is open inbound and
+  // outbound TCP 25 (SMTP) is blocked.
+  optional Firewall firewall = 5;
 }
 
 // Result of a successful CreateVm.
@@ -161,6 +176,49 @@ message StopVmRequest {
 
 // Result of StopVm. Empty today.
 message StopVmResponse {}
+
+// Request to replace a VM's port policy.
+message SetVmFirewallRequest {
+  // The id of the VM to update.
+  string vm_id = 1;
+
+  // Required. The policy to apply, replacing the current one entirely.
+  Firewall firewall = 2;
+}
+
+// Result of SetVmFirewall. Empty today.
+message SetVmFirewallResponse {}
+
+// A VM's port policy. Inbound connections are dropped unless a rule in
+// `inbound` opens their port; outbound ones are allowed unless a rule in
+// `outbound_blocked` names their port. Replies to allowed traffic always pass.
+message Firewall {
+  // Destination ports open to connections from outside.
+  repeated PortRule inbound = 1;
+
+  // Destination ports the VM may not connect out to.
+  repeated PortRule outbound_blocked = 2;
+}
+
+// Traffic of one protocol to an inclusive destination port range.
+message PortRule {
+  // Required. The transport protocol.
+  Protocol protocol = 1;
+
+  // Required. The first port of the range, 1..65535.
+  uint32 first_port = 2;
+
+  // Required. The last port of the range, from `first_port` to 65535. Equal to
+  // `first_port` for a single port.
+  uint32 last_port = 3;
+}
+
+// A transport protocol a PortRule matches.
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;  // unset -- the server rejects it (INVALID_ARGUMENT)
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+}
 
 // Request to locate a VM.
 message GetVmRequest {
