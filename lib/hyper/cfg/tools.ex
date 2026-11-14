@@ -46,6 +46,6 @@ defmodule Hyper.Cfg.Tools do
       get_cfg(
         runtime: {__MODULE__, :suidhelper},
         toml: "tools.suidhelper",
-        default: "/usr/local/bin/hyper-suidhelper"
+        default: "/usr/local/libexec/hyper/hyper-suidhelper"
       )
 end

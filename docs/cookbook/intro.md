@@ -30,7 +30,7 @@ Follow the [installation guide](install.md). In short:
 2. Add `hypervm` to your Mix project's dependencies (or work from a source
    checkout).
 3. Install the Firecracker binaries (`mix firecracker.install`) and the setuid
-   helper (`mix suidhelper.install`).
+   helper (`mix suidhelper.install --group hyper`).
 4. Write `/etc/hyper/config.toml` and run the database migrations.
 
 ### Configuration

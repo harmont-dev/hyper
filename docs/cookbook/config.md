@@ -55,7 +55,7 @@ configurable:
 | `mke2fs`      | `.mke2fs`     | `.mke2fs`      | `$PATH["mke2fs"]`                   |  |
 | `skopeo`      | `.skopeo`     | `.skopeo`      | `$PATH["skopeo"]`                   |  |
 | `umoci`       | `.umoci`      | `.umoci`       | Automatically downloaded.           |  |
-| `suidhelper`  | `.suidhelper` | `.suidhelper`  | `"/usr/local/bin/hyper-suidhelper"` | [Absolute Path](#absolute-path) |
+| `suidhelper`  | `.suidhelper` | `.suidhelper`  | `"/usr/local/libexec/hyper/hyper-suidhelper"` | [Absolute Path](#absolute-path) |
 
 <!-- tabs open -->
 ### `config.exs`
@@ -67,7 +67,7 @@ config :hyper, Hyper.Cfg.Tools,
   skopeo: "/usr/local/bin/skopeo",
   mke2fs: "/usr/local/bin/mke2fs",
   umoci: "/usr/local/bin/umoci",
-  suidhelper: "/usr/local/bin/hyper-suidhelper"
+  suidhelper: "/usr/local/libexec/hyper/hyper-suidhelper"
 ```
 
 ### `config.toml`
@@ -85,7 +85,7 @@ thin_dump   = "/usr/sbin/thin_dump"
 skopeo     = "/usr/local/bin/skopeo"
 mke2fs     = "/usr/local/bin/mke2fs"
 umoci      = "/usr/local/bin/umoci"
-suidhelper = "/usr/local/bin/hyper-suidhelper"
+suidhelper = "/usr/local/libexec/hyper/hyper-suidhelper"
 ```
 <!-- tabs close -->
 
