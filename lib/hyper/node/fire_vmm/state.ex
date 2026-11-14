@@ -67,6 +67,17 @@ defmodule Hyper.Node.FireVMM.State do
   end
 
   @doc """
+  Replace the running VM `id`'s port policy. The new policy is what `describe/1`
+  reports from then on, so a later fork inherits it. Exits if the VM is gone.
+  """
+  @set_firewall_timeout Unit.Time.s(30)
+
+  @spec set_firewall(Hyper.Vm.Id.t(), Hyper.Vm.Firewall.t()) :: :ok | {:error, term()}
+  def set_firewall(id, %Hyper.Vm.Firewall{} = firewall) do
+    :gen_statem.call(via(id), {:set_firewall, firewall}, Unit.Time.as_ms(@set_firewall_timeout))
+  end
+
+  @doc """
   The start `Opts` of the running VM `id` — how a fork recovers the parent's
   `img_id`/`type`/`arch`/`boot_args` from just a vm_id. Exits if the VM is gone;
   callers translate that to `{:error, :not_found}`.
@@ -123,7 +134,26 @@ defmodule Hyper.Node.FireVMM.State do
   # Answered in every lifecycle state: the opts are static data, and a fork must
   # be able to describe a parent that is still configuring.
   def handle_event({:call, from}, :describe, _state, data) do
-    {:keep_state_and_data, [{:reply, from, data.opts}]}
+    firewall = Hyper.Node.FireVMM.Policy.current(data.opts.vm_id)
+    {:keep_state_and_data, [{:reply, from, %{data.opts | firewall: firewall}}]}
+  end
+
+  def handle_event({:call, _from}, {:set_firewall, _firewall}, :awaiting_api, _data) do
+    {:keep_state_and_data, :postpone}
+  end
+
+  # The VM's namespace exists from launch until teardown, so any state short of
+  # stopping can take a new policy.
+  def handle_event({:call, from}, {:set_firewall, firewall}, state, data)
+      when state in [:configuring, :running] do
+    case Hyper.SuidHelper.Vm.firewall(data.opts.vm_id, firewall) do
+      :ok ->
+        :ok = Hyper.Node.FireVMM.Policy.put(data.opts.vm_id, firewall)
+        {:keep_state_and_data, [{:reply, from, :ok}]}
+
+      {:error, _} = err ->
+        {:keep_state_and_data, [{:reply, from, err}]}
+    end
   end
 
   def handle_event(type, content, state, data) do

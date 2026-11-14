@@ -30,6 +30,7 @@ defmodule Hyper.Node.FireVMM do
   alias Hyper.Node.FireVMM.Core
   alias Hyper.Node.FireVMM.Jailer
   alias Hyper.Node.FireVMM.Meter
+  alias Hyper.Node.FireVMM.Policy
 
   @doc "The scheduler period of each VM."
   @spec cpu_period() :: Unit.Time.t()
@@ -102,6 +103,9 @@ defmodule Hyper.Node.FireVMM do
           # which calls Client.run while waiting for the daemon's API. Client
           # depends only on vm_id (an independent peer), so no reverse dependency.
           {Client, %Client.Opts{vm_id: opts.vm_id}},
+          # Before Core: its Daemon launches under the current policy, and a
+          # firecracker crash restarts Core without resetting what was set since.
+          {Policy, opts},
           {Core, opts},
           {Relay,
            %{

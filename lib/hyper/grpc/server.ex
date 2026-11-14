@@ -24,6 +24,8 @@ defmodule Hyper.Grpc.Server do
     ListVmsResponse,
     LoadImageRequest,
     LoadImageResponse,
+    SetVmFirewallRequest,
+    SetVmFirewallResponse,
     StopVmRequest,
     StopVmResponse
   }
@@ -72,6 +74,18 @@ defmodule Hyper.Grpc.Server do
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.stop_vm(vm_id) do
       :ok -> Codec.to_grpc(:stopped)
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
+  end
+
+  @spec set_vm_firewall(SetVmFirewallRequest.t(), GRPC.Server.Stream.t()) ::
+          SetVmFirewallResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.set_vm_firewall", include: [:vm_id])
+  def set_vm_firewall(%SetVmFirewallRequest{vm_id: vm_id} = req, _stream) do
+    with {:ok, {^vm_id, firewall}} <- Codec.from_grpc(req),
+         :ok <- Hyper.set_vm_firewall(vm_id, firewall) do
+      Codec.to_grpc(:firewall_set)
+    else
       {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
   end
