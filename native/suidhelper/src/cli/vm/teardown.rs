@@ -8,7 +8,7 @@ use super::{VmOut, API_SOCKET, VSOCK_SOCKET};
 use crate::cli::Op;
 use crate::config::Config;
 use crate::lock::{Locks, LocksError};
-use crate::network;
+use crate::net::vm::{VmNet, VmNetError};
 use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{JailLayout, RemoveError};
 use hyperrs_firecracker::VmId;
@@ -31,7 +31,7 @@ pub enum TeardownError {
     #[error(transparent)]
     Jail(#[from] JailRemoveError),
     #[error(transparent)]
-    Network(#[from] network::TeardownError),
+    Net(#[from] VmNetError),
     #[error(transparent)]
     Unpin(#[from] PinError),
     #[error(transparent)]
@@ -64,7 +64,6 @@ pub enum CgroupError {
 #[serde(deny_unknown_fields)]
 pub struct Teardown {
     id: VmId,
-    uid: Option<u32>,
 }
 
 impl Op for Teardown {
@@ -86,28 +85,24 @@ impl Op for Teardown {
 impl Teardown {
     pub fn teardown(&self, token: &mut Unprivileged) -> Result<(), TeardownError> {
         let config = Config::get();
-        let jail = (|| {
-            let cgroup_parent = config.parent_cgroup_dir();
-            let jail_base = config.jail_base();
-            let layout = JailLayout::new(&jail_base, &self.id);
-            let _root = token.elevate()?;
-            self.remove_cgroup(&cgroup_parent)?;
-            Ok::<_, JailRemoveError>(layout.remove()?)
-        })()
-        .map_err(TeardownError::from);
-        let net = match (config.network(), self.uid) {
-            (None, _) => Ok(()),
-            (Some(_), Some(uid)) => network::teardown::Teardown::new(uid, &self.id)
-                .and_then(|net| net.run(token))
-                .map_err(|e| TeardownError::Network(e.into())),
-            (Some(_), None) => network::teardown_orphan::TeardownOrphan::new(&self.id)
-                .and_then(|net| net.run(token))
-                .map_err(|e| TeardownError::Network(e.into())),
-        };
+        let cgroup_parent = config.parent_cgroup_dir();
+        let jail_base = config.jail_base();
+        let layout = JailLayout::new(&jail_base, &self.id);
+        let _root = token.elevate().map_err(JailRemoveError::from)?;
+        let cgroup = self
+            .remove_cgroup(&cgroup_parent)
+            .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
+        let jail = layout
+            .remove()
+            .map_err(|e| TeardownError::from(JailRemoveError::from(e)));
+        let net = self
+            .net()
+            .teardown(config.net().ok())
+            .map_err(TeardownError::from);
         let pins = self
             .unpin_sockets(&config.socket_dir())
             .map_err(TeardownError::from);
-        jail.and(net).and(pins)
+        cgroup.and(jail).and(net).and(pins)
     }
 
     pub fn unpin_sockets(&self, socket_dir: &LexicalPath) -> Result<(), PinError> {
@@ -119,6 +114,11 @@ impl Teardown {
         [API_SOCKET, VSOCK_SOCKET]
             .into_iter()
             .try_for_each(|socket| SocketPin::new(&self.id, socket).unpin(&dir))
+    }
+
+    /// The VM's network, as [`VmNet`] sees it.
+    pub fn net(&self) -> VmNet<'_> {
+        VmNet { id: &self.id }
     }
 
     pub fn remove_cgroup(&self, parent: &LexicalPath) -> Result<(), CgroupError> {
@@ -153,7 +153,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let id: VmId = "id".parse().unwrap();
         let parent = tmp.child("hyper");
-        let teardown = Teardown::new(id, None);
+        let teardown = Teardown::new(id);
         teardown
             .remove_cgroup(&strict(&parent))
             .expect("missing parent must be Ok");

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod exec;
 pub mod init;
+pub mod net;
 
 // tonic-generated code: lints in it are not ours to fix, and newer clippy
 // releases keep flagging it (e.g. `double_must_use` on async_trait methods).

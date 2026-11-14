@@ -5,6 +5,10 @@ test_workspace = true
 additional_cargo_test_args = ["--profile", "mutants"]
 exclude_globs = ["suidhelper/xtask/**"]
 exclude_re = [
+    # Needs root; killed by the root-gated e2e_chroot_jail tests in the privileged E2E job.
+    'replace Teardown::teardown -> ',
+    # PID-1 mounts inside a booted guest; killed by the KVM integration job.
+    'replace setup -> io::Result<\(\)> with Ok\(\(\)\)',
     # rtnetlink, netns, nftables and sysctl wrappers act on a network namespace and need
     # root; killed by their _as_root tests in the privileged E2E job. Flag `|` -> `^`
     # mutants among them are equivalent (the flag bits never overlap), as is `|` -> `&`
@@ -16,4 +20,17 @@ exclude_re = [
     "hyperrs-linux/src/net/route\\.rs:.*Route::rtnl_message",
     "hyperrs-linux/src/net/nft/mod\\.rs:.*Nft::",
     "hyperrs-linux/src/sysctl\\.rs:.*Setting::(read|write)",
+    # Host and VM network setup and socket pins need root; killed by the suidhelper
+    # _as_root tests (net::vm, e2e_firewall, e2e_chroot_jail) in the privileged E2E job.
+    "suidhelper/src/net/host\\.rs:.*HostNet<'_>::init",
+    "suidhelper/src/net/vm\\.rs:.*VmNet<'_>::",
+    "suidhelper/src/cli/vm/claim\\.rs:.*SocketPin<'_>::",
+    "suidhelper/src/cli/vm/teardown\\.rs:.*Teardown::unpin_sockets",
+    # Guest network setup runs inside a booted guest; killed by test/e2e/guest_network_test.exs
+    # in the KVM integration job.
+    "guest-agent/src/net\\.rs:.*GuestNet::(from_proc|configure)",
+    # Equivalent: the VM range tag and a NetId never share bits with a normalised /64.
+    "replace \\| with \\^ in NodePrefix::(vm_range|guest)$",
+    # Equivalent: the dst-nat chain runs after conntrack and before routing at -100 or 100.
+    "suidhelper/src/net/mod\\.rs:\\d+:\\d+: delete -$",
 ]

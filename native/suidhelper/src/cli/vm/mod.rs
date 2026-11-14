@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pub mod claim;
+pub mod firewall;
 pub mod launch;
 pub mod teardown;
 
@@ -14,4 +15,5 @@ pub enum VmOut {
     Claimed,
     Pending,
     ToreDown,
+    FirewallSet,
 }

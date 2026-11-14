@@ -3,7 +3,7 @@ name = "hyper-guest-agent"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "PID-1 guest agent for Hyper microVMs: mounts, resolv.conf, and a vsock exec server."
+description = "PID-1 guest agent for Hyper microVMs: mounts, IPv6 and a vsock exec server."
 repository = "https://github.com/harmont-dev/hyper"
 
 [lib]
@@ -15,10 +15,12 @@ name = "hyper-guest-agent"
 path = "src/main.rs"
 
 [dependencies]
+hyperrs-linux = { path = "../hyperrs-linux" }
 nix = { version = "0.29", features = ["mount"] }
 pid1 = "0.1.6"
 tonic = "0.14"
 tonic-prost = "0.14"
+thiserror = "1"
 prost = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process"] }
 tokio-vsock = { version = "0.7", features = ["tonic014"] }
@@ -34,7 +36,3 @@ tokio-stream = "0.1"
 [[test]]
 name = "exec"
 path = "tests/exec.rs"
-
-[[test]]
-name = "init"
-path = "tests/init.rs"

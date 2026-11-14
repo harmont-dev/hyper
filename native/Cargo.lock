@@ -968,11 +968,13 @@ dependencies = [
 name = "hyper-guest-agent"
 version = "0.1.0"
 dependencies = [
+ "hyperrs-linux",
  "nix 0.29.0",
  "pid1",
  "pretty_assertions",
  "prost",
  "rstest",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-vsock",
@@ -1003,6 +1005,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smart-default",
+ "socket2",
  "test-strategy",
  "thiserror 1.0.69",
  "toml",

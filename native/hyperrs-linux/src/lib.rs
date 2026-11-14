@@ -12,7 +12,6 @@ pub mod cgroup;
 pub mod dm;
 pub mod loopdev;
 pub mod net;
-pub mod netns;
 pub mod sysctl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
