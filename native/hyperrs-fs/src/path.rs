@@ -40,6 +40,30 @@ pub enum ComponentError {
     TooLong(usize),
 }
 
+const fn check_component(bytes: &[u8], allow_whitespace: bool) -> Result<(), ComponentError> {
+    match bytes {
+        [] => return Err(ComponentError::Empty),
+        b"." => return Err(ComponentError::CurrentDir),
+        b".." => return Err(ComponentError::ParentDir),
+        _ => {}
+    }
+    if bytes.len() > NAME_MAX {
+        return Err(ComponentError::TooLong(bytes.len()));
+    }
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' => return Err(ComponentError::Separator),
+            0 => return Err(ComponentError::Nul),
+            b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' if !allow_whitespace => {
+                return Err(ComponentError::Whitespace)
+            }
+            _ => i += 1,
+        }
+    }
+    Ok(())
+}
+
 /// A path component that isn't `.`, nor `..`, and has no `/` or whitespace.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
@@ -55,27 +79,7 @@ impl StrictComponent {
     const fn new_unchecked(bytes: &[u8]) -> &Self;
 
     const fn check(bytes: &[u8]) -> Result<(), ComponentError> {
-        match bytes {
-            [] => return Err(ComponentError::Empty),
-            b"." => return Err(ComponentError::CurrentDir),
-            b".." => return Err(ComponentError::ParentDir),
-            _ => {}
-        }
-        if bytes.len() > NAME_MAX {
-            return Err(ComponentError::TooLong(bytes.len()));
-        }
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'/' => return Err(ComponentError::Separator),
-                0 => return Err(ComponentError::Nul),
-                b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' => {
-                    return Err(ComponentError::Whitespace)
-                }
-                _ => i += 1,
-            }
-        }
-        Ok(())
+        check_component(bytes, false)
     }
 
     pub const fn from_static(name: &'static str) -> &'static Self {
@@ -142,6 +146,68 @@ impl Borrow<StrictComponent> for StrictComponentBuf {
 }
 
 impl AsRef<Path> for StrictComponentBuf {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
+#[repr(transparent)]
+pub struct LooseComponent([u8]);
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
+pub struct LooseComponentBuf(Box<[u8]>);
+
+impl LooseComponent {
+    #[ref_cast_custom]
+    const fn new_unchecked(bytes: &[u8]) -> &Self;
+
+    pub fn as_os_str(&self) -> &OsStr {
+        OsStr::from_bytes(&self.0)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        Path::new(self.as_os_str())
+    }
+}
+
+impl<'a> TryFrom<&'a OsStr> for &'a LooseComponent {
+    type Error = ComponentError;
+    fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
+        check_component(name.as_bytes(), true)?;
+        Ok(LooseComponent::new_unchecked(name.as_bytes()))
+    }
+}
+
+impl AsRef<Path> for LooseComponent {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+impl ToOwned for LooseComponent {
+    type Owned = LooseComponentBuf;
+    fn to_owned(&self) -> LooseComponentBuf {
+        LooseComponentBuf(self.0.into())
+    }
+}
+
+impl Deref for LooseComponentBuf {
+    type Target = LooseComponent;
+    fn deref(&self) -> &LooseComponent {
+        LooseComponent::new_unchecked(&self.0)
+    }
+}
+
+impl Borrow<LooseComponent> for LooseComponentBuf {
+    fn borrow(&self) -> &LooseComponent {
+        self
+    }
+}
+
+impl AsRef<Path> for LooseComponentBuf {
     fn as_ref(&self) -> &Path {
         self.as_path()
     }

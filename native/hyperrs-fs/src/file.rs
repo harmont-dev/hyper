@@ -4,6 +4,7 @@
 use super::dev::DeviceNumber;
 use super::path::{IsAbsolute, SafePath, StrictComponents};
 use derive_more::{BitOr, Into};
+use nix::errno::Errno;
 use nix::fcntl::{open, openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
 use nix::libc::AT_FDCWD;
 use nix::sys::stat::{fchmodat, fstat, FchmodatFlags, FileStat, Mode, SFlag};
@@ -11,7 +12,7 @@ use nix::unistd::{dup, fchownat, getgid, getuid, Gid, Uid};
 use std::io;
 use std::marker::PhantomData;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
 const SECTOR_BYTES: u64 = 512;
@@ -61,6 +62,7 @@ pub struct OwnerOnlyWritable;
 /// What's the type of the file?
 pub trait FileType {
     const OPEN_FLAGS: OFlag = OFlag::empty();
+    const CREATABLE: bool = false;
 
     fn check(stat: &FileStat) -> Result<(), ValidationError>;
 }
@@ -76,6 +78,8 @@ pub trait Writability {
 }
 
 impl FileType for Any {
+    const CREATABLE: bool = true;
+
     fn check(_: &FileStat) -> Result<(), ValidationError> {
         Ok(())
     }
@@ -94,6 +98,8 @@ impl Writability for Any {
 }
 
 impl FileType for IsRegularFile {
+    const CREATABLE: bool = true;
+
     fn check(stat: &FileStat) -> Result<(), ValidationError> {
         if stat.st_mode & SFlag::S_IFMT.bits() == SFlag::S_IFREG.bits() {
             Ok(())
@@ -274,14 +280,61 @@ where
         path: &SafePath<IsAbsolute, StrictComponents>,
         flags: OpenFlags,
     ) -> Result<Self, ValidationError> {
-        let how = OpenHow::new()
-            .flags(flags.0 | T::OPEN_FLAGS | OFlag::O_CLOEXEC)
-            .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS);
-        let raw = openat2(AT_FDCWD, path.as_ref(), how).map_err(ValidationError::Open)?;
-        // SAFETY: `openat2` just handed us this fd; nobody else owns it.
-        let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+        Self::open_at(
+            AT_FDCWD,
+            path.as_ref(),
+            flags,
+            Mode::empty(),
+            ResolveFlag::RESOLVE_NO_SYMLINKS,
+        )
+    }
 
-        Self::try_from(owned)
+    // Validate through an O_PATH probe before applying `flags`, so a refused open never blocks on a
+    // FIFO, truncates, or creates.
+    pub(crate) fn open_at(
+        dir: RawFd,
+        path: &Path,
+        flags: OpenFlags,
+        mode: Mode,
+        resolve: ResolveFlag,
+    ) -> Result<Self, ValidationError> {
+        let flags = flags.0;
+        let create_new = OFlag::O_CREAT | OFlag::O_EXCL;
+        if flags.contains(OFlag::O_PATH) || (flags.contains(create_new) && T::CREATABLE) {
+            return Self::open_raw(dir, path, flags, mode, resolve);
+        }
+        if flags.contains(create_new) {
+            return Err(ValidationError::WrongFileType);
+        }
+        let create = flags.contains(OFlag::O_CREAT) && T::CREATABLE;
+        let flags = flags - OFlag::O_CREAT;
+        loop {
+            match Self::open_raw(dir, path, OFlag::O_PATH, Mode::empty(), resolve) {
+                Ok(probe) => return probe.reopen(OpenFlags(flags)),
+                Err(ValidationError::Open(Errno::ENOENT)) if create => {}
+                Err(refused) => return Err(refused),
+            }
+            match Self::open_raw(dir, path, flags | create_new, mode, resolve) {
+                Err(ValidationError::Open(Errno::EEXIST)) => {}
+                created => return created,
+            }
+        }
+    }
+
+    fn open_raw(
+        dir: RawFd,
+        path: &Path,
+        flags: OFlag,
+        mode: Mode,
+        resolve: ResolveFlag,
+    ) -> Result<Self, ValidationError> {
+        let how = OpenHow::new()
+            .flags(flags | T::OPEN_FLAGS | OFlag::O_CLOEXEC)
+            .mode(mode)
+            .resolve(resolve);
+        let raw = openat2(dir, path, how).map_err(ValidationError::Open)?;
+        // SAFETY: `openat2` just handed us this fd; nobody else owns it.
+        Self::try_from(unsafe { OwnedFd::from_raw_fd(raw) })
     }
 
     pub fn reopen(&self, flags: OpenFlags) -> Result<Self, ValidationError> {
