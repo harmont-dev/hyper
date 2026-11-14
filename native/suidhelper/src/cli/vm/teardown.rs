@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-//! `vm teardown`: delete a VM's stale chroot and cgroup leaf before relaunching the jailer.
+//! `vm teardown`: kill a VM's cgroup and delete its chroot, network and socket pins, before a
+//! relaunch or when the VM stops. Waits for the VM's lock, so it never overlaps a `vm_launch` of
+//! the same VM still staging, and removes the lock file afterwards.
 
 use super::claim::{PinError, SocketPin};
 use super::{VmOut, API_SOCKET, VSOCK_SOCKET};

@@ -6,7 +6,9 @@ defmodule Hyper.Node.FireVMM.Agent.RelayDialer do
 
   Firecracker exposes its guest vsock as a host UDS. Before the connection
   becomes a transparent pipe, the host must send `"CONNECT <port>\\n"` and
-  receive a line starting with `"OK "`. This module implements that handshake.
+  receive a line starting with `"OK "`. This module implements that handshake,
+  under one deadline for the whole dial and refusing a reply line of 64 bytes or
+  more.
   """
 
   @max_line_bytes 64

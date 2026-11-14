@@ -61,7 +61,7 @@ defmodule Hyper.Node.FireVMM.VmLinux.Provider do
   sit at the same asset paths, and skipping the hash check would keep booting
   guests on the previous release forever.
   """
-  @spec install_state(Path.t(), [Manifest.Build.t()], non_neg_integer()) ::
+  @spec install_state(Path.t(), [Manifest.Build.t()], non_neg_integer() | nil) ::
           :ok | {:error, :not_installed | :bad_install}
   def install_state(dir, builds, owner) do
     installed = Enum.count(builds, &installed?(dir, &1, owner))

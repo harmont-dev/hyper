@@ -16,6 +16,8 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
     and close both sockets cleanly. When either worker ends, the handler
     unlinks the sibling before killing it so the resulting `:killed` exit does
     not cascade back to the handler via the link.
+  - The guest-to-host worker stops after 16 MiB, closing the connection, so a
+    hostile guest cannot stream an unbounded reply into the client.
   - `terminate/2` closes the listen socket (which causes the acceptor to
     exit on its next accept call) and removes the socket file so a
     subsequent `start_link` with the same path can rebind.

@@ -3,9 +3,8 @@ defmodule Hyper.Node.FireVMM.Agent do
   gRPC client to the in-guest agent, dialed through the per-VM relay UDS.
 
   `relay_socket_path/1` is the single source of truth for the host-side
-  Unix-domain socket the relay listens on. The relay GenServer (Task 7) will
-  call this function to derive its own listen path, so both sides agree
-  without a process-registry lookup.
+  Unix-domain socket the relay listens on. The relay derives its own listen
+  path from it, so both sides agree without a process-registry lookup.
   """
 
   alias Hyper.Agent.V1.{ExecRequest, GuestAgent.Stub}
@@ -22,8 +21,6 @@ defmodule Hyper.Node.FireVMM.Agent do
 
   Derived from `Hyper.Cfg.Dirs.socket_dir/0` so both this client and the
   relay GenServer agree without a registry lookup.
-
-  Task 7: the relay GenServer listens here.
   """
   @spec relay_socket_path(Hyper.Vm.Id.t()) :: Path.t()
   def relay_socket_path(vm_id) do
@@ -37,14 +34,15 @@ defmodule Hyper.Node.FireVMM.Agent do
 
   Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`,
   or `{:error, term()}`. Error values: `:agent_unavailable` (relay unreachable —
-  gRPC UNAVAILABLE), `:timeout` (gRPC DEADLINE_EXCEEDED), or raw transport
-  errors for unexpected failures.
+  gRPC UNAVAILABLE), `:timeout` (the call did not finish within `:timeout`),
+  `{:bad_agent_reply, reason}` (the reply did not decode), or raw transport
+  errors for unexpected failures, including a reply over the relay's 16 MiB cap.
 
   ## Options
 
     - `:env` — environment map `%{String.t() => String.t()}` for the guest process
     - `:cwd` — working directory inside the guest (`nil` → not set)
-    - `:timeout` — gRPC deadline in milliseconds (default: #{@default_timeout})
+    - `:timeout` — deadline for the whole call in milliseconds (default: #{@default_timeout})
   """
   @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
