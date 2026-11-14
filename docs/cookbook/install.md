@@ -294,7 +294,7 @@ echo '+cpu +memory' | sudo tee /sys/fs/cgroup/hyper/cgroup.subtree_control
 
 ### User Configuration
 
-Hyper must **not** run as `root`, and you should not run it as your login user
+Hyper must **not** run as `root`, and you must not run it as your login user
 either. Instead, give it a dedicated, unprivileged system user. The BEAM runs
 as this user; every operation that genuinely needs root is routed through the
 setuid helper (see [SUID Helper](#suid-helper)), so the node itself never holds
