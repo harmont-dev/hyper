@@ -7,14 +7,22 @@ defmodule Hyper.Node.FireVMM.Agent do
   path from it, so both sides agree without a process-registry lookup.
   """
 
-  alias Hyper.Agent.V1.{ExecRequest, GuestAgent.Stub}
+  alias Hyper.Agent.V1.{ExecRequest, ExecResponse, GuestAgent}
 
   # GRPC.Status codes stored as module attributes so they can be used in
   # guard-equivalent pattern matches without calling functions at match time.
   @unavailable GRPC.Status.unavailable()
   @deadline_exceeded GRPC.Status.deadline_exceeded()
+  @cancelled GRPC.Status.cancelled()
+
+  @exec_path "/#{GuestAgent.Service.__meta__(:name)}/Exec"
+  @wire_max 99_999_999
+  @wire_units [{"m", 1}, {"S", 1_000}, {"M", 60_000}, {"H", 3_600_000}]
 
   @default_timeout 30_000
+
+  @type result ::
+          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}} | {:error, term()}
 
   @doc """
   Deterministic host-side path for the per-VM relay Unix socket.
@@ -44,12 +52,10 @@ defmodule Hyper.Node.FireVMM.Agent do
     - `:cwd` — working directory inside the guest (`nil` → not set)
     - `:timeout` — deadline for the whole call in milliseconds (default: #{@default_timeout})
   """
-  @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) ::
-          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
-          | {:error, term()}
+  @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) :: result()
   def exec(vm_id, argv, opts \\ []) do
-    path = relay_socket_path(vm_id)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    deadline = System.monotonic_time(:millisecond) + timeout
 
     req = %ExecRequest{
       argv: argv,
@@ -57,53 +63,145 @@ defmodule Hyper.Node.FireVMM.Agent do
       cwd: opts[:cwd]
     }
 
-    case GRPC.Stub.connect("unix://" <> path, adapter: GRPC.Client.Adapters.Gun) do
-      {:error, _} = err ->
-        map_grpc_error(err)
+    path = vm_id |> relay_socket_path() |> String.to_charlist()
 
-      {:ok, ch} ->
-        try do
-          ch |> call(req, timeout) |> await(timeout)
-        after
-          _ = GRPC.Stub.disconnect(ch)
-        end
+    # The caller owns the connection: gun monitors its owner, so a killed
+    # caller takes the socket, and the relay's vsock leg, down with it, without
+    # draining the hung stream for gun's default 15 s closing_timeout. With
+    # retry: 0 an unreachable relay is a prompt :down instead of reconnects.
+    {:ok, conn} =
+      :gun.open_unix(path, %{
+        protocols: [:http2],
+        retry: 0,
+        http2_opts: %{closing_timeout: 1}
+      })
+
+    try do
+      call(conn, req, timeout, deadline)
+    after
+      _ = :gun.close(conn)
+      :gun.flush(conn)
     end
   end
 
-  @spec call(GRPC.Channel.t(), ExecRequest.t(), timeout()) :: Task.t()
-  defp call(ch, req, timeout) do
-    Task.async(fn ->
-      try do
-        Stub.exec(ch, req, timeout: timeout)
-      rescue
-        e -> {:error, {:bad_agent_reply, e.__struct__}}
-      catch
-        :exit, reason -> {:error, {:bad_agent_reply, reason}}
-      end
+  @spec call(pid(), ExecRequest.t(), non_neg_integer(), integer()) :: result()
+  defp call(conn, req, timeout, deadline) do
+    case :gun.await_up(conn, remaining(deadline)) do
+      {:ok, :http2} ->
+        msg = ExecRequest.encode(req)
+        body = <<0, byte_size(msg)::32, msg::binary>>
+        ref = :gun.post(conn, @exec_path, headers(timeout), body)
+        await_response(conn, ref, deadline)
+
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, _} ->
+        {:error, :agent_unavailable}
+    end
+  end
+
+  @spec headers(non_neg_integer()) :: [{String.t(), String.t()}]
+  defp headers(timeout) do
+    [
+      {"content-type", "application/grpc"},
+      {"te", "trailers"},
+      {"grpc-timeout", wire_timeout(timeout)}
+    ]
+  end
+
+  # grpc-timeout carries at most 8 digits: take the finest unit that fits and
+  # round up, so the guest never gives up before the host's deadline.
+  @spec wire_timeout(non_neg_integer()) :: String.t()
+  defp wire_timeout(ms) do
+    Enum.find_value(@wire_units, "#{@wire_max}H", fn {unit, unit_ms} ->
+      n = div(ms + unit_ms - 1, unit_ms)
+      if n <= @wire_max, do: "#{n}#{unit}"
     end)
   end
 
-  @spec await(Task.t(), timeout()) ::
-          {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}} | {:error, term()}
-  defp await(task, timeout) do
-    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, resp}} ->
-        {:ok, %{exit_code: resp.exit_code, stdout: resp.stdout, stderr: resp.stderr}}
+  @spec await_response(pid(), reference(), integer()) :: result()
+  defp await_response(conn, ref, deadline) do
+    case :gun.await(conn, ref, remaining(deadline)) do
+      {:response, fin, 200, headers} ->
+        cond do
+          not grpc?(headers) -> {:error, {:bad_agent_reply, {:content_type, ctype(headers)}}}
+          fin == :fin -> reply(headers, "")
+          true -> await_body(conn, ref, deadline, [])
+        end
 
-      {:ok, err} ->
-        map_grpc_error(err)
+      {:response, _fin, status, _headers} ->
+        {:error, {:bad_agent_reply, {:http_status, status}}}
+
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, _} ->
+        {:error, :agent_unavailable}
 
       _ ->
-        {:error, :timeout}
+        await_response(conn, ref, deadline)
     end
   end
 
-  @spec map_grpc_error({:error, term()}) :: {:error, term()}
-  defp map_grpc_error({:error, %GRPC.RPCError{status: @unavailable}}),
-    do: {:error, :agent_unavailable}
+  @spec await_body(pid(), reference(), integer(), iodata()) :: result()
+  defp await_body(conn, ref, deadline, acc) do
+    case :gun.await(conn, ref, remaining(deadline)) do
+      {:data, :nofin, data} -> await_body(conn, ref, deadline, [acc | data])
+      {:data, :fin, _data} -> {:error, {:bad_agent_reply, :no_trailers}}
+      {:trailers, trailers} -> reply(trailers, IO.iodata_to_binary(acc))
+      {:error, _} = err -> err
+      _ -> await_body(conn, ref, deadline, acc)
+    end
+  end
 
-  defp map_grpc_error({:error, %GRPC.RPCError{status: @deadline_exceeded}}),
-    do: {:error, :timeout}
+  @spec reply([{binary(), binary()}], binary()) :: result()
+  defp reply(trailers, body) do
+    case {trailers |> header("grpc-status") |> Num.Int.parse_unsigned(), body} do
+      {{:ok, 0}, <<0, len::32, msg::binary-size(len)>>} -> decode(msg)
+      {{:ok, 0}, _} -> {:error, {:bad_agent_reply, :framing}}
+      {{:ok, code}, _} -> map_status(code, trailers |> header("grpc-message") |> percent_decode())
+      {:error, _} -> {:error, {:bad_agent_reply, :grpc_status}}
+    end
+  end
 
-  defp map_grpc_error({:error, _} = err), do: err
+  @spec decode(binary()) :: result()
+  defp decode(msg) do
+    resp = ExecResponse.decode(msg)
+    {:ok, %{exit_code: resp.exit_code, stdout: resp.stdout, stderr: resp.stderr}}
+  rescue
+    e -> {:error, {:bad_agent_reply, e.__struct__}}
+  end
+
+  # tonic answers a lapsed grpc-timeout with CANCELLED "Timeout expired", not
+  # DEADLINE_EXCEEDED.
+  @spec map_status(pos_integer(), binary()) :: {:error, term()}
+  defp map_status(@unavailable, _message), do: {:error, :agent_unavailable}
+  defp map_status(@deadline_exceeded, _message), do: {:error, :timeout}
+  defp map_status(@cancelled, "Timeout expired"), do: {:error, :timeout}
+  defp map_status(code, message), do: {:error, GRPC.RPCError.exception(code, message)}
+
+  @spec grpc?([{binary(), binary()}]) :: boolean()
+  defp grpc?(headers), do: String.starts_with?(ctype(headers), "application/grpc")
+
+  @spec ctype([{binary(), binary()}]) :: binary()
+  defp ctype(headers), do: header(headers, "content-type")
+
+  @spec header([{binary(), binary()}], String.t()) :: binary()
+  defp header(headers, name) do
+    case List.keyfind(headers, name, 0) do
+      {^name, value} -> value
+      nil -> ""
+    end
+  end
+
+  @spec percent_decode(binary()) :: binary()
+  defp percent_decode(message) do
+    URI.decode(message)
+  rescue
+    ArgumentError -> message
+  end
+
+  @spec remaining(integer()) :: non_neg_integer()
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end
