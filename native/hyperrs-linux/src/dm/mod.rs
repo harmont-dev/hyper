@@ -10,9 +10,11 @@ use super::Access;
 use derive_more::Constructor;
 pub use device::{Device, NumberError};
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{Root, RootCommandExt};
 pub use name::{DmName, InvalidDmName, OpenDeviceError, ParseDmDeviceError, SizeError};
 use std::ffi::OsStr;
 use std::io;
+use std::os::unix::io::AsFd;
 pub use table::{
     DevPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, Role, SnapshotTable,
     ThinPoolTable, ThinTable,
@@ -44,34 +46,40 @@ pub struct Dmsetup {
 }
 
 impl Dmsetup {
-    pub fn create(
-        &self,
+    pub fn create<'a>(
+        &'a self,
+        root: &'a Root<'a>,
         name: &DmName,
         table: &DmTable,
         access: Access,
-    ) -> Result<Device<'_>, RunError> {
+    ) -> Result<Device<'a>, RunError> {
         let table = table.to_string();
         let mut args = vec![OsStr::new("create"), name.as_ref()];
         if access == Access::ReadOnly {
             args.push(OsStr::new("--readonly"));
         }
         args.extend([OsStr::new("--table"), OsStr::new(&table)]);
-        self.run(args)?;
-        Ok(self.device(name))
+        self.run(root, args)?;
+        Ok(self.device(root, name))
     }
 
-    pub fn device(&self, name: &DmName) -> Device<'_> {
+    pub fn device<'a>(&'a self, root: &'a Root<'a>, name: &DmName) -> Device<'a> {
         Device {
             dmsetup: self,
+            root,
             name: name.clone(),
         }
     }
 
-    pub fn thin_pool(&self, name: &DmName) -> Result<ThinPool<'_>, ThinPoolError> {
-        ThinPool::open(self, name)
+    pub fn thin_pool<'a>(
+        &'a self,
+        root: &'a Root<'a>,
+        name: &DmName,
+    ) -> Result<ThinPool<'a>, ThinPoolError> {
+        ThinPool::open(self, root, name)
     }
 
-    fn run<I, S>(&self, args: I) -> Result<String, RunError>
+    fn run<I, S>(&self, root: &Root<'_>, args: I) -> Result<String, RunError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -80,7 +88,8 @@ impl Dmsetup {
             .bin
             .command()
             .args(args)
-            .env_clear()
+            // The binary fd stays open so an interpreted tool can reopen itself via /proc/self/fd.
+            .spawn_as_root(root, &[self.bin.as_fd()])
             .output()
             .map_err(RunError::Spawn)?;
         if !out.status.success() {

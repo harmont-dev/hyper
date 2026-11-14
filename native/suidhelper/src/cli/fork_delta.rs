@@ -15,7 +15,7 @@ use hyperrs_linux::dm::{
 use hyperrs_linux::loopdev::LoopDevNum;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBinError;
-use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
+use hyperrs_process::privilege::{PrivilegeError, Root, Unprivileged};
 use nix::fcntl::{Flock, FlockArg};
 use serde::Deserialize;
 use serde::Serialize;
@@ -112,9 +112,9 @@ impl Op for ThinForkDelta {
         let scratch: HyperDmName = format!("hyper-scratch-{}", self.scratch_id).parse()?;
 
         {
-            let _root = token.elevate()?;
+            let root = token.elevate()?;
             let sectors = self.origin.sectors().map_err(DmError::from)?;
-            let pool = dmsetup.thin_pool(&self.pool)?;
+            let pool = dmsetup.thin_pool(&root, &self.pool)?;
             let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
                 Err(e @ SnapshotError::Resume { created: true, .. }) => {
@@ -131,9 +131,9 @@ impl Op for ThinForkDelta {
 
         let copied = self.copy_scratch(&scratch, target, &dmsetup, &thin_dump, &meta, &mut token);
         let destroyed = (|| {
-            let _root = token.elevate()?;
+            let root = token.elevate()?;
             dmsetup
-                .thin_pool(&self.pool)?
+                .thin_pool(&root, &self.pool)?
                 .open_thin(&scratch)?
                 .deactivate()
                 .and_then(|thin| thin.delete())
@@ -156,8 +156,8 @@ impl ThinForkDelta {
         token: &mut Unprivileged,
     ) -> Result<CopyStats, ForkDeltaError> {
         let (id, dumped) = {
-            let _root = token.elevate()?;
-            self.dump_reserved(dmsetup, thin_dump, meta, scratch)?
+            let root = token.elevate()?;
+            self.dump_reserved(&root, dmsetup, thin_dump, meta, scratch)?
         };
         let mappings = dumped.parse()?.mappings(id)?;
 
@@ -179,9 +179,9 @@ impl ThinForkDelta {
             Ok::<_, ForkDeltaError>(stats)
         })();
         let removed = (|| {
-            let _root = token.elevate()?;
+            let root = token.elevate()?;
             dmsetup
-                .device(&target_name)
+                .device(&root, &target_name)
                 .remove(RemoveMode::Retry)
                 .map_err(ForkDeltaError::Remove)
         })();
@@ -192,6 +192,7 @@ impl ThinForkDelta {
 
     fn dump_reserved(
         &self,
+        root: &Root<'_>,
         dmsetup: &dm::Dmsetup,
         thin_dump: &dump::ThinDump,
         meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
@@ -204,14 +205,14 @@ impl ThinForkDelta {
             .map_err(ForkDeltaError::Lock)?;
         let _lock = Flock::lock(lock_fd, FlockArg::LockExclusive)
             .map_err(|(_, e)| ForkDeltaError::Lock(e.into()))?;
-        let pool = dmsetup.thin_pool(&self.pool)?;
+        let pool = dmsetup.thin_pool(root, &self.pool)?;
         let id = pool.open_thin(src)?.id();
         if pool.send(ThinMessage::ReserveMetadataSnap).is_err() {
             let _ = pool.send(ThinMessage::ReleaseMetadataSnap);
             pool.send(ThinMessage::ReserveMetadataSnap)
                 .map_err(ForkDeltaError::Reserve)?;
         }
-        let dumped = thin_dump.dump(&device, id);
+        let dumped = thin_dump.dump(root, &device, id);
         let released = pool
             .send(ThinMessage::ReleaseMetadataSnap)
             .map_err(ForkDeltaError::Release);
