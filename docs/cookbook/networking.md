@@ -311,9 +311,40 @@ virtual interface.
 
 ## Firewalls
 
-TODO
+Hyper firewalls VMs in two places, both with `nftables`.
 
-Do not forget about default firewall rules.
+### Host
+
+The host's `inet hyper` table holds the rules that are the same for every VM:
+
+- **No host access.** Traffic from a `vm-veth-*` to any of the host's own
+  addresses is dropped, except replies to connections the host opened and the
+  neighbour discovery the link needs.
+- **No infrastructure access.** Traffic from a VM to private (`10/8`,
+  `172.16/12`, `192.168/16`), shared (`100.64/10`) and link-local (`169.254/16`)
+  IPv4, and to unique local IPv6 (`fc00::/7`), is dropped. This is where
+  providers keep their networks and metadata services, and it also stops VMs
+  talking to each other over the transit network.
+
+### VM namespace
+
+Each VM's namespace holds the rules that are specific to it.
+
+- **No spoofing.** Only packets from the guest's own `172.16.0.2` and its own
+  IPv6 address leave `tap0`. The jailed Firecracker process cannot send from the
+  namespace at all.
+- **Port policy.** Inbound, only replies and the VM's open ports reach the
+  guest; outbound, the VM's blocked ports never leave it. Both lists are
+  `tcp`/`udp` port ranges.
+
+The port policy is set when the VM is created (`CreateVm`'s `firewall`) and
+can be replaced while it runs (`SetVmFirewall`); a fork starts with its
+parent's current policy. Unset, nothing is open inbound and outbound TCP 25
+(SMTP) is blocked.
+
+VMs reach each other only through their public IPv6 addresses, and only on
+ports the receiving VM has opened, exactly like any other host on the
+internet.
 
 ## FAQ
 
