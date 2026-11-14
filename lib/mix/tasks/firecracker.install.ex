@@ -145,10 +145,11 @@ defmodule Mix.Tasks.Firecracker.Install do
     Mix.shell().info("""
 
     Almost done. Run these as root so the setuid helper will accept the binaries
-    (it refuses any jailer/firecracker not owned by root):
+    (it refuses any jailer/firecracker not owned by root, or in a directory
+    anyone but root can write):
 
-        sudo chown root:root #{fc} #{jailer}
-        sudo chmod 0755      #{fc} #{jailer}
+        sudo chown root:root #{prefix} #{fc} #{jailer}
+        sudo chmod 0755      #{prefix} #{fc} #{jailer}
 
     Then add to /etc/hyper/config.toml (file: root-owned, mode 0644):
 
