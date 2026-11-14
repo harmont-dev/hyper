@@ -3,6 +3,7 @@ use crate::cli::MapperPath;
 use crate::cli::Op;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, NameError, TableError};
+use hyperrs_fs::dev::DeviceNumber;
 use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_fs::path;
 use hyperrs_linux::dm::thin_dump::{
@@ -48,6 +49,11 @@ pub enum ForkDeltaError {
     Path(#[from] path::ValidationError),
     #[error("opening metadata device: {0}")]
     Open(#[from] file::ValidationError),
+    #[error("{meta} is not the pool's metadata device {pool}")]
+    NotPoolMetadata {
+        meta: DeviceNumber,
+        pool: DeviceNumber,
+    },
     #[error("locking metadata device: {0}")]
     Lock(#[source] io::Error),
     #[error(transparent)]
@@ -111,10 +117,18 @@ impl Op for ThinForkDelta {
         }))?;
         let scratch: HyperDmName = format!("hyper-scratch-{}", self.scratch_id).parse()?;
 
-        {
+        let meta = {
             let _root = token.elevate()?;
             let sectors = self.origin.sectors().map_err(DmError::from)?;
             let pool = dmsetup.thin_pool(&self.pool)?;
+            let meta = SafeFile::<IsBlockDevice, Any, Any>::open(&meta, OpenFlags::RDONLY)?;
+            let (got, want) = (meta.rdev()?, pool.metadata());
+            if got != want {
+                return Err(ForkDeltaError::NotPoolMetadata {
+                    meta: got,
+                    pool: want,
+                });
+            }
             let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
                 Err(e @ SnapshotError::Resume { created: true, .. }) => {
@@ -127,7 +141,8 @@ impl Op for ThinForkDelta {
                 let _ = pool.delete_thin(self.scratch_id);
                 return Err(ForkDeltaError::Activate(e));
             }
-        }
+            meta
+        };
 
         let copied = self.copy_scratch(&scratch, target, &dmsetup, &thin_dump, &meta, &mut token);
         let destroyed = (|| {
@@ -152,7 +167,7 @@ impl ThinForkDelta {
         target: HyperDmTable,
         dmsetup: &dm::Dmsetup,
         thin_dump: &dump::ThinDump,
-        meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
+        meta: &SafeFile<IsBlockDevice, Any, Any>,
         token: &mut Unprivileged,
     ) -> Result<CopyStats, ForkDeltaError> {
         let (id, dumped) = {
@@ -194,10 +209,9 @@ impl ThinForkDelta {
         &self,
         dmsetup: &dm::Dmsetup,
         thin_dump: &dump::ThinDump,
-        meta: &path::SafePath<path::IsAbsolute, path::StrictComponents>,
+        device: &SafeFile<IsBlockDevice, Any, Any>,
         src: &HyperDmName,
     ) -> Result<(ThinId, MetadataDump), ForkDeltaError> {
-        let device = SafeFile::<IsBlockDevice, Any, Any>::open(meta, OpenFlags::RDONLY)?;
         let lock_fd = device
             .as_fd()
             .try_clone_to_owned()
@@ -211,7 +225,7 @@ impl ThinForkDelta {
             pool.send(ThinMessage::ReserveMetadataSnap)
                 .map_err(ForkDeltaError::Reserve)?;
         }
-        let dumped = thin_dump.dump(&device, id);
+        let dumped = thin_dump.dump(device, id);
         let released = pool
             .send(ThinMessage::ReleaseMetadataSnap)
             .map_err(ForkDeltaError::Release);
@@ -269,9 +283,11 @@ pub fn copy_ranges(
 fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
-        match r.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
+        match r.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(filled)
