@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Host-wide networking, applied by `host_init`.
 
-use super::{Filter, Masquerade, NetId, NodePrefix, NON_PUBLIC, TABLE};
+use super::{Blocked, Filter, Masquerade, NetId, NodePrefix, TABLE};
 use hyperrs_linux::net::link::LinkError;
 use hyperrs_linux::net::nft::{
     Action, Chain, CtState, Family, Hook, Icmpv6Type, Iface, Match, Nft, NftError, Policy, Rule,
@@ -28,12 +28,17 @@ pub enum HostNetError {
     Link(#[from] LinkError),
     #[error("uplink {0} is not an interface on this host; set [net] uplink to the one on the default route")]
     NoUplink(IfName),
+    #[error(
+        "{0} is off; VMs need the host to forward: set {0}=1 (and persist it in /etc/sysctl.d)"
+    )]
+    ForwardingOff(&'static str),
 }
 
 /// The host side of VM networking, routed out of `uplink`.
 pub struct HostNet<'a> {
     pub uplink: &'a IfName,
     pub prefix: NodePrefix,
+    pub blocked: &'a Blocked,
 }
 
 impl HostNet<'_> {
@@ -43,14 +48,18 @@ impl HostNet<'_> {
         if Rtnl::open()?.link(self.uplink)?.is_none() {
             return Err(HostNetError::NoUplink(self.uplink.clone()));
         }
+        if !Sysctl::net().ipv4().current_ip_forward()? {
+            return Err(HostNetError::ForwardingOff("net.ipv4.ip_forward"));
+        }
+        if !Sysctl::net().ipv6().conf_all().current_forwarding()? {
+            return Err(HostNetError::ForwardingOff("net.ipv6.conf.all.forwarding"));
+        }
         let uplink_conf = || Sysctl::net().ipv6().conf(self.uplink);
         if uplink_conf().current_accept_ra()? == AcceptRa::UnlessForwarding {
             uplink_conf()
                 .accept_ra(AcceptRa::EvenWhenForwarding)
                 .write()?;
         }
-        Sysctl::net().ipv4().ip_forward(true).write()?;
-        Sysctl::net().ipv6().conf_all().forwarding(true).write()?;
         Sysctl::net()
             .ipv6()
             .conf(self.uplink)
@@ -108,38 +117,43 @@ impl HostNet<'_> {
         Filter {
             hook: Hook::Forward,
             policy: Policy::Accept,
-            rules: NON_PUBLIC
-                .iter()
-                .map(|range| {
-                    let daddr = match range.parse().expect("the non-public ranges parse") {
-                        IpNet::V4(net) => Match::Ipv4Daddr(net),
-                        IpNet::V6(net) => Match::Ipv6Daddr(net),
-                    };
-                    Self::from_vms(daddr, Action::Drop)
-                })
-                .chain([
-                    Rule {
-                        matches: vec![
-                            Match::Iifname(VM_VETHS.clone()),
-                            Match::Ipv6Daddr(self.prefix.get()),
-                            not_vm_range(),
-                            Match::CtState(CtState::New),
-                        ],
-                        action: Action::Drop,
-                    },
-                    Rule {
-                        matches: vec![
-                            Match::Ipv4Daddr(NetId::transit_range()),
-                            Match::CtState(CtState::New),
-                        ],
-                        action: Action::Drop,
-                    },
-                    Rule {
-                        matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
-                        action: Action::Drop,
-                    },
-                ])
-                .collect(),
+            rules: [
+                Match::CtState(CtState::Invalid),
+                Match::Not(Box::new(Match::Ipv4Saddr(NetId::transit_range()))),
+                Match::Not(Box::new(Match::Ipv6Saddr(self.prefix.vm_range()))),
+            ]
+            .into_iter()
+            .map(|matches| Self::from_vms(matches, Action::Drop))
+            .chain(self.blocked.ranges().map(|range| {
+                let daddr = match range {
+                    IpNet::V4(net) => Match::Ipv4Daddr(net),
+                    IpNet::V6(net) => Match::Ipv6Daddr(net),
+                };
+                Self::from_vms(daddr, Action::Drop)
+            }))
+            .chain([
+                Rule {
+                    matches: vec![
+                        Match::Iifname(VM_VETHS.clone()),
+                        Match::Ipv6Daddr(self.prefix.get()),
+                        not_vm_range(),
+                        Match::CtState(CtState::New),
+                    ],
+                    action: Action::Drop,
+                },
+                Rule {
+                    matches: vec![
+                        Match::Ipv4Daddr(NetId::transit_range()),
+                        Match::CtState(CtState::New),
+                    ],
+                    action: Action::Drop,
+                },
+                Rule {
+                    matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
+                    action: Action::Drop,
+                },
+            ])
+            .collect(),
         }
         .chain()
     }

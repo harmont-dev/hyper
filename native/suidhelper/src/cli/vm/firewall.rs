@@ -4,6 +4,7 @@
 use super::VmOut;
 use crate::cli::Op;
 use crate::config::{BinError, Config};
+use crate::lock::{Locks, LocksError};
 use crate::net::firewall::Firewall;
 use crate::net::vm::{VmNet, VmNetError};
 use hyperrs_firecracker::VmId;
@@ -20,6 +21,8 @@ pub enum SetFirewallError {
     Privilege(#[from] PrivilegeError),
     #[error(transparent)]
     Net(#[from] VmNetError),
+    #[error(transparent)]
+    Lock(#[from] LocksError),
 }
 
 #[derive(Deserialize)]
@@ -36,6 +39,8 @@ impl Op for SetFirewall {
     fn run(self, mut token: Unprivileged) -> Result<VmOut, SetFirewallError> {
         let nft = Nft::new(Config::get().nft().map_err(BinError::from)?);
         let root = token.elevate()?;
+        let locks = Locks::open(&root)?;
+        let _vm = locks.vm(&root, &self.id)?;
         VmNet { id: &self.id }.set_firewall(&root, &nft, &self.firewall)?;
         Ok(VmOut::FirewallSet)
     }

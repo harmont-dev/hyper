@@ -61,6 +61,7 @@ impl Op for HostInit {
             HostNet {
                 uplink: net.uplink(),
                 prefix: net.ipv6_prefix(),
+                blocked: net.blocked(),
             }
             .init(&root, &nft)?;
         }

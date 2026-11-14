@@ -11,13 +11,13 @@
 //! absent). Operators narrowing the range must set **both**.
 
 use crate::id::UidGidRange;
-use crate::net::{NodePrefix, Resolver};
+use crate::net::{Blocked, NodePrefix, Resolver};
 use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
 use hyperrs_fs::path::{
     self, IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponentBuf, StrictComponents,
 };
 use hyperrs_linux::cgroup;
-use hyperrs_linux::net::IfName;
+use hyperrs_linux::net::{IfName, IpNet, Ipv4Net};
 use hyperrs_process::binary::{self, RootSafeBin, RootSafeBinPathBuf};
 use serde::{Deserialize, Deserializer};
 use serde_with::{serde_as, DisplayFromStr};
@@ -87,10 +87,19 @@ pub struct Config {
 ///
 /// `uplink` is the host interface VMs reach the outside world through (`if0` in the
 /// networking cookbook); `ipv6_prefix` is the routed prefix on it, `/64` or shorter.
-#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawNet")]
 pub struct Net {
+    uplink: IfName,
+    ipv6_prefix: NodePrefix,
+    resolver: Resolver,
+    blocked: Blocked,
+}
+
+#[serde_as]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawNet {
     #[serde_as(as = "DisplayFromStr")]
     uplink: IfName,
     #[serde_as(as = "DisplayFromStr")]
@@ -98,6 +107,39 @@ pub struct Net {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default)]
     resolver: Resolver,
+    #[serde(default)]
+    blocked: Blocked,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum NetError {
+    #[error("ipv6_prefix {0} overlaps blocked range {1}, so VMs could not reach each other")]
+    PrefixBlocked(NodePrefix, IpNet),
+    #[error("resolver {0} is in blocked range {1}, so VMs could not reach it")]
+    ResolverBlocked(Resolver, IpNet),
+}
+
+impl TryFrom<RawNet> for Net {
+    type Error = NetError;
+
+    fn try_from(raw: RawNet) -> Result<Self, NetError> {
+        if let Some(range) = raw.blocked.overlapping(IpNet::V6(raw.ipv6_prefix.get())) {
+            return Err(NetError::PrefixBlocked(raw.ipv6_prefix, range));
+        }
+        let resolver = IpNet::V4(Ipv4Net {
+            addr: raw.resolver.addr(),
+            prefix: 32.try_into().expect("/32 is a valid IPv4 prefix"),
+        });
+        if let Some(range) = raw.blocked.overlapping(resolver) {
+            return Err(NetError::ResolverBlocked(raw.resolver, range));
+        }
+        Ok(Self {
+            uplink: raw.uplink,
+            ipv6_prefix: raw.ipv6_prefix,
+            resolver: raw.resolver,
+            blocked: raw.blocked,
+        })
+    }
 }
 
 impl Net {
@@ -111,6 +153,10 @@ impl Net {
 
     pub fn resolver(&self) -> Resolver {
         self.resolver
+    }
+
+    pub fn blocked(&self) -> &Blocked {
+        &self.blocked
     }
 }
 
@@ -322,7 +368,84 @@ mod tests {
     use super::Net;
     use crate::net::Resolver;
     use pretty_assertions::assert_eq;
+    use proptest::prelude::*;
     use rstest::rstest;
+    use std::assert_matches;
+    use std::net::Ipv4Addr;
+    use test_strategy::proptest;
+
+    fn net(prefix: &str, lines: &str) -> Result<Net, toml::de::Error> {
+        toml::from_str(&format!(
+            "uplink = \"eth0\"\nipv6_prefix = \"{prefix}\"\n{lines}"
+        ))
+    }
+
+    fn refusal(prefix: &str, lines: &str) -> Option<String> {
+        net(prefix, lines).err().map(|e| e.message().to_owned())
+    }
+
+    #[rstest]
+    #[case::an_operator_prefix_range(
+        "2001:db8:1::/48",
+        "blocked = [\"2001:db8::/32\"]",
+        "overlaps blocked range 2001:db8::/32"
+    )]
+    #[case::six_to_four_prefix("2002:c000:204::/48", "", "overlaps blocked range 2002::/16")]
+    #[case::private_resolver(
+        "2001:db8::/64",
+        "resolver = \"10.0.0.53\"",
+        "in blocked range 10.0.0.0/8"
+    )]
+    #[case::metadata_resolver(
+        "2001:db8::/64",
+        "resolver = \"169.254.169.254\"",
+        "in blocked range 169.254.0.0/16"
+    )]
+    #[case::an_operator_range(
+        "2001:db8::/64",
+        "resolver = \"203.0.113.5\"\nblocked = [\"203.0.113.0/24\"]",
+        "in blocked range 203.0.113.0/24"
+    )]
+    fn a_prefix_or_resolver_vms_could_not_reach_is_refused(
+        #[case] prefix: &str,
+        #[case] lines: &str,
+        #[case] message: &str,
+    ) {
+        let refusal = refusal(prefix, lines).expect("the [net] table must be refused");
+        assert!(refusal.contains(message), "{refusal}");
+    }
+
+    #[rstest]
+    #[case::opted_out_prefix("2002:c000:204::/48", "blocked = []")]
+    #[case::opted_out_resolver("2001:db8::/64", "resolver = \"10.0.0.53\"\nblocked = []")]
+    #[case::replaced_list(
+        "2001:db8::/64",
+        "resolver = \"10.0.0.53\"\nblocked = [\"203.0.113.0/24\"]"
+    )]
+    fn an_operator_list_replaces_the_default(#[case] prefix: &str, #[case] lines: &str) {
+        assert_matches!(net(prefix, lines), Ok(_));
+    }
+
+    #[rstest]
+    fn a_blocked_entry_must_be_a_cidr() {
+        assert!(refusal("2001:db8::/64", "blocked = [\"10.0.0.0\"]").is_some());
+    }
+
+    #[proptest]
+    fn every_address_in_a_default_blocked_ipv4_range_is_refused_as_a_resolver(
+        #[strategy(prop_oneof![
+            (0u32..1 << 24).prop_map(|host| (10u32 << 24) | host),
+            (0u32..1 << 20).prop_map(|host| ((172u32 << 24) | (16 << 16)) | host),
+            (0u32..1 << 16).prop_map(|host| ((192u32 << 24) | (168 << 16)) | host),
+            (0u32..1 << 22).prop_map(|host| ((100u32 << 24) | (64 << 16)) | host),
+            (0u32..1 << 16).prop_map(|host| ((169u32 << 24) | (254 << 16)) | host),
+        ])]
+        addr: u32,
+    ) {
+        let addr = Ipv4Addr::from(addr);
+        let err = net("2001:db8::/64", &format!("resolver = \"{addr}\""));
+        prop_assert!(err.is_err(), "{addr} was accepted");
+    }
 
     #[rstest]
     #[case::configured("resolver = \"9.9.9.9\"", "9.9.9.9")]

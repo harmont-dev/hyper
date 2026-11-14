@@ -2,7 +2,7 @@
 //! One VM's network namespace: built by `vm_launch`, removed by `vm_teardown`.
 
 use super::firewall::Firewall;
-use super::{Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, NON_PUBLIC, TABLE};
+use super::{Blocked, Filter, Masquerade, NetId, DSTNAT_PRIORITY, FIREWALL_TABLE, TABLE};
 use crate::config::Net;
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::file::ValidationError;
@@ -24,7 +24,7 @@ use hyperrs_linux::net::{
 use hyperrs_process::privilege::Root;
 use nix::errno::Errno;
 use nix::unistd::{Gid, Uid};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 use thiserror::Error as ThisError;
 
@@ -176,10 +176,23 @@ impl VmNet<'_> {
             veth.index(),
         ))?;
 
-        Self::existing(&host, net.uplink())?.add_proxy_neigh(guest)?;
+        let host_uplink = Self::existing(&host, net.uplink())?;
+        host_uplink.add_proxy_neigh(guest)?;
+        let host_addrs: Vec<IpAddr> = host_uplink.addrs()?.into_iter().map(IpNet::addr).collect();
 
         ns.enable_forwarding()?;
-        ns.scoped(|| nft.replace_table(root, &Self::table(guest, uid, net.resolver().addr())))??;
+        ns.scoped(|| {
+            nft.replace_table(
+                root,
+                &Self::table(
+                    guest,
+                    uid,
+                    net.resolver().addr(),
+                    net.blocked(),
+                    &host_addrs,
+                ),
+            )
+        })??;
         ns.scoped(|| nft.replace_table(root, &Self::firewall_table(firewall)))??;
 
         Ok(ns)
@@ -268,7 +281,13 @@ impl VmNet<'_> {
 
     /// Only the guest's own addresses leave `tap0`, and the jailed Firecracker (`uid`)
     /// sends nothing from the namespace itself.
-    fn table(guest: Ipv6Addr, uid: Uid, resolver: Ipv4Addr) -> Table {
+    fn table(
+        guest: Ipv6Addr,
+        uid: Uid,
+        resolver: Ipv4Addr,
+        blocked: &Blocked,
+        host: &[IpAddr],
+    ) -> Table {
         let guest_v4 = Ipv4Net {
             addr: GUEST_ADDR,
             prefix: Self::prefix(32),
@@ -308,33 +327,45 @@ impl VmNet<'_> {
                 Filter {
                     hook: Hook::Forward,
                     policy: Policy::Drop,
-                    rules: NON_PUBLIC
-                        .iter()
-                        .map(|range| Rule {
-                            matches: vec![
-                                Match::Iifname(Iface::Named(TAP.clone())),
-                                match range.parse().expect("the non-public ranges parse") {
-                                    IpNet::V4(net) => Match::Ipv4Daddr(net),
-                                    IpNet::V6(net) => Match::Ipv6Daddr(net),
-                                },
-                            ],
-                            action: Action::Drop,
-                        })
-                        .chain([
-                            from_guest(Match::Ipv4Saddr(guest_v4)),
-                            from_guest(Match::Ipv6Saddr(Ipv6Net {
-                                addr: guest,
-                                prefix: Self::prefix(128),
-                            })),
-                            Rule {
+                    rules: std::iter::once(Rule {
+                        matches: vec![Match::CtState(CtState::Invalid)],
+                        action: Action::Drop,
+                    })
+                    .chain(blocked.ranges().map(|range| Rule {
+                        matches: vec![
+                            Match::Iifname(Iface::Named(TAP.clone())),
+                            Self::daddr(range),
+                        ],
+                        action: Action::Drop,
+                    }))
+                    .chain(
+                        host.iter()
+                            .map(|addr| Self::host_route(*addr))
+                            .chain([IpNet::V4(NetId::transit_range())])
+                            .map(|daddr| Rule {
                                 matches: vec![
-                                    Match::Iifname(Iface::Named(UPLINK.clone())),
-                                    Match::Oifname(Iface::Named(TAP.clone())),
+                                    Match::Iifname(Iface::Named(TAP.clone())),
+                                    Self::daddr(daddr),
+                                    Match::CtState(CtState::New),
                                 ],
-                                action: Action::Accept,
-                            },
-                        ])
-                        .collect(),
+                                action: Action::Drop,
+                            }),
+                    )
+                    .chain([
+                        from_guest(Match::Ipv4Saddr(guest_v4)),
+                        from_guest(Match::Ipv6Saddr(Ipv6Net {
+                            addr: guest,
+                            prefix: Self::prefix(128),
+                        })),
+                        Rule {
+                            matches: vec![
+                                Match::Iifname(Iface::Named(UPLINK.clone())),
+                                Match::Oifname(Iface::Named(TAP.clone())),
+                            ],
+                            action: Action::Accept,
+                        },
+                    ])
+                    .collect(),
                 }
                 .chain(),
                 Filter {
@@ -435,11 +466,31 @@ impl VmNet<'_> {
         len.try_into()
             .expect("the prefix length is a valid constant")
     }
+
+    fn daddr(net: IpNet) -> Match {
+        match net {
+            IpNet::V4(net) => Match::Ipv4Daddr(net),
+            IpNet::V6(net) => Match::Ipv6Daddr(net),
+        }
+    }
+
+    fn host_route(addr: IpAddr) -> IpNet {
+        match addr {
+            IpAddr::V4(addr) => IpNet::V4(Ipv4Net {
+                addr,
+                prefix: Self::prefix(32),
+            }),
+            IpAddr::V6(addr) => IpNet::V6(Ipv6Net {
+                addr,
+                prefix: Self::prefix(128),
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Firewall, VmNet, TAP, UPLINK};
+    use super::{Blocked, Firewall, VmNet, TAP, UPLINK};
     use hyperrs_linux::net::link::DuplicateAddrDetection;
     use hyperrs_linux::net::netns::NetNs;
     use hyperrs_linux::net::nft::Nft;
@@ -451,8 +502,9 @@ mod tests {
     use pretty_assertions::assert_eq;
     use rstest::rstest;
     use serde_json::json;
-    use socket2::{Domain, Socket, Type};
-    use std::net::{Ipv6Addr, SocketAddr, TcpListener};
+    use socket2::{Domain, Protocol, Socket, Type};
+    use std::io::Read;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, TcpListener};
     use std::path::Path;
     use std::time::Duration;
 
@@ -462,6 +514,8 @@ mod tests {
     const DNS: u16 = 53;
     const NAMESPACE: u16 = 7074;
     const DROPPED_AFTER: Duration = Duration::from_secs(3);
+    const HOST_ADDRS: [&str; 2] = ["198.51.100.2", "2001:db8:ffff::2"];
+    const INVALID_PORT: u16 = 7075;
     const FIRECRACKER: u32 = 900_001;
     const GUEST_V6: &str = "2001:db8::1:0:0:5";
 
@@ -541,8 +595,10 @@ mod tests {
                 &[
                     "10.200.0.1/30",
                     "198.51.100.1/32",
+                    "198.51.100.2/32",
                     "fe80::1/64",
                     "2001:db8:ffff::1/128",
+                    "2001:db8:ffff::2/128",
                 ],
             );
 
@@ -554,6 +610,7 @@ mod tests {
                 (&v, Self::route("::/0", Some("fe80::1"), uplink)),
                 (&v, Self::route("0.0.0.0/0", Some("10.200.0.1"), uplink)),
                 (&h, Self::route("192.0.2.9/32", Some("10.200.0.2"), wan)),
+                (&h, Self::route("172.16.0.0/30", Some("10.200.0.2"), wan)),
                 (&h, Self::route("2001:db8:0:0:1::/80", Some("fe80::2"), wan)),
             ] {
                 rtnl.add_route(&route).unwrap();
@@ -573,6 +630,8 @@ mod tests {
                     GUEST_V6.parse().unwrap(),
                     Uid::from_raw(FIRECRACKER),
                     "198.51.100.1".parse().unwrap(),
+                    &Blocked::default(),
+                    &HOST_ADDRS.map(|addr| addr.parse().unwrap()),
                 ),
                 VmNet::firewall_table(&firewall),
             ] {
@@ -624,6 +683,60 @@ mod tests {
                     .scoped(|| socket().connect_timeout(&to.into(), DROPPED_AFTER).is_ok()),
             }
             .unwrap()
+        }
+
+        fn invalid_segment_arrives_from(&self, to: SocketAddrV4) -> Vec<Ipv4Addr> {
+            let capture = self
+                .host
+                .get()
+                .scoped(|| Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::TCP)))
+                .unwrap()
+                .unwrap();
+            capture.set_read_timeout(Some(DROPPED_AFTER)).unwrap();
+            let src: Ipv4Addr = "172.16.0.2".parse().unwrap();
+            let mut segment = [0u8; 20];
+            segment[0..2].copy_from_slice(&40_000u16.to_be_bytes());
+            segment[2..4].copy_from_slice(&to.port().to_be_bytes());
+            segment[4..8].copy_from_slice(&1u32.to_be_bytes());
+            segment[12] = 5 << 4;
+            segment[13] = 0x03;
+            segment[14..16].copy_from_slice(&64_240u16.to_be_bytes());
+            let pseudo: Vec<u8> = [&src.octets()[..], &to.ip().octets()[..], &[0, 6, 0, 20]]
+                .concat()
+                .into_iter()
+                .chain(segment)
+                .collect();
+            let sum = pseudo
+                .chunks(2)
+                .map(|w| u32::from(u16::from_be_bytes([w[0], w[1]])))
+                .sum::<u32>();
+            let folded = !(((sum & 0xffff) + (sum >> 16)) as u16);
+            segment[16..18].copy_from_slice(&folded.to_be_bytes());
+            self.guest
+                .get()
+                .scoped(|| {
+                    let send = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::TCP)).unwrap();
+                    send.bind(&SocketAddr::new(src.into(), 0).into()).unwrap();
+                    send.send_to(&segment, &SocketAddr::new((*to.ip()).into(), 0).into())
+                        .unwrap();
+                })
+                .unwrap();
+
+            let mut seen = Vec::new();
+            let mut packet = [0u8; 1500];
+            while let Ok(n) = (&capture).read(&mut packet) {
+                let ihl = usize::from(packet[0] & 0x0f) * 4;
+                if n < ihl + 4 {
+                    continue;
+                }
+                let port = u16::from_be_bytes([packet[ihl + 2], packet[ihl + 3]]);
+                if port == to.port() {
+                    seen.push(Ipv4Addr::new(
+                        packet[12], packet[13], packet[14], packet[15],
+                    ));
+                }
+            }
+            seen
         }
 
         fn up(rtnl: &Rtnl, link: &str, addrs: &[&str]) -> IfIndex {
@@ -680,6 +793,12 @@ mod tests {
     )]
     #[case::guest_to_a_namespace_service(Probe::Guest("172.16.0.2"), "172.16.0.1:7074", false)]
     #[case::host_to_a_namespace_service(Probe::Host, "10.200.0.2:7074", false)]
+    #[case::guest_to_the_host_itself(Probe::Guest("172.16.0.2"), "198.51.100.2:7071", false)]
+    #[case::guest_to_the_host_itself_over_ipv6(
+        Probe::Guest(GUEST_V6),
+        "[2001:db8:ffff::2]:7071",
+        false
+    )]
     fn the_vm_namespace_admits_only_what_its_policy_allows_as_root(
         #[case] probe: Probe,
         #[case] to: &str,
@@ -695,6 +814,23 @@ mod tests {
         let lab = Lab::new(&test);
 
         assert_eq!(lab.connects(probe, to.parse().unwrap()), reachable);
+    }
+
+    #[rstest]
+    fn an_invalid_segment_from_the_guest_never_leaves_the_namespace_as_root() {
+        if !nix::unistd::geteuid().is_root() {
+            eprintln!("SKIP invalid segment: needs root");
+            return;
+        }
+        let lab = Lab::new("vmfw-invalid");
+
+        assert_eq!(
+            lab.invalid_segment_arrives_from(SocketAddrV4::new(
+                "198.51.100.1".parse().unwrap(),
+                INVALID_PORT
+            )),
+            Vec::<Ipv4Addr>::new()
+        );
     }
 
     #[rstest]
