@@ -417,3 +417,96 @@ fn teardown_waits_for_the_vm_lock_an_in_flight_launch_holds_as_root(launch: Opti
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+fn vm_lock_dir() -> SafeDir {
+    let locks = PathBuf::from("/run/hyper-suidhelper/locks");
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&locks)
+        .unwrap();
+    fs::set_permissions("/run/hyper-suidhelper", fs::Permissions::from_mode(0o755)).unwrap();
+    let locks: SafePathBuf<IsAbsolute, StrictComponents> = locks.try_into().unwrap();
+    SafeFile::open(&locks, OpenFlags::RDONLY).unwrap()
+}
+
+#[rstest]
+fn launch_waits_for_a_teardown_holding_the_vm_lock_before_touching_the_jail_as_root(
+    launch: Option<Launch>,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let stale = launch.plant_stale_jail();
+    let dir = vm_lock_dir();
+    let name = format!("vm-{}", launch.id);
+    let held = FileLock::acquire(
+        &dir,
+        name.as_str().try_into().unwrap(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let request = launch.request(json!({})).to_string();
+    let mut child = launch
+        .ns
+        .get()
+        .scoped(|| {
+            support::command(&cfg, &[&request])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .unwrap();
+    thread::sleep(Duration::from_millis(1500));
+    let while_held = (
+        child.try_wait().unwrap().is_none(),
+        stale.exists(),
+        launch.recorded_argv().is_none(),
+    );
+    drop(held);
+    let out = child.wait_with_output().unwrap();
+
+    assert_eq!(
+        (
+            while_held,
+            out.status.code(),
+            stale.exists(),
+            launch.recorded_argv().is_some()
+        ),
+        ((true, true, true), Some(RECORDER_EXIT), false, true),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[rstest]
+fn a_launch_that_never_gets_the_vm_lock_stages_nothing_and_never_execs_as_root(
+    launch: Option<Launch>,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let stale = launch.plant_stale_jail();
+    let dir = vm_lock_dir();
+    let name = format!("vm-{}", launch.id);
+    let _held = FileLock::acquire(
+        &dir,
+        name.as_str().try_into().unwrap(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let out = launch.run(&cfg, launch.request(json!({}))).failure();
+
+    assert_eq!(
+        (
+            out.get_output().status.code() == Some(RECORDER_EXIT),
+            stale.exists(),
+            launch.recorded_argv().is_none(),
+            Path::new("/run/netns").join(launch.netns()).exists(),
+        ),
+        (false, true, true, false),
+        "{}",
+        String::from_utf8_lossy(&out.get_output().stderr)
+    );
+}

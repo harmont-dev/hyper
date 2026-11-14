@@ -194,3 +194,128 @@ mod tests {
         assert!(serde_json::from_value::<Firewall>(policy).is_err());
     }
 }
+
+#[cfg(test)]
+mod refusal_properties {
+    //! Laws over arbitrary policies as the helper's JSON delivers them:
+    //! - a policy is accepted exactly when every rule names `tcp` or `udp` over a
+    //!   non-empty range without port 0 and each direction holds at most `Rules::MAX`;
+    //! - an accepted policy renders one destination-port match per rule, in order, over
+    //!   exactly the ports it named.
+
+    use super::{Firewall, Rules};
+    use hyperrs_linux::net::nft::{L4Proto, Match};
+    use proptest::prelude::*;
+    use serde_json::{json, Value};
+    use test_strategy::proptest;
+
+    #[derive(Debug, Clone)]
+    struct Raw {
+        protocol: &'static str,
+        first: u16,
+        last: u16,
+    }
+
+    impl Raw {
+        fn valid(&self) -> bool {
+            matches!(self.protocol, "tcp" | "udp") && self.first != 0 && self.first <= self.last
+        }
+
+        fn json(&self) -> Value {
+            json!({"protocol": self.protocol, "ports": [self.first, self.last]})
+        }
+
+        fn rendered(&self) -> Match {
+            let proto = if self.protocol == "tcp" {
+                L4Proto::Tcp
+            } else {
+                L4Proto::Udp
+            };
+            Match::Dport(proto, self.first..=self.last)
+        }
+    }
+
+    fn port() -> impl Strategy<Value = u16> {
+        prop_oneof![Just(0), Just(1), Just(u16::MAX), any::<u16>()]
+    }
+
+    fn raw() -> impl Strategy<Value = Raw> {
+        (
+            prop_oneof![
+                8 => Just("tcp"),
+                8 => Just("udp"),
+                1 => Just("icmp"),
+                1 => Just("TCP"),
+                1 => Just(""),
+            ],
+            port(),
+            port(),
+        )
+            .prop_map(|(protocol, first, last)| Raw {
+                protocol,
+                first,
+                last,
+            })
+    }
+
+    fn direction() -> impl Strategy<Value = Vec<Raw>> {
+        prop_oneof![
+            4 => prop::collection::vec(raw(), 0..8),
+            1 => (Rules::MAX - 2..=Rules::MAX + 2).prop_flat_map(|len| {
+                prop::collection::vec(
+                    (1u16..=u16::MAX).prop_map(|p| Raw {
+                        protocol: "tcp",
+                        first: p,
+                        last: p,
+                    }),
+                    len,
+                )
+            }),
+        ]
+    }
+
+    #[proptest]
+    fn a_policy_is_accepted_exactly_when_every_rule_and_direction_is_valid(
+        #[strategy(direction())] inbound: Vec<Raw>,
+        #[strategy(direction())] outbound_blocked: Vec<Raw>,
+    ) {
+        let ok = |rules: &[Raw]| rules.len() <= Rules::MAX && rules.iter().all(Raw::valid);
+        let parsed = serde_json::from_value::<Firewall>(json!({
+            "inbound": inbound.iter().map(Raw::json).collect::<Vec<_>>(),
+            "outbound_blocked": outbound_blocked.iter().map(Raw::json).collect::<Vec<_>>(),
+        }));
+
+        prop_assert_eq!(parsed.is_ok(), ok(&inbound) && ok(&outbound_blocked));
+        if let Ok(firewall) = parsed {
+            prop_assert_eq!(
+                firewall.inbound().collect::<Vec<_>>(),
+                inbound.iter().map(Raw::rendered).collect::<Vec<_>>()
+            );
+            prop_assert_eq!(
+                firewall.outbound_blocked().collect::<Vec<_>>(),
+                outbound_blocked
+                    .iter()
+                    .map(Raw::rendered)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[proptest]
+    fn ports_outside_u16_are_refused(
+        #[strategy(prop_oneof![-70_000i64..0, 65_536i64..200_000])] bad: i64,
+        first: bool,
+    ) {
+        let ports = if first {
+            json!([bad, 80])
+        } else {
+            json!([80, bad])
+        };
+        let policy = json!({
+            "inbound": [{"protocol": "tcp", "ports": ports}],
+            "outbound_blocked": [],
+        });
+
+        prop_assert!(serde_json::from_value::<Firewall>(policy).is_err());
+    }
+}
