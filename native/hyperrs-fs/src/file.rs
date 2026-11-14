@@ -299,6 +299,12 @@ where
     }
 }
 
+impl<T, R, O> io::Read for SafeFile<T, R, O> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Ok(nix::unistd::read(self.0.as_raw_fd(), buf)?)
+    }
+}
+
 impl<T, R, O> io::Write for SafeFile<T, R, O> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         Ok(nix::unistd::write(&self.0, buf)?)
@@ -355,7 +361,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::assert_matches;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
@@ -408,6 +414,9 @@ mod tests {
     #[rstest]
     fn safefile_owner_axis_rejects_non_root_file(plain: (TempDir, ChildPath)) {
         let (_tmp, f) = plain;
+        if nix::unistd::geteuid().is_root() {
+            nix::unistd::chown(f.path(), Some(nix::unistd::Uid::from_raw(65_534)), None).unwrap();
+        }
         assert!(
             SafeFile::<IsRegularFile, RootOwner, Any>::open(&safe(&f), OpenFlags::PATH).is_err()
         );
@@ -441,6 +450,17 @@ mod tests {
             .unwrap();
         file.write_all(b"hello").unwrap();
         f.assert("hello");
+    }
+
+    #[rstest]
+    fn safefile_read_to_string_reads_through_the_fd(plain: (TempDir, ChildPath)) {
+        let (tmp, f) = plain;
+        f.write_str(&"x".repeat(10_000)).unwrap();
+        let mut file: SafeFile<IsRegularFile, Any, Any> =
+            SafeFile::open(&safe(&tmp.path().join("plain")), OpenFlags::RDONLY).unwrap();
+        let mut read = String::new();
+        file.read_to_string(&mut read).unwrap();
+        assert_eq!(read, "x".repeat(10_000));
     }
 
     #[fixture]

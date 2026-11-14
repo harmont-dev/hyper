@@ -308,6 +308,9 @@ jobs:
         with:
           tool: cargo-llvm-cov,nextest
 
+      - name: Install nftables
+        run: sudo apt-get update && sudo apt-get install -y nftables
+
       # Root-gated cases are tagged by name: every test that needs root ends in
       # `_as_root` and self-skips when run unprivileged. We select them by that
       # suffix (via sudo -E so the runner's cargo/rustup home and PATH are kept)
