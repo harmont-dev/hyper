@@ -147,6 +147,17 @@ mod tests {
     }
 
     #[rstest]
+    #[case::at_the_cap(Rules::MAX, true)]
+    #[case::past_the_cap(Rules::MAX + 1, false)]
+    fn a_direction_takes_exactly_max_rules(#[case] len: usize, #[case] accepted: bool) {
+        let rules = vec![json!({"protocol": "tcp", "ports": [22, 22]}); len];
+        assert_eq!(
+            serde_json::from_value::<Rules>(json!(rules)).is_ok(),
+            accepted
+        );
+    }
+
+    #[rstest]
     fn rules_become_destination_port_matches_in_order() {
         let firewall: Firewall = serde_json::from_value(json!({
             "inbound": [

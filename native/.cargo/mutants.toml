@@ -19,7 +19,7 @@ exclude_re = [
     "hyperrs-linux/src/net/rtnl\\.rs:.*Rtnl::",
     "hyperrs-linux/src/net/route\\.rs:.*Route::rtnl_message",
     "hyperrs-linux/src/net/nft/mod\\.rs:.*Nft::",
-    "hyperrs-linux/src/sysctl\\.rs:.*Setting::(read|write)",
+    "hyperrs-linux/src/sysctl\\.rs:.*(Setting::(read|write)|Ipv4::current_ip_forward|Ipv6Conf::current_forwarding)",
     # Host and VM network setup and socket pins need root; killed by the suidhelper
     # _as_root tests (net::vm, e2e_firewall, e2e_chroot_jail) in the privileged E2E job.
     "suidhelper/src/net/host\\.rs:.*HostNet<'_>::init",

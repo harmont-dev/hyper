@@ -366,7 +366,7 @@ static CONFIG: LazyLock<Result<Config, LoadingError>> = LazyLock::new(Config::sa
 #[cfg(test)]
 mod tests {
     use super::Net;
-    use crate::net::Resolver;
+    use crate::net::{Blocked, Resolver};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
@@ -424,6 +424,16 @@ mod tests {
     )]
     fn an_operator_list_replaces_the_default(#[case] prefix: &str, #[case] lines: &str) {
         assert_matches!(net(prefix, lines), Ok(_));
+    }
+
+    #[rstest]
+    #[case::defaulted("", Blocked::default())]
+    #[case::configured(
+        "blocked = [\"203.0.113.0/24\"]",
+        Blocked::try_from(vec!["203.0.113.0/24".to_owned()]).unwrap()
+    )]
+    fn the_net_table_yields_its_blocked_ranges(#[case] lines: &str, #[case] blocked: Blocked) {
+        assert_eq!(net("2001:db8::/64", lines).unwrap().blocked(), &blocked);
     }
 
     #[rstest]

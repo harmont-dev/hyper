@@ -522,6 +522,8 @@ mod tests {
     #[case::ipv4_inside("10.200.0.0/16", Some("10.0.0.0/8"))]
     #[case::ipv4_covering("0.0.0.0/0", Some("0.0.0.0/8"))]
     #[case::ipv4_beside("11.0.0.0/8", None)]
+    #[case::ipv4_covering_a_range_it_does_not_start_at("8.0.0.0/6", Some("10.0.0.0/8"))]
+    #[case::ipv6_covering_a_range_it_does_not_start_at("2000::/8", Some("2002::/16"))]
     #[case::ipv6_inside("fd12:3456:789a::/64", Some("fc00::/7"))]
     #[case::ipv6_beside("2001:db8::/32", None)]
     fn a_range_overlaps_the_first_blocked_range_sharing_an_address(
