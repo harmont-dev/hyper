@@ -11,6 +11,7 @@ pub struct Ruleset<'a> {
 }
 
 impl<'a> Ruleset<'a> {
+    /// Delete `table` if it exists and recreate it with its chains and rules, in one batch `nft` applies atomically ([nft(8)](https://man7.org/linux/man-pages/man8/nft.8.html)).
     pub fn replace(table: &'a super::Table) -> Self {
         let chains = table.chains.iter().flat_map(|chain| {
             let rules = chain.rules.iter().map(|rule| {
@@ -52,6 +53,7 @@ impl<'a> Ruleset<'a> {
         }
     }
 
+    /// Delete the table `name`; one that doesn't exist is not an error (it is added first, then deleted).
     pub fn delete(family: Family, name: &'a str) -> Self {
         Self {
             nftables: vec![

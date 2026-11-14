@@ -123,6 +123,7 @@ impl Ipv6Conf {
         Setting::flag(self.0.child(StrictComponent::from_static("proxy_ndp")), on)
     }
 
+    /// `net/ipv6/conf/<…>/accept_ra`: whether the link accepts router advertisements ([ip-sysctl](https://docs.kernel.org/networking/ip-sysctl.html#proc-sys-net-ipv6-variables)).
     pub fn accept_ra(self, mode: AcceptRa) -> Setting {
         Setting {
             key: self.0.child(StrictComponent::from_static("accept_ra")),
@@ -130,6 +131,7 @@ impl Ipv6Conf {
         }
     }
 
+    /// The current value of `net/ipv6/conf/<…>/accept_ra` ([ip-sysctl](https://docs.kernel.org/networking/ip-sysctl.html#proc-sys-net-ipv6-variables)).
     pub fn current_accept_ra(self) -> Result<AcceptRa, SysctlError> {
         let key = self.0.child(StrictComponent::from_static("accept_ra"));
         let value = Setting::read(&key)?;

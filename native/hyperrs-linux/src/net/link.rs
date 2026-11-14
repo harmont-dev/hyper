@@ -167,6 +167,7 @@ impl Link<'_> {
             .map_err(|e| NeighError(addr, e))
     }
 
+    /// The addresses this link answers neighbour solicitations for, as `ip -6 neigh show proxy dev <link>` lists them ([ip-neighbour(8)](https://man7.org/linux/man-pages/man8/ip-neighbour.8.html)).
     pub fn proxy_neighs(&self) -> Result<Vec<Ipv6Addr>, RequestError> {
         let mut request = NeighbourMessage::default();
         request.header.family = AddressFamily::Inet6;
