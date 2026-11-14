@@ -74,7 +74,7 @@ defmodule Hyper.Node.Img.ThinPool do
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
-    with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
+    with :ok <- Sys.Posix.mkdir_private(Hyper.Cfg.Dirs.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
          {:ok, _pool_dev, meta_loop} <-
@@ -156,18 +156,17 @@ defmodule Hyper.Node.Img.ThinPool do
   defp ensure_backing(file, size) do
     path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), file)
 
-    case File.open(path, [:write, :read]) do
-      {:ok, io} ->
-        try do
-          {:ok, _} = :file.position(io, Information.as_bytes(size))
-          :ok = :file.truncate(io)
-          {:ok, path}
-        after
-          File.close(io)
-        end
-
-      {:error, reason} ->
-        {:error, {:backing_file, file, reason}}
+    with :ok <- Sys.Posix.ensure_private_file(path),
+         {:ok, io} <- File.open(path, [:write, :read]) do
+      try do
+        {:ok, _} = :file.position(io, Information.as_bytes(size))
+        :ok = :file.truncate(io)
+        {:ok, path}
+      after
+        File.close(io)
+      end
+    else
+      {:error, reason} -> {:error, {:backing_file, file, reason}}
     end
   end
 end

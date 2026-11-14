@@ -208,7 +208,7 @@ defmodule Hyper.Img do
   @spec publish(Path.t(), id()) :: {:ok, Path.t(), :created | :reused} | {:error, term()}
   @decorate with_span("Hyper.Img.publish", include: [:id])
   defp publish(src, id) do
-    File.mkdir_p!(Hyper.Cfg.Dirs.layer_dir())
+    :ok = Sys.Posix.mkdir_private(Hyper.Cfg.Dirs.layer_dir())
     final = final_path(id)
 
     if File.exists?(final) do
@@ -227,22 +227,32 @@ defmodule Hyper.Img do
   # across filesystems (rename can't cross a mount).
   @spec place(Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
   defp place(src, final) do
-    case File.rename(src, final) do
-      :ok ->
+    with :ok <- File.chmod(src, Sys.Posix.private_file_mode()),
+         :ok <- File.rename(src, final) do
+      {:ok, final}
+    else
+      {:error, :exdev} -> copy_private(src, final)
+      {:error, reason} -> {:error, {:publish_failed, reason}}
+    end
+  end
+
+  @spec copy_private(Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  defp copy_private(src, final) do
+    case Sys.Posix.create_private_file(final) do
+      :ok -> fill(src, final)
+      {:error, reason} -> {:error, {:publish_failed, reason}}
+    end
+  end
+
+  @spec fill(Path.t(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  defp fill(src, final) do
+    case File.copy(src, final) do
+      {:ok, _bytes} ->
+        _ = File.rm(src)
         {:ok, final}
 
-      {:error, :exdev} ->
-        case File.cp(src, final) do
-          :ok ->
-            _ = File.rm(src)
-            {:ok, final}
-
-          {:error, reason} ->
-            _ = File.rm(final)
-            {:error, {:publish_failed, reason}}
-        end
-
       {:error, reason} ->
+        _ = File.rm(final)
         {:error, {:publish_failed, reason}}
     end
   end

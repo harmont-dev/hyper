@@ -107,7 +107,8 @@ defmodule Hyper.Node.Img.Publish do
 
   @spec create_sparse(Path.t(), Information.t()) :: :ok | {:error, term()}
   defp create_sparse(path, size) do
-    with :ok <- File.mkdir_p(Path.dirname(path)),
+    with :ok <- Sys.Posix.mkdir_private(Path.dirname(path)),
+         :ok <- Sys.Posix.create_private_file(path),
          {:ok, io} <- File.open(path, [:write, :read]) do
       try do
         {:ok, _} = :file.position(io, Information.as_bytes(size))

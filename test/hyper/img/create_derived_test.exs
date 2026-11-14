@@ -24,7 +24,10 @@ defmodule Hyper.Img.CreateDerivedTest do
     assert [%Blob{id: ^base_id, kind: :base}, %Blob{kind: :delta} = delta] =
              Image.resolve_chain(img_id)
 
-    assert File.exists?(Path.join(Dirs.layer_dir(), "layer_#{delta.id}.img"))
+    for id <- [base_id, delta.id] do
+      layer = Path.join(Dirs.layer_dir(), "layer_#{id}.img")
+      assert Bitwise.band(File.stat!(layer).mode, 0o7777) == 0o600
+    end
 
     # Same bytes over the same parent: the same derived image, no duplicates.
     assert {:ok, ^img_id} = Img.create_derived(base_id, consumable!(delta_bytes), label: "delta")

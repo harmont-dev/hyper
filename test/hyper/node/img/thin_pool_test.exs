@@ -41,4 +41,29 @@ defmodule Hyper.Node.Img.ThinPoolTest do
       assert state.freed == freed, label
     end
   end
+
+  test "the pool's scratch dir is 0700 and its backing files 0600, fresh or reused", %{tmp: tmp} do
+    original = Hyper.Cfg.Toml.reload()
+    Hyper.Cfg.Toml.put_cache(Map.put(original, "work_dir", tmp))
+    on_exit(fn -> Hyper.Cfg.Toml.put_cache(original) end)
+
+    SuidHelperStub.install!(
+      tmp,
+      ~s(echo '{"result":"created","device":"/dev/mapper/hyper-thinpool","loops":{"metadata":"/dev/loop3"}}')
+    )
+
+    scratch = Hyper.Cfg.Dirs.scratch_dir()
+    files = Enum.map(["thinpool.meta", "thinpool.data"], &Path.join(scratch, &1))
+    mode = fn path -> Bitwise.band(File.stat!(path).mode, 0o7777) end
+
+    for reused_mode <- [nil, 0o664] do
+      if reused_mode, do: Enum.each(files, &File.chmod!(&1, reused_mode))
+
+      assert {:ok, %ThinPool.State{meta_loop: "/dev/loop3"}} =
+               Task.await(Task.async(fn -> ThinPool.init([]) end))
+
+      assert mode.(scratch) == 0o700
+      assert Enum.map(files, mode) == [0o600, 0o600]
+    end
+  end
 end
