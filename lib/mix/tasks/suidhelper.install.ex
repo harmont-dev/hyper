@@ -14,8 +14,7 @@ defmodule Mix.Tasks.Suidhelper.Install do
        `/usr/local/libexec/hyper/hyper-suidhelper`, owned `root:GROUP`, mode
        `4750`, inside a `root:GROUP` `0750` directory: only root and GROUP may
        run it, and the helper refuses anyone else. GROUP defaults to your
-       primary group and must contain no other account. A helper left at the
-       old `/usr/local/bin/hyper-suidhelper` is removed.
+       primary group and must contain no other account.
 
   The copy needs root, but Mix runs every subprocess in its own session with no
   controlling terminal (`erl_child_setup` calls `setsid`), so a nested `sudo`

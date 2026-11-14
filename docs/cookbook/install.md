@@ -394,11 +394,7 @@ sudo install -d -o root -g hyper -m 0750 /usr/local/libexec/hyper
 sudo install -o root -g hyper -m 4750 \
   path/to/built/hyper-suidhelper \
   /usr/local/libexec/hyper/hyper-suidhelper
-sudo rm -f /usr/local/bin/hyper-suidhelper
 ```
-
-The last line removes a helper left at the pre-0.1.1 path, which any local
-account could run.
 
 ### Database Migrations
 
