@@ -83,8 +83,8 @@ defmodule Hyper.Img.OciLoader do
   end
 
   @doc """
-  Verify the external tools the loader needs (`skopeo`, `umoci`, `mke2fs`) are
-  resolvable on this host. Returns `{:error, {:missing_tools, names}}` listing
+  Verify the external tools the loader needs (`skopeo`, `umoci`, `mke2fs`,
+  `debugfs`) are resolvable on this host. Returns `{:error, {:missing_tools, names}}` listing
   any that are absent.
   """
   @spec test_system() :: :ok | {:error, term()}
