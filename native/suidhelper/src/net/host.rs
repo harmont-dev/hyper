@@ -109,8 +109,8 @@ impl HostNet<'_> {
         .chain()
     }
 
-    /// VMs reach only public addresses. What reaches a VM is its own namespace's
-    /// firewall to decide.
+    /// VMs reach only public addresses. Nothing new or untracked reaches the transit
+    /// range; what reaches a VM's public address is its own namespace's firewall to decide.
     fn forward(&self) -> Chain {
         let vm_range = Match::Ipv6Daddr(self.prefix.vm_range());
         let not_vm_range = || Match::Not(Box::new(vm_range.clone()));

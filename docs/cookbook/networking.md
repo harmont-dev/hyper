@@ -324,8 +324,9 @@ The host's `inet hyper` table holds the rules that are the same for every VM:
   their networks and metadata services in: private, shared and link-local IPv4,
   unique local IPv6, and the NAT64, 6to4 and IPv4-mapped prefixes that lead
   back to them.
-- **No transit access.** New connections into the transit network are dropped
-  whatever `blocked` says, so VMs can't talk to each other over it.
+- **No transit access.** New connections into the transit network, and packets
+  into it that conntrack can't track, are dropped whatever `blocked` says, so
+  neither VMs nor the internet reach it.
 - **No untranslated traffic.** Packets conntrack can't track are dropped, as is
   anything from a VM whose source is outside the transit network and the VM
   range.
