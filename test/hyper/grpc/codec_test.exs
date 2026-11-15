@@ -268,7 +268,9 @@ defmodule Hyper.Grpc.CodecTest do
   describe "to_grpc/1 response encoding" do
     test "a created result carries the vm_id, node string and IPv6 address" do
       assert %CreateVmResponse{vm_id: "vabc", node: "hyper@host", ipv6: "2001:db8::1:0:0:2a"} =
-               Codec.to_grpc({:created, "vabc", :hyper@host, {0x2001, 0xDB8, 0, 0, 1, 0, 0, 0x2A}})
+               Codec.to_grpc(
+                 {:created, "vabc", :hyper@host, {0x2001, 0xDB8, 0, 0, 1, 0, 0, 0x2A}}
+               )
     end
 
     test "an executed result carries the exit code and both streams" do
