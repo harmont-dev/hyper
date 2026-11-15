@@ -4,8 +4,8 @@ defmodule Hyper.Cfg.Tools do
 
   The privileged tools (`firecracker`, `jailer`, `dmsetup`, `losetup`) are read
   **only** from `/etc/hyper/config.toml` — the file the setuid helper also
-  parses, so node and helper can never disagree on a root-impacting path. The node-only tools (`skopeo`, `mke2fs`, `umoci`,
-  `suidhelper`) run unprivileged, so `/etc/hyper/config.exs` may override them
+  parses, so node and helper can never disagree on a root-impacting path. The node-only tools (`skopeo`, `mke2fs`, `debugfs`,
+  `umoci`, `suidhelper`) run unprivileged, so `/etc/hyper/config.exs` may override them
   (e.g. a path from a secrets manager), then `config.toml`, then the default.
   """
 
@@ -34,6 +34,11 @@ defmodule Hyper.Cfg.Tools do
   @doc "mke2fs binary (node tool). config.exs > config.toml > `mke2fs` on PATH."
   @spec mke2fs :: String.t()
   def mke2fs, do: get_cfg(runtime: {__MODULE__, :mke2fs}, toml: "tools.mke2fs", default: "mke2fs")
+
+  @doc "debugfs binary (node tool). config.exs > config.toml > `debugfs` on PATH."
+  @spec debugfs :: String.t()
+  def debugfs,
+    do: get_cfg(runtime: {__MODULE__, :debugfs}, toml: "tools.debugfs", default: "debugfs")
 
   @doc "umoci binary (node tool), or `nil` to let Hyper download a pinned release."
   @spec umoci :: String.t() | nil

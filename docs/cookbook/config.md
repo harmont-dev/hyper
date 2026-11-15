@@ -54,6 +54,7 @@ configurable:
 | `nft`         | -             | `.nft`         | `"/usr/sbin/nft"`                   | [Safe Path](#safe-path). Applies the host's and each VM's IPv4 NAT. |
 | `thin_dump`   | -             | `.thin_dump`   | `"/usr/sbin/thin_dump"`             | [Safe Path](#safe-path). Reads thin snapshot metadata for fork publish; required for `Hyper.Vm.fork/1`'s cross-node path (same-node `fast_fork/1` is unaffected). |
 | `mke2fs`      | `.mke2fs`     | `.mke2fs`      | `$PATH["mke2fs"]`                   |  |
+| `debugfs`     | `.debugfs`    | `.debugfs`     | `$PATH["debugfs"]`                  | Restores image file ownership in rootless builds. |
 | `skopeo`      | `.skopeo`     | `.skopeo`      | `$PATH["skopeo"]`                   |  |
 | `umoci`       | `.umoci`      | `.umoci`       | Automatically downloaded.           |  |
 | `suidhelper`  | `.suidhelper` | `.suidhelper`  | `"/usr/local/libexec/hyper/hyper-suidhelper"` | [Absolute Path](#absolute-path) |
@@ -67,6 +68,7 @@ configurable:
 config :hyper, Hyper.Cfg.Tools,
   skopeo: "/usr/local/bin/skopeo",
   mke2fs: "/usr/local/bin/mke2fs",
+  debugfs: "/usr/sbin/debugfs",
   umoci: "/usr/local/bin/umoci",
   suidhelper: "/usr/local/libexec/hyper/hyper-suidhelper"
 ```
@@ -85,6 +87,7 @@ thin_dump   = "/usr/sbin/thin_dump"
 # Node tools -- may also be set in config.exs, which wins when both are set.
 skopeo     = "/usr/local/bin/skopeo"
 mke2fs     = "/usr/local/bin/mke2fs"
+debugfs    = "/usr/sbin/debugfs"
 umoci      = "/usr/local/bin/umoci"
 suidhelper = "/usr/local/libexec/hyper/hyper-suidhelper"
 ```
