@@ -56,11 +56,12 @@ defmodule Hyper do
 
   Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`, or
   `{:error, reason}` — `:agent_unavailable` if the relay/agent is not yet
-  reachable, `:timeout` if the gRPC deadline expired, `:not_found` if the VM
-  cannot be resolved (unknown vm_id, or a pid whose id/owning node is gone),
-  `:node_unreachable` if the owning node cannot be reached over the cluster.
+  reachable, `:timeout` if the call did not finish within `:timeout`,
+  `:not_found` if the VM cannot be resolved (unknown vm_id, or a pid whose
+  id/owning node is gone), `:node_unreachable` if the owning node cannot be
+  reached over the cluster.
   `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd` (string), `:timeout`
-  (ms, gRPC deadline forwarded to the relay; default 30 000).
+  (ms, deadline for the whole call, also sent to the guest; default 30 000).
 
   `argv` is executed directly, not through a shell. Use an **absolute** `argv`
   head (`["/bin/echo", "hi"]`): the guest runs as PID 1 with a near-empty

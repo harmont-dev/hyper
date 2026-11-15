@@ -41,10 +41,15 @@ defmodule Hyper.Node.FireVMM.Agent do
   Run `argv` in the guest VM identified by `vm_id` via gRPC through the relay.
 
   Returns `{:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}`,
-  or `{:error, term()}`. Error values: `:agent_unavailable` (relay unreachable —
-  gRPC UNAVAILABLE), `:timeout` (the call did not finish within `:timeout`),
-  `{:bad_agent_reply, reason}` (the reply did not decode), or raw transport
-  errors for unexpected failures, including a reply over the relay's 16 MiB cap.
+  or `{:error, term()}`. Error values: `:agent_unavailable` (relay missing,
+  refused or closed before replying, or gRPC UNAVAILABLE), `:timeout` (the call
+  did not finish within `:timeout`), `{:bad_agent_reply, reason}` (the reply is
+  not a well-formed gRPC response), `%GRPC.RPCError{}` for any other gRPC
+  status, or raw transport errors for unexpected failures, including a reply
+  over the relay's 16 MiB cap.
+
+  The guest gets `:timeout` as its `grpc-timeout`, rounded up, so it never gives
+  up before the host does.
 
   ## Options
 
