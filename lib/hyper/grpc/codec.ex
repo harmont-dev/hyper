@@ -11,6 +11,8 @@ defmodule Hyper.Grpc.Codec do
   alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
+    ExecVmRequest,
+    ExecVmResponse,
     ForkVmResponse,
     GetVmResponse,
     GetVmUsageResponse,
@@ -72,6 +74,15 @@ defmodule Hyper.Grpc.Codec do
     end
   end
 
+  @spec from_grpc(ExecVmRequest.t()) :: {:ok, {[String.t()], keyword()}} | {:error, term()}
+  def from_grpc(%ExecVmRequest{argv: []}), do: {:error, :missing_argv}
+
+  def from_grpc(%ExecVmRequest{argv: argv, env: env, cwd: cwd, timeout_ms: timeout_ms}) do
+    # Unset leaves `Hyper.exec/3` its own default deadline.
+    timeout = if timeout_ms == nil, do: [], else: [timeout: timeout_ms]
+    {:ok, {argv, [env: Map.new(env), cwd: cwd] ++ timeout}}
+  end
+
   @spec from_grpc(SetVmFirewallRequest.t()) ::
           {:ok, {Hyper.Vm.Id.t(), Firewall.t()}} | {:error, term()}
   def from_grpc(%SetVmFirewallRequest{firewall: nil}), do: {:error, :missing_firewall}
@@ -91,9 +102,15 @@ defmodule Hyper.Grpc.Codec do
   end
 
   @doc "Convert a domain result to an outbound response message, or an error to `GRPC.RPCError`."
-  @spec to_grpc({:created, Hyper.Vm.Id.t(), node()}) :: CreateVmResponse.t()
-  def to_grpc({:created, vm_id, node}) when is_binary(vm_id),
-    do: %CreateVmResponse{vm_id: vm_id, node: to_string(node)}
+  @spec to_grpc({:created, Hyper.Vm.Id.t(), node(), :inet.ip6_address()}) ::
+          CreateVmResponse.t()
+  def to_grpc({:created, vm_id, node, ipv6}) when is_binary(vm_id),
+    do: %CreateVmResponse{vm_id: vm_id, node: to_string(node), ipv6: to_string(:inet.ntoa(ipv6))}
+
+  @spec to_grpc({:executed, %{exit_code: integer(), stdout: binary(), stderr: binary()}}) ::
+          ExecVmResponse.t()
+  def to_grpc({:executed, %{exit_code: exit_code, stdout: stdout, stderr: stderr}}),
+    do: %ExecVmResponse{exit_code: exit_code, stdout: stdout, stderr: stderr}
 
   @spec to_grpc({:forked, Hyper.Vm.Id.t(), node()}) :: ForkVmResponse.t()
   def to_grpc({:forked, vm_id, node}) when is_binary(vm_id),
@@ -191,6 +208,15 @@ defmodule Hyper.Grpc.Codec do
 
   defp rpc_error(:bad_arch),
     do: GRPC.RPCError.exception(:invalid_argument, "arch holds an unrecognised value")
+
+  defp rpc_error(:missing_argv),
+    do: GRPC.RPCError.exception(:invalid_argument, "argv is required")
+
+  defp rpc_error(:agent_unavailable),
+    do: GRPC.RPCError.exception(:unavailable, "VM's guest agent is not answering yet")
+
+  defp rpc_error(:timeout),
+    do: GRPC.RPCError.exception(:deadline_exceeded, "command did not exit in time")
 
   defp rpc_error(:missing_firewall),
     do: GRPC.RPCError.exception(:invalid_argument, "firewall is required")

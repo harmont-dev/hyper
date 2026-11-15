@@ -212,6 +212,16 @@ defmodule Hyper.Node do
   end
 
   @doc """
+  The IPv6 address of the VM `vm_id` hosted **on this node**: the one its
+  network lease holds. The node-local half of `Hyper.address/1`.
+  """
+  @spec address(Hyper.Vm.Id.t()) :: {:ok, :inet.ip6_address()} | {:error, :not_found}
+  def address(vm_id) do
+    with {:ok, %FireVMM.Opts{net_id: net_id}} <- describe_vm(vm_id),
+         do: {:ok, Net.lease(net_id).ipv6}
+  end
+
+  @doc """
   Fork the running VM `parent_vm_id` **onto this node**: budget-admitted like any
   placement (`try_run/3`), erroring with the node's admission verdict
   (`:mem_exhausted`, `:cpu_saturated`, ...) instead of falling back elsewhere.
