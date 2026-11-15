@@ -158,8 +158,8 @@ work_dir = "/srv/hyper"
 #
 # The privileged binaries the setuid helper runs (firecracker, jailer, dmsetup,
 # losetup) must be root-owned and not group/world writable -- the
-# helper refuses them otherwise. The node-run tools (skopeo, umoci, mke2fs) have
-# no such requirement.
+# helper refuses them otherwise. The node-run tools (skopeo, umoci, mke2fs,
+# debugfs) have no such requirement.
 [tools]
 # **required**. basename **must** be 'firecracker'.
 firecracker = "/opt/firecracker/firecracker"
@@ -172,10 +172,11 @@ jailer = "/opt/firecracker/jailer"
 # losetup  = "/usr/sbin/losetup"
 # nft      = "/usr/sbin/nft"
 
-# optional -- node-run tools. skopeo/mke2fs default to the name on PATH; omit
-# umoci to let hyper download and cache a pinned release.
+# optional -- node-run tools. skopeo/mke2fs/debugfs default to the name on
+# PATH; omit umoci to let hyper download and cache a pinned release.
 # skopeo     = "skopeo"
 # mke2fs     = "mke2fs"
+# debugfs    = "debugfs"
 # umoci      = "/usr/bin/umoci"
 # suidhelper = "/usr/local/libexec/hyper/hyper-suidhelper"
 

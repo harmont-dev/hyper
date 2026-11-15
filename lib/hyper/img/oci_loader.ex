@@ -9,7 +9,9 @@ defmodule Hyper.Img.OciLoader do
        architecture, into a local OCI layout.
     2. **flattens** it with `umoci unpack`, which applies OCI whiteouts/opaque dirs correctly,
        yielding a merged rootfs directory.
-    3. **builds** an ext4 image of that rootfs with `mke2fs -d`.
+    3. **builds** an ext4 image of that rootfs with `mke2fs -d`, then restores
+       the image's file owners and modes with `debugfs` (a rootless unpack
+       records them in an mtree rather than on disk).
     4. hands the ext4 file to `Hyper.Img.create/2`, which content-addresses it,
        publishes it into the media store, and records it as a base image --
        returning the `img_id`.
@@ -37,7 +39,7 @@ defmodule Hyper.Img.OciLoader do
   `ref`).
 
   Returns `{:error, {:missing_tools, names}}` when the node lacks a required
-  external tool (`skopeo`/`umoci`/`mke2fs`); the check runs up front so the load
+  external tool (`skopeo`/`umoci`/`mke2fs`/`debugfs`); the check runs up front so the load
   fails fast before the multi-minute pull.
   """
   @spec load(String.t(), keyword()) :: {:ok, Hyper.Img.id()} | {:error, term()}
