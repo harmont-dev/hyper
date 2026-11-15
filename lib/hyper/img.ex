@@ -34,7 +34,8 @@ defmodule Hyper.Img do
   failure -- so the caller hands off ownership.
 
   `opts[:label]` sets the human-readable `images.label` (defaults to the basename
-  of `path`).
+  of `path`). A label Postgres `text` cannot store (NUL, invalid UTF-8) is
+  `{:error, :bad_label}`, refused before anything is published.
 
   Idempotent: creating identical bytes again is a no-op that returns the same id.
   """
