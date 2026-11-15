@@ -151,6 +151,8 @@ impl AsRef<Path> for StrictComponentBuf {
     }
 }
 
+/// A path component the kernel can return from `readdir`: like [`StrictComponent`], but whitespace
+/// is allowed. Only for names read back from a directory, never for caller-supplied names.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
 #[repr(transparent)]

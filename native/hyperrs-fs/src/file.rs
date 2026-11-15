@@ -62,6 +62,8 @@ pub struct OwnerOnlyWritable;
 /// What's the type of the file?
 pub trait FileType {
     const OPEN_FLAGS: OFlag = OFlag::empty();
+    /// Whether an open may create the file. When false, `CREATE_NEW` is refused and `CREATE`
+    /// only opens an existing file.
     const CREATABLE: bool = false;
 
     fn check(stat: &FileStat) -> Result<(), ValidationError>;
@@ -275,7 +277,8 @@ where
     R: Ownership,
     O: Writability,
 {
-    /// Open `path` and verify it against the type traits.
+    /// Open `path` and verify it against the type traits. `flags` apply only after the checks
+    /// pass, so a refused open never blocks on a FIFO, truncates, or creates.
     pub fn open(
         path: &SafePath<IsAbsolute, StrictComponents>,
         flags: OpenFlags,

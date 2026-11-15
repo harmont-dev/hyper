@@ -63,7 +63,8 @@ struct Ancestor {
 pub type SafeDir = SafeFile<IsDirectory, Any, Any>;
 
 impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
-    /// Open `name` relative to this directory and verify it as a [`SafeFile<T, R2, O2>`].
+    /// Open `name` relative to this directory and verify it as a [`SafeFile<T, R2, O2>`]. As with
+    /// [`SafeFile::open`], `flags` apply only after the checks pass.
     pub fn openat<T: FileType, R2: Ownership, O2: Writability>(
         &self,
         name: impl AsRef<Path>,
@@ -196,6 +197,8 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     }
 
     /// Recursively, without following symlinks, remove child `name` and everything under it.
+    /// Holds a bounded number of fds whatever the depth. Fails with [`DirError::Moved`] if a
+    /// directory is moved out of the tree mid-walk.
     pub fn rmdirat_recursive(&self, name: &StrictComponent) -> Result<(), DirError> {
         // Walk with no fd held per level, so depth is bounded by memory rather than
         // RLIMIT_NOFILE; climbing through `..` is confined by matching the recorded parent inode.
