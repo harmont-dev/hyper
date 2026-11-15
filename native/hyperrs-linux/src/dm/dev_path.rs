@@ -10,7 +10,9 @@ use thiserror::Error as ThisError;
 // space, so `dm_split_args` splits a UTF-8 path through any char holding it.
 const KERNEL_SPACE: u8 = 0xa0;
 
-/// A table `<dev path>` operand: an absolute path to a block device.
+/// A table `<dev path>` operand: an absolute, strict path to a non-dm block
+/// device that holds no byte the kernel's table tokenizer splits on, so it
+/// renders as exactly one operand.
 #[derive(Debug, Clone, PartialEq, Eq, Deref, Into)]
 #[cfg_attr(
     feature = "serde",

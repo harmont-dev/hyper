@@ -112,7 +112,7 @@ pub enum ParseTableError {
     /// A `/dev/mapper/` operand that is not a valid dm name.
     #[error(transparent)]
     Device(#[from] ParseDmDeviceError),
-    /// A backing operand that is not an absolute, strict path.
+    /// A backing operand that is not a [`DevPath`].
     #[error("backing file path: {0}")]
     Path(#[from] DevPathError),
     /// A sector count, chunk size, block size, or low-water mark that is not a `u64`.
