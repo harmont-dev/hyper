@@ -38,8 +38,7 @@ The goals for Hyper are:
 - VMs should be banned from running some ports. Hyper achieves this through its
   firewall rules.
 - VMs have all inbound ports blocked, unless the operator (you) opens ports.
-- VMs have a default set of outbound ports blocked, unless explicitly permitted
-  by the operator.
+- VMs have no outbound ports blocked, unless the operator blocks them.
 - VMs can only send traffic from their own addresses. Forged IP addresses are
   dropped.
 

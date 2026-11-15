@@ -140,7 +140,7 @@ message CreateVmRequest {
   optional string boot_args = 4;
 
   // Optional. The VM's port policy. If unset, nothing is open inbound and
-  // outbound TCP 25 (SMTP) is blocked.
+  // nothing is blocked outbound.
   optional Firewall firewall = 5;
 }
 
