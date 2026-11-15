@@ -167,7 +167,7 @@ defmodule Hyper.Node.FireVMM.Meter do
   def handle_call(:flush_now, _from, state), do: {:reply, :ok, flush(state)}
 
   @impl true
-  def handle_cast(:rebase, state), do: {:noreply, %{state | acc: Accumulator.rebase(state.acc)}}
+  def handle_cast(:rebase, state), do: {:noreply, rebase_acc(state)}
 
   @impl true
   @decorate with_span("Hyper.Node.FireVMM.Meter.terminate", include: [])
@@ -204,9 +204,28 @@ defmodule Hyper.Node.FireVMM.Meter do
     end
   end
 
+  # A queued rebase means the leaf was torn down and its successor may already
+  # exist, so this reading may be the new leaf's: accrued as a counter reset,
+  # the rebase would then bill it again. Drop it instead, under-counting the old
+  # leaf's tail. Read before checking: the new leaf is only created after the
+  # rebase is enqueued, so a read that finds none queued saw the old leaf.
   @spec sample(%__MODULE__{}) :: %__MODULE__{}
   defp sample(%__MODULE__{opts: opts} = state) do
-    case CpuStat.read(opts.cgroup_dir) do
+    reading = CpuStat.read(opts.cgroup_dir)
+
+    receive do
+      {:"$gen_cast", :rebase} -> rebase_acc(state)
+    after
+      0 -> observe(state, reading)
+    end
+  end
+
+  @spec rebase_acc(%__MODULE__{}) :: %__MODULE__{}
+  defp rebase_acc(state), do: %{state | acc: Accumulator.rebase(state.acc)}
+
+  @spec observe(%__MODULE__{}, {:ok, CpuStat.t()} | {:error, term()}) :: %__MODULE__{}
+  defp observe(%__MODULE__{opts: opts} = state, reading) do
+    case reading do
       {:ok, %CpuStat{usage: usage}} ->
         %{state | acc: Accumulator.observe(state.acc, usage), samples_ok: state.samples_ok + 1}
 

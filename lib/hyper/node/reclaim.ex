@@ -44,8 +44,13 @@ defmodule Hyper.Node.Reclaim do
     dir = Hyper.Cfg.Dirs.socket_dir()
     # Ensure the dir exists: the relay bind needs it, and the sweep is a no-op
     # on a fresh node where it was never created.
-    File.mkdir_p!(dir)
-    File.chmod!(dir, 0o700)
+    with {:error, reason} <- File.mkdir_p(dir) do
+      Logger.warning("reclaim: could not create socket dir #{dir}: #{inspect(reason)}")
+    end
+
+    with {:error, reason} <- File.chmod(dir, 0o700) do
+      Logger.warning("reclaim: could not make socket dir #{dir} private: #{inspect(reason)}")
+    end
 
     case File.ls(dir) do
       {:ok, names} ->
