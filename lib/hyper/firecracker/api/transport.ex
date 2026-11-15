@@ -2,8 +2,10 @@ defmodule Hyper.Firecracker.Api.Transport do
   @moduledoc """
   `oapi_generator` client backend for the Firecracker API. Each generated
   operation calls `request/1` with a plain map describing the call; this issues
-  it over the target daemon's HTTP-over-Unix-socket API via `Req` and decodes the
-  typed response.
+  it over the target daemon's HTTP-over-Unix-socket API on a raw `:gen_tcp`
+  socket and decodes the typed response. The daemon is untrusted: the status
+  line, headers and body are size-capped, and the whole call shares one 30 s
+  deadline.
 
   The per-VM socket path arrives as `opts[:socket_path]` (injected by
   `Hyper.Node.FireVMM.Client`). Request bodies are generated structs encoded by
@@ -12,8 +14,11 @@ defmodule Hyper.Firecracker.Api.Transport do
   own generated `decode/1` (also from `Hyper.Firecracker.Api.Codec`).
 
   Returns: `:ok` (204 / empty), `{:ok, decoded}` (2xx with a typed body),
-  `{:error, {:api, status, fault_message}}` (non-2xx), or
-  `{:error, {:transport, reason}}` (socket/connection failure).
+  `{:error, {:api, status, fault_message}}` (non-2xx),
+  `{:error, {:unexpected_body, status}}` (a typed reply that is not a JSON
+  object), `{:error, {:body_too_large, max_bytes}}`, or
+  `{:error, {:transport, reason}}` (socket failure, deadline, or an oversized
+  head).
   """
 
   use OpenTelemetryDecorator
