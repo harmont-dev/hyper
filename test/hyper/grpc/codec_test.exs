@@ -4,6 +4,8 @@ defmodule Hyper.Grpc.CodecTest do
   alias Hyper.Grpc.Codec
   alias Hyper.Grpc.V1.CreateVmRequest
   alias Hyper.Grpc.V1.CreateVmResponse
+  alias Hyper.Grpc.V1.ExecVmRequest
+  alias Hyper.Grpc.V1.ExecVmResponse
   alias Hyper.Grpc.V1.GetVmResponse
   alias Hyper.Grpc.V1.GetVmUsageResponse
   alias Hyper.Grpc.V1.ListVmsResponse
@@ -237,6 +239,24 @@ defmodule Hyper.Grpc.CodecTest do
                Codec.from_grpc(%LoadImageRequest{image_ref: "alpine:3.19", label: "prod"})
     end
 
+    test "an exec request needs an argv" do
+      assert {:error, :missing_argv} = Codec.from_grpc(%ExecVmRequest{vm_id: "v", argv: []})
+    end
+
+    test "an exec request passes its timeout only when set" do
+      assert {:ok, {["/bin/true"], [env: %{"A" => "1"}, cwd: "/tmp", timeout: 5]}} =
+               Codec.from_grpc(%ExecVmRequest{
+                 vm_id: "v",
+                 argv: ["/bin/true"],
+                 env: %{"A" => "1"},
+                 cwd: "/tmp",
+                 timeout_ms: 5
+               })
+
+      assert {:ok, {["/bin/true"], [env: %{}, cwd: nil]}} =
+               Codec.from_grpc(%ExecVmRequest{vm_id: "v", argv: ["/bin/true"]})
+    end
+
     test "a missing image_ref (nil or empty) is refused" do
       assert {:error, :missing_image_ref} = Codec.from_grpc(%LoadImageRequest{image_ref: nil})
       assert {:error, :missing_image_ref} = Codec.from_grpc(%LoadImageRequest{image_ref: ""})
@@ -246,9 +266,16 @@ defmodule Hyper.Grpc.CodecTest do
   # `to_grpc/1` -- the encode boundary. The contract: each domain result maps to
   # the response message carrying exactly the fields a client reads.
   describe "to_grpc/1 response encoding" do
-    test "a created result carries the vm_id and node string" do
-      assert %CreateVmResponse{vm_id: "vabc", node: "hyper@host"} =
-               Codec.to_grpc({:created, "vabc", :hyper@host})
+    test "a created result carries the vm_id, node string and IPv6 address" do
+      assert %CreateVmResponse{vm_id: "vabc", node: "hyper@host", ipv6: "2001:db8::1:0:0:2a"} =
+               Codec.to_grpc(
+                 {:created, "vabc", :hyper@host, {0x2001, 0xDB8, 0, 0, 1, 0, 0, 0x2A}}
+               )
+    end
+
+    test "an executed result carries the exit code and both streams" do
+      assert %ExecVmResponse{exit_code: 3, stdout: "out", stderr: "err"} =
+               Codec.to_grpc({:executed, %{exit_code: 3, stdout: "out", stderr: "err"}})
     end
 
     test "a located result carries the vm_id and node string" do

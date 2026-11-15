@@ -21,7 +21,7 @@ service Hyper {
   // The image is scheduled onto the most available node in the cluster
   // (preferring nodes that already hold the image's layers); a per-VM writable
   // root filesystem is built over it and the guest is booted. Returns the
-  // minted `vm_id` and the node the guest booted on.
+  // minted `vm_id`, the node the guest booted on, and the guest's IPv6 address.
   //
   // Errors:
   //   INVALID_ARGUMENT  -- `img_id` is empty, or an enum field holds an
@@ -93,6 +93,20 @@ service Hyper {
   //   FAILED_PRECONDITION -- the node lacks the required tools (skopeo/umoci/mke2fs).
   //   INTERNAL            -- the pull, unpack, build, publish, or DB record failed.
   rpc LoadImage(LoadImageRequest) returns (LoadImageResponse);
+
+  // Run a command in a running microVM through its guest agent, and return its
+  // exit code and captured output once it exits. `argv` runs directly, not
+  // through a shell, so its head must be an absolute path: the guest's init has
+  // a near-empty environment. A command that daemonizes returns once the
+  // daemon has closed the standard streams it inherited.
+  //
+  // Errors:
+  //   INVALID_ARGUMENT  -- `argv` is empty.
+  //   NOT_FOUND         -- no VM with this `vm_id` is running in the cluster.
+  //   UNAVAILABLE       -- the guest agent is not answering yet (a VM that has
+  //                       just booted), or the VM's host node is unreachable.
+  //   DEADLINE_EXCEEDED -- the command did not exit within `timeout_ms`.
+  rpc ExecVm(ExecVmRequest) returns (ExecVmResponse);
 }
 
 // A fixed (vCPU, memory, disk) size, like a cloud instance class. Each step up
@@ -151,6 +165,10 @@ message CreateVmResponse {
 
   // The cluster node (Erlang node name) the guest booted on.
   string node = 2;
+
+  // The guest's globally routable IPv6 address, e.g. "2001:db8::1:0:0:0":
+  // where the ports its firewall opens accept connections.
+  string ipv6 = 3;
 }
 
 // Request to fork a running VM.
@@ -293,4 +311,35 @@ message LoadImageRequest {
 message LoadImageResponse {
   // The content-addressed image id; pass it to CreateVm.
   string img_id = 1;
+}
+
+// Request to run a command in a VM.
+message ExecVmRequest {
+  // The id of the VM to run the command in.
+  string vm_id = 1;
+
+  // Required. The program, by absolute path, then its arguments.
+  repeated string argv = 2;
+
+  // Optional. The command's environment. When non-empty it replaces the
+  // guest's (near-empty) default environment entirely, `PATH` included.
+  map<string, string> env = 3;
+
+  // Optional. The command's working directory; the agent's own if unset.
+  optional string cwd = 4;
+
+  // Optional. How long the command may run, in milliseconds; 30000 if unset.
+  optional uint32 timeout_ms = 5;
+}
+
+// Result of a command that ran to completion.
+message ExecVmResponse {
+  // The command's exit code; zero means success.
+  sint32 exit_code = 1;
+
+  // Everything the command wrote to standard output.
+  bytes stdout = 2;
+
+  // Everything the command wrote to standard error.
+  bytes stderr = 3;
 }

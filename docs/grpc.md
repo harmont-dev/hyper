@@ -94,8 +94,27 @@ created = await client.CreateVm(
         # boot_args is optional; omit it for the default kernel cmdline.
     )
 )
-print(created.vm_id, created.node)
+print(created.vm_id, created.node, created.ipv6)
 ```
+
+`ipv6` is the guest's globally routable address. Inbound connections reach it
+only on the ports `firewall.inbound` opens, so pass a `firewall` to accept any.
+
+### Running Commands
+
+`ExecVm` runs a command in the guest through its agent and returns once the
+command exits. `argv` runs without a shell, so name the program by absolute
+path; a non-empty `env` replaces the guest's environment, `PATH` included.
+
+```python
+ran = await client.ExecVm(
+    hyper_pb2.ExecVmRequest(vm_id=created.vm_id, argv=["/bin/uname", "-a"])
+)
+print(ran.exit_code, ran.stdout.decode())
+```
+
+Right after `CreateVm` the agent may not answer yet; `ExecVm` then fails with
+`UNAVAILABLE`, so retry it.
 
 ### Listing VMs
 

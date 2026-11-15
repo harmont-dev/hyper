@@ -144,6 +144,39 @@ defmodule Hyper do
   @spec sum_time(Unit.Time.t(), Unit.Time.t()) :: Unit.Time.t()
   defp sum_time(a, b), do: Unit.Time.ns(Unit.Time.as_ns(a) + Unit.Time.as_ns(b))
 
+  @doc """
+  The globally routable IPv6 address of `vm` -- a pid (from `create_vm/1`) or a
+  `Hyper.Vm.Id.t()` binary -- where the ports its firewall opens accept
+  connections.
+
+  Resolved on the VM's owning node, which leased the address: a pid carries its
+  node, a vm_id goes through the routing registry. `{:error, :not_found}` if the
+  VM is not running, `{:error, :node_unreachable}` if its node cannot be reached.
+  """
+  @spec address(Hyper.Vm.t() | Hyper.Vm.Id.t()) ::
+          {:ok, :inet.ip6_address()} | {:error, :not_found | :node_unreachable}
+  def address(vm) when is_pid(vm) do
+    case id(vm) do
+      nil -> {:error, :not_found}
+      vm_id -> address_on(node(vm), vm_id)
+    end
+  end
+
+  def address(vm_id) when is_binary(vm_id) do
+    case whereis(vm_id) do
+      nil -> {:error, :not_found}
+      node -> address_on(node, vm_id)
+    end
+  end
+
+  @spec address_on(node(), Hyper.Vm.Id.t()) ::
+          {:ok, :inet.ip6_address()} | {:error, :not_found | :node_unreachable}
+  defp address_on(node, vm_id) do
+    :erpc.call(node, Hyper.Node, :address, [vm_id])
+  catch
+    :error, {:erpc, _} -> {:error, :node_unreachable}
+  end
+
   @doc "Cluster-wide: which node currently runs `vm_id`? `nil` if unknown."
   @spec whereis(Hyper.Vm.Id.t()) :: node() | nil
   def whereis(vm_id), do: Hyper.Cluster.Routing.whereis(vm_id)

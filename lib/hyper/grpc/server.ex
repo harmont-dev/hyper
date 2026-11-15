@@ -14,6 +14,8 @@ defmodule Hyper.Grpc.Server do
   alias Hyper.Grpc.V1.{
     CreateVmRequest,
     CreateVmResponse,
+    ExecVmRequest,
+    ExecVmResponse,
     ForkVmRequest,
     ForkVmResponse,
     GetVmRequest,
@@ -45,8 +47,9 @@ defmodule Hyper.Grpc.Server do
   def create_vm(%CreateVmRequest{} = req, _stream) do
     with {:ok, spec} <- Codec.from_grpc(req),
          {:ok, pid} <- Hyper.create_vm(spec),
-         vm_id when is_binary(vm_id) <- Hyper.id(pid) do
-      Codec.to_grpc({:created, vm_id, node(pid)})
+         vm_id when is_binary(vm_id) <- Hyper.id(pid),
+         {:ok, ipv6} <- Hyper.address(pid) do
+      Codec.to_grpc({:created, vm_id, node(pid), ipv6})
     else
       # Hyper.id/1 could not resolve the id: the VM was placed but its host
       # became unreachable. Surface that rather than returning an empty vm_id.
@@ -86,6 +89,21 @@ defmodule Hyper.Grpc.Server do
          :ok <- Hyper.set_vm_firewall(vm_id, firewall) do
       Codec.to_grpc(:firewall_set)
     else
+      {:error, reason} -> raise Codec.to_grpc({:error, reason})
+    end
+  end
+
+  @spec exec_vm(ExecVmRequest.t(), GRPC.Server.Stream.t()) :: ExecVmResponse.t()
+  @decorate with_span("Hyper.Grpc.Server.exec_vm", include: [:vm_id])
+  def exec_vm(%ExecVmRequest{vm_id: vm_id} = req, _stream) do
+    with {:ok, {argv, opts}} <- Codec.from_grpc(req),
+         {:ok, result} <- Hyper.exec(vm_id, argv, opts) do
+      Codec.to_grpc({:executed, result})
+    else
+      # The relay's vsock stream can connect and drop while the agent is still starting, which
+      # surfaces as the agent's own RPCError rather than :agent_unavailable (see
+      # Hyper.E2E.await_exec/3); a command that runs reports its failure in its exit code.
+      {:error, %GRPC.RPCError{}} -> raise Codec.to_grpc({:error, :agent_unavailable})
       {:error, reason} -> raise Codec.to_grpc({:error, reason})
     end
   end
