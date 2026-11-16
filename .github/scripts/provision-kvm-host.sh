@@ -139,7 +139,10 @@ mkdir -p /srv/hyper/layers
 
 # firecracker.install writes into /opt/firecracker as the invoking user, then
 # the helper requires both binaries root-owned and not group/world-writable,
-# and the directory too: the jailer is handed firecracker by path.
+# and every parent directory too: the jailer is handed firecracker by path.
+# The hosted runner image leaves /opt itself writable beyond root.
+sudo chown root:root /opt
+sudo chmod go-w /opt
 sudo mkdir -p /opt/firecracker
 sudo chown "$(id -u)" /opt/firecracker
 mix firecracker.install
