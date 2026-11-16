@@ -222,11 +222,14 @@ mod tests {
     #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_stage_op(json!({"op": "vm_stage", "id": "v1", "kernel": "/srv/hyper/vmlinux",
         "device": "/dev/mapper/hyper-v1", "uid": 900_001, "gid": 900_001}))]
+    #[case::fork_delta_caller_named_meta(json!({"op": "thin_fork_delta", "pool": "hyper-pool",
+        "meta": "/dev/loop3", "parent": "hyper-v1", "scratch_id": 9,
+        "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
     #[case::fork_delta_caller_named_source(json!({"op": "thin_fork_delta", "pool": "hyper-pool",
-        "meta": "/dev/loop3", "parent": "hyper-v1", "scratch_id": 9, "src": "/dev/mapper/hyper-a",
+        "parent": "hyper-v1", "scratch_id": 9, "src": "/dev/mapper/hyper-a",
         "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
     #[case::fork_delta_scratch_id_past_24_bits(json!({"op": "thin_fork_delta", "pool": "hyper-pool",
-        "meta": "/dev/loop3", "parent": "hyper-v1", "scratch_id": 16_777_216,
+        "parent": "hyper-v1", "scratch_id": 16_777_216,
         "origin": "/dev/mapper/hyper-img", "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
     #[case::retired_thin_copy_op(json!({"op": "thin_copy", "pool": "hyper-pool",
         "meta": "/dev/loop3", "src": "/dev/mapper/hyper-a", "origin": "/dev/mapper/hyper-img",

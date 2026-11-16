@@ -27,8 +27,7 @@ defmodule Hyper.Node.Img.ThinPool do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:meta_loop]
-    defstruct [:meta_loop, next: 0, freed: []]
+    defstruct next: 0, freed: []
   end
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -47,11 +46,11 @@ defmodule Hyper.Node.Img.ThinPool do
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.fork_delta", include: [:parent, :cow])
   def fork_delta(parent, origin, cow) do
-    {scratch_id, meta_loop} = GenServer.call(__MODULE__, :reserve_scratch)
+    scratch_id = GenServer.call(__MODULE__, :reserve_scratch)
 
     result =
       serialized_on(parent, fn ->
-        SuidHelper.ForkDelta.run(@pool_name, meta_loop, parent, scratch_id, origin, cow)
+        SuidHelper.ForkDelta.run(@pool_name, parent, scratch_id, origin, cow)
       end)
 
     GenServer.call(__MODULE__, {:release_scratch, scratch_id, result})
@@ -77,9 +76,9 @@ defmodule Hyper.Node.Img.ThinPool do
     with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
          {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
          {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
-         {:ok, _pool_dev, meta_loop} <-
+         {:ok, _pool_dev, _meta_loop} <-
            SuidHelper.Thin.create_pool(@pool_name, meta, data, ImgConfig.thin_block_sectors(), 0) do
-      {:ok, %State{meta_loop: meta_loop}}
+      {:ok, %State{}}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -98,7 +97,7 @@ defmodule Hyper.Node.Img.ThinPool do
   @impl true
   def handle_call(:reserve_scratch, _from, state) do
     {id, state} = id_alloc(state)
-    {:reply, {id, state.meta_loop}, state}
+    {:reply, id, state}
   end
 
   @impl true

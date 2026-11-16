@@ -33,10 +33,7 @@ defmodule Hyper.Node.Img.ThinPoolTest do
       SuidHelperStub.install!(tmp, helper)
 
       {:reply, _, state} =
-        ThinPool.handle_call(request, {self(), make_ref()}, %ThinPool.State{
-          meta_loop: "/dev/loop3",
-          next: 6
-        })
+        ThinPool.handle_call(request, {self(), make_ref()}, %ThinPool.State{next: 6})
 
       assert state.freed == freed, label
     end

@@ -3,9 +3,8 @@ use crate::cli::MapperPath;
 use crate::cli::Op;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, NameError, TableError};
-use hyperrs_fs::dev::DeviceNumber;
-use hyperrs_fs::file::{self, Any, IsBlockDevice, OpenFlags, SafeFile};
-use hyperrs_fs::path;
+use hyperrs_fs::dev::OpenDeviceError;
+use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
 use hyperrs_linux::dm::thin_dump::{
     self as dump, DumpError, MappingsError, MetadataDump, ParseError, ThinMappings,
 };
@@ -13,7 +12,6 @@ use hyperrs_linux::dm::{
     self, DevPath, DmTable, OpenThinError, Origin, Persistence, RemoveMode, RunError,
     SnapshotError, SnapshotTable, ThinId, ThinMessage, ThinPoolError,
 };
-use hyperrs_linux::loopdev::LoopDevNum;
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBinError;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -34,7 +32,6 @@ const CHUNK_BYTES: usize = 1 << 20;
 #[serde(deny_unknown_fields)]
 pub struct ThinForkDelta {
     pool: HyperDmName,
-    meta: LoopDevNum,
     parent: HyperDmName,
     scratch_id: ThinId,
     #[serde_as(as = "MapperPath")]
@@ -45,15 +42,8 @@ pub struct ThinForkDelta {
 
 #[derive(Debug, ThisError)]
 pub enum ForkDeltaError {
-    #[error("metadata device path: {0}")]
-    Path(#[from] path::ValidationError),
-    #[error("opening metadata device: {0}")]
-    Open(#[from] file::ValidationError),
-    #[error("{meta} is not the pool's metadata device {pool}")]
-    NotPoolMetadata {
-        meta: DeviceNumber,
-        pool: DeviceNumber,
-    },
+    #[error("opening the pool's metadata device: {0}")]
+    Metadata(#[from] OpenDeviceError),
     #[error("locking metadata device: {0}")]
     Lock(#[source] io::Error),
     #[error(transparent)]
@@ -106,7 +96,6 @@ impl Op for ThinForkDelta {
         let config = Config::get();
         let dmsetup = dm::Dmsetup::new(config.dmsetup()?);
         let thin_dump = dump::ThinDump::new(config.thin_dump()?);
-        let meta = self.meta.path()?;
         let origin = Origin::Device((*self.origin).clone());
         let target = HyperDmTable::new(DmTable::Snapshot(SnapshotTable {
             sectors: 0,
@@ -121,14 +110,10 @@ impl Op for ThinForkDelta {
             let _root = token.elevate()?;
             let sectors = self.origin.sectors().map_err(DmError::from)?;
             let pool = dmsetup.thin_pool(&self.pool)?;
-            let meta = SafeFile::<IsBlockDevice, Any, Any>::open(&meta, OpenFlags::RDONLY)?;
-            let (got, want) = (meta.rdev()?, pool.metadata());
-            if got != want {
-                return Err(ForkDeltaError::NotPoolMetadata {
-                    meta: got,
-                    pool: want,
-                });
-            }
+            let meta = SafeFile::<IsBlockDevice, Any, Any>::open_block(
+                pool.metadata(),
+                OpenFlags::RDONLY,
+            )?;
             let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
                 Err(e @ SnapshotError::Resume { created: true, .. }) => {

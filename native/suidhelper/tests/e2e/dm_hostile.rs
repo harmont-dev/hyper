@@ -2,8 +2,8 @@
 //! real dm-thin pool. The caller is in the helper's group but may name any
 //! device, id or file it likes. Laws:
 //!   * `thin_fork_delta` reads mappings only from the pool's own metadata
-//!     device: a `meta` that is not that pool's metadata is refused, never
-//!     dumped and copied from;
+//!     device, which it derives from the pool's live table: another pool holding
+//!     the same thin id never changes what the fork copies;
 //!   * a `scratch_id` already provisioned in the pool is refused and the
 //!     volume holding it keeps its id and its bytes;
 //!   * a device the call did not create (a pre-existing `hyper-scratch-N` or
@@ -93,7 +93,7 @@ fn live_table(name: &str) -> Option<String> {
 struct Pool {
     name: String,
     pool: DmDevice,
-    meta: LoopDevice,
+    _meta: LoopDevice,
     _data: LoopDevice,
 }
 
@@ -115,7 +115,7 @@ impl Pool {
         Some(Self {
             name: name.to_string(),
             pool,
-            meta,
+            _meta: meta,
             _data: data,
         })
     }
@@ -180,7 +180,7 @@ impl Live {
         )
     }
 
-    fn fork(&self, parent: &DmDevice, scratch_id: u32, meta: &str) -> (bool, String, PathBuf) {
+    fn fork(&self, parent: &DmDevice, scratch_id: u32) -> (bool, String, PathBuf) {
         let cow = self.base.join(format!("cow-{scratch_id}.img"));
         sparse(&cow, 8 << 20);
         let out = run(
@@ -188,7 +188,6 @@ impl Live {
             json!({
                 "op": "thin_fork_delta",
                 "pool": self.a.name,
-                "meta": meta,
                 "parent": parent.path().trim_start_matches("/dev/mapper/"),
                 "scratch_id": scratch_id,
                 "origin": self.origin.path(),
@@ -234,7 +233,7 @@ macro_rules! live {
 }
 
 #[test]
-fn fork_delta_refuses_a_meta_device_that_is_not_the_pools_metadata_as_root() {
+fn fork_delta_copies_from_its_own_pool_beside_another_holding_the_same_id_as_root() {
     let live = live!("meta");
     const SCRATCH: u32 = 700;
     let parent = live.parent(1);
@@ -245,26 +244,13 @@ fn fork_delta_refuses_a_meta_device_that_is_not_the_pools_metadata_as_root() {
     let decoy = b.thin(&format!("{}-decoy", live.tag), SCRATCH, None);
     write_block(&decoy.path(), 5, 0x33);
     drop(decoy);
-    assert!(b.pool.message("reserve_metadata_snap"));
 
-    let (ok, stderr, cow) = live.fork(&parent, SCRATCH, b.meta.path());
-    let _ = b.pool.message("release_metadata_snap");
-    let detail = if ok {
-        format!(
-            "the fork succeeded and its replay {} the parent",
-            if live.replay(&cow) == want {
-                "matches"
-            } else {
-                "DIFFERS FROM"
-            }
-        )
-    } else {
-        stderr
-    };
+    let (ok, stderr, cow) = live.fork(&parent, SCRATCH);
+
+    assert!(ok, "{stderr}");
     assert!(
-        !ok,
-        "meta {} belongs to another pool, yet: {detail}",
-        b.meta.path()
+        live.replay(&cow) == want,
+        "the fork's replay differs from its parent"
     );
 }
 
@@ -281,7 +267,7 @@ fn fork_delta_with_a_scratch_id_in_use_leaves_that_volume_untouched_as_root(#[ca
     let before = read_all(&victim.path());
     let table = live_table(victim.path().trim_start_matches("/dev/mapper/"));
 
-    let (ok, stderr, _) = live.fork(&parent, scratch, live.a.meta.path());
+    let (ok, stderr, _) = live.fork(&parent, scratch);
 
     assert!(!ok, "a fork into a provisioned id {scratch} succeeded");
     assert!(
@@ -323,7 +309,7 @@ fn fork_delta_never_removes_a_device_it_did_not_create_as_root(
         .expect("pre-existing device");
     let table = live_table(&squatter_name);
 
-    let (ok, stderr, _) = live.fork(&parent, scratch, live.a.meta.path());
+    let (ok, stderr, _) = live.fork(&parent, scratch);
 
     assert!(!ok, "fork succeeded despite {squatter_name} existing");
     assert_eq!(
