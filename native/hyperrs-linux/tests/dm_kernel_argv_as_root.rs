@@ -7,6 +7,8 @@
 #![feature(adt_const_params, unsized_const_params)]
 #![allow(incomplete_features)]
 
+use hyperrs_fs::path::SafePath;
+
 use assert_fs::TempDir;
 use hyperrs_fs::file::{Any, IsRegularFile, OpenFlags, SafeFile};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
@@ -80,7 +82,7 @@ fn a_linear_table_is_backed_by_the_path_it_names_as_root(
     let origin: DevPath = PathBuf::from(&named)
         .try_into()
         .expect("the type accepts it");
-    let dm = Dmsetup::new(RootSafeBin::open(Path::new(DMSETUP)).unwrap());
+    let dm = Dmsetup::new(RootSafeBin::open(SafePath::from_static::<DMSETUP>()).unwrap());
     let name: DmName = format!("hyperrs-argv-{}", std::process::id())
         .parse()
         .unwrap();

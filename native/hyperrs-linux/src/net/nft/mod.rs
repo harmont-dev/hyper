@@ -195,13 +195,13 @@ mod tests {
     };
     use crate::net::netns::NetNs;
     use crate::net::{IpNet, Ipv4Net, Ipv6Net};
+    use hyperrs_fs::path::SafePath;
     use hyperrs_process::binary::RootSafeBin;
     use hyperrs_process::privilege::Unprivileged;
     use nix::unistd::Uid;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
     use serde_json::{json, Value};
-    use std::path::Path;
     use std::process::Command;
 
     const NFT: &str = "/usr/sbin/nft";
@@ -235,7 +235,7 @@ mod tests {
     }
 
     fn nft() -> Nft {
-        Nft::new(RootSafeBin::open(Path::new(NFT)).unwrap())
+        Nft::new(RootSafeBin::open(SafePath::from_static::<NFT>()).unwrap())
     }
 
     fn v4(net: &str) -> Ipv4Net {

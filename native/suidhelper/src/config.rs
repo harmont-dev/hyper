@@ -23,7 +23,7 @@ use serde::{Deserialize, Deserializer};
 use serde_with::{serde_as, DisplayFromStr};
 use smart_default::SmartDefault;
 use std::os::unix::io::OwnedFd;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use thiserror::Error;
 
@@ -72,8 +72,9 @@ fn config_path() -> PathBuf {
 /// Hyper's /etc/hyper/config.toml file format.
 #[derive(Debug, Clone, Deserialize, SmartDefault)]
 pub struct Config {
-    #[default(default_work_dir())]
-    #[serde(deserialize_with = "safe_path")]
+    // Must match the Elixir node's `@dev_work_dir`, which it uses when the same config file is
+    // absent, so both sides agree (see `Hyper.Node.check_helper_base`).
+    #[default(SafePath::from_static::<"/srv/hyper">().to_owned())]
     work_dir: SafePathBuf<IsAbsolute, StrictComponents>,
     #[serde(default)]
     tools: Tools,
@@ -180,14 +181,6 @@ fn uid_gid_range<'de, D: Deserializer<'de>>(deserializer: D) -> Result<UidGidRan
     UidGidRange::try_from(<[u32; 2]>::deserialize(deserializer)?).map_err(serde::de::Error::custom)
 }
 
-fn safe_path<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<SafePathBuf<IsAbsolute, StrictComponents>, D::Error> {
-    PathBuf::deserialize(deserializer)?
-        .try_into()
-        .map_err(serde::de::Error::custom)
-}
-
 fn strict_component<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<StrictComponentBuf, D::Error> {
@@ -208,25 +201,14 @@ fn strict_component<'de, D: Deserializer<'de>>(
 #[derive(Debug, Clone, Deserialize, SmartDefault)]
 #[serde(default)]
 pub struct Tools {
-    #[default("/usr/sbin/dmsetup".into())]
-    dmsetup: PathBuf,
-    #[default("/usr/sbin/thin_dump".into())]
-    thin_dump: PathBuf,
-    #[default("/usr/sbin/nft".into())]
-    nft: PathBuf,
-    firecracker: Option<PathBuf>,
-    jailer: Option<PathBuf>,
-}
-
-fn required<const NAME: &'static str>(path: &Option<PathBuf>) -> Result<&Path, BinError> {
-    path.as_deref().ok_or(BinError::Unconfigured(NAME))
-}
-
-// The default data root. Must match the Elixir node's `@dev_work_dir`, which it
-// uses when the same config file is absent, so both sides agree (see
-// `Hyper.Node.check_helper_base`).
-fn default_work_dir() -> SafePathBuf<IsAbsolute, StrictComponents> {
-    SafePath::from_static::<"/srv/hyper">().to_owned()
+    #[default(SafePath::from_static::<"/usr/sbin/dmsetup">().to_owned())]
+    dmsetup: SafePathBuf<IsAbsolute, StrictComponents>,
+    #[default(SafePath::from_static::<"/usr/sbin/thin_dump">().to_owned())]
+    thin_dump: SafePathBuf<IsAbsolute, StrictComponents>,
+    #[default(SafePath::from_static::<"/usr/sbin/nft">().to_owned())]
+    nft: SafePathBuf<IsAbsolute, StrictComponents>,
+    firecracker: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
+    jailer: Option<SafePathBuf<IsAbsolute, StrictComponents>>,
 }
 
 const JAILS: &StrictComponent = StrictComponent::from_static("jails");
@@ -298,18 +280,20 @@ impl Config {
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] firecracker` before any VM can be launched.
     pub fn firecracker(&self) -> Result<RootSafeBinPathBuf<"firecracker">, BinError> {
-        Ok(RootSafeBinPathBuf::open(required::<"firecracker">(
-            &self.tools.firecracker,
-        )?)?)
+        let bin = self.tools.firecracker.as_deref();
+        Ok(RootSafeBinPathBuf::open(
+            bin.ok_or(BinError::Unconfigured("firecracker"))?,
+        )?)
     }
 
     /// The Firecracker jailer binary, validated as root-owned and correctly named.
     /// Errors [`BinError::Unconfigured`] when absent from config — an operator
     /// must set `[tools] jailer` before any VM can be launched.
     pub fn jailer(&self) -> Result<RootSafeBin<"jailer">, BinError> {
-        Ok(RootSafeBin::open(required::<"jailer">(
-            &self.tools.jailer,
-        )?)?)
+        let bin = self.tools.jailer.as_deref();
+        Ok(RootSafeBin::open(
+            bin.ok_or(BinError::Unconfigured("jailer"))?,
+        )?)
     }
 
     /// The jailer `--parent-cgroup` value, from `[jails] cgroup`. Defaults to

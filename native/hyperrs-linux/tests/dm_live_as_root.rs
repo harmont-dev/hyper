@@ -17,6 +17,8 @@
 #![feature(adt_const_params, unsized_const_params)]
 #![allow(incomplete_features)]
 
+use hyperrs_fs::path::SafePath;
+
 use assert_fs::TempDir;
 use hyperrs_fs::dev::DeviceNumber;
 use hyperrs_fs::file::{Any, IsBlockDevice, IsRegularFile, OpenFlags, SafeFile};
@@ -100,7 +102,7 @@ impl FakeDmsetup {
             ),
         );
         Self {
-            dmsetup: Dmsetup::new(RootSafeBin::open(&bin).unwrap()),
+            dmsetup: Dmsetup::new(RootSafeBin::open(bin.as_path().try_into().unwrap()).unwrap()),
             _dir: dir,
             base,
         }
@@ -346,7 +348,9 @@ impl Drop for DmGuard {
 }
 
 fn live_dmsetup() -> Option<Dmsetup> {
-    RootSafeBin::open(Path::new(DMSETUP)).ok().map(Dmsetup::new)
+    RootSafeBin::open(SafePath::from_static::<DMSETUP>())
+        .ok()
+        .map(Dmsetup::new)
 }
 
 #[test]
@@ -419,7 +423,7 @@ impl FakeThinDump {
             ),
         );
         Self {
-            dump: ThinDump::new(RootSafeBin::open(&bin).unwrap()),
+            dump: ThinDump::new(RootSafeBin::open(bin.as_path().try_into().unwrap()).unwrap()),
             _dir: dir,
             base,
         }
@@ -509,7 +513,7 @@ fn a_failing_thin_dump_is_an_error_not_an_empty_dump_as_root() {
         "thin_dump",
         "printf '<superblock data_block_size=\"128\"></superblock>'\nprintf ' no metadata snap \\n' >&2\nexit 1\n",
     );
-    let dump = ThinDump::new(RootSafeBin::open(&bin).unwrap());
+    let dump = ThinDump::new(RootSafeBin::open(bin.as_path().try_into().unwrap()).unwrap());
     let (_lo, meta) = metadata_device(&base, b"0123456789abcdef");
 
     let err = dump
@@ -593,7 +597,7 @@ fn read_block(dev: &Path, block: u64) -> Vec<u8> {
 
 fn mapped_blocks(pool: &LivePool, root: &Root<'_>, id: ThinId) -> BTreeSet<u64> {
     let thin_pool = pool.dm.thin_pool(root, &pool.pool).unwrap();
-    let dump = ThinDump::new(RootSafeBin::open(Path::new(THIN_DUMP)).unwrap());
+    let dump = ThinDump::new(RootSafeBin::open(SafePath::from_static::<THIN_DUMP>()).unwrap());
     thin_pool.reserve_metadata_snap().unwrap();
     let dumped = dump.dump(root, &pool.meta_dev, id);
     thin_pool.release_metadata_snap().unwrap();
@@ -614,7 +618,7 @@ fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
     require_root!();
     let mut token = Unprivileged::take().unwrap();
     let root = token.elevate().unwrap();
-    if RootSafeBin::<"thin_dump">::open(Path::new(THIN_DUMP)).is_err() {
+    if RootSafeBin::<"thin_dump">::open(SafePath::from_static::<THIN_DUMP>()).is_err() {
         eprintln!("SKIP: no root-owned {THIN_DUMP}");
         return;
     }
@@ -685,7 +689,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
     require_root!();
     let mut token = Unprivileged::take().unwrap();
     let root = token.elevate().unwrap();
-    if RootSafeBin::<"thin_dump">::open(Path::new(THIN_DUMP)).is_err() {
+    if RootSafeBin::<"thin_dump">::open(SafePath::from_static::<THIN_DUMP>()).is_err() {
         eprintln!("SKIP: no root-owned {THIN_DUMP}");
         return;
     }

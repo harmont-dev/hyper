@@ -428,6 +428,8 @@ config :hyper, Hyper.Cfg.Cluster,
   - Must be owned by `root`.
   - Must be only writable by `root`.
   - Must not be a symlink.
+  - For `firecracker` only: every directory above it must also be owned by
+    `root` and writable only by `root`, since the jailer is handed it by path.
 
 #### Range
 

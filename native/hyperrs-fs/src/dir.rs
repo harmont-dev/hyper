@@ -6,7 +6,10 @@ use super::file::{
     Any, DeviceType, FileType, IsDirectory, OpenFlags, Owner, Ownership, SafeFile, ValidationError,
     Writability,
 };
-use super::path::{ComponentWithWhitespace, ComponentWithWhitespaceBuf, StrictComponent};
+use super::path::{
+    ComponentWithWhitespace, ComponentWithWhitespaceBuf, IsAbsolute, SafePath, StrictComponent,
+    StrictComponents,
+};
 use nix::dir::{Dir, Type};
 use nix::errno::Errno;
 use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
@@ -17,7 +20,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
@@ -35,6 +38,15 @@ pub enum DirError {
         expected: DeviceNumber,
         found: DeviceNumber,
     },
+}
+
+/// A directory above a path failed its [`SafeFile`] checks.
+#[derive(Debug, ThisError)]
+#[error("parent {dir}: {source}")]
+pub struct ParentError {
+    pub dir: PathBuf,
+    #[source]
+    pub source: ValidationError,
 }
 
 impl DirError {
@@ -63,6 +75,29 @@ struct Ancestor {
 pub type SafeDir = SafeFile<IsDirectory, Any, Any>;
 
 impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
+    /// Open the directory `path` is in, verifying it and every directory above it, from `/`
+    /// down. Each is opened beneath the one before, so a vetted directory's entries cannot be
+    /// swapped for the lookups that follow.
+    pub fn open_parent(path: &SafePath<IsAbsolute, StrictComponents>) -> Result<Self, ParentError> {
+        match path.split_last() {
+            Some((parent, _)) => Self::open_vetted(parent),
+            None => Self::open_vetted(path),
+        }
+    }
+
+    fn open_vetted(dir: &SafePath<IsAbsolute, StrictComponents>) -> Result<Self, ParentError> {
+        let opened = match dir.split_last() {
+            None => Self::open(dir, OpenFlags::PATH),
+            Some((parent, name)) => {
+                Self::open_vetted(parent)?.openat(name, OpenFlags::PATH, Mode::empty())
+            }
+        };
+        opened.map_err(|source| ParentError {
+            dir: dir.as_path().to_path_buf(),
+            source,
+        })
+    }
+
     /// Open `name` relative to this directory and verify it as a [`SafeFile<T, R2, O2>`]. As with
     /// [`SafeFile::open`], `flags` apply only after the checks pass.
     pub fn openat<T: FileType, R2: Ownership, O2: Writability>(

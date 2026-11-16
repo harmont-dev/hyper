@@ -58,6 +58,9 @@ pub struct IsDirectory;
 pub struct RootOwner;
 /// Require the file not be writable by group or other.
 pub struct OwnerOnlyWritable;
+/// Require the file not be writable by group or other, unless it is sticky: group and other may
+/// then add entries but never rename or unlink one they do not own.
+pub struct StickyOrOwnerOnlyWritable;
 
 /// What's the type of the file?
 pub trait FileType {
@@ -169,6 +172,16 @@ impl Writability for OwnerOnlyWritable {
             Ok(())
         } else {
             Err(ValidationError::GroupOrOtherWritable)
+        }
+    }
+}
+
+impl Writability for StickyOrOwnerOnlyWritable {
+    fn check(stat: &FileStat) -> Result<(), ValidationError> {
+        if stat.st_mode & Mode::S_ISVTX.bits() != 0 {
+            Ok(())
+        } else {
+            OwnerOnlyWritable::check(stat)
         }
     }
 }

@@ -43,6 +43,8 @@ exclude_re = [
     # Equivalent: the operands never share a bit (no OpenFlags carries O_EXCL without O_CREAT,
     # nor O_DIRECTORY or O_CLOEXEC; the RESOLVE_* flags are distinct bits).
     "hyperrs-fs/src/(dir|file)\\.rs:.*replace \\| with \\^ in SafeFile<.*>::(openat|open_at|open_raw)$",
+    # Equivalent: S_ISUID and S_ISGID share no bits.
+    "replace \\| with \\^ in KernelImage::is_set_id$",
     # Equivalent: the dst-nat chain runs after conntrack and before routing at -100 or 100.
     "suidhelper/src/net/mod\\.rs:\\d+:\\d+: delete -$",
 ]

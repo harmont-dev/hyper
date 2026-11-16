@@ -368,9 +368,20 @@ mix firecracker.install            # installs to /opt/firecracker
 The task installs the binaries under their bare basenames (`firecracker`,
 `jailer` – the setuid helper rejects version-stamped names), marks them
 executable, and prints the `[tools]` snippet for `/etc/hyper/config.toml`.
-After installing, make both binaries root-owned and not group- or
-world-writable (the task prints the exact `chown` command); the helper refuses
-them otherwise.
+After installing, make both binaries **and their directory** root-owned and
+not group- or world-writable (the task prints the exact commands); the helper
+refuses them otherwise:
+
+```sh
+sudo chown root:root /opt/firecracker /opt/firecracker/firecracker /opt/firecracker/jailer
+sudo chmod 0755      /opt/firecracker /opt/firecracker/firecracker /opt/firecracker/jailer
+```
+
+Every parent directory (`/opt` included) must be root-owned and not group- or
+world-writable too.
+
+Hosts installed before 0.2 left `/opt/firecracker` owned by the node user;
+every VM launch there fails until the directory is chowned as above.
 
 ### SUID Helper
 

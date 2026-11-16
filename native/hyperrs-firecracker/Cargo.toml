@@ -27,3 +27,7 @@ pretty_assertions = "1"
 proptest = "1"
 rstest = "0.28"
 test-strategy = "0.4"
+
+[[test]]
+name = "kernel_trust"
+path = "tests/kernel_trust.rs"

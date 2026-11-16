@@ -138,12 +138,16 @@ sudo chown "$(id -u):$(id -g)" /srv/hyper
 mkdir -p /srv/hyper/layers
 
 # firecracker.install writes into /opt/firecracker as the invoking user, then
-# the helper requires both binaries root-owned and not group/world-writable.
+# the helper requires both binaries root-owned and not group/world-writable,
+# and every parent directory too: the jailer is handed firecracker by path.
+# The hosted runner image leaves /opt itself writable beyond root.
+sudo chown root:root /opt
+sudo chmod go-w /opt
 sudo mkdir -p /opt/firecracker
 sudo chown "$(id -u)" /opt/firecracker
 mix firecracker.install
-sudo chown root:root /opt/firecracker/firecracker /opt/firecracker/jailer
-sudo chmod 0755 /opt/firecracker/firecracker /opt/firecracker/jailer
+sudo chown root:root /opt/firecracker /opt/firecracker/firecracker /opt/firecracker/jailer
+sudo chmod 0755 /opt/firecracker /opt/firecracker/firecracker /opt/firecracker/jailer
 
 # With passwordless sudo the task installs setuid-root itself, for the runner's group.
 mix suidhelper.install --group "$(id -gn)"
