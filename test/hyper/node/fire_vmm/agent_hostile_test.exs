@@ -168,5 +168,8 @@ defmodule Hyper.Node.FireVMM.AgentHostileTest do
       )
   end
 
-  defp connections, do: length(DynamicSupervisor.which_children(GRPC.Client.Supervisor))
+  defp connections,
+    do:
+      length(DynamicSupervisor.which_children(GRPC.Client.Supervisor)) +
+        length(Supervisor.which_children(:gun_conns_sup))
 end
