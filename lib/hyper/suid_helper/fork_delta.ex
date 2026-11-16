@@ -7,14 +7,13 @@ defmodule Hyper.SuidHelper.ForkDelta do
 
   @type err :: SuidHelper.err()
 
-  @spec run(String.t(), Path.t(), String.t(), non_neg_integer(), Path.t(), Path.t()) ::
+  @spec run(String.t(), String.t(), non_neg_integer(), Path.t(), Path.t()) ::
           {:ok, %{scanned: non_neg_integer(), written: non_neg_integer()}} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.ForkDelta.run", include: [:parent, :cow])
-  def run(pool, meta_dev, parent, scratch_id, origin, cow) do
+  def run(pool, parent, scratch_id, origin, cow) do
     request = %{
       op: "thin_fork_delta",
       pool: pool,
-      meta: meta_dev,
       parent: parent,
       scratch_id: scratch_id,
       origin: origin,

@@ -19,7 +19,7 @@
   "thin_volume_create_forked": {"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": 2,
     "name": "hyper-v2", "origin": "/dev/mapper/hyper-img", "parent": "hyper-v1"},
   "thin_destroy": {"op": "thin_destroy", "pool": "hyper-pool", "name": "hyper-v1"},
-  "thin_fork_delta": {"op": "thin_fork_delta", "pool": "hyper-pool", "meta": "/dev/loop3",
+  "thin_fork_delta": {"op": "thin_fork_delta", "pool": "hyper-pool",
     "parent": "hyper-v1", "scratch_id": 9, "origin": "/dev/mapper/hyper-img",
     "cow": "/srv/hyper/cow.img", "chunk_sectors": 8},
   "host_init": {"op": "host_init"},

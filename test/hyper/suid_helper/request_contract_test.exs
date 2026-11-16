@@ -87,7 +87,6 @@ defmodule Hyper.SuidHelper.RequestContractTest do
          fn ->
            SuidHelper.ForkDelta.run(
              "hyper-pool",
-             "/dev/loop3",
              "hyper-v1",
              9,
              "/dev/mapper/hyper-img",

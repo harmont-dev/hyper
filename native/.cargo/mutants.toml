@@ -26,10 +26,6 @@ exclude_re = [
     "suidhelper/src/net/vm\\.rs:.*VmNet<'_>::",
     "suidhelper/src/cli/vm/claim\\.rs:.*SocketPin<'_>::",
     "suidhelper/src/cli/vm/teardown\\.rs:.*Teardown::unpin_sockets",
-    # The metadata-device check runs as root against a fake dmsetup; killed by suidhelper's
-    # a_meta_that_is_not_the_pools_metadata_is_refused_before_any_snapshot_as_root (tests/e2e/
-    # fork_delta.rs) in the privileged E2E job.
-    "suidhelper/src/cli/fork_delta\\.rs:.*replace != with == in <impl Op for ThinForkDelta>::run$",
     # Guest network setup runs inside a booted guest; killed by test/e2e/guest_network_test.exs
     # in the KVM integration job.
     "guest-agent/src/net\\.rs:.*GuestNet::(from_proc|configure)",

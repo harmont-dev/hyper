@@ -173,7 +173,6 @@ esac
         let mut request = json!({
             "op": "thin_fork_delta",
             "pool": "hyper-pool",
-            "meta": "/dev/loop3",
             "parent": "hyper-vm1",
             "scratch_id": SCRATCH_ID,
             "origin": self.origin.path(),
@@ -332,23 +331,7 @@ fn nothing_is_snapshotted_unless_pool_and_parent_check_out_as_root(
 }
 
 #[rstest]
-fn a_meta_that_is_not_the_pools_metadata_is_refused_before_any_snapshot_as_root(
-    pool: Option<Pool>,
-) {
-    let pool = require!(pool);
-
-    pool.fork_delta(json!({"meta": "/dev/loop4"}))
-        .failure()
-        .stderr(contains("is not the pool's metadata device 7:3"));
-
-    assert_eq!(pool.dmsetup_calls(), [TABLE]);
-    assert!(!pool.thin_dump_ran());
-}
-
-#[rstest]
-#[case::system_disk_as_meta(json!({"meta": "/dev/sda"}))]
-#[case::traversing_meta(json!({"meta": "/dev/loop0/../sda"}))]
-#[case::dm_device_as_meta(json!({"meta": "/dev/mapper/hyper-pool"}))]
+#[case::caller_named_meta(json!({"meta": "/dev/loop3"}))]
 #[case::foreign_pool(json!({"pool": "vg0-pool"}))]
 #[case::foreign_parent(json!({"parent": "root"}))]
 #[case::foreign_origin(json!({"origin": "/dev/mapper/root"}))]
@@ -450,7 +433,6 @@ fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
         json!({
             "op": "thin_fork_delta",
             "pool": pool_name,
-            "meta": meta.path(),
             "parent": parent_name,
             "scratch_id": REAL_POOL_SCRATCH_ID,
             "origin": origin.path(),
