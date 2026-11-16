@@ -221,7 +221,13 @@ fn jailer_basename_mismatch_rejected() {
     let err = config
         .jailer()
         .expect_err("wrong-basename jailer path must be rejected");
-    assert_matches!(err, BinError::Bin(binary::RootSafeBinError::Name { .. }));
+    assert_matches!(
+        err,
+        BinError::Bin(binary::RootSafeBinError {
+            kind: binary::RootSafeBinErrorKind::Name("jailer"),
+            ..
+        })
+    );
 }
 
 #[rstest]

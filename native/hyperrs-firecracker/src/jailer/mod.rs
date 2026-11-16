@@ -170,9 +170,11 @@ mod tests {
     fn bins() -> Bins {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().to_path_buf();
-        let jailer = RootSafeBin::open(&root_binary(&dir, "jailer", "jailer")).unwrap();
+        let jailer = root_binary(&dir, "jailer", "jailer");
+        let jailer = RootSafeBin::open(jailer.as_path().try_into().unwrap()).unwrap();
+        let firecracker = root_binary(&dir, "firecracker", "vetted");
         let firecracker =
-            RootSafeBinPathBuf::open(&root_binary(&dir, "firecracker", "vetted")).unwrap();
+            RootSafeBinPathBuf::open(firecracker.as_path().try_into().unwrap()).unwrap();
         Bins {
             _dir: tmp,
             dir,

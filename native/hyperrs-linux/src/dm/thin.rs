@@ -499,7 +499,7 @@ mod tests {
             );
             bin.write_str(&script).unwrap();
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-            let dmsetup = Dmsetup::new(RootSafeBin::open(&bin).unwrap());
+            let dmsetup = Dmsetup::new(RootSafeBin::open(bin.path().try_into().unwrap()).unwrap());
             Self {
                 _dir: dir,
                 log,

@@ -491,6 +491,7 @@ impl VmNet<'_> {
 #[cfg(test)]
 mod tests {
     use super::{Blocked, Firewall, VmNet, TAP, UPLINK};
+    use hyperrs_fs::path::SafePath;
     use hyperrs_linux::net::link::DuplicateAddrDetection;
     use hyperrs_linux::net::netns::NetNs;
     use hyperrs_linux::net::nft::Nft;
@@ -505,7 +506,6 @@ mod tests {
     use socket2::{Domain, Protocol, Socket, Type};
     use std::io::Read;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, TcpListener};
-    use std::path::Path;
     use std::time::Duration;
 
     const OPEN: u16 = 7071;
@@ -621,7 +621,8 @@ mod tests {
             }
 
             vm.get().enable_forwarding().unwrap();
-            let nft = Nft::new(RootSafeBin::open(Path::new("/usr/sbin/nft")).unwrap());
+            let nft =
+                Nft::new(RootSafeBin::open(SafePath::from_static::<"/usr/sbin/nft">()).unwrap());
             let mut token = Unprivileged::take().unwrap();
             let root = token.elevate().unwrap();
             let firewall: Firewall = serde_json::from_value(json!({
