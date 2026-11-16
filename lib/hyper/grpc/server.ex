@@ -32,7 +32,9 @@ defmodule Hyper.Grpc.Server do
     StopVmResponse
   }
 
-  @spec load_image(LoadImageRequest.t(), GRPC.Server.Stream.t()) :: LoadImageResponse.t()
+  @typep stream :: %GRPC.Server.Stream{}
+
+  @spec load_image(LoadImageRequest.t(), stream()) :: LoadImageResponse.t()
   def load_image(%LoadImageRequest{} = req, _stream) do
     with {:ok, {ref, opts}} <- Codec.from_grpc(req),
          {:ok, img_id} <- Hyper.Img.OciLoader.load(ref, opts) do
@@ -42,7 +44,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec create_vm(CreateVmRequest.t(), GRPC.Server.Stream.t()) :: CreateVmResponse.t()
+  @spec create_vm(CreateVmRequest.t(), stream()) :: CreateVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.create_vm")
   def create_vm(%CreateVmRequest{} = req, _stream) do
     with {:ok, spec} <- Codec.from_grpc(req),
@@ -58,7 +60,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec fork_vm(ForkVmRequest.t(), GRPC.Server.Stream.t()) :: ForkVmResponse.t()
+  @spec fork_vm(ForkVmRequest.t(), stream()) :: ForkVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.fork_vm", include: [:vm_id])
   def fork_vm(%ForkVmRequest{vm_id: vm_id}, _stream) do
     with {:ok, child} <- Hyper.fork_vm(vm_id),
@@ -72,7 +74,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec stop_vm(StopVmRequest.t(), GRPC.Server.Stream.t()) :: StopVmResponse.t()
+  @spec stop_vm(StopVmRequest.t(), stream()) :: StopVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.stop_vm", include: [:vm_id])
   def stop_vm(%StopVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.stop_vm(vm_id) do
@@ -81,7 +83,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec set_vm_firewall(SetVmFirewallRequest.t(), GRPC.Server.Stream.t()) ::
+  @spec set_vm_firewall(SetVmFirewallRequest.t(), stream()) ::
           SetVmFirewallResponse.t()
   @decorate with_span("Hyper.Grpc.Server.set_vm_firewall", include: [:vm_id])
   def set_vm_firewall(%SetVmFirewallRequest{vm_id: vm_id} = req, _stream) do
@@ -93,7 +95,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec exec_vm(ExecVmRequest.t(), GRPC.Server.Stream.t()) :: ExecVmResponse.t()
+  @spec exec_vm(ExecVmRequest.t(), stream()) :: ExecVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.exec_vm", include: [:vm_id])
   def exec_vm(%ExecVmRequest{vm_id: vm_id} = req, _stream) do
     with {:ok, {argv, opts}} <- Codec.from_grpc(req),
@@ -108,7 +110,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec get_vm(GetVmRequest.t(), GRPC.Server.Stream.t()) :: GetVmResponse.t()
+  @spec get_vm(GetVmRequest.t(), stream()) :: GetVmResponse.t()
   @decorate with_span("Hyper.Grpc.Server.get_vm", include: [:vm_id])
   def get_vm(%GetVmRequest{vm_id: vm_id}, _stream) do
     case Hyper.whereis(vm_id) do
@@ -117,7 +119,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec get_vm_usage(GetVmUsageRequest.t(), GRPC.Server.Stream.t()) :: GetVmUsageResponse.t()
+  @spec get_vm_usage(GetVmUsageRequest.t(), stream()) :: GetVmUsageResponse.t()
   @decorate with_span("Hyper.Grpc.Server.get_vm_usage", include: [:vm_id])
   def get_vm_usage(%GetVmUsageRequest{vm_id: vm_id}, _stream) do
     case Hyper.usage(vm_id) do
@@ -126,7 +128,7 @@ defmodule Hyper.Grpc.Server do
     end
   end
 
-  @spec list_vms(ListVmsRequest.t(), GRPC.Server.Stream.t()) :: ListVmsResponse.t()
+  @spec list_vms(ListVmsRequest.t(), stream()) :: ListVmsResponse.t()
   @decorate with_span("Hyper.Grpc.Server.list_vms")
   def list_vms(%ListVmsRequest{page_size: page_size, page_token: page_token}, _stream) do
     case Hyper.Grpc.Page.paginate(
