@@ -40,30 +40,6 @@ pub enum ComponentError {
     TooLong(usize),
 }
 
-const fn check_component(bytes: &[u8], allow_whitespace: bool) -> Result<(), ComponentError> {
-    match bytes {
-        [] => return Err(ComponentError::Empty),
-        b"." => return Err(ComponentError::CurrentDir),
-        b".." => return Err(ComponentError::ParentDir),
-        _ => {}
-    }
-    if bytes.len() > NAME_MAX {
-        return Err(ComponentError::TooLong(bytes.len()));
-    }
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'/' => return Err(ComponentError::Separator),
-            0 => return Err(ComponentError::Nul),
-            b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' if !allow_whitespace => {
-                return Err(ComponentError::Whitespace)
-            }
-            _ => i += 1,
-        }
-    }
-    Ok(())
-}
-
 /// A path component that isn't `.`, nor `..`, and has no `/` or whitespace.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
@@ -78,13 +54,24 @@ impl StrictComponent {
     #[ref_cast_custom]
     const fn new_unchecked(bytes: &[u8]) -> &Self;
 
-    const fn check(bytes: &[u8]) -> Result<(), ComponentError> {
-        check_component(bytes, false)
+    const fn from_bytes(bytes: &[u8]) -> Result<&Self, ComponentError> {
+        let name = match ComponentWithWhitespace::from_bytes(bytes) {
+            Ok(name) => name,
+            Err(e) => return Err(e),
+        };
+        let mut i = 0;
+        while i < name.0.len() {
+            if matches!(name.0[i], b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r') {
+                return Err(ComponentError::Whitespace);
+            }
+            i += 1;
+        }
+        Ok(Self::new_unchecked(&name.0))
     }
 
     pub const fn from_static(name: &'static str) -> &'static Self {
-        match Self::check(name.as_bytes()) {
-            Ok(()) => Self::new_unchecked(name.as_bytes()),
+        match Self::from_bytes(name.as_bytes()) {
+            Ok(name) => name,
             Err(_) => panic!("not a strict path component"),
         }
     }
@@ -101,8 +88,7 @@ impl StrictComponent {
 impl<'a> TryFrom<&'a OsStr> for &'a StrictComponent {
     type Error = ComponentError;
     fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
-        StrictComponent::check(name.as_bytes())?;
-        Ok(StrictComponent::new_unchecked(name.as_bytes()))
+        StrictComponent::from_bytes(name.as_bytes())
     }
 }
 
@@ -165,6 +151,27 @@ impl ComponentWithWhitespace {
     #[ref_cast_custom]
     const fn new_unchecked(bytes: &[u8]) -> &Self;
 
+    const fn from_bytes(bytes: &[u8]) -> Result<&Self, ComponentError> {
+        match bytes {
+            [] => return Err(ComponentError::Empty),
+            b"." => return Err(ComponentError::CurrentDir),
+            b".." => return Err(ComponentError::ParentDir),
+            _ => {}
+        }
+        if bytes.len() > NAME_MAX {
+            return Err(ComponentError::TooLong(bytes.len()));
+        }
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'/' => return Err(ComponentError::Separator),
+                0 => return Err(ComponentError::Nul),
+                _ => i += 1,
+            }
+        }
+        Ok(Self::new_unchecked(bytes))
+    }
+
     pub fn as_os_str(&self) -> &OsStr {
         OsStr::from_bytes(&self.0)
     }
@@ -177,8 +184,7 @@ impl ComponentWithWhitespace {
 impl<'a> TryFrom<&'a OsStr> for &'a ComponentWithWhitespace {
     type Error = ComponentError;
     fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
-        check_component(name.as_bytes(), true)?;
-        Ok(ComponentWithWhitespace::new_unchecked(name.as_bytes()))
+        ComponentWithWhitespace::from_bytes(name.as_bytes())
     }
 }
 
@@ -272,7 +278,7 @@ const fn check_strict_components(raw: &[u8]) -> Result<(), ComponentError> {
             end += 1;
         }
         let (segment, tail) = rest.split_at(end);
-        if let Err(e) = StrictComponent::check(segment) {
+        if let Err(e) = StrictComponent::from_bytes(segment) {
             return Err(e);
         }
         match tail {
