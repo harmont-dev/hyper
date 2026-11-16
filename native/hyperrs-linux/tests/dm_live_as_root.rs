@@ -29,6 +29,7 @@ use hyperrs_linux::dm::{
 use hyperrs_linux::loopdev::{LoopControl, LoopDevice};
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::{Root, Unprivileged};
 use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
@@ -144,6 +145,8 @@ fn table() -> impl Strategy<Value = DmTable> {
 #[test]
 fn create_passes_the_whole_table_as_one_argument_and_no_environment_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     std::env::set_var("HYPER_LEAK_PROBE", "leaked");
     let fake = FakeDmsetup::new("");
     let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(24));
@@ -156,7 +159,7 @@ fn create_passes_the_whole_table_as_one_argument_and_no_environment_as_root() {
                 } else {
                     Access::ReadWrite
                 };
-                let dev = fake.dmsetup.create(&name(&n), &t, access).unwrap();
+                let dev = fake.dmsetup.create(&root, &name(&n), &t, access).unwrap();
                 let mut expected = vec!["create".to_string(), n.clone()];
                 if ro {
                     expected.push("--readonly".into());
@@ -176,8 +179,10 @@ type Verb = fn(&Device) -> Result<(), RunError>;
 #[test]
 fn every_device_verb_names_exactly_the_device_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let fake = FakeDmsetup::new("");
-    let dev = fake.dmsetup.device(&name("hyper-vol"));
+    let dev = fake.dmsetup.device(&root, &name("hyper-vol"));
 
     let verbs: [(Verb, &[&str]); 4] = [
         (|d| d.suspend(), &["suspend", "hyper-vol"]),
@@ -200,13 +205,15 @@ fn every_device_verb_names_exactly_the_device_as_root() {
 #[test]
 fn a_failing_dmsetup_is_an_error_carrying_its_trimmed_stderr_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let fake = FakeDmsetup::new(
         "printf 'looks fine\\n'\nprintf '\\n  device-mapper: reload ioctl failed  \\n\\n' >&2\nexit 3",
     );
 
     let err = fake
         .dmsetup
-        .device(&name("hyper-vol"))
+        .device(&root, &name("hyper-vol"))
         .suspend()
         .unwrap_err();
 
@@ -219,6 +226,8 @@ fn a_failing_dmsetup_is_an_error_carrying_its_trimmed_stderr_as_root() {
 #[test]
 fn device_number_accepts_only_a_major_minor_pair_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     for (out, expected) in [
         ("253:7", Some((253, 7))),
         ("  253:7  ", Some((253, 7))),
@@ -229,7 +238,7 @@ fn device_number_accepts_only_a_major_minor_pair_as_root() {
         ("253:-1", None),
     ] {
         let fake = FakeDmsetup::new(&format!("printf '%s\\n' '{out}'"));
-        let got = fake.dmsetup.device(&name("hyper-vol")).number();
+        let got = fake.dmsetup.device(&root, &name("hyper-vol")).number();
         assert_eq!(
             got.ok().map(|n| (n.major(), n.minor())),
             expected,
@@ -343,6 +352,8 @@ fn live_dmsetup() -> Option<Dmsetup> {
 #[test]
 fn a_live_linear_table_is_sized_numbered_and_protected_as_requested_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let Some(dm) = live_dmsetup() else {
         eprintln!("SKIP: no root-owned {DMSETUP}");
         return;
@@ -357,6 +368,7 @@ fn a_live_linear_table_is_sized_numbered_and_protected_as_requested_as_root() {
 
     let dev = dm
         .create(
+            &root,
             &name(&n),
             &DmTable::Linear(LinearTable {
                 sectors,
@@ -433,6 +445,8 @@ fn metadata_device(dir: &Path, marker: &[u8; 16]) -> (Loop, SafeFile<IsBlockDevi
 #[test]
 fn thin_dump_reads_the_metadata_through_the_inherited_fd_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let fake = FakeThinDump::new(&superblock(
         "<device dev_id=\"5\" mapped_blocks=\"3\" transaction=\"0\" creation_time=\"0\" snap_time=\"0\"><range_mapping origin_begin=\"2\" data_begin=\"0\" length=\"2\" time=\"0\"/><single_mapping origin_block=\"9\" data_block=\"4\" time=\"0\"/></device>",
     ));
@@ -440,7 +454,7 @@ fn thin_dump_reads_the_metadata_through_the_inherited_fd_as_root() {
     let (_lo, meta) = metadata_device(&fake.base, &marker);
     let id = ThinId::new(5).unwrap();
 
-    let dumped = fake.dump.dump(&meta, id).unwrap();
+    let dumped = fake.dump.dump(&root, &meta, id).unwrap();
 
     let argv = recorded_argv(&fake.base.join("argv"));
     assert_eq!(argv[..3], ["--metadata-snap", "--dev-id", "5"]);
@@ -465,13 +479,15 @@ fn thin_dump_reads_the_metadata_through_the_inherited_fd_as_root() {
 #[test]
 fn a_mapping_total_that_overflows_is_refused_not_a_panic_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let fake = FakeThinDump::new(&superblock(&format!(
         "<device dev_id=\"5\" mapped_blocks=\"0\" transaction=\"0\" creation_time=\"0\" snap_time=\"0\"><range_mapping origin_begin=\"0\" data_begin=\"0\" length=\"{}\" time=\"0\"/><single_mapping origin_block=\"9\" data_block=\"4\" time=\"0\"/></device>",
         u64::MAX
     )));
     let (_lo, meta) = metadata_device(&fake.base, b"0123456789abcdef");
     let id = ThinId::new(5).unwrap();
-    let superblock = fake.dump.dump(&meta, id).unwrap().parse().unwrap();
+    let superblock = fake.dump.dump(&root, &meta, id).unwrap().parse().unwrap();
 
     let got = std::panic::catch_unwind(|| superblock.mappings(id));
 
@@ -484,6 +500,8 @@ fn a_mapping_total_that_overflows_is_refused_not_a_panic_as_root() {
 #[test]
 fn a_failing_thin_dump_is_an_error_not_an_empty_dump_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let dir = TempDir::new().unwrap();
     let base = real(&dir);
     let bin = install(
@@ -494,7 +512,9 @@ fn a_failing_thin_dump_is_an_error_not_an_empty_dump_as_root() {
     let dump = ThinDump::new(RootSafeBin::open(&bin).unwrap());
     let (_lo, meta) = metadata_device(&base, b"0123456789abcdef");
 
-    let err = dump.dump(&meta, ThinId::new(1).unwrap()).unwrap_err();
+    let err = dump
+        .dump(&root, &meta, ThinId::new(1).unwrap())
+        .unwrap_err();
 
     assert_eq!(err.to_string(), "thin_dump failed: no metadata snap");
 }
@@ -514,7 +534,7 @@ const VOLUME_SECTORS: u64 = 16 << 11;
 const VOLUME_BLOCKS: u64 = VOLUME_SECTORS / BLOCK_SECTORS;
 
 impl LivePool {
-    fn new(tag: &str) -> Option<Self> {
+    fn new(root: &Root<'_>, tag: &str) -> Option<Self> {
         let dm = live_dmsetup()?;
         let dir = TempDir::new().unwrap();
         let base = real(&dir);
@@ -525,6 +545,7 @@ impl LivePool {
         let pool = format!("hyper-t-{tag}-pool-{}", std::process::id());
         let guard = DmGuard(vec![pool.clone()]);
         dm.create(
+            root,
             &name(&pool),
             &DmTable::ThinPool(ThinPoolTable {
                 sectors: POOL_DATA_BYTES / 512,
@@ -570,11 +591,11 @@ fn read_block(dev: &Path, block: u64) -> Vec<u8> {
     buf
 }
 
-fn mapped_blocks(pool: &LivePool, id: ThinId) -> BTreeSet<u64> {
-    let thin_pool = pool.dm.thin_pool(&pool.pool).unwrap();
+fn mapped_blocks(pool: &LivePool, root: &Root<'_>, id: ThinId) -> BTreeSet<u64> {
+    let thin_pool = pool.dm.thin_pool(root, &pool.pool).unwrap();
     let dump = ThinDump::new(RootSafeBin::open(Path::new(THIN_DUMP)).unwrap());
     thin_pool.reserve_metadata_snap().unwrap();
-    let dumped = dump.dump(&pool.meta_dev, id);
+    let dumped = dump.dump(root, &pool.meta_dev, id);
     thin_pool.release_metadata_snap().unwrap();
     dumped
         .unwrap()
@@ -591,18 +612,20 @@ fn mapped_blocks(pool: &LivePool, id: ThinId) -> BTreeSet<u64> {
 #[test]
 fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     if RootSafeBin::<"thin_dump">::open(Path::new(THIN_DUMP)).is_err() {
         eprintln!("SKIP: no root-owned {THIN_DUMP}");
         return;
     }
-    let Some(mut live) = LivePool::new("laws") else {
+    let Some(mut live) = LivePool::new(&root, "laws") else {
         eprintln!("SKIP: dm-thin unavailable");
         return;
     };
     let vol_name = live.volume_name("vol");
     let snap_name = live.volume_name("snap");
     let (one, two) = (ThinId::new(1).unwrap(), ThinId::new(2).unwrap());
-    let pool = live.dm.thin_pool(&live.pool).unwrap();
+    let pool = live.dm.thin_pool(&root, &live.pool).unwrap();
 
     let vol = pool
         .create_thin(one)
@@ -622,7 +645,7 @@ fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
     for &b in &written {
         write_block(vol.device().path().as_path(), b, (b % 250) as u8 + 1);
     }
-    assert_eq!(mapped_blocks(&live, one), written);
+    assert_eq!(mapped_blocks(&live, &root, one), written);
 
     let snap = vol.snapshot(two).unwrap();
     let snap = snap.activate(&snap_name, VOLUME_SECTORS, None).unwrap();
@@ -637,10 +660,10 @@ fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
         read_block(snap.device().path().as_path(), fresh),
         vec![0u8; BLOCK_BYTES as usize]
     );
-    assert_eq!(mapped_blocks(&live, two), written);
+    assert_eq!(mapped_blocks(&live, &root, two), written);
     let mut grown = written.clone();
     grown.insert(fresh);
-    assert_eq!(mapped_blocks(&live, one), grown);
+    assert_eq!(mapped_blocks(&live, &root, one), grown);
 
     assert_eq!(pool.open_thin(&vol_name).unwrap().id(), one);
     assert_eq!(pool.open_thin(&snap_name).unwrap().id(), two);
@@ -660,11 +683,13 @@ fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
 #[test]
 fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
     require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     if RootSafeBin::<"thin_dump">::open(Path::new(THIN_DUMP)).is_err() {
         eprintln!("SKIP: no root-owned {THIN_DUMP}");
         return;
     }
-    let Some(mut live) = LivePool::new("ext") else {
+    let Some(mut live) = LivePool::new(&root, "ext") else {
         eprintln!("SKIP: dm-thin unavailable");
         return;
     };
@@ -675,6 +700,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
     let origin_name = live.volume_name("origin");
     live.dm
         .create(
+            &root,
             &origin_name,
             &DmTable::Linear(LinearTable {
                 sectors: VOLUME_SECTORS,
@@ -685,7 +711,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
         .unwrap();
     let vol_name = live.volume_name("vol");
     let id = ThinId::new(3).unwrap();
-    let pool = live.dm.thin_pool(&live.pool).unwrap();
+    let pool = live.dm.thin_pool(&root, &live.pool).unwrap();
     let vol = pool
         .create_thin(id)
         .unwrap()
@@ -701,14 +727,14 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
         vec![0x11; BLOCK_BYTES as usize]
     );
     assert!(
-        mapped_blocks(&live, id).is_empty(),
+        mapped_blocks(&live, &root, id).is_empty(),
         "reads must not provision"
     );
     write_block(vol.device().path().as_path(), 5, 0x22);
     write_block(vol.device().path().as_path(), VOLUME_BLOCKS - 1, 0x33);
 
     assert_eq!(
-        mapped_blocks(&live, id),
+        mapped_blocks(&live, &root, id),
         BTreeSet::from([5, VOLUME_BLOCKS - 1])
     );
     assert_eq!(

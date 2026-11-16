@@ -54,9 +54,9 @@ impl Op for ImgActivate {
                     created.push(name);
                 }
                 Err(e) => {
-                    let _root = token.elevate().map_err(DmError::from)?;
+                    let root = token.elevate().map_err(DmError::from)?;
                     for name in created.iter().rev() {
-                        let _ = dm.device(name).remove(RemoveMode::Retry);
+                        let _ = dm.device(&root, name).remove(RemoveMode::Retry);
                     }
                     return Err(e.into());
                 }

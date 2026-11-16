@@ -109,8 +109,8 @@ impl HostNet<'_> {
         .chain()
     }
 
-    /// VMs reach only public addresses. What reaches a VM is its own namespace's
-    /// firewall to decide.
+    /// VMs reach only public addresses. Nothing new or untracked reaches the transit
+    /// range; what reaches a VM's public address is its own namespace's firewall to decide.
     fn forward(&self) -> Chain {
         let vm_range = Match::Ipv6Daddr(self.prefix.vm_range());
         let not_vm_range = || Match::Not(Box::new(vm_range.clone()));
@@ -131,28 +131,26 @@ impl HostNet<'_> {
                 };
                 Self::from_vms(daddr, Action::Drop)
             }))
-            .chain([
-                Rule {
-                    matches: vec![
-                        Match::Iifname(VM_VETHS.clone()),
-                        Match::Ipv6Daddr(self.prefix.get()),
-                        not_vm_range(),
-                        Match::CtState(CtState::New),
-                    ],
-                    action: Action::Drop,
-                },
-                Rule {
-                    matches: vec![
-                        Match::Ipv4Daddr(NetId::transit_range()),
-                        Match::CtState(CtState::New),
-                    ],
-                    action: Action::Drop,
-                },
-                Rule {
-                    matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
-                    action: Action::Drop,
-                },
-            ])
+            .chain([Rule {
+                matches: vec![
+                    Match::Iifname(VM_VETHS.clone()),
+                    Match::Ipv6Daddr(self.prefix.get()),
+                    not_vm_range(),
+                    Match::CtState(CtState::New),
+                ],
+                action: Action::Drop,
+            }])
+            .chain([CtState::Invalid, CtState::New].map(|state| Rule {
+                matches: vec![
+                    Match::Ipv4Daddr(NetId::transit_range()),
+                    Match::CtState(state),
+                ],
+                action: Action::Drop,
+            }))
+            .chain([Rule {
+                matches: vec![Match::Oifname(VM_VETHS.clone()), not_vm_range()],
+                action: Action::Drop,
+            }])
             .collect(),
         }
         .chain()

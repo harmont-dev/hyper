@@ -68,8 +68,9 @@ elsewhere via dm-thin), so there is no read-write attach.
 - **`--bin` is validated, not trusted.** It must be an absolute path whose
   basename matches the subcommand, and a **root-owned, non-symlink, not
   group/other-writable** regular file. An unprivileged caller therefore can't
-  point it at a binary it controls. The tool is exec'd with a cleared
-  environment (no `LD_PRELOAD`/`PATH` inheritance).
+  point it at a binary it controls. The tool runs as genuine root (real,
+  effective and saved ids 0, groups `[0]`) with a cleared environment (no
+  `LD_PRELOAD`/`PATH` inheritance) and only the fds it is handed.
 - **Operands are validated by type, at parse time.** Loop devices must be
   `/dev/loopN`; block operands must be a loop or a `/dev/mapper/hyper-*` device;
   dm names must be `hyper-*`; backing files must canonicalize under `/srv/hyper`

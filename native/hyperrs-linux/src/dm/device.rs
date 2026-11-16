@@ -1,6 +1,7 @@
 use super::{DmName, Dmsetup, RemoveMode, RunError};
 use hyperrs_fs::dev::{DeviceNumber, ParseDeviceNumberError};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+use hyperrs_process::privilege::Root;
 use std::ffi::OsStr;
 use thiserror::Error as ThisError;
 
@@ -15,6 +16,7 @@ pub enum NumberError {
 #[derive(Debug, Clone)]
 pub struct Device<'a> {
     pub(super) dmsetup: &'a Dmsetup,
+    pub(super) root: &'a Root<'a>,
     pub(super) name: DmName,
 }
 
@@ -28,26 +30,29 @@ impl<'a> Device<'a> {
     }
 
     pub fn number(&self) -> Result<DeviceNumber, NumberError> {
-        let out = self.dmsetup.run([
-            OsStr::new("info"),
-            OsStr::new("-c"),
-            OsStr::new("--noheadings"),
-            OsStr::new("-o"),
-            OsStr::new("major,minor"),
-            self.name.as_ref(),
-        ])?;
+        let out = self.dmsetup.run(
+            self.root,
+            [
+                OsStr::new("info"),
+                OsStr::new("-c"),
+                OsStr::new("--noheadings"),
+                OsStr::new("-o"),
+                OsStr::new("major,minor"),
+                self.name.as_ref(),
+            ],
+        )?;
         Ok(out.trim().parse()?)
     }
 
     pub fn suspend(&self) -> Result<(), RunError> {
         self.dmsetup
-            .run([OsStr::new("suspend"), self.name.as_ref()])
+            .run(self.root, [OsStr::new("suspend"), self.name.as_ref()])
             .map(drop)
     }
 
     pub fn resume(&self) -> Result<(), RunError> {
         self.dmsetup
-            .run([OsStr::new("resume"), self.name.as_ref()])
+            .run(self.root, [OsStr::new("resume"), self.name.as_ref()])
             .map(drop)
     }
 
@@ -57,6 +62,6 @@ impl<'a> Device<'a> {
             args.push(OsStr::new("--retry"));
         }
         args.push(self.name.as_ref());
-        self.dmsetup.run(args).map(drop)
+        self.dmsetup.run(self.root, args).map(drop)
     }
 }

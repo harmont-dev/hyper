@@ -26,6 +26,15 @@ exclude_re = [
     "suidhelper/src/net/vm\\.rs:.*VmNet<'_>::",
     "suidhelper/src/cli/vm/claim\\.rs:.*SocketPin<'_>::",
     "suidhelper/src/cli/vm/teardown\\.rs:.*Teardown::unpin_sockets",
+    # dmsetup runs as genuine root from a root-owned binary; killed by the fake-dmsetup
+    # dm::thin _as_root tests in hyperrs-linux (snapshot_always_resumes_the_origin_as_root,
+    # deactivate_then_delete_removes_the_device_then_frees_its_id_as_root) and, for the old-pool
+    # check, suidhelper's pool_create_zeroes_the_metadata_only_once_no_old_pool_is_live_as_root,
+    # all in the privileged E2E job.
+    "hyperrs-linux/src/dm/mod\\.rs:.*Dmsetup::run ",
+    "hyperrs-linux/src/dm/device\\.rs:.*Device<'a>::(suspend|resume|remove) ",
+    "hyperrs-linux/src/dm/thin\\.rs:.*ThinPool<'a>::send ",
+    "suidhelper/src/cli/thin\\.rs:.*delete ! in <impl Op for ThinPoolCreate>::run$",
     # Guest network setup runs inside a booted guest; killed by test/e2e/guest_network_test.exs
     # in the KVM integration job.
     "guest-agent/src/net\\.rs:.*GuestNet::(from_proc|configure)",

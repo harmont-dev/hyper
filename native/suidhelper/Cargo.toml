@@ -60,6 +60,14 @@ name = "e2e_caller_gate"
 path = "tests/e2e/caller_gate.rs"
 
 [[test]]
+name = "e2e_net_hostile"
+path = "tests/e2e/net_hostile.rs"
+
+[[test]]
+name = "e2e_setuid"
+path = "tests/e2e/setuid.rs"
+
+[[test]]
 name = "e2e_argv"
 path = "tests/e2e/argv.rs"
 
