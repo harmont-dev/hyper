@@ -92,6 +92,9 @@ pub fn static_insecure_helper() -> PathBuf {
         if let Some(home) = home_of(uid) {
             cargo.env("HOME", home);
         }
+        // Root's cargo exports its own CARGO_HOME, which the invoker cannot write;
+        // without it cargo falls back to the invoker's $HOME/.cargo.
+        cargo.env_remove("CARGO_HOME");
         cargo.uid(uid).gid(gid);
     }
     assert!(
