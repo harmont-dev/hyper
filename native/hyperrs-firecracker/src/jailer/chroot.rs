@@ -549,15 +549,11 @@ mod tests {
     }
 
     #[rstest]
-    fn a_staged_kernel_never_carries_a_set_id_bit_as_root(
+    fn a_staged_kernel_never_carries_a_set_id_bit(
         jail: Jail,
         #[values(0o4755, 0o2755, 0o6755)] mode: u32,
         #[values(false, true)] cross_device: bool,
     ) {
-        if !is_root() {
-            eprintln!("SKIP a_staged_kernel_never_carries_a_set_id_bit_as_root");
-            return;
-        }
         let src_dir = if cross_device {
             match TempDir::new_in("/dev/shm") {
                 Ok(d) => d,
@@ -568,7 +564,9 @@ mod tests {
         };
         let src = src_dir.child("vmlinux");
         src.write_str("kernel").unwrap();
-        std::os::unix::fs::chown(&src, Some(0), Some(0)).unwrap();
+        if is_root() {
+            std::os::unix::fs::chown(&src, Some(0), Some(0)).unwrap();
+        }
         fs::set_permissions(&src, fs::Permissions::from_mode(mode)).unwrap();
 
         jail.open_root()
@@ -582,6 +580,20 @@ mod tests {
             staged & 0o6000,
             0,
             "staged vmlinux is {staged:o} from a {mode:o} source"
+        );
+    }
+
+    #[rstest]
+    fn a_kernel_without_a_set_id_bit_is_hard_linked_on_one_filesystem(jail: Jail) {
+        let src = jail.kernel_source("vmlinux-src", "kernel");
+
+        jail.open_root()
+            .stage_kernel(&KernelImage::open(&strict(&src)).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            fs::metadata(jail.root_dir.join("vmlinux")).unwrap().ino(),
+            fs::metadata(&src).unwrap().ino()
         );
     }
 

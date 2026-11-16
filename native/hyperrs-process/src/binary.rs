@@ -214,6 +214,26 @@ mod tests {
         }
     }
 
+    // `/` is a root-owned 0755 directory and `/tmp` a root-owned sticky world-writable one, so
+    // both must be passed and the walk must stop at the first directory the caller owns.
+    #[test]
+    fn path_binary_is_refused_at_the_first_parent_owned_by_someone_other_than_root() {
+        let tmp = TempDir::new_in("/tmp").unwrap();
+        let bin = tmp.child("dmsetup");
+        bin.write_str("#!/bin/true\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        if is_root() {
+            std::os::unix::fs::chown(tmp.path(), Some(65_534), None).unwrap();
+        }
+
+        let got = RootSafeBinPathBuf::<"dmsetup">::open(&bin);
+
+        assert!(
+            matches!(got, Err(RootSafeBinError::UnsafeParent { ref dir, .. }) if dir == tmp.path()),
+            "{got:?}"
+        );
+    }
+
     // `RootSafeBinPathBuf` hands the jailer a path, and the release flow leaves the install
     // directory owned by the node user, who could rename their own file over the vetted binary
     // after it was checked. Any directory on the path that someone other than root can rewrite

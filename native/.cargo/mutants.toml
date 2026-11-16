@@ -43,6 +43,13 @@ exclude_re = [
     # Equivalent: the operands never share a bit (no OpenFlags carries O_EXCL without O_CREAT,
     # nor O_DIRECTORY or O_CLOEXEC; the RESOLVE_* flags are distinct bits).
     "hyperrs-fs/src/(dir|file)\\.rs:.*replace \\| with \\^ in SafeFile<.*>::(openat|open_at|open_raw)$",
+    # Equivalent: S_ISUID and S_ISGID share no bits.
+    "replace \\| with \\^ in KernelImage::is_set_id$",
+    # Equivalent: S_IWGRP and S_IWOTH share no bits. `|` -> `&` empties the mask, which only
+    # a root-owned, non-sticky, group- or other-writable parent tells apart; killed by the
+    # group_writable and other_writable cases of
+    # path_binary_is_accepted_exactly_when_only_root_can_rewrite_its_parents_as_root.
+    "hyperrs-process/src/binary\\.rs:\\d+:\\d+: replace \\| with [&^] in root_only_writable$",
     # Equivalent: the dst-nat chain runs after conntrack and before routing at -100 or 100.
     "suidhelper/src/net/mod\\.rs:\\d+:\\d+: delete -$",
 ]
