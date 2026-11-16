@@ -36,10 +36,12 @@ defmodule Hyper.Cfg.Grpc do
 
   defstruct enabled: false, port: @default_port, cred: nil, adapter_opts: []
 
+  @typep cred :: %GRPC.Credential{}
+
   @type t :: %__MODULE__{
           enabled: boolean(),
           port: :inet.port_number(),
-          cred: %GRPC.Credential{} | nil,
+          cred: cred() | nil,
           adapter_opts: keyword()
         }
 
@@ -55,7 +57,7 @@ defmodule Hyper.Cfg.Grpc do
     }
   end
 
-  @spec cred(term()) :: %GRPC.Credential{} | nil
+  @spec cred(term()) :: cred() | nil
   defp cred(nil), do: nil
   defp cred(%GRPC.Credential{} = c), do: c
 

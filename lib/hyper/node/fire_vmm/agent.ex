@@ -9,6 +9,8 @@ defmodule Hyper.Node.FireVMM.Agent do
 
   alias Hyper.Agent.V1.{ExecRequest, GuestAgent.Stub}
 
+  @typep channel :: %GRPC.Channel{}
+
   # GRPC.Status codes stored as module attributes so they can be used in
   # guard-equivalent pattern matches without calling functions at match time.
   @unavailable GRPC.Status.unavailable()
@@ -70,7 +72,7 @@ defmodule Hyper.Node.FireVMM.Agent do
     end
   end
 
-  @spec call(%GRPC.Channel{}, ExecRequest.t(), timeout()) :: Task.t()
+  @spec call(channel(), ExecRequest.t(), timeout()) :: Task.t()
   defp call(ch, req, timeout) do
     Task.async(fn ->
       try do
