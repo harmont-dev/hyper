@@ -8,7 +8,7 @@ license = "MIT"
 redundant_field_names = "allow"
 
 [dependencies]
-derive_more = { version = "2.1.1", features = ["as_ref", "display", "constructor", "from", "into", "try_unwrap"] }
+derive_more = { version = "2.1.1", features = ["as_ref", "constructor", "deref", "display", "from", "into", "try_unwrap"] }
 hyperrs-fs = { path = "../hyperrs-fs" }
 hyperrs-process = { path = "../hyperrs-process" }
 netlink-packet-core = "0.9"

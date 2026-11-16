@@ -91,12 +91,16 @@ impl Superblock {
 
         let ranges: Vec<BlockRange> = device.mappings.iter().map(Mapping::range).collect();
 
-        let got: u64 = ranges.iter().map(|range| range.length).sum();
+        let truncated = |got| MappingsError::Truncated {
+            expected: device.mapped_blocks,
+            got,
+        };
+        let got = ranges
+            .iter()
+            .try_fold(0u64, |sum, range| sum.checked_add(range.length))
+            .ok_or_else(|| truncated(u64::MAX))?;
         if got != device.mapped_blocks {
-            return Err(MappingsError::Truncated {
-                expected: device.mapped_blocks,
-                got,
-            });
+            return Err(truncated(got));
         }
 
         Ok(ThinMappings {

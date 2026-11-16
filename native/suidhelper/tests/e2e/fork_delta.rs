@@ -101,7 +101,7 @@ case "$1" in
   table)
     case "$2" in
       hyper-pool)
-        if [ -e '{b}/linear' ]; then printf '0 100 linear 7:0 0\n'; else printf '0 100 thin-pool 7:0 7:1 128 0 0\n'; fi ;;
+        if [ -e '{b}/linear' ]; then printf '0 100 linear 7:0 0\n'; else printf '0 100 thin-pool 7:3 7:1 128 0 0\n'; fi ;;
       hyper-vm1)
         if [ -e '{b}/parent-linear' ]; then printf '0 2048 linear 7:0 0\n'; else printf '0 2048 thin 253:1 7\n'; fi ;;
       *) printf '0 2048 thin 253:1 {SCRATCH_ID}\n' ;;
@@ -328,6 +328,20 @@ fn nothing_is_snapshotted_unless_pool_and_parent_check_out_as_root(
     pool.fork_delta(json!({})).failure();
 
     assert_eq!(pool.dmsetup_calls(), calls);
+    assert!(!pool.thin_dump_ran());
+}
+
+#[rstest]
+fn a_meta_that_is_not_the_pools_metadata_is_refused_before_any_snapshot_as_root(
+    pool: Option<Pool>,
+) {
+    let pool = require!(pool);
+
+    pool.fork_delta(json!({"meta": "/dev/loop4"}))
+        .failure()
+        .stderr(contains("is not the pool's metadata device 7:3"));
+
+    assert_eq!(pool.dmsetup_calls(), [TABLE]);
     assert!(!pool.thin_dump_ran());
 }
 

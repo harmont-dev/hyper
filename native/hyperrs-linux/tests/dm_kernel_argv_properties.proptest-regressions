@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c114d108d6e992cde0bcff6ceeac1f49d0eb06eb9f29e0d42822b02b0369753a # shrinks to input = _TheKernelOpensExactlyTheOperandsOfAnyConstructibleTableArgs { t: ThinPool(ThinPoolTable { sectors: 0, metadata: SafePathBuf("/!", PhantomData<(hyperrs_fs::path::IsAbsolute, hyperrs_fs::path::StrictComponents)>), data: SafePathBuf("/\u{e0000}", PhantomData<(hyperrs_fs::path::IsAbsolute, hyperrs_fs::path::StrictComponents)>), block_sectors: 0, low_water: 0 }) }

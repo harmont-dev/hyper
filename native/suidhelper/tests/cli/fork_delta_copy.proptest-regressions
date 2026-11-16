@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 946c5c1fb5e28a2f2d8ded7ddced842c81919ac879b5da87ee5a9500f18ed8f7 # shrinks to input = _InterruptedReadsAreRetriedNotFatalArgs { c: Case { src_len: 7371, block_sectors: 4, ranges: [(7, 1), (7, 5), (3, 5), (2, 4), (2, 2), (2, 4)], chunk: 788 }, reads: [472, 203, 21] }

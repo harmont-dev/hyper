@@ -64,6 +64,10 @@ name = "e2e_img"
 path = "tests/e2e/img.rs"
 
 [[test]]
+name = "e2e_dm_hostile"
+path = "tests/e2e/dm_hostile.rs"
+
+[[test]]
 name = "config_uid_gid_range"
 path = "tests/config_uid_gid_range.rs"
 
@@ -74,6 +78,10 @@ path = "tests/config_paths.rs"
 [[test]]
 name = "dm_backing"
 path = "tests/dm/backing.rs"
+
+[[test]]
+name = "cli_fork_delta_copy"
+path = "tests/cli/fork_delta_copy.rs"
 
 [lints.clippy]
 redundant_field_names = "allow"

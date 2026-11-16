@@ -2,7 +2,7 @@ use crate::cli::Op;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, TableError};
 use hyperrs_linux::dm::{
-    self, DmTable, LinearTable, Origin, RemoveMode, Role, SnapshotTable, ThinTable,
+    self, DevPath, DmTable, LinearTable, Origin, RemoveMode, Role, SnapshotTable, ThinTable,
 };
 use hyperrs_linux::loopdev::{self, LoopControl};
 use hyperrs_linux::Access;
@@ -61,6 +61,8 @@ pub enum DmError {
     FileSize(#[source] nix::Error),
     #[error("the table has no device to size it from")]
     Unsized,
+    #[error(transparent)]
+    LoopPath(#[from] dm::DevPathError),
 }
 
 impl Op for Remove {
@@ -114,7 +116,7 @@ impl HyperDmTable {
                     Role::Metadata | Role::Data => Access::ReadWrite,
                 };
                 let device = control.attach(backing.file(), role_access, ATTACH_TIMEOUT)?;
-                let path = device.path().to_owned();
+                let path = DevPath::try_from(device.path().to_owned())?;
                 loops.insert(role, device);
                 Ok::<_, DmError>(path)
             })?;

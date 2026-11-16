@@ -132,6 +132,7 @@ pub enum SnapshotError {
 #[derive(Debug, Clone)]
 pub struct ThinPool<'a> {
     device: Device<'a>,
+    metadata: DeviceNumber,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,19 +151,34 @@ pub struct Thin<'a, S> {
 impl<'a> ThinPool<'a> {
     pub(super) fn open(dmsetup: &'a Dmsetup, name: &DmName) -> Result<Self, ThinPoolError> {
         let table = dmsetup.run([OsStr::new("table"), name.as_ref()])?;
-        match table.lines().collect::<Vec<_>>().as_slice() {
-            [line] if line.split_whitespace().nth(2) == Some("thin-pool") => Ok(Self {
+        match Self::pool_metadata(&table) {
+            Some(metadata) => Ok(Self {
                 device: dmsetup.device(name),
+                metadata,
             }),
-            _ => Err(ThinPoolError::NotAThinPool {
+            None => Err(ThinPoolError::NotAThinPool {
                 name: name.clone(),
                 table,
             }),
         }
     }
 
+    fn pool_metadata(table: &str) -> Option<DeviceNumber> {
+        match table.lines().collect::<Vec<_>>()[..] {
+            [line] => match line.split_whitespace().collect::<Vec<_>>()[..] {
+                [_, _, "thin-pool", metadata, ..] => metadata.parse().ok(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     pub fn device(&self) -> &Device<'a> {
         &self.device
+    }
+
+    pub fn metadata(&self) -> DeviceNumber {
+        self.metadata
     }
 
     pub fn create_thin(&self, id: ThinId) -> Result<Thin<'a, Inactive>, RunError> {
@@ -306,7 +322,7 @@ impl<'a> Thin<'a, Active<'a>> {
 mod tests {
     use super::{
         Inactive, OpenThinError, ParseThinMessageError, SnapshotError, Thin, ThinId, ThinMessage,
-        ThinPoolError,
+        ThinPool, ThinPoolError,
     };
     use crate::dm::{DmName, Dmsetup};
     use assert_fs::fixture::ChildPath;
@@ -408,6 +424,30 @@ mod tests {
     }
 
     const POOL_TABLE: &str = "0 100 thin-pool 7:0 7:1 128 0 0";
+
+    #[rstest]
+    #[case::pool(POOL_TABLE, Some("7:0"))]
+    #[case::pool_with_trailing_newline("0 100 thin-pool 7:0 7:1 128 0 0\n", Some("7:0"))]
+    #[case::linear("0 100 linear 7:0 0", None)]
+    #[case::thin("0 100 thin 7:0 1", None)]
+    #[case::target_in_another_column("0 thin-pool 100 7:0 7:1 128 0 0", None)]
+    #[case::metadata_not_a_device_number("0 100 thin-pool /dev/loop0 7:1 128 0 0", None)]
+    #[case::no_metadata("0 100 thin-pool", None)]
+    #[case::two_pool_segments(
+        "0 100 thin-pool 7:0 7:1 128 0 0\n100 100 thin-pool 7:2 7:3 128 0 0",
+        None
+    )]
+    #[case::empty("", None)]
+    fn only_a_single_thin_pool_segment_names_a_metadata_device(
+        #[case] table: &str,
+        #[case] metadata: Option<&str>,
+    ) {
+        assert_eq!(
+            ThinPool::pool_metadata(table),
+            metadata.map(|m| m.parse().unwrap()),
+            "{table:?}"
+        );
+    }
 
     fn name(s: &str) -> DmName {
         s.parse().unwrap()
