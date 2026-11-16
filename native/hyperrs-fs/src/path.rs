@@ -151,18 +151,17 @@ impl AsRef<Path> for StrictComponentBuf {
     }
 }
 
-/// A path component the kernel can return from `readdir`: like [`StrictComponent`], but whitespace
-/// is allowed. Only for names read back from a directory, never for caller-supplied names.
+/// Like [`StrictComponent`], but whitespace is allowed.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
 #[repr(transparent)]
-pub struct LooseComponent([u8]);
+pub struct ComponentWithWhitespace([u8]);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Debug)]
 #[debug("{:?}", self.as_os_str())]
-pub struct LooseComponentBuf(Box<[u8]>);
+pub struct ComponentWithWhitespaceBuf(Box<[u8]>);
 
-impl LooseComponent {
+impl ComponentWithWhitespace {
     #[ref_cast_custom]
     const fn new_unchecked(bytes: &[u8]) -> &Self;
 
@@ -175,41 +174,41 @@ impl LooseComponent {
     }
 }
 
-impl<'a> TryFrom<&'a OsStr> for &'a LooseComponent {
+impl<'a> TryFrom<&'a OsStr> for &'a ComponentWithWhitespace {
     type Error = ComponentError;
     fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
         check_component(name.as_bytes(), true)?;
-        Ok(LooseComponent::new_unchecked(name.as_bytes()))
+        Ok(ComponentWithWhitespace::new_unchecked(name.as_bytes()))
     }
 }
 
-impl AsRef<Path> for LooseComponent {
+impl AsRef<Path> for ComponentWithWhitespace {
     fn as_ref(&self) -> &Path {
         self.as_path()
     }
 }
 
-impl ToOwned for LooseComponent {
-    type Owned = LooseComponentBuf;
-    fn to_owned(&self) -> LooseComponentBuf {
-        LooseComponentBuf(self.0.into())
+impl ToOwned for ComponentWithWhitespace {
+    type Owned = ComponentWithWhitespaceBuf;
+    fn to_owned(&self) -> ComponentWithWhitespaceBuf {
+        ComponentWithWhitespaceBuf(self.0.into())
     }
 }
 
-impl Deref for LooseComponentBuf {
-    type Target = LooseComponent;
-    fn deref(&self) -> &LooseComponent {
-        LooseComponent::new_unchecked(&self.0)
+impl Deref for ComponentWithWhitespaceBuf {
+    type Target = ComponentWithWhitespace;
+    fn deref(&self) -> &ComponentWithWhitespace {
+        ComponentWithWhitespace::new_unchecked(&self.0)
     }
 }
 
-impl Borrow<LooseComponent> for LooseComponentBuf {
-    fn borrow(&self) -> &LooseComponent {
+impl Borrow<ComponentWithWhitespace> for ComponentWithWhitespaceBuf {
+    fn borrow(&self) -> &ComponentWithWhitespace {
         self
     }
 }
 
-impl AsRef<Path> for LooseComponentBuf {
+impl AsRef<Path> for ComponentWithWhitespaceBuf {
     fn as_ref(&self) -> &Path {
         self.as_path()
     }
@@ -449,7 +448,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        ComponentError, IsAbsolute, LooseComponent, RelativeError, SafePath, SafePathBuf,
+        ComponentError, ComponentWithWhitespace, IsAbsolute, RelativeError, SafePath, SafePathBuf,
         StrictComponent, StrictComponents, ValidationError,
     };
     use pretty_assertions::assert_eq;
@@ -557,7 +556,10 @@ mod tests {
         };
         let bad = OsStr::new(&bad);
         assert_matches!(<&StrictComponent>::try_from(bad), Err(ComponentError::Nul));
-        assert_matches!(<&LooseComponent>::try_from(bad), Err(ComponentError::Nul));
+        assert_matches!(
+            <&ComponentWithWhitespace>::try_from(bad),
+            Err(ComponentError::Nul)
+        );
     }
 
     #[proptest]

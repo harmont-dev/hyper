@@ -6,7 +6,7 @@ use super::file::{
     Any, DeviceType, FileType, IsDirectory, OpenFlags, Owner, Ownership, SafeFile, ValidationError,
     Writability,
 };
-use super::path::{LooseComponent, LooseComponentBuf, StrictComponent};
+use super::path::{ComponentWithWhitespace, ComponentWithWhitespaceBuf, StrictComponent};
 use nix::dir::{Dir, Type};
 use nix::errno::Errno;
 use nix::fcntl::{openat2, AtFlags, OFlag, OpenHow, ResolveFlag};
@@ -55,8 +55,8 @@ type FileId = (libc::dev_t, libc::ino_t);
 
 struct Ancestor {
     id: FileId,
-    name: LooseComponentBuf,
-    subdirs: Vec<LooseComponentBuf>,
+    name: ComponentWithWhitespaceBuf,
+    subdirs: Vec<ComponentWithWhitespaceBuf>,
 }
 
 /// See [`SafeFile<IsDirectory, R, O>`].
@@ -168,7 +168,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     ///
     /// Note that this must remain private as this function is a footgun. It's very dangerous and
     /// risky to use this function as it causes an array of TOCTOU bugs.
-    fn statat(&self, name: &LooseComponent) -> nix::Result<FileStat> {
+    fn statat(&self, name: &ComponentWithWhitespace) -> nix::Result<FileStat> {
         let how = OpenHow::new()
             .flags(OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC)
             .resolve(ResolveFlag::RESOLVE_NO_SYMLINKS | ResolveFlag::RESOLVE_BENEATH);
@@ -234,7 +234,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
         Ok(self.rmdirat(name)?)
     }
 
-    fn unlink_non_dirs(&self) -> Result<Vec<LooseComponentBuf>, DirError> {
+    fn unlink_non_dirs(&self) -> Result<Vec<ComponentWithWhitespaceBuf>, DirError> {
         let mut subdirs = Vec::new();
         for entry in self.entries()? {
             match entry? {
@@ -266,7 +266,8 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
     /// Get an iterator through all the entries in this directory.
     pub fn entries(
         &self,
-    ) -> Result<impl Iterator<Item = nix::Result<(LooseComponentBuf, Type)>> + '_, DirError> {
+    ) -> Result<impl Iterator<Item = nix::Result<(ComponentWithWhitespaceBuf, Type)>> + '_, DirError>
+    {
         let fresh: SafeDir = self.openat(Path::new("."), OpenFlags::RDONLY, Mode::empty())?;
 
         Ok(Dir::from(OwnedFd::from(fresh))?
@@ -282,7 +283,7 @@ impl<R: Ownership, O: Writability> SafeFile<IsDirectory, R, O> {
                     return None;
                 }
 
-                let name: &LooseComponent = match OsStr::from_bytes(bytes).try_into() {
+                let name: &ComponentWithWhitespace = match OsStr::from_bytes(bytes).try_into() {
                     Ok(name) => name,
                     Err(_) => return Some(Err(Errno::EINVAL)),
                 };
