@@ -152,7 +152,7 @@ defmodule Hyper.Node.FireVMM.Agent do
   @spec await_body(pid(), reference(), integer(), iodata()) :: result()
   defp await_body(conn, ref, deadline, acc) do
     case :gun.await(conn, ref, remaining(deadline)) do
-      {:data, :nofin, data} -> await_body(conn, ref, deadline, [acc | data])
+      {:data, :nofin, data} -> await_body(conn, ref, deadline, [acc, data])
       {:data, :fin, _data} -> {:error, {:bad_agent_reply, :no_trailers}}
       {:trailers, trailers} -> reply(trailers, IO.iodata_to_binary(acc))
       {:error, _} = err -> err
@@ -208,5 +208,6 @@ defmodule Hyper.Node.FireVMM.Agent do
   end
 
   @spec remaining(integer()) :: non_neg_integer()
-  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+  defp remaining(deadline) when is_integer(deadline),
+    do: max(deadline - System.monotonic_time(:millisecond), 0)
 end
