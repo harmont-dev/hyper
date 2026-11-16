@@ -446,4 +446,17 @@ mod tests {
         ]);
         assert_eq!(got, want);
     }
+
+    #[rstest]
+    fn id_names_one_directory_however_it_is_reached(tmp: TempDir) {
+        tmp.child("a/child").create_dir_all().unwrap();
+        tmp.child("b").create_dir_all().unwrap();
+        let root = open(tmp.path());
+        let a: SafeDir = root.openat("a", OpenFlags::RDONLY, Mode::empty()).unwrap();
+        let b: SafeDir = root.openat("b", OpenFlags::RDONLY, Mode::empty()).unwrap();
+        let child: SafeDir = a.openat("child", OpenFlags::RDONLY, Mode::empty()).unwrap();
+
+        assert_eq!(child.parent().unwrap().id().unwrap(), a.id().unwrap());
+        assert_ne!(a.id().unwrap(), b.id().unwrap());
+    }
 }

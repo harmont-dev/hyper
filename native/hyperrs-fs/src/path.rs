@@ -449,13 +449,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        ComponentError, IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent,
-        StrictComponents, ValidationError,
+        ComponentError, IsAbsolute, LooseComponent, RelativeError, SafePath, SafePathBuf,
+        StrictComponent, StrictComponents, ValidationError,
     };
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
     use std::assert_matches;
+    use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use test_strategy::proptest;
 
@@ -541,6 +542,22 @@ mod tests {
             Strict::try_from(path),
             Err(ValidationError::Component(ComponentError::Whitespace))
         );
+    }
+
+    #[proptest]
+    fn rejects_a_nul_byte_anywhere_in_any_component_kind(
+        #[strategy(safe_component())] head: String,
+        #[strategy(safe_component())] tail: String,
+        #[strategy(0usize..3)] at: usize,
+    ) {
+        let bad = match at {
+            0 => format!("\0{head}"),
+            1 => format!("{head}\0{tail}"),
+            _ => format!("{head}\0"),
+        };
+        let bad = OsStr::new(&bad);
+        assert_matches!(<&StrictComponent>::try_from(bad), Err(ComponentError::Nul));
+        assert_matches!(<&LooseComponent>::try_from(bad), Err(ComponentError::Nul));
     }
 
     #[proptest]

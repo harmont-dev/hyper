@@ -407,11 +407,12 @@ mod tests {
         RootOwner, SafeFile, ValidationError,
     };
     use crate::dir::SafeDir;
-    use crate::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use crate::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
     use assert_fs::fixture::ChildPath;
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
     use nix::errno::Errno;
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
     use nix::sys::stat::Mode;
     use pretty_assertions::assert_eq;
     use rstest::{fixture, rstest};
@@ -419,6 +420,7 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::io::AsRawFd;
     use std::path::Path;
 
     type Strict = SafePathBuf<IsAbsolute, StrictComponents>;
@@ -541,5 +543,36 @@ mod tests {
             Err(ValidationError::Open(Errno::ELOOP)),
             "{path} with {flags:?}"
         );
+    }
+
+    type Opened = Result<SafeFile<Any, Any, Any>, ValidationError>;
+
+    #[rstest]
+    #[case::path_probe(|dir: &SafeDir| -> Opened {
+        dir.openat(Path::new("plain"), OpenFlags::PATH, Mode::empty())
+    })]
+    #[case::reopened(|dir: &SafeDir| -> Opened {
+        dir.openat(Path::new("plain"), OpenFlags::RDONLY, Mode::empty())
+    })]
+    #[case::created_new(|dir: &SafeDir| -> Opened {
+        dir.mkfileat(StrictComponent::from_static("new"), Mode::from_bits_truncate(0o600))
+    })]
+    #[case::created(|dir: &SafeDir| -> Opened {
+        dir.openat(
+            Path::new("new"),
+            OpenFlags::WRONLY | OpenFlags::CREATE,
+            Mode::from_bits_truncate(0o600),
+        )
+    })]
+    fn every_open_is_close_on_exec(
+        plain: (TempDir, ChildPath),
+        #[case] open: fn(&SafeDir) -> Opened,
+    ) {
+        let (tmp, _) = plain;
+        let dir = SafeDir::open(&safe(tmp.path()), OpenFlags::RDONLY).unwrap();
+        let file = open(&dir).unwrap();
+        let fd_flags =
+            FdFlag::from_bits_truncate(fcntl(file.as_raw_fd(), FcntlArg::F_GETFD).unwrap());
+        assert!(fd_flags.contains(FdFlag::FD_CLOEXEC), "{fd_flags:?}");
     }
 }

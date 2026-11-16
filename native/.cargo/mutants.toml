@@ -31,6 +31,9 @@ exclude_re = [
     "guest-agent/src/net\\.rs:.*GuestNet::(from_proc|configure)",
     # Equivalent: the VM range tag and a NetId never share bits with a normalised /64.
     "replace \\| with \\^ in NodePrefix::(vm_range|guest)$",
+    # Equivalent: the operands never share a bit (no OpenFlags carries O_EXCL without O_CREAT,
+    # nor O_DIRECTORY or O_CLOEXEC; the RESOLVE_* flags are distinct bits).
+    "hyperrs-fs/src/(dir|file)\\.rs:.*replace \\| with \\^ in SafeFile<.*>::(openat|open_at|open_raw)$",
     # Equivalent: the dst-nat chain runs after conntrack and before routing at -100 or 100.
     "suidhelper/src/net/mod\\.rs:\\d+:\\d+: delete -$",
 ]
