@@ -54,33 +54,24 @@ impl StrictComponent {
     #[ref_cast_custom]
     const fn new_unchecked(bytes: &[u8]) -> &Self;
 
-    const fn check(bytes: &[u8]) -> Result<(), ComponentError> {
-        match bytes {
-            [] => return Err(ComponentError::Empty),
-            b"." => return Err(ComponentError::CurrentDir),
-            b".." => return Err(ComponentError::ParentDir),
-            _ => {}
-        }
-        if bytes.len() > NAME_MAX {
-            return Err(ComponentError::TooLong(bytes.len()));
-        }
+    const fn from_bytes(bytes: &[u8]) -> Result<&Self, ComponentError> {
+        let name = match ComponentWithWhitespace::from_bytes(bytes) {
+            Ok(name) => name,
+            Err(e) => return Err(e),
+        };
         let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'/' => return Err(ComponentError::Separator),
-                0 => return Err(ComponentError::Nul),
-                b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' => {
-                    return Err(ComponentError::Whitespace)
-                }
-                _ => i += 1,
+        while i < name.0.len() {
+            if matches!(name.0[i], b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r') {
+                return Err(ComponentError::Whitespace);
             }
+            i += 1;
         }
-        Ok(())
+        Ok(Self::new_unchecked(&name.0))
     }
 
     pub const fn from_static(name: &'static str) -> &'static Self {
-        match Self::check(name.as_bytes()) {
-            Ok(()) => Self::new_unchecked(name.as_bytes()),
+        match Self::from_bytes(name.as_bytes()) {
+            Ok(name) => name,
             Err(_) => panic!("not a strict path component"),
         }
     }
@@ -97,8 +88,7 @@ impl StrictComponent {
 impl<'a> TryFrom<&'a OsStr> for &'a StrictComponent {
     type Error = ComponentError;
     fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
-        StrictComponent::check(name.as_bytes())?;
-        Ok(StrictComponent::new_unchecked(name.as_bytes()))
+        StrictComponent::from_bytes(name.as_bytes())
     }
 }
 
@@ -142,6 +132,89 @@ impl Borrow<StrictComponent> for StrictComponentBuf {
 }
 
 impl AsRef<Path> for StrictComponentBuf {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+/// Like [`StrictComponent`], but whitespace is allowed.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
+#[repr(transparent)]
+pub struct ComponentWithWhitespace([u8]);
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Debug)]
+#[debug("{:?}", self.as_os_str())]
+pub struct ComponentWithWhitespaceBuf(Box<[u8]>);
+
+impl ComponentWithWhitespace {
+    #[ref_cast_custom]
+    const fn new_unchecked(bytes: &[u8]) -> &Self;
+
+    const fn from_bytes(bytes: &[u8]) -> Result<&Self, ComponentError> {
+        match bytes {
+            [] => return Err(ComponentError::Empty),
+            b"." => return Err(ComponentError::CurrentDir),
+            b".." => return Err(ComponentError::ParentDir),
+            _ => {}
+        }
+        if bytes.len() > NAME_MAX {
+            return Err(ComponentError::TooLong(bytes.len()));
+        }
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'/' => return Err(ComponentError::Separator),
+                0 => return Err(ComponentError::Nul),
+                _ => i += 1,
+            }
+        }
+        Ok(Self::new_unchecked(bytes))
+    }
+
+    pub fn as_os_str(&self) -> &OsStr {
+        OsStr::from_bytes(&self.0)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        Path::new(self.as_os_str())
+    }
+}
+
+impl<'a> TryFrom<&'a OsStr> for &'a ComponentWithWhitespace {
+    type Error = ComponentError;
+    fn try_from(name: &'a OsStr) -> Result<Self, Self::Error> {
+        ComponentWithWhitespace::from_bytes(name.as_bytes())
+    }
+}
+
+impl AsRef<Path> for ComponentWithWhitespace {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
+
+impl ToOwned for ComponentWithWhitespace {
+    type Owned = ComponentWithWhitespaceBuf;
+    fn to_owned(&self) -> ComponentWithWhitespaceBuf {
+        ComponentWithWhitespaceBuf(self.0.into())
+    }
+}
+
+impl Deref for ComponentWithWhitespaceBuf {
+    type Target = ComponentWithWhitespace;
+    fn deref(&self) -> &ComponentWithWhitespace {
+        ComponentWithWhitespace::new_unchecked(&self.0)
+    }
+}
+
+impl Borrow<ComponentWithWhitespace> for ComponentWithWhitespaceBuf {
+    fn borrow(&self) -> &ComponentWithWhitespace {
+        self
+    }
+}
+
+impl AsRef<Path> for ComponentWithWhitespaceBuf {
     fn as_ref(&self) -> &Path {
         self.as_path()
     }
@@ -205,7 +278,7 @@ const fn check_strict_components(raw: &[u8]) -> Result<(), ComponentError> {
             end += 1;
         }
         let (segment, tail) = rest.split_at(end);
-        if let Err(e) = StrictComponent::check(segment) {
+        if let Err(e) = StrictComponent::from_bytes(segment) {
             return Err(e);
         }
         match tail {
@@ -381,13 +454,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        ComponentError, IsAbsolute, RelativeError, SafePath, SafePathBuf, StrictComponent,
-        StrictComponents, ValidationError,
+        ComponentError, ComponentWithWhitespace, IsAbsolute, RelativeError, SafePath, SafePathBuf,
+        StrictComponent, StrictComponents, ValidationError,
     };
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use rstest::rstest;
     use std::assert_matches;
+    use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use test_strategy::proptest;
 
@@ -472,6 +546,25 @@ mod tests {
         assert_matches!(
             Strict::try_from(path),
             Err(ValidationError::Component(ComponentError::Whitespace))
+        );
+    }
+
+    #[proptest]
+    fn rejects_a_nul_byte_anywhere_in_any_component_kind(
+        #[strategy(safe_component())] head: String,
+        #[strategy(safe_component())] tail: String,
+        #[strategy(0usize..3)] at: usize,
+    ) {
+        let bad = match at {
+            0 => format!("\0{head}"),
+            1 => format!("{head}\0{tail}"),
+            _ => format!("{head}\0"),
+        };
+        let bad = OsStr::new(&bad);
+        assert_matches!(<&StrictComponent>::try_from(bad), Err(ComponentError::Nul));
+        assert_matches!(
+            <&ComponentWithWhitespace>::try_from(bad),
+            Err(ComponentError::Nul)
         );
     }
 

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc cb517a93f9b9b43a5b0c16e00ed4a9f6594a61befc18e55a9f09e5c404588253 # shrinks to children = [Dir([File, File])], names = [[97], [97], [116, 119, 111, 32, 119, 111, 114, 100, 115], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97], [97]]
