@@ -1,9 +1,12 @@
 //! Utilities for interacting with binaries.
-use hyperrs_fs::file::{self, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile};
+use hyperrs_fs::file::{
+    self, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable, RootOwner, SafeFile,
+    StickyOrOwnerOnlyWritable,
+};
 use hyperrs_fs::path::{self, IsAbsolute, SafePath, StrictComponent, StrictComponents};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
-use nix::sys::stat::{lstat, Mode, SFlag};
+use nix::sys::stat::Mode;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -31,17 +34,17 @@ pub enum RootSafeBinError {
     },
     #[error("binary {path}: clearing FD_CLOEXEC: {errno}")]
     Inherit { path: PathBuf, errno: Errno },
-    #[error("binary {path}: stat-ing parent {dir}: {errno}")]
-    ParentStat {
+    #[error("binary {path}: parent {dir}: {source}")]
+    Parent {
         path: PathBuf,
         dir: PathBuf,
-        errno: Errno,
+        #[source]
+        source: file::ValidationError,
     },
-    #[error("binary {path}: parent {dir} is not a directory only root can write")]
-    UnsafeParent { path: PathBuf, dir: PathBuf },
 }
 
 type Executable = SafeFile<IsRegularFile, RootOwner, OwnerOnlyWritable>;
+type RootOnlyDir = SafeFile<IsDirectory, RootOwner, StickyOrOwnerOnlyWritable>;
 
 /// A binary that's safe for the root user to use.
 #[derive(Debug)]
@@ -102,8 +105,16 @@ impl<const NAME: &'static str> RootSafeBinPathBuf<NAME> {
         // cannot be swapped, so the path cannot change under the checks that follow.
         let mut parents: Vec<&Path> = strict(bin)?.as_path().ancestors().skip(1).collect();
         parents.reverse();
-        for dir in parents {
-            root_only_writable(bin, dir)?;
+        let (root, below) = parents
+            .split_first()
+            .expect("an absolute path has `/` above it");
+        let mut vetted =
+            RootOnlyDir::open(strict(root)?, OpenFlags::PATH).map_err(parent(bin, root))?;
+        for dir in below {
+            let name = dir.file_name().expect("a strict path has no `..`");
+            vetted = vetted
+                .openat(name, OpenFlags::PATH, Mode::empty())
+                .map_err(parent(bin, dir))?;
         }
         RootSafeBin::<NAME>::open(bin)?;
         Ok(Self(bin.to_path_buf()))
@@ -121,24 +132,14 @@ fn strict(bin: &Path) -> Result<&SafePath<IsAbsolute, StrictComponents>, RootSaf
     })
 }
 
-fn root_only_writable(bin: &Path, dir: &Path) -> Result<(), RootSafeBinError> {
-    let stat = lstat(dir).map_err(|errno| RootSafeBinError::ParentStat {
+fn parent<'a>(
+    bin: &'a Path,
+    dir: &'a Path,
+) -> impl FnOnce(file::ValidationError) -> RootSafeBinError + 'a {
+    move |source| RootSafeBinError::Parent {
         path: bin.to_path_buf(),
         dir: dir.to_path_buf(),
-        errno,
-    })?;
-    let is_dir = stat.st_mode & SFlag::S_IFMT.bits() == SFlag::S_IFDIR.bits();
-    let mode = Mode::from_bits_truncate(stat.st_mode);
-    // In a sticky directory only root can rename or unlink a root-owned entry, and every entry
-    // on the path must be root-owned, so a shared sticky directory (`/tmp`) is still safe.
-    let shared = mode.intersects(Mode::S_IWGRP | Mode::S_IWOTH) && !mode.contains(Mode::S_ISVTX);
-    if is_dir && stat.st_uid == 0 && !shared {
-        Ok(())
-    } else {
-        Err(RootSafeBinError::UnsafeParent {
-            path: bin.to_path_buf(),
-            dir: dir.to_path_buf(),
-        })
+        source,
     }
 }
 
@@ -153,8 +154,10 @@ mod tests {
     use super::{RootSafeBin, RootSafeBinError, RootSafeBinPathBuf};
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use hyperrs_fs::file::ValidationError::{self, GroupOrOtherWritable, NotRootOwned};
     use rstest::{fixture, rstest};
     use std::fs;
+    use std::mem::discriminant;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
@@ -229,7 +232,7 @@ mod tests {
         let got = RootSafeBinPathBuf::<"dmsetup">::open(&bin);
 
         assert!(
-            matches!(got, Err(RootSafeBinError::UnsafeParent { ref dir, .. }) if dir == tmp.path()),
+            matches!(got, Err(RootSafeBinError::Parent { ref dir, source: NotRootOwned, .. }) if dir == tmp.path()),
             "{got:?}"
         );
     }
@@ -239,16 +242,16 @@ mod tests {
     // after it was checked. Any directory on the path that someone other than root can rewrite
     // is refused, at any depth; a sticky one is not, since its root-owned entries stay put.
     #[rstest]
-    #[case::root_0755(0o755, 0, true)]
-    #[case::root_sticky_world_writable(0o1777, 0, true)]
-    #[case::owned_by_another_user(0o755, 65_534, false)]
-    #[case::group_writable(0o775, 0, false)]
-    #[case::other_writable(0o757, 0, false)]
+    #[case::root_0755(0o755, 0, None)]
+    #[case::root_sticky_world_writable(0o1777, 0, None)]
+    #[case::owned_by_another_user(0o755, 65_534, Some(NotRootOwned))]
+    #[case::group_writable(0o775, 0, Some(GroupOrOtherWritable))]
+    #[case::other_writable(0o757, 0, Some(GroupOrOtherWritable))]
     fn path_binary_is_accepted_exactly_when_only_root_can_rewrite_its_parents_as_root(
         dir: TempDir,
         #[case] mode: u32,
         #[case] uid: u32,
-        #[case] accepted: bool,
+        #[case] refusal: Option<ValidationError>,
         #[values(0, 1)] depth: usize,
     ) {
         if !is_root() {
@@ -269,13 +272,13 @@ mod tests {
 
         let got = RootSafeBinPathBuf::<"dmsetup">::open(&bin);
 
-        if accepted {
-            assert!(got.is_ok(), "{got:?}");
-        } else {
-            assert!(
-                matches!(got, Err(RootSafeBinError::UnsafeParent { ref dir, .. }) if dir == loose.path()),
+        match refusal {
+            None => assert!(got.is_ok(), "{got:?}"),
+            Some(want) => assert!(
+                matches!(got, Err(RootSafeBinError::Parent { ref dir, source, .. })
+                    if dir == loose.path() && discriminant(&source) == discriminant(&want)),
                 "{got:?}"
-            );
+            ),
         }
     }
 }
