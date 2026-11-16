@@ -14,6 +14,7 @@ use hyperrs_linux::dm::{DevPath, DmName, DmTable, Dmsetup, LinearTable, Origin, 
 use hyperrs_linux::loopdev::{LoopControl, LoopDevice};
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBin;
+use hyperrs_process::privilege::Unprivileged;
 use pretty_assertions::assert_eq;
 use rstest::rstest;
 use std::ffi::OsStr;
@@ -66,6 +67,8 @@ fn a_linear_table_is_backed_by_the_path_it_names_as_root(
         eprintln!("SKIP: needs root");
         return;
     }
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
     let dir = TempDir::new().unwrap();
     let base = fs::canonicalize(dir.path()).unwrap();
     let wanted = attach(&base.join("wanted.img"));
@@ -86,7 +89,7 @@ fn a_linear_table_is_backed_by_the_path_it_names_as_root(
         sectors: 8,
         origin: Origin::Path(origin),
     });
-    let device = dm.create(&name, &table, Access::ReadOnly).unwrap();
+    let device = dm.create(&root, &name, &table, Access::ReadOnly).unwrap();
 
     let live = Command::new(DMSETUP)
         .args(["table", &name.to_string()])
