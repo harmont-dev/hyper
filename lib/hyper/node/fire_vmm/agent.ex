@@ -70,7 +70,7 @@ defmodule Hyper.Node.FireVMM.Agent do
     end
   end
 
-  @spec call(GRPC.Channel.t(), ExecRequest.t(), timeout()) :: Task.t()
+  @spec call(%GRPC.Channel{}, ExecRequest.t(), timeout()) :: Task.t()
   defp call(ch, req, timeout) do
     Task.async(fn ->
       try do

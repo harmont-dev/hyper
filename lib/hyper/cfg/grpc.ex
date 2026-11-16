@@ -39,7 +39,7 @@ defmodule Hyper.Cfg.Grpc do
   @type t :: %__MODULE__{
           enabled: boolean(),
           port: :inet.port_number(),
-          cred: GRPC.Credential.t() | nil,
+          cred: %GRPC.Credential{} | nil,
           adapter_opts: keyword()
         }
 
@@ -55,7 +55,7 @@ defmodule Hyper.Cfg.Grpc do
     }
   end
 
-  @spec cred(term()) :: GRPC.Credential.t() | nil
+  @spec cred(term()) :: %GRPC.Credential{} | nil
   defp cred(nil), do: nil
   defp cred(%GRPC.Credential{} = c), do: c
 

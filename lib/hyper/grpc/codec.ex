@@ -138,7 +138,7 @@ defmodule Hyper.Grpc.Codec do
   @spec to_grpc(:firewall_set) :: SetVmFirewallResponse.t()
   def to_grpc(:firewall_set), do: %SetVmFirewallResponse{}
 
-  @spec to_grpc({:error, term()}) :: GRPC.RPCError.t()
+  @spec to_grpc({:error, term()}) :: %GRPC.RPCError{}
   def to_grpc({:error, reason}), do: rpc_error(reason)
 
   @spec vm({Hyper.Vm.Id.t(), node()}) :: Vm.t()
@@ -190,7 +190,7 @@ defmodule Hyper.Grpc.Codec do
   defp reserved_boot_arg?(arg),
     do: arg == "--" or String.starts_with?(arg, ["ip=", "nfsaddrs=", "hyper."])
 
-  @spec rpc_error(term()) :: GRPC.RPCError.t()
+  @spec rpc_error(term()) :: %GRPC.RPCError{}
   defp rpc_error(:missing_img_id),
     do: GRPC.RPCError.exception(:invalid_argument, "img_id is required")
 
