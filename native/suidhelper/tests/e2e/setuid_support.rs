@@ -95,6 +95,15 @@ pub fn static_insecure_helper() -> PathBuf {
         // Root's cargo exports its own CARGO_HOME, which the invoker cannot write;
         // without it cargo falls back to the invoker's $HOME/.cargo.
         cargo.env_remove("CARGO_HOME");
+        // Root may have created target/ first (the coverage run does), so hand the
+        // build its own directories rather than asking the invoker to create them.
+        fs::create_dir_all(&target_dir).expect("creating the helper's target dir");
+        for dir in [
+            target_dir.parent().expect("target dir has a parent"),
+            &target_dir,
+        ] {
+            std::os::unix::fs::chown(dir, Some(uid), Some(gid)).expect("chowning target dir");
+        }
         cargo.uid(uid).gid(gid);
     }
     assert!(
