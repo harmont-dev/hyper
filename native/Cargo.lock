@@ -972,6 +972,7 @@ dependencies = [
  "nix 0.29.0",
  "pid1",
  "pretty_assertions",
+ "proptest",
  "prost",
  "rstest",
  "thiserror 1.0.69",

@@ -94,6 +94,12 @@ ipv6_prefix="${ipv6_prefix:-2001:db8::/64}"
 # carries IPv6 link-local addresses, so it must be on.
 sudo sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0
 sudo sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1
+# The runner's Docker sets the iptables forward policy to drop, which drops VM
+# traffic too (install.md: allow forwarding to and from vm-veth-*).
+for ipt in iptables ip6tables; do
+  sudo "$ipt" -I FORWARD -i 'vm-veth+' -j ACCEPT
+  sudo "$ipt" -I FORWARD -o 'vm-veth+' -j ACCEPT
+done
 
 sudo mkdir -p /etc/hyper
 sudo tee /etc/hyper/config.toml >/dev/null <<EOF
