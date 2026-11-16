@@ -8,7 +8,10 @@
 //!     `ceil(available bytes / chunk)`;
 //!   * metamorphic: short reads, short writes and `Interrupted` reads (all
 //!     legal per `std::io`) change nothing about the result;
-//!   * any other I/O error from either side is propagated, never swallowed.
+//!   * any other I/O error from either side is propagated, never swallowed;
+//!   * confinement: every read asks for at least one byte and lies wholly
+//!     inside one listed range, so a source that fails any other read
+//!     changes nothing.
 
 use hyper_suidhelper::cli::fork_delta::copy_ranges;
 use hyperrs_linux::dm::thin_dump::{BlockRange, ThinMappings};
@@ -309,4 +312,49 @@ fn an_io_error_on_either_side_is_propagated(
         budget,
         total
     );
+}
+
+struct Confined {
+    inner: Cursor<Vec<u8>>,
+    ranges: Vec<(u64, u64)>,
+}
+
+impl Read for Confined {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let start = self.inner.position();
+        let end = start + buf.len() as u64;
+        if start < end && self.ranges.iter().any(|&(a, b)| a <= start && end <= b) {
+            self.inner.read(buf)
+        } else {
+            Err(io::Error::other(format!(
+                "read outside the ranges: {start}..{end}"
+            )))
+        }
+    }
+}
+
+impl Seek for Confined {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+#[proptest(ProptestConfig::with_cases(256))]
+fn reads_never_leave_the_listed_ranges(#[strategy(case())] c: Case) {
+    let bb = c.block_sectors * SECTOR;
+    let mut src = Confined {
+        inner: Cursor::new(c.src.clone()),
+        ranges: c
+            .ranges
+            .iter()
+            .map(|&(begin, length)| (begin * bb, (begin + length) * bb))
+            .collect(),
+    };
+    let mut dst = Cursor::new(vec![SENTINEL; c.src.len()]);
+
+    let got = run(&c, &mut src, &mut dst);
+
+    let (target, expected_stats) = baseline(&c);
+    prop_assert_eq!(got.unwrap(), expected_stats);
+    prop_assert!(dst.into_inner() == target);
 }
