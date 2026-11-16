@@ -34,7 +34,8 @@ defmodule Hyper.Img do
   failure -- so the caller hands off ownership.
 
   `opts[:label]` sets the human-readable `images.label` (defaults to the basename
-  of `path`).
+  of `path`). A label Postgres `text` cannot store (NUL, invalid UTF-8) is
+  `{:error, :bad_label}`, refused before anything is published.
 
   Idempotent: creating identical bytes again is a no-op that returns the same id.
   """
@@ -43,7 +44,8 @@ defmodule Hyper.Img do
   def create(path, opts \\ []) do
     label = Keyword.get(opts, :label, Path.basename(path))
 
-    with {:ok, %File.Stat{size: size}} <- File.stat(path),
+    with :ok <- check_label(label),
+         {:ok, %File.Stat{size: size}} <- File.stat(path),
          {:ok, id} <- content_id(path),
          {:ok, final, origin} <- publish(path, id),
          :ok <- record_or_rollback(id, label, size, final, origin) do
@@ -114,6 +116,10 @@ defmodule Hyper.Img do
         err
     end
   end
+
+  @spec check_label(String.t()) :: :ok | {:error, :bad_label}
+  defp check_label(label),
+    do: if(Hyper.Img.Db.Repo.storable_text?(label), do: :ok, else: {:error, :bad_label})
 
   @spec parent_chain(id()) :: {:ok, [String.t()]} | {:error, {:unknown_parent_image, id()}}
   defp parent_chain(parent_img_id) do

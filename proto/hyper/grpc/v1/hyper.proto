@@ -14,7 +14,9 @@ package hyper.grpc.v1;
 // The VM lifecycle service.
 //
 // Errors are returned as standard gRPC statuses (see each RPC). Beyond the ones
-// listed, any RPC may return INTERNAL for an unexpected server-side failure.
+// listed, any RPC may return INTERNAL for an unexpected server-side failure, and
+// INVALID_ARGUMENT for a request that does not decode (e.g. a `string` field
+// that is not UTF-8).
 service Hyper {
   // Create and boot a microVM from an image.
   //
@@ -26,6 +28,7 @@ service Hyper {
   // Errors:
   //   INVALID_ARGUMENT  -- `img_id` is empty, or an enum field holds an
   //                       unrecognised value.
+  //   NOT_FOUND         -- no image with this `img_id` exists.
   //   RESOURCE_EXHAUSTED -- no node in the cluster has spare capacity.
   //   UNAVAILABLE       -- the VM was placed but its host became unreachable
   //                       before its id could be confirmed.
@@ -89,7 +92,8 @@ service Hyper {
   // Returns the content-addressed `img_id` to pass to CreateVm.
   //
   // Errors:
-  //   INVALID_ARGUMENT    -- `image_ref` is empty or malformed.
+  //   INVALID_ARGUMENT    -- `image_ref` is empty or malformed, or `label`
+  //                         contains NUL.
   //   FAILED_PRECONDITION -- the node lacks the required tools (skopeo/umoci/mke2fs).
   //   INTERNAL            -- the pull, unpack, build, publish, or DB record failed.
   rpc LoadImage(LoadImageRequest) returns (LoadImageResponse);
