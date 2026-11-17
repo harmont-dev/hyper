@@ -4,8 +4,8 @@ use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable};
 use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, NumberError, OpenThinError, Origin, RemoveMode, Role, RunError,
-    SnapshotError, ThinId, ThinPoolError, ThinPoolTable,
+    self, DevPath, DmTable, NoSpace, NumberError, OpenThinError, Origin, RemoveMode, Role,
+    RunError, SnapshotError, ThinId, ThinPoolError, ThinPoolTable,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
@@ -86,6 +86,7 @@ impl Op for ThinPoolCreate {
             data: self.data,
             block_sectors: self.block_sectors,
             low_water: self.low_water,
+            no_space: NoSpace::Error,
         }))
         .map_err(DmError::from)?;
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);

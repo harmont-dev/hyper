@@ -10,8 +10,8 @@
 //!   * a thin message renders to at most three tokens and round-trips.
 
 use hyperrs_linux::dm::{
-    DevPath, DmName, DmTable, LinearTable, Origin, Persistence, Role, SnapshotTable, ThinMessage,
-    ThinPoolTable, ThinTable,
+    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, Persistence, Role, SnapshotTable,
+    ThinMessage, ThinPoolTable, ThinTable,
 };
 use proptest::prelude::*;
 use std::path::PathBuf;
@@ -119,17 +119,21 @@ fn table(chars: &'static str) -> impl Strategy<Value = DmTable> {
             dev_path(chars),
             dev_path(chars),
             any::<u64>(),
-            any::<u64>()
+            any::<u64>(),
+            prop_oneof![Just(NoSpace::Queue), Just(NoSpace::Error)]
         )
-            .prop_map(|(sectors, metadata, data, block_sectors, low_water)| {
-                DmTable::ThinPool(ThinPoolTable {
-                    sectors,
-                    metadata,
-                    data,
-                    block_sectors,
-                    low_water,
-                })
-            }),
+            .prop_map(
+                |(sectors, metadata, data, block_sectors, low_water, no_space)| {
+                    DmTable::ThinPool(ThinPoolTable {
+                        sectors,
+                        metadata,
+                        data,
+                        block_sectors,
+                        low_water,
+                        no_space,
+                    })
+                }
+            ),
         (
             any::<u64>(),
             dm_name(),

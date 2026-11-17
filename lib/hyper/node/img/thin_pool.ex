@@ -1,9 +1,11 @@
 defmodule Hyper.Node.Img.ThinPool do
   @moduledoc """
-  The node's single dm-thin pool. On start it materialises two sparse backing
-  files in `scratch_dir` (metadata + data), attaches them as writable loop
-  devices, zeroes the metadata (so the kernel treats it as a fresh pool), and
-  creates the `hyper-thinpool` device-mapper pool.
+  The node's single dm-thin pool. On start it materialises two fully allocated
+  backing files in `scratch_dir` (metadata + data, the data sized to
+  `disk_max`), attaches them as writable loop devices, zeroes the metadata (so
+  the kernel treats it as a fresh pool), and creates the `hyper-thinpool`
+  device-mapper pool. A full pool fails writes at once rather than queueing
+  them.
 
   `create_external/3` provisions a thin volume whose unwritten blocks read
   through to a read-only external origin (the composed image device) and whose
@@ -72,10 +74,11 @@ defmodule Hyper.Node.Img.ThinPool do
   @decorate with_span("Hyper.Node.Img.ThinPool.init")
   def init(_opts) do
     Process.flag(:trap_exit, true)
+    data_size = ImgConfig.thin_pool_data_size(Hyper.Cfg.Budget.get().disk_max)
 
     with :ok <- File.mkdir_p(Hyper.Cfg.Dirs.scratch_dir()),
-         {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size()),
-         {:ok, data} <- ensure_backing(@data_file, ImgConfig.thin_pool_data_size()),
+         {:ok, meta} <- ensure_backing(@meta_file, ImgConfig.thin_pool_meta_size(data_size)),
+         {:ok, data} <- ensure_backing(@data_file, data_size),
          {:ok, _pool_dev, _meta_loop} <-
            SuidHelper.Thin.create_pool(@pool_name, meta, data, ImgConfig.thin_block_sectors(), 0) do
       {:ok, %State{}}
@@ -150,23 +153,26 @@ defmodule Hyper.Node.Img.ThinPool do
     state
   end
 
-  # Create a sparse file of `size` if absent; reuse it if already present.
+  # Create or resize `file` to `size` with every block allocated up front: a
+  # sparse file lets the pool promise space its filesystem may not have.
   @spec ensure_backing(String.t(), Information.t()) :: {:ok, Path.t()} | {:error, term()}
   defp ensure_backing(file, size) do
     path = Path.join(Hyper.Cfg.Dirs.scratch_dir(), file)
 
-    case File.open(path, [:write, :read]) do
-      {:ok, io} ->
-        try do
-          {:ok, _} = :file.position(io, Information.as_bytes(size))
-          :ok = :file.truncate(io)
-          {:ok, path}
-        after
-          File.close(io)
-        end
-
-      {:error, reason} ->
-        {:error, {:backing_file, file, reason}}
+    with {:ok, io} <- File.open(path, [:write, :read]),
+         :ok <- allocate(io, Information.as_bytes(size)) do
+      {:ok, path}
+    else
+      {:error, reason} -> {:error, {:backing_file, file, reason}}
     end
+  end
+
+  @spec allocate(File.io_device(), non_neg_integer()) :: :ok | {:error, term()}
+  defp allocate(io, bytes) do
+    {:ok, _} = :file.position(io, bytes)
+    :ok = :file.truncate(io)
+    :file.allocate(io, 0, bytes)
+  after
+    File.close(io)
   end
 end
