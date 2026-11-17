@@ -1,9 +1,9 @@
 //! `copy_ranges` turns a thin device's provisioned ranges into writes on the
 //! fork's COW target; a skipped or invented byte silently corrupts the forked
 //! image. Laws:
-//!   * oracle: for ANY ranges (unsorted, overlapping, past the device end) the
-//!     target equals the source on the union of the clipped ranges and is
-//!     untouched everywhere else;
+//!   * oracle: for ANY ranges inside the device (unsorted, overlapping, ending
+//!     in a partial last block) the target equals the source on the union of
+//!     the ranges clipped to the device end and is untouched everywhere else;
 //!   * oracle: `written_chunks == scanned_chunks ==` the sum over ranges of
 //!     `ceil(available bytes / chunk)`;
 //!   * metamorphic: short reads, short writes and `Interrupted` reads (all
@@ -17,6 +17,7 @@ use hyper_suidhelper::cli::fork_delta::copy_ranges;
 use hyperrs_linux::dm::thin_dump::{BlockRange, ThinMappings};
 use proptest::prelude::*;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+use std::num::NonZeroUsize;
 use test_strategy::proptest;
 
 const SENTINEL: u8 = 0xAA;
@@ -63,7 +64,7 @@ struct Case {
     src: Vec<u8>,
     block_sectors: u64,
     ranges: Vec<(u64, u64)>,
-    chunk: usize,
+    chunk: NonZeroUsize,
 }
 
 impl std::fmt::Debug for Case {
@@ -84,8 +85,13 @@ fn case() -> impl Strategy<Value = Case> {
             (
                 Just(block_sectors),
                 prop::collection::vec(any::<u8>(), (blocks * bb - bb / 2)..=(blocks * bb)),
-                prop::collection::vec((0u64..(blocks as u64 + 4), 1u64..6), 0..8),
-                prop_oneof![1usize..64, 64usize..4096, Just(1 << 20)],
+                prop::collection::vec(
+                    (0..blocks as u64)
+                        .prop_flat_map(move |begin| (Just(begin), 1..=(blocks as u64 - begin))),
+                    0..8,
+                ),
+                prop_oneof![1usize..64, 64usize..4096, Just(1 << 20)]
+                    .prop_map(|bytes| NonZeroUsize::new(bytes).unwrap()),
             )
         })
         .prop_map(|(block_sectors, src, ranges, chunk)| Case {
@@ -126,7 +132,7 @@ fn any_ranges_copy_exactly_their_clipped_union_and_count_their_chunks(#[strategy
         c.src.len() as u64,
         c.block_sectors,
         &c.ranges,
-        c.chunk as u64,
+        c.chunk.get() as u64,
     );
     prop_assert_eq!(written, chunks);
     prop_assert_eq!(scanned, chunks);

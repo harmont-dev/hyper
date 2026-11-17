@@ -21,11 +21,12 @@ use serde::Serialize;
 use serde_with::serde_as;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::num::NonZeroUsize;
 use std::os::fd::AsFd;
 use thiserror::Error as ThisError;
 
 const SECTOR_BYTES: u64 = 512;
-const CHUNK_BYTES: usize = 1 << 20;
+const CHUNK_BYTES: NonZeroUsize = NonZeroUsize::new(1 << 20).expect("2^20 is nonzero");
 
 #[serde_as]
 #[derive(Deserialize)]
@@ -225,58 +226,57 @@ pub fn copy_ranges(
     src: &mut (impl Read + Seek),
     dst: &mut (impl Write + Seek),
     mappings: &ThinMappings,
-    chunk_bytes: usize,
+    chunk_bytes: NonZeroUsize,
 ) -> io::Result<CopyStats> {
     let overflow = || io::Error::new(io::ErrorKind::InvalidInput, "range offset overflows u64");
     let block_bytes = mappings
         .block_sectors
         .checked_mul(SECTOR_BYTES)
         .ok_or_else(overflow)?;
-    let mut buf = vec![0u8; chunk_bytes];
+    let device_bytes = src.seek(SeekFrom::End(0))?;
+    let spans = mappings
+        .ranges
+        .iter()
+        .map(|range| {
+            let start = range.begin.checked_mul(block_bytes).ok_or_else(overflow)?;
+            let end = range
+                .begin
+                .checked_add(range.length)
+                .and_then(|blocks| blocks.checked_mul(block_bytes))
+                .ok_or_else(overflow)?;
+            if end.saturating_sub(device_bytes) >= block_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "blocks mapped up to byte {end} lie past the {device_bytes}-byte device"
+                    ),
+                ));
+            }
+            Ok((start.min(device_bytes), end.min(device_bytes)))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+
+    let mut buf = vec![0u8; chunk_bytes.get()];
     let mut stats = CopyStats {
         scanned_chunks: 0,
         written_chunks: 0,
     };
-
-    for range in &mappings.ranges {
-        let offset = range.begin.checked_mul(block_bytes).ok_or_else(overflow)?;
-        let mut remaining = range.length.checked_mul(block_bytes).ok_or_else(overflow)?;
-        src.seek(SeekFrom::Start(offset))?;
-        dst.seek(SeekFrom::Start(offset))?;
-
+    for (start, end) in spans {
+        src.seek(SeekFrom::Start(start))?;
+        dst.seek(SeekFrom::Start(start))?;
+        let mut remaining = end - start;
         while remaining > 0 {
-            let want = remaining.min(chunk_bytes as u64) as usize;
-            let n = read_full(src, &mut buf[..want])?;
-            if n == 0 {
-                // Device shorter than the mapping claims: stop this range.
-                break;
-            }
-            dst.write_all(&buf[..n])?;
+            let want = remaining.min(chunk_bytes.get() as u64) as usize;
+            src.read_exact(&mut buf[..want])?;
+            dst.write_all(&buf[..want])?;
             stats.scanned_chunks += 1;
             stats.written_chunks += 1;
-            remaining -= n as u64;
-            if n < want {
-                break;
-            }
+            remaining -= want as u64;
         }
     }
 
     dst.flush()?;
     Ok(stats)
-}
-
-// `Read::read` may return short counts on block devices; fill the buffer or hit EOF.
-fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match r.read(&mut buf[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(filled)
 }
 
 #[cfg(test)]
@@ -285,8 +285,10 @@ mod tests {
     use hyperrs_linux::dm::thin_dump::{BlockRange, ThinMappings};
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
+    use proptest::sample::Index;
     use rstest::rstest;
     use std::io::{self, Cursor};
+    use std::num::NonZeroUsize;
     use test_strategy::proptest;
 
     const SENTINEL: u8 = 0xAA;
@@ -299,6 +301,10 @@ mod tests {
                 .map(|&(begin, length)| BlockRange { begin, length })
                 .collect(),
         }
+    }
+
+    fn chunk(bytes: usize) -> NonZeroUsize {
+        NonZeroUsize::new(bytes).unwrap()
     }
 
     fn oracle(src: &[u8], mappings: &ThinMappings) -> Vec<u8> {
@@ -320,7 +326,7 @@ mod tests {
             usize,
         )>,
         #[strategy(prop_oneof![Just(1u64), Just(2u64)])] block_sectors: u64,
-        #[strategy(64u64..600)] chunk: u64,
+        #[strategy(64usize..600)] chunk_bytes: usize,
     ) {
         let block_bytes = (block_sectors * 512) as usize;
         let n_blocks = src.len() / block_bytes;
@@ -337,7 +343,13 @@ mod tests {
         let mappings = mappings(block_sectors, &ranges);
         let mut dst = Cursor::new(vec![SENTINEL; src.len()]);
 
-        copy_ranges(&mut Cursor::new(&src), &mut dst, &mappings, chunk as usize).unwrap();
+        copy_ranges(
+            &mut Cursor::new(&src),
+            &mut dst,
+            &mappings,
+            chunk(chunk_bytes),
+        )
+        .unwrap();
 
         prop_assert_eq!(dst.into_inner(), oracle(&src, &mappings));
     }
@@ -345,7 +357,7 @@ mod tests {
     #[proptest]
     fn empty_ranges_write_nothing(
         #[strategy(proptest::collection::vec(any::<u8>(), 1..4096))] src: Vec<u8>,
-        #[strategy(1u64..600)] chunk: u64,
+        #[strategy(1usize..600)] chunk_bytes: usize,
     ) {
         let mut dst = Cursor::new(vec![SENTINEL; src.len()]);
 
@@ -353,7 +365,7 @@ mod tests {
             &mut Cursor::new(&src),
             &mut dst,
             &mappings(1, &[]),
-            chunk as usize,
+            chunk(chunk_bytes),
         )
         .unwrap();
 
@@ -361,15 +373,49 @@ mod tests {
         prop_assert_eq!(dst.into_inner(), vec![SENTINEL; src.len()]);
     }
 
+    #[proptest]
+    fn a_block_past_the_device_end_is_refused_before_any_write(
+        #[strategy(1u64..=4)] block_sectors: u64,
+        #[strategy(1u64..16)] device_blocks: u64,
+        #[strategy(prop_oneof![Just(0u64), 1u64..512])] last_block_short: u64,
+        #[strategy(0u64..4)] blocks_past: u64,
+        #[strategy(1u64..4)] length: u64,
+        #[strategy(proptest::collection::vec((0u64..16, 1u64..4), 0..4))] valid: Vec<(u64, u64)>,
+        at: Index,
+    ) {
+        let device_bytes = device_blocks * block_sectors * 512 - last_block_short;
+        let mut ranges: Vec<(u64, u64)> = valid
+            .iter()
+            .map(|&(b, l)| {
+                let begin = b % device_blocks;
+                (begin, l.min(device_blocks - begin))
+            })
+            .collect();
+        ranges.insert(
+            at.index(ranges.len() + 1),
+            (device_blocks + blocks_past, length),
+        );
+        let mut dst = Cursor::new(vec![SENTINEL; device_bytes as usize]);
+
+        let err = copy_ranges(
+            &mut Cursor::new(vec![0u8; device_bytes as usize]),
+            &mut dst,
+            &mappings(block_sectors, &ranges),
+            chunk(512),
+        )
+        .unwrap_err();
+
+        prop_assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        prop_assert_eq!(dst.into_inner(), vec![SENTINEL; device_bytes as usize]);
+    }
+
     #[rstest]
     #[case::one_chunk_per_range(1 << 20, &[(0, 3), (9, 1)], 2)]
     #[case::chunk_equal_to_a_block(512, &[(0, 3), (9, 1)], 4)]
     #[case::chunk_splitting_a_block(256, &[(0, 1)], 2)]
     #[case::uneven_tail(384, &[(0, 1)], 2)]
-    #[case::range_past_the_device_end(1 << 20, &[(14, 4)], 1)]
-    #[case::range_entirely_past_the_end(1 << 20, &[(20, 1)], 0)]
     fn chunk_accounting(
-        #[case] chunk: usize,
+        #[case] chunk_bytes: usize,
         #[case] ranges: &[(u64, u64)],
         #[case] written_chunks: u64,
     ) {
@@ -377,7 +423,13 @@ mod tests {
         let mappings = mappings(1, ranges);
         let mut dst = Cursor::new(vec![SENTINEL; src.len()]);
 
-        let stats = copy_ranges(&mut Cursor::new(&src), &mut dst, &mappings, chunk).unwrap();
+        let stats = copy_ranges(
+            &mut Cursor::new(&src),
+            &mut dst,
+            &mappings,
+            chunk(chunk_bytes),
+        )
+        .unwrap();
 
         assert_eq!(stats.written_chunks, written_chunks);
         assert_eq!(stats.scanned_chunks, written_chunks);
@@ -385,12 +437,16 @@ mod tests {
     }
 
     #[rstest]
-    #[case::block_size_overflows(u64::MAX, &[(0, 1)])]
-    #[case::offset_overflows(1, &[(u64::MAX, 1)])]
-    #[case::length_overflows(1, &[(0, u64::MAX)])]
-    fn overflowing_geometry_is_refused_before_any_write(
+    #[case::block_size_overflows(u64::MAX, &[(0, 1)], io::ErrorKind::InvalidInput)]
+    #[case::offset_overflows(1, &[(u64::MAX, 1)], io::ErrorKind::InvalidInput)]
+    #[case::length_overflows(1, &[(0, u64::MAX)], io::ErrorKind::InvalidInput)]
+    #[case::block_at_the_device_end(1, &[(1, 1)], io::ErrorKind::InvalidData)]
+    #[case::range_running_past_the_end(1, &[(0, 2)], io::ErrorKind::InvalidData)]
+    #[case::past_end_after_a_valid_range(1, &[(0, 1), (1, 1)], io::ErrorKind::InvalidData)]
+    fn bad_geometry_is_refused_before_any_write(
         #[case] block_sectors: u64,
         #[case] ranges: &[(u64, u64)],
+        #[case] kind: io::ErrorKind,
     ) {
         let mut dst = Cursor::new(vec![SENTINEL; 512]);
 
@@ -398,11 +454,11 @@ mod tests {
             &mut Cursor::new(vec![0u8; 512]),
             &mut dst,
             &mappings(block_sectors, ranges),
-            512,
+            chunk(512),
         )
         .unwrap_err();
 
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(err.kind(), kind);
         assert_eq!(dst.into_inner(), vec![SENTINEL; 512]);
     }
 }
