@@ -30,6 +30,11 @@ defmodule Hyper.Img.OciLoader do
 
   require Logger
 
+  @block_size Information.kib(4)
+  @inode_size 256
+  @bytes_per_inode Information.kib(16)
+  @journal Information.mib(64)
+
   @doc "Load `ref` into the store and DB. See the module doc. Label defaults to `ref`."
   @spec load(String.t()) :: {:ok, Hyper.Img.id()} | {:error, term()}
   def load(ref), do: load(ref, [])
@@ -191,14 +196,27 @@ defmodule Hyper.Img.OciLoader do
 
   # `du` apparent bytes undercount ext4 block usage and the default inode ratio
   # starves file-dense trees, so the size carries the inode table plus slack and
-  # the inode count is the file count with headroom.
+  # the inode count is the file count with headroom. Online growth keeps the
+  # inodes per group, so the count is also at least one per 16 KiB, the density
+  # the grown disk inherits. mke2fs refuses a journal over half the free blocks,
+  # so the size holds two journals beside the content.
   @doc false
   @spec ext4_params(Information.t(), non_neg_integer()) :: {Information.t(), pos_integer()}
   def ext4_params(content, files) do
-    inodes = files + div(files, 10) + 256
-    metadata = Information.bytes(inodes * 256) + Information.mib(16)
-    size = ceil_mib(content + Information.bytes(div(Information.as_bytes(content), 4)) + metadata)
-    {size, inodes}
+    file_inodes = files + div(files, 10) + 256
+
+    content_bytes = Information.as_bytes(content)
+    journal = Information.as_bytes(@journal)
+
+    data =
+      max(content_bytes + div(content_bytes, 4), journal) + journal +
+        Information.as_bytes(Information.mib(16))
+
+    data_per_inode = Information.as_bytes(@bytes_per_inode) - @inode_size
+    reserved = max(file_inodes, div(data + data_per_inode - 1, data_per_inode))
+    size = ceil_mib(Information.bytes(data + reserved * @inode_size))
+    per_inode = Information.as_bytes(@bytes_per_inode)
+    {size, max(file_inodes, div(Information.as_bytes(size) + per_inode - 1, per_inode))}
   end
 
   @spec ceil_mib(Information.t()) :: Information.t()
@@ -271,8 +289,11 @@ defmodule Hyper.Img.OciLoader do
       Path.join(Hyper.Cfg.Dirs.layer_dir(), ".incoming-#{System.unique_integer([:positive])}.img")
 
     args =
-      ["-t", "ext4", "-F", "-q", "-N", to_string(inodes), "-d", rootfs, staged] ++
-        ["#{Information.as_mib(size)}M"]
+      ["-t", "ext4", "-F", "-q", "-b", to_string(Information.as_bytes(@block_size))] ++
+        ["-I", to_string(@inode_size), "-N", to_string(inodes)] ++
+        ["-J", "size=#{Information.as_mib(@journal)}"] ++
+        ["-E", "resize=#{max_online_resize_blocks()},lazy_itable_init=0,lazy_journal_init=1"] ++
+        ["-d", rootfs, staged, "#{Information.as_mib(size)}M"]
 
     with :ok <- tag(cmd(Hyper.Cfg.Tools.mke2fs(), args), :mke2fs),
          :ok <- Debugfs.apply_script(staged, ownership_script) do
@@ -282,6 +303,14 @@ defmodule Hyper.Img.OciLoader do
         _ = File.rm(staged)
         err
     end
+  end
+
+  @spec max_online_resize_blocks() :: pos_integer()
+  defp max_online_resize_blocks do
+    Hyper.Vm.Instance.types()
+    |> Enum.map(&Information.as_bytes(Hyper.Vm.Instance.spec(&1).disk))
+    |> Enum.max()
+    |> div(Information.as_bytes(@block_size))
   end
 
   # Run `bin` with `args`, no shell (System.cmd takes an arg list), merging
