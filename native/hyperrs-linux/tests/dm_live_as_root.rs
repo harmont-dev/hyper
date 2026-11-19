@@ -25,8 +25,8 @@ use hyperrs_fs::file::{Any, IsBlockDevice, IsRegularFile, OpenFlags, SafeFile};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::thin_dump::{BlockRange, MappingsError, ThinDump};
 use hyperrs_linux::dm::{
-    DevPath, Device, DmName, DmTable, Dmsetup, LinearTable, Origin, RemoveMode, RunError, ThinId,
-    ThinPoolTable, ThinTable,
+    DevPath, Device, DmName, DmTable, Dmsetup, LinearTable, NoSpace, Origin, RemoveMode, RunError,
+    ThinId, ThinPoolTable, ThinTable,
 };
 use hyperrs_linux::loopdev::{LoopControl, LoopDevice};
 use hyperrs_linux::Access;
@@ -557,6 +557,7 @@ impl LivePool {
                 data: dev_path(&data.path),
                 block_sectors: BLOCK_SECTORS,
                 low_water: 0,
+                no_space: NoSpace::Error,
             }),
             Access::ReadWrite,
         )
@@ -682,6 +683,40 @@ fn a_real_pools_ids_snapshots_and_dumped_mappings_obey_their_laws_as_root() {
     assert!(!vol_name.path().as_path().exists());
     let again = pool.create_thin(one).expect("a deleted id is free again");
     again.delete().unwrap();
+}
+
+#[test]
+fn a_full_pool_fails_writes_instead_of_queueing_them_as_root() {
+    require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
+    let Some(mut live) = LivePool::new(&root, "full") else {
+        eprintln!("SKIP: dm-thin unavailable");
+        return;
+    };
+    let vol_name = live.volume_name("vol");
+    let pool = live.dm.thin_pool(&root, &live.pool).unwrap();
+    let vol = pool
+        .create_thin(ThinId::new(1).unwrap())
+        .unwrap()
+        .activate(&vol_name, 2 * POOL_DATA_BYTES / 512, None)
+        .unwrap();
+
+    let started = Instant::now();
+    let filled = fs::OpenOptions::new()
+        .write(true)
+        .open(vol.device().path().as_path())
+        .and_then(|mut f| {
+            f.write_all(&vec![0xAB; 2 * POOL_DATA_BYTES as usize])?;
+            f.sync_all()
+        });
+    let waited = started.elapsed();
+
+    assert!(filled.is_err(), "twice the pool's data fit in the pool");
+    assert!(
+        waited < Duration::from_secs(30),
+        "the full pool held writes for {waited:?} instead of failing them"
+    );
 }
 
 #[test]

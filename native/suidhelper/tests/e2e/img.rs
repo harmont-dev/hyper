@@ -215,7 +215,7 @@ fn thin_pool_create_clears_a_stale_pool_and_zeroes_only_the_metadata_header_as_r
         work.calls(),
         [
             "remove --retry hyper-pool",
-            "create hyper-pool --table 0 2048 thin-pool {loop} {loop} 128 0",
+            "create hyper-pool --table 0 2048 thin-pool {loop} {loop} 128 0 1 error_if_no_space",
         ]
     );
     assert_eq!(out["result"], "created");

@@ -11,8 +11,8 @@
 //!     hands the kernel) are faithful for the whole dm-name charset.
 
 use hyperrs_linux::dm::{
-    DevPath, DmName, DmTable, LinearTable, Origin, Persistence, SnapshotTable, ThinId, ThinMessage,
-    ThinPoolTable, ThinTable,
+    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, Persistence, SnapshotTable, ThinId,
+    ThinMessage, ThinPoolTable, ThinTable,
 };
 use hyperrs_linux::loopdev::LoopDevNum;
 use proptest::prelude::*;
@@ -71,14 +71,20 @@ fn operands(t: &DmTable) -> Vec<Vec<u8>> {
             num(s.persistence),
             num(s.chunk),
         ]),
-        DmTable::ThinPool(p) => v.extend([
-            num(p.sectors),
-            b"thin-pool".to_vec(),
-            path_bytes(&p.metadata),
-            path_bytes(&p.data),
-            num(p.block_sectors),
-            num(p.low_water),
-        ]),
+        DmTable::ThinPool(p) => {
+            v.extend([
+                num(p.sectors),
+                b"thin-pool".to_vec(),
+                path_bytes(&p.metadata),
+                path_bytes(&p.data),
+                num(p.block_sectors),
+                num(p.low_water),
+            ]);
+            match p.no_space {
+                NoSpace::Queue => v.push(b"0".to_vec()),
+                NoSpace::Error => v.extend([b"1".to_vec(), b"error_if_no_space".to_vec()]),
+            }
+        }
         DmTable::Thin(t) => {
             v.extend([
                 num(t.sectors),
@@ -148,17 +154,26 @@ fn table(path: BoxedStrategy<DevPath>) -> impl Strategy<Value = DmTable> {
                     chunk,
                 })
             }),
-        (any::<u64>(), path.clone(), path, any::<u64>(), any::<u64>()).prop_map(
-            |(sectors, metadata, data, block_sectors, low_water)| {
-                DmTable::ThinPool(ThinPoolTable {
-                    sectors,
-                    metadata,
-                    data,
-                    block_sectors,
-                    low_water,
-                })
-            }
-        ),
+        (
+            any::<u64>(),
+            path.clone(),
+            path,
+            any::<u64>(),
+            any::<u64>(),
+            prop_oneof![Just(NoSpace::Queue), Just(NoSpace::Error)]
+        )
+            .prop_map(
+                |(sectors, metadata, data, block_sectors, low_water, no_space)| {
+                    DmTable::ThinPool(ThinPoolTable {
+                        sectors,
+                        metadata,
+                        data,
+                        block_sectors,
+                        low_water,
+                        no_space,
+                    })
+                }
+            ),
         (any::<u64>(), dm_name(), thin_id(), prop::option::of(origin)).prop_map(
             |(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
                 sectors,

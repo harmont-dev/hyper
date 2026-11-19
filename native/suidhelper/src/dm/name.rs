@@ -111,7 +111,7 @@ mod tests {
         "0 100 snapshot /dev/mapper/hyper-img /srv/hyper/scratch/cow.img P 8"
     )]
     #[case::thin_pool_over_files(
-        "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024"
+        "0 100 thin-pool /srv/hyper/scratch/meta /srv/hyper/scratch/data 128 1024 1 error_if_no_space"
     )]
     #[case::thin_with_hyper_origin("0 100 thin /dev/mapper/hyper-pool 0 /dev/mapper/hyper-orig")]
     #[case::thin_with_file_origin("0 100 thin /dev/mapper/hyper-pool 0 /srv/hyper/layers/base.img")]

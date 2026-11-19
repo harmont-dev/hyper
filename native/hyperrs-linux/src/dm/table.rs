@@ -77,9 +77,20 @@ pub struct SnapshotTable {
     pub chunk: u64,
 }
 
+/// What a thin-pool does with writes once its data device is full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::EnumString)]
+pub enum NoSpace {
+    /// `queue_if_no_space` (the default): hold writes until the pool grows or `no_space_timeout`.
+    #[strum(serialize = "0")]
+    Queue,
+    /// `error_if_no_space`: fail writes at once.
+    #[strum(serialize = "1 error_if_no_space")]
+    Error,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display(
-    "0 {sectors} thin-pool {} {} {block_sectors} {low_water}",
+    "0 {sectors} thin-pool {} {} {block_sectors} {low_water} {no_space}",
     metadata.as_path().display(),
     data.as_path().display()
 )]
@@ -89,6 +100,7 @@ pub struct ThinPoolTable {
     pub data: DevPath,
     pub block_sectors: u64,
     pub low_water: u64,
+    pub no_space: NoSpace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -121,6 +133,9 @@ pub enum ParseTableError {
     /// A snapshot `<persistent?>` flag other than `P` or `N`.
     #[error("snapshot persistence must be `P` or `N`")]
     Persistence(#[from] strum::ParseError),
+    /// Thin-pool feature args other than none or `error_if_no_space`.
+    #[error("thin-pool feature args must be `0` or `1 error_if_no_space`")]
+    NoSpace(#[source] strum::ParseError),
     /// A thin device id that is not a 24-bit integer.
     #[error(transparent)]
     ThinId(#[from] ParseThinIdError),
@@ -214,13 +229,17 @@ impl FromStr for DmTable {
                     chunk: chunk.parse()?,
                 })
             }
-            ["0", sectors, "thin-pool", metadata, data, block_sectors, low_water] => {
+            ["0", sectors, "thin-pool", metadata, data, block_sectors, low_water, ref features @ ..] => {
                 DmTable::ThinPool(ThinPoolTable {
                     sectors: sectors.parse()?,
                     metadata: metadata.parse()?,
                     data: data.parse()?,
                     block_sectors: block_sectors.parse()?,
                     low_water: low_water.parse()?,
+                    no_space: features
+                        .join(" ")
+                        .parse()
+                        .map_err(ParseTableError::NoSpace)?,
                 })
             }
             ["0", sectors, "thin", pool, id, ref origin @ ..] if origin.len() <= 1 => {
@@ -239,8 +258,8 @@ impl FromStr for DmTable {
 #[cfg(test)]
 mod tests {
     use super::{
-        DevPath, DmTable, LinearTable, Origin, ParseTableError, Persistence, SnapshotTable,
-        ThinPoolTable, ThinTable,
+        DevPath, DmTable, LinearTable, NoSpace, Origin, ParseTableError, Persistence,
+        SnapshotTable, ThinPoolTable, ThinTable,
     };
     use crate::dm::{DmName, ThinId};
     use proptest::prelude::*;
@@ -280,6 +299,10 @@ mod tests {
         prop_oneof![Just(Persistence::Persistent), Just(Persistence::Transient)]
     }
 
+    fn no_space() -> impl Strategy<Value = NoSpace> {
+        prop_oneof![Just(NoSpace::Queue), Just(NoSpace::Error)]
+    }
+
     fn table() -> impl Strategy<Value = DmTable> {
         prop_oneof![
             (any::<u64>(), origin())
@@ -293,17 +316,26 @@ mod tests {
                     chunk,
                 })
             ),
-            (any::<u64>(), file(), file(), any::<u64>(), any::<u64>()).prop_map(
-                |(sectors, metadata, data, block_sectors, low_water)| {
-                    DmTable::ThinPool(ThinPoolTable {
-                        sectors,
-                        metadata,
-                        data,
-                        block_sectors,
-                        low_water,
-                    })
-                }
-            ),
+            (
+                any::<u64>(),
+                file(),
+                file(),
+                any::<u64>(),
+                any::<u64>(),
+                no_space()
+            )
+                .prop_map(
+                    |(sectors, metadata, data, block_sectors, low_water, no_space)| {
+                        DmTable::ThinPool(ThinPoolTable {
+                            sectors,
+                            metadata,
+                            data,
+                            block_sectors,
+                            low_water,
+                            no_space,
+                        })
+                    }
+                ),
             (
                 any::<u64>(),
                 dm_name(),
@@ -362,6 +394,11 @@ mod tests {
     #[case::loop_as_pool("0 100 thin /dev/loop0 0")]
     #[case::thin_id_past_24_bits("0 100 thin /dev/mapper/pool 16777216")]
     #[case::two_origins("0 100 thin /dev/mapper/pool 0 /dev/loop0 /dev/loop1")]
+    #[case::pool_without_feature_count("0 100 thin-pool /srv/hyper/m /srv/hyper/d 128 0")]
+    #[case::pool_feature_count_without_args("0 100 thin-pool /srv/hyper/m /srv/hyper/d 128 0 1")]
+    #[case::unsupported_pool_feature(
+        "0 100 thin-pool /srv/hyper/m /srv/hyper/d 128 0 1 skip_block_zeroing"
+    )]
     #[case::control_device("0 100 linear /dev/mapper/control 0")]
     #[case::empty("")]
     #[case::garbage("garbage")]
