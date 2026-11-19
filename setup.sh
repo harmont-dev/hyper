@@ -44,11 +44,11 @@ sudo apt-get install -y \
   coreutils e2fsprogs libc-bin lvm2 nftables skopeo \
   thin-provisioning-tools util-linux
 
-# Ubuntu packages additional kernel modules separately.
-# Debian provides the required modules through its linux-modules package.
-. /etc/os-release
-if [ "${ID:-}" = "ubuntu" ]; then
-  sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+modules_extra="linux-modules-extra-$(uname -r)"
+if apt-cache show "${modules_extra}" >/dev/null 2>&1; then
+  sudo apt-get install -y "${modules_extra}"
+else
+  info "${modules_extra} is not available; relying on the kernel's base modules"
 fi
 
 info "device-mapper modules"
