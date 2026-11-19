@@ -52,6 +52,11 @@ exclude_re = [
     # open_thin_refuses_anything_but_a_thin_of_this_pool_as_root) in the privileged E2E job.
     "hyperrs-linux/src/dm/thin\\.rs:.*ThinPool<'a>::open_thin$",
     "hyperrs-linux/src/dm/thin\\.rs:.*Thin<'a, Active<'a>>::sectors ",
+    # Growing and remounting a mounted ext4 need root and a loop device; killed by the
+    # ext4 _as_root tests in hyperrs-linux (growing_fills_the_device_and_a_second_grow_changes_nothing_as_root,
+    # a_device_smaller_than_its_filesystem_is_an_error_and_never_shrinks_it_as_root,
+    # skipping_inode_table_init_remounts_with_noinit_itable_as_root) in the privileged E2E job.
+    "hyperrs-linux/src/ext4\\.rs:.*Ext4Mount::(grow_to_device|skip_inode_table_init)",
     # Guest network setup runs inside a booted guest; killed by test/e2e/guest_network_test.exs
     # in the KVM integration job.
     "guest-agent/src/net\\.rs:.*GuestNet::(from_proc|configure)",
