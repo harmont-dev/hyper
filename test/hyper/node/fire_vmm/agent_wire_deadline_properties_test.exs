@@ -86,7 +86,11 @@ defmodule Hyper.Node.FireVMM.AgentWireDeadlinePropertiesTest do
   property "the guest is never told a shorter deadline than the caller asked for" do
     check all(
             timeout_ms <-
-              one_of([integer(1..999), integer(1_000..59_999), integer(60_000..7_200_000)]),
+              one_of([
+                integer(1_000..59_999),
+                integer(60_000..7_200_000),
+                integer(99_999_000..100_001_000)
+              ]),
             max_runs: 100
           ) do
       {header, wire_ms} = wire_timeout_ms(timeout_ms)
