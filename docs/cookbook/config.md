@@ -216,7 +216,7 @@ keys you need to change.
 | Config Key         | `config.exs`        | `config.toml`       | Default   | Notes |
 | ------------------ | ------------------- | ------------------- | --------- | ----- |
 | `mem_max`          | `.mem_max`          | `.mem_max`          | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of RAM the node offers VMs. Must not exceed available system memory. |
-| `disk_max`         | `.disk_max`         | `.disk_max`         | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Reserved in full under `work_dir` (`<work_dir>/scratch`) when the node starts, so that filesystem must hold it. |
+| `disk_max`         | `.disk_max`         | `.disk_max`         | `4 GiB`   | [$\alpha$ (hard) budget](./architecture.md#budgets): total [unit](#unit) of disk the node offers VMs. Must not exceed available disk or Hyper won't boot. |
 | `cpu_max_load`     | `.cpu_max_load`     | `.cpu_max_load`     | `0.8`     | [$\beta$ (soft) budget](./architecture.md#budgets): instantaneous CPU load threshold, a fraction `0.0`–`1.0` of the cap. |
 | `cpu_max_cap`      | `.cpu_max_cap`      | `.cpu_max_cap`      | `4.0`     | [$\beta$ (soft) budget](./architecture.md#budgets): soft CPU capacity in cores (a float). Optional — an explicit `nil` in `config.exs` disables the cap. |
 | `disk_bw_cap`      | `.disk_bw_cap`      | `.disk_bw_cap`      | `1 GiBps` | [$\beta$ (soft) budget](./architecture.md#budgets): soft disk-bandwidth capacity ([unit](#unit)). |
