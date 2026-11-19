@@ -10,6 +10,7 @@
 
 pub mod cgroup;
 pub mod dm;
+pub mod ext4;
 pub mod loopdev;
 pub mod net;
 pub mod sysctl;
