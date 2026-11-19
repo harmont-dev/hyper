@@ -31,6 +31,7 @@ defmodule Hyper.Img.OciLoader do
   require Logger
 
   @block_size Information.kib(4)
+  @group_bytes Information.mib(128)
   @inode_size 256
   @bytes_per_inode Information.kib(16)
   @journal Information.mib(64)
@@ -196,10 +197,10 @@ defmodule Hyper.Img.OciLoader do
 
   # `du` apparent bytes undercount ext4 block usage and the default inode ratio
   # starves file-dense trees, so the size carries the inode table plus slack and
-  # the inode count is the file count with headroom. Online growth keeps the
-  # inodes per group, so the count is also at least one per 16 KiB, the density
-  # the grown disk inherits. mke2fs refuses a journal over half the free blocks,
-  # so the size holds two journals beside the content.
+  # the inode count is the file count with headroom. Online growth copies the
+  # inodes per group, so every 128 MiB group also gets one per 16 KiB, the
+  # density the grown disk inherits. mke2fs refuses a journal over half the free
+  # blocks, so the size holds two journals beside the content.
   @doc false
   @spec ext4_params(Information.t(), non_neg_integer()) :: {Information.t(), pos_integer()}
   def ext4_params(content, files) do
@@ -212,11 +213,19 @@ defmodule Hyper.Img.OciLoader do
       max(content_bytes + div(content_bytes, 4), journal) + journal +
         Information.as_bytes(Information.mib(16))
 
-    data_per_inode = Information.as_bytes(@bytes_per_inode) - @inode_size
-    reserved = max(file_inodes, div(data + data_per_inode - 1, data_per_inode))
-    size = ceil_mib(Information.bytes(data + reserved * @inode_size))
-    per_inode = Information.as_bytes(@bytes_per_inode)
-    {size, max(file_inodes, div(Information.as_bytes(size) + per_inode - 1, per_inode))}
+    fit(data, file_inodes, 1)
+  end
+
+  @spec fit(non_neg_integer(), pos_integer(), pos_integer()) :: {Information.t(), pos_integer()}
+  defp fit(data, file_inodes, groups) do
+    group = Information.as_bytes(@group_bytes)
+    inodes = max(file_inodes, groups * div(group, Information.as_bytes(@bytes_per_inode)))
+    size = ceil_mib(Information.bytes(data + inodes * @inode_size))
+
+    case div(Information.as_bytes(size) + group - 1, group) do
+      ^groups -> {size, inodes}
+      more -> fit(data, file_inodes, more)
+    end
   end
 
   @spec ceil_mib(Information.t()) :: Information.t()

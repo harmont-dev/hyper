@@ -40,14 +40,17 @@ defmodule Hyper.Img.OciLoaderTest do
       end
     end
 
-    property "there is an inode for every 16 KiB, a density online growth keeps" do
+    property "every 128 MiB block group holds an inode per 16 KiB, a density online growth keeps" do
       check all(
               bytes <- integer(0..Information.as_bytes(Information.gib(8))),
               files <- integer(0..500_000)
             ) do
         {size, inodes} = OciLoader.ext4_params(Information.bytes(bytes), files)
+        group = Information.as_bytes(Information.mib(128))
+        groups = div(Information.as_bytes(size) + group - 1, group)
 
-        assert Information.as_bytes(size) <= inodes * Information.as_bytes(Information.kib(16))
+        assert div(inodes + groups - 1, groups) * Information.as_bytes(Information.kib(16)) >=
+                 group
       end
     end
   end
@@ -88,8 +91,8 @@ defmodule Hyper.Img.OciLoaderTest do
     assert block == 4096
     assert (gdt_blocks + reserved) * per_gdt_block * per_group * block >= largest
 
-    assert blocks * block <=
-             field!(stats, "Inode count") * Information.as_bytes(Information.kib(16))
+    assert field!(stats, "Inodes per group") * Information.as_bytes(Information.kib(16)) >=
+             per_group * block
 
     assert field!(debugfs!(path, "stat <8>"), "Size") >=
              Information.as_bytes(Information.mib(64))
