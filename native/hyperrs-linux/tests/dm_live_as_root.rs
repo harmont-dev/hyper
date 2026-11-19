@@ -25,8 +25,8 @@ use hyperrs_fs::file::{Any, IsBlockDevice, IsRegularFile, OpenFlags, SafeFile};
 use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
 use hyperrs_linux::dm::thin_dump::{BlockRange, MappingsError, ThinDump};
 use hyperrs_linux::dm::{
-    DevPath, Device, DmName, DmTable, Dmsetup, LinearTable, NoSpace, Origin, RemoveMode, RunError,
-    ThinId, ThinPoolTable, ThinTable,
+    DevPath, Device, DmName, DmTable, Dmsetup, LinearTable, NoSpace, Origin, PaddedTable,
+    RemoveMode, RunError, ThinId, ThinPoolTable, ThinTable,
 };
 use hyperrs_linux::loopdev::{LoopControl, LoopDevice};
 use hyperrs_linux::Access;
@@ -35,6 +35,7 @@ use hyperrs_process::privilege::{Root, Unprivileged};
 use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
+use rstest::rstest;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -401,6 +402,53 @@ fn a_live_linear_table_is_sized_numbered_and_protected_as_requested_as_root() {
     assert!(lo.detached_within(Duration::from_secs(3)), "loop leaked");
 }
 
+#[test]
+fn a_live_padded_table_reads_its_origin_then_zeros_out_to_its_size_as_root() {
+    require_root!();
+    let mut token = Unprivileged::take().unwrap();
+    let root = token.elevate().unwrap();
+    let Some(dm) = live_dmsetup() else {
+        eprintln!("SKIP: no root-owned {DMSETUP}");
+        return;
+    };
+    let dir = TempDir::new().unwrap();
+    let file = real(&dir).join("disk.img");
+    let origin_sectors = 2048;
+    let sectors = 4 * origin_sectors + 8;
+    fs::write(&file, vec![0x5a; origin_sectors as usize * 512]).unwrap();
+    let mut lo = Loop::attach(&file, Access::ReadOnly);
+    let n = format!("hyper-t-pad-{}", std::process::id());
+    let _guard = DmGuard(vec![n.clone()]);
+
+    let dev = dm
+        .create(
+            &root,
+            &name(&n),
+            &DmTable::Padded(PaddedTable {
+                sectors,
+                origin_sectors,
+                origin: Origin::Path(dev_path(&lo.path)),
+            }),
+            Access::ReadOnly,
+        )
+        .unwrap();
+
+    assert_eq!(dev.name().sectors().unwrap(), sectors);
+    let mut whole = Vec::new();
+    fs::File::open(dev.path().as_path())
+        .unwrap()
+        .read_to_end(&mut whole)
+        .unwrap();
+    let (head, tail) = whole.split_at(origin_sectors as usize * 512);
+    assert!(head.iter().all(|&b| b == 0x5a));
+    assert_eq!(tail.len() as u64, (sectors - origin_sectors) * 512);
+    assert!(tail.iter().all(|&b| b == 0));
+
+    dev.remove(RemoveMode::Retry).unwrap();
+    lo.release();
+    assert!(lo.detached_within(Duration::from_secs(3)), "loop leaked");
+}
+
 struct FakeThinDump {
     _dir: TempDir,
     base: PathBuf,
@@ -719,8 +767,10 @@ fn a_full_pool_fails_writes_instead_of_queueing_them_as_root() {
     );
 }
 
-#[test]
-fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
+#[rstest]
+#[case::the_volumes_size(VOLUME_SECTORS)]
+#[case::half_the_volume(VOLUME_SECTORS / 2)]
+fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root(#[case] origin_sectors: u64) {
     require_root!();
     let mut token = Unprivileged::take().unwrap();
     let root = token.elevate().unwrap();
@@ -734,7 +784,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
     };
     let dir = TempDir::new().unwrap();
     let origin_file = real(&dir).join("origin.img");
-    fs::write(&origin_file, vec![0x11; (VOLUME_SECTORS * 512) as usize]).unwrap();
+    fs::write(&origin_file, vec![0x11; (origin_sectors * 512) as usize]).unwrap();
     let origin_loop = Loop::attach(&origin_file, Access::ReadOnly);
     let origin_name = live.volume_name("origin");
     live.dm
@@ -742,7 +792,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
             &root,
             &origin_name,
             &DmTable::Linear(LinearTable {
-                sectors: VOLUME_SECTORS,
+                sectors: origin_sectors,
                 origin: Origin::Path(dev_path(&origin_loop.path)),
             }),
             Access::ReadOnly,
@@ -765,6 +815,16 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
         read_block(vol.device().path().as_path(), 5),
         vec![0x11; BLOCK_BYTES as usize]
     );
+    let last = VOLUME_BLOCKS - 1;
+    let expected = if last * BLOCK_SECTORS < origin_sectors {
+        0x11
+    } else {
+        0
+    };
+    assert_eq!(
+        read_block(vol.device().path().as_path(), last),
+        vec![expected; BLOCK_BYTES as usize]
+    );
     assert!(
         mapped_blocks(&live, &root, id).is_empty(),
         "reads must not provision"
@@ -778,7 +838,7 @@ fn a_thin_over_an_external_origin_maps_only_what_diverged_as_root() {
     );
     assert_eq!(
         fs::read(&origin_file).unwrap(),
-        vec![0x11; (VOLUME_SECTORS * 512) as usize]
+        vec![0x11; (origin_sectors * 512) as usize]
     );
 
     vol.deactivate().unwrap().delete().unwrap();

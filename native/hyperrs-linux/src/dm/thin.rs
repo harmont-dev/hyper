@@ -140,7 +140,10 @@ pub struct ThinPool<'a> {
 pub struct Inactive;
 
 #[derive(Debug)]
-pub struct Active<'a>(Device<'a>);
+pub struct Active<'a> {
+    device: Device<'a>,
+    sectors: u64,
+}
 
 #[derive(Debug)]
 pub struct Thin<'a, S> {
@@ -207,11 +210,14 @@ impl<'a> ThinPool<'a> {
             return Err(not_a_thin());
         };
         match line.split_whitespace().collect::<Vec<_>>()[..] {
-            [_, _, "thin", dev, id, ..] if dev.parse::<DeviceNumber>().ok() == Some(pool) => {
+            [_, sectors, "thin", dev, id, ..] if dev.parse::<DeviceNumber>().ok() == Some(pool) => {
                 Ok(Thin {
                     pool: self.clone(),
                     id: id.parse()?,
-                    state: Active(dmsetup.device(root, name)),
+                    state: Active {
+                        device: dmsetup.device(root, name),
+                        sectors: sectors.parse().map_err(|_| not_a_thin())?,
+                    },
                 })
             }
             _ => Err(not_a_thin()),
@@ -275,7 +281,7 @@ impl<'a> Thin<'a, Inactive> {
         Ok(Thin {
             pool: self.pool,
             id: self.id,
-            state: Active(device),
+            state: Active { device, sectors },
         })
     }
 
@@ -286,7 +292,11 @@ impl<'a> Thin<'a, Inactive> {
 
 impl<'a> Thin<'a, Active<'a>> {
     pub fn device(&self) -> &Device<'a> {
-        &self.state.0
+        &self.state.device
+    }
+
+    pub fn sectors(&self) -> u64 {
+        self.state.sectors
     }
 
     pub fn snapshot(&self, new_id: ThinId) -> Result<Thin<'a, Inactive>, SnapshotError> {
@@ -314,7 +324,7 @@ impl<'a> Thin<'a, Active<'a>> {
     }
 
     pub fn deactivate(self) -> Result<Thin<'a, Inactive>, RunError> {
-        self.state.0.remove(RemoveMode::Retry)?;
+        self.state.device.remove(RemoveMode::Retry)?;
         Ok(Thin {
             pool: self.pool,
             id: self.id,
@@ -619,7 +629,7 @@ mod tests {
     }
 
     #[rstest]
-    fn open_thin_reads_the_id_from_the_live_table_as_root() {
+    fn open_thin_reads_the_id_and_length_from_the_live_table_as_root() {
         if !is_root() {
             eprintln!("SKIP open_thin: needs root to own the fake dmsetup");
             return;
@@ -635,12 +645,10 @@ mod tests {
         );
         let pool = fake.dmsetup.thin_pool(&root, &name("hyper-pool")).unwrap();
 
-        let snap = pool
-            .open_thin(&name("hyper-vol"))
-            .unwrap()
-            .snapshot(ThinId::new(8).unwrap())
-            .unwrap();
+        let vol = pool.open_thin(&name("hyper-vol")).unwrap();
+        let snap = vol.snapshot(ThinId::new(8).unwrap()).unwrap();
 
+        assert_eq!(vol.sectors(), 100);
         assert_eq!(snap.id(), ThinId::new(8).unwrap());
         assert_eq!(
             fake.calls()[1..],
@@ -660,6 +668,7 @@ mod tests {
     #[case::pool_itself(POOL_TABLE)]
     #[case::two_segments("0 100 thin 253:1 7\\n100 100 thin 253:1 8")]
     #[case::no_id("0 100 thin 253:1")]
+    #[case::non_numeric_length("0 x thin 253:1 7")]
     #[case::absent("")]
     fn open_thin_refuses_anything_but_a_thin_of_this_pool_as_root(#[case] table: &str) {
         if !is_root() {

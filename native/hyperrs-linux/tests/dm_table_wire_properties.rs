@@ -10,8 +10,8 @@
 //!   * a thin message renders to at most three tokens and round-trips.
 
 use hyperrs_linux::dm::{
-    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, Persistence, Role, SnapshotTable,
-    ThinMessage, ThinPoolTable, ThinTable,
+    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, PaddedTable, Persistence, Role,
+    SnapshotTable, ThinMessage, ThinPoolTable, ThinTable,
 };
 use proptest::prelude::*;
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ fn arity(t: &DmTable) -> usize {
         DmTable::Linear(_) => 5,
         DmTable::Snapshot(_) | DmTable::ThinPool(_) => 7,
         DmTable::Thin(ThinTable { origin, .. }) => 5 + usize::from(origin.is_some()),
+        DmTable::Padded(_) => 8,
     }
 }
 
@@ -32,6 +33,8 @@ fn token() -> impl Strategy<Value = String> {
         Just("snapshot".to_string()),
         Just("thin-pool".to_string()),
         Just("thin".to_string()),
+        Just("zero".to_string()),
+        Just("\n".to_string()),
         Just("P".to_string()),
         Just("N".to_string()),
         Just("/dev/mapper/hyper-a".to_string()),
@@ -56,7 +59,12 @@ fn soup() -> impl Strategy<Value = String> {
 fn parse_is_total_and_whatever_parses_renders_canonically(#[strategy(soup())] s: String) {
     if let Ok(t) = s.parse::<DmTable>() {
         let rendered = t.to_string();
-        prop_assert_eq!(rendered.split(' ').count(), arity(&t), "{}", rendered);
+        prop_assert_eq!(
+            rendered.split([' ', '\n']).count(),
+            arity(&t),
+            "{}",
+            rendered
+        );
         let back: DmTable = rendered.parse().unwrap();
         prop_assert_eq!(&back, &t);
         prop_assert_eq!(back.to_string(), rendered);
@@ -146,6 +154,21 @@ fn table(chars: &'static str) -> impl Strategy<Value = DmTable> {
                 id: hyperrs_linux::dm::ThinId::new(id).unwrap(),
                 origin,
             })),
+        (0..u64::MAX, origin(chars))
+            .prop_flat_map(|(origin_sectors, origin)| {
+                (
+                    origin_sectors + 1..=u64::MAX,
+                    Just(origin_sectors),
+                    Just(origin),
+                )
+            })
+            .prop_map(|(sectors, origin_sectors, origin)| {
+                DmTable::Padded(PaddedTable {
+                    sectors,
+                    origin_sectors,
+                    origin,
+                })
+            }),
     ]
 }
 

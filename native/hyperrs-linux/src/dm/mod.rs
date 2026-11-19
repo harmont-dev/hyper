@@ -18,8 +18,8 @@ use std::ffi::OsStr;
 use std::io;
 use std::os::unix::io::AsFd;
 pub use table::{
-    DmTable, LinearTable, NoSpace, Origin, ParseTableError, Persistence, Role, SnapshotTable,
-    ThinPoolTable, ThinTable,
+    DmTable, LinearTable, NoSpace, Origin, PaddedTable, ParseTableError, Persistence, Role,
+    SnapshotTable, ThinPoolTable, ThinTable,
 };
 pub use thin::{
     Active, Inactive, OpenThinError, ParseThinIdError, ParseThinMessageError, SnapshotError, Thin,
