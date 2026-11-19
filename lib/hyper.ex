@@ -18,7 +18,6 @@ defmodule Hyper do
   @spec create_vm(Hyper.Vm.Spec.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%Hyper.Vm.Spec{} = spec) do
     with {:ok, arch} <- resolve_arch(spec.arch),
-         {:ok, layers} <- image_layers(spec.img_id),
          :ok <- fits_disk(spec.img_id, spec.type) do
       vm_id = Hyper.Vm.Id.generate()
       spec = %{spec | arch: arch}
@@ -27,22 +26,15 @@ defmodule Hyper do
       start_fun = fn -> Hyper.Node.start_image_vm(vm_id, spec) end
       stop_fun = fn pid -> Hyper.Node.stop_image_vm(pid) end
 
+      # Rank candidates by how many of the image's layer bytes they already
+      # have mounted; a fork's freshly published delta is resident nowhere yet,
+      # so its parent's base layers dominate the score — which is the point.
+      layers = Hyper.Img.Db.Image.chain_sizes(spec.img_id)
+
       case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
         {:ok, {_node, pid}} -> {:ok, pid}
         {:error, _} = err -> err
       end
-    end
-  end
-
-  # Rank candidates by how many of the image's layer bytes they already
-  # have mounted; a fork's freshly published delta is resident nowhere yet,
-  # so its parent's base layers dominate the score — which is the point.
-  @spec image_layers(Hyper.Img.id()) ::
-          {:ok, Hyper.Cluster.Scheduler.layer_sizes()} | {:error, :unknown_image}
-  defp image_layers(img_id) do
-    case Hyper.Img.Db.Image.chain_sizes(img_id) do
-      [] -> {:error, :unknown_image}
-      layers -> {:ok, layers}
     end
   end
 
