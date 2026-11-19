@@ -16,7 +16,7 @@ defmodule Hyper.Cfg.Img do
   @thin_block_sectors Application.compile_env(:hyper, :thin_block_sectors, 128)
   @thin_block_bytes Unit.Information.as_bytes(Unit.Information.sectors(@thin_block_sectors))
   @meta_bytes_per_block 48
-  @min_meta_size Unit.Information.gib(1)
+  @min_meta_size Unit.Information.mib(2)
 
   @doc """
   dm-snapshot exception-store chunk size, in 512-byte sectors (8 = 4 KiB).
@@ -38,7 +38,7 @@ defmodule Hyper.Cfg.Img do
 
   @doc """
   Size of the node's dm-thin pool metadata device for a `data_size` data device:
-  the kernel's guide of 48 bytes per data block, and never under 1 GiB.
+  the kernel's guide of 48 bytes per data block, and never under 2 MiB.
   """
   @spec thin_pool_meta_size(Unit.Information.t()) :: Unit.Information.t()
   def thin_pool_meta_size(data_size) do
