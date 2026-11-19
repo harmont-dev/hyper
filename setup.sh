@@ -42,7 +42,14 @@ info "OS packages"
 sudo apt-get update
 sudo apt-get install -y \
   coreutils e2fsprogs libc-bin lvm2 nftables skopeo \
-  thin-provisioning-tools util-linux "linux-modules-extra-$(uname -r)"
+  thin-provisioning-tools util-linux
+
+# Ubuntu packages additional kernel modules separately.
+# Debian provides the required modules through its linux-modules package.
+. /etc/os-release
+if [ "${ID:-}" = "ubuntu" ]; then
+  sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+fi
 
 info "device-mapper modules"
 # -a is load-bearing: without it modprobe reads the 2nd+ names as module
