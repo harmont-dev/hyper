@@ -289,7 +289,7 @@ impl FromStr for DmTable {
 mod tests {
     use super::{
         DevPath, DmTable, LinearTable, NoSpace, Origin, PaddedTable, ParseTableError, Persistence,
-        SnapshotTable, ThinPoolTable, ThinTable,
+        Role, SnapshotTable, ThinPoolTable, ThinTable,
     };
     use crate::dm::{DmName, ThinId};
     use proptest::prelude::*;
@@ -424,6 +424,38 @@ mod tests {
             .map(|d| d.path().as_path().display().to_string())
             .collect();
         prop_assert_eq!(devices, mapper);
+    }
+
+    #[proptest]
+    fn paths_are_exactly_the_backing_file_operands(#[strategy(table())] t: DmTable) {
+        let rendered = t.to_string();
+        let files: Vec<&str> = rendered
+            .split_whitespace()
+            .filter(|tok| tok.starts_with('/') && !tok.starts_with("/dev/mapper/"))
+            .collect();
+        let paths: Vec<String> = t
+            .paths()
+            .map(|(_, p)| p.as_path().display().to_string())
+            .collect();
+        prop_assert_eq!(paths, files);
+    }
+
+    #[proptest]
+    fn paths_mut_rewrites_exactly_the_operands_paths_reads(#[strategy(table())] mut t: DmTable) {
+        let roles: Vec<Role> = t.paths().map(|(role, _)| role).collect();
+        for (i, (_, path)) in t.paths_mut().enumerate() {
+            *path = PathBuf::from(format!("/rewritten/{i}")).try_into().unwrap();
+        }
+        let rewritten: Vec<(Role, String)> = t
+            .paths()
+            .map(|(role, p)| (role, p.as_path().display().to_string()))
+            .collect();
+        let expected: Vec<(Role, String)> = roles
+            .into_iter()
+            .enumerate()
+            .map(|(i, role)| (role, format!("/rewritten/{i}")))
+            .collect();
+        prop_assert_eq!(rewritten, expected);
     }
 
     #[rstest]
