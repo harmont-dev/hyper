@@ -50,7 +50,12 @@ defmodule Hyper.SuidHelper.RequestContractTest do
       "img_activate" =>
         {~s({"result":"activated","device":"/dev/mapper/hyper-img-x","names":[]}),
          fn ->
-           SuidHelper.Img.activate("hyper-img-x", "/srv/hyper/base.img", ["/srv/hyper/d1.img"])
+           SuidHelper.Img.activate(
+             "hyper-img-x",
+             "/srv/hyper/base.img",
+             ["/srv/hyper/d1.img"],
+             Unit.Information.gib(2)
+           )
          end},
       "thin_pool_create" =>
         {~s({"result":"created","device":"/dev/mapper/hyper-pool","loops":{"metadata":"/dev/loop3"}}),
@@ -66,6 +71,7 @@ defmodule Hyper.SuidHelper.RequestContractTest do
              1,
              "hyper-v1",
              "/dev/mapper/hyper-img",
+             Unit.Information.gib(2),
              nil
            )
          end},
@@ -77,6 +83,7 @@ defmodule Hyper.SuidHelper.RequestContractTest do
              2,
              "hyper-v2",
              "/dev/mapper/hyper-img",
+             Unit.Information.gib(2),
              "hyper-v1"
            )
          end},

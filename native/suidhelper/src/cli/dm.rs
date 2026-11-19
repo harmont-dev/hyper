@@ -2,7 +2,8 @@ use crate::cli::Op;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, TableError};
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, LinearTable, Origin, RemoveMode, Role, SnapshotTable, ThinTable,
+    self, DevPath, DmTable, LinearTable, Origin, PaddedTable, RemoveMode, Role, SnapshotTable,
+    ThinTable,
 };
 use hyperrs_linux::loopdev::{self, LoopControl};
 use hyperrs_linux::Access;
@@ -125,6 +126,7 @@ impl HyperDmTable {
                 DmTable::Snapshot(t) => t.sectors = sectors,
                 DmTable::ThinPool(t) => t.sectors = sectors,
                 DmTable::Thin(t) => t.sectors = sectors,
+                DmTable::Padded(t) => t.sectors = sectors,
             }
             (
                 dm.create(&root, name, &attached, access)?.path().into(),
@@ -143,6 +145,7 @@ impl HyperDmTable {
     fn sectors(&self) -> Result<u64, DmError> {
         let origin = match self.table() {
             DmTable::ThinPool(_) => return self.backing_sectors(Role::Data),
+            DmTable::Padded(PaddedTable { sectors, .. }) => return Ok(*sectors),
             DmTable::Linear(LinearTable { origin, .. })
             | DmTable::Snapshot(SnapshotTable { origin, .. })
             | DmTable::Thin(ThinTable {

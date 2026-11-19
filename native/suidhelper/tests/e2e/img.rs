@@ -83,26 +83,41 @@ fn work() -> Work {
     }
 }
 
-fn activate(base: &str, deltas: &[String]) -> Value {
+fn activate(base: &str, deltas: &[String], sectors: u64) -> Value {
     json!({
         "op": "img_activate",
         "name": "hyper-img-x",
         "base": base,
         "deltas": deltas,
         "chunk_sectors": 8,
+        "sectors": sectors,
     })
 }
 
 #[rstest]
-#[case::base_only(0, &["create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0"])]
-#[case::one_delta(1, &["create hyper-img-x-1 --readonly --table 0 2048 snapshot {loop} {loop} P 8"])]
-#[case::two_deltas(2, &[
-    "create hyper-img-x-1 --readonly --table 0 2048 snapshot {loop} {loop} P 8",
+#[case::base_only(0, 2048, &["create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0"])]
+#[case::one_delta(1, 2048, &[
+    "create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0",
+    "create hyper-img-x-1 --readonly --table 0 2048 snapshot /dev/mapper/hyper-img-x-0 {loop} P 8",
+])]
+#[case::two_deltas(2, 2048, &[
+    "create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0",
+    "create hyper-img-x-1 --readonly --table 0 2048 snapshot /dev/mapper/hyper-img-x-0 {loop} P 8",
     "create hyper-img-x-2 --readonly --table 0 2048 snapshot /dev/mapper/hyper-img-x-1 {loop} P 8",
 ])]
-fn img_activate_stacks_a_snapshot_per_delta_sized_by_the_base_as_root(
+#[case::padded_base(0, 8192, &[
+    "create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0",
+    "2048 6144 zero",
+])]
+#[case::padded_under_a_delta(1, 2049, &[
+    "create hyper-img-x-0 --readonly --table 0 2048 linear {loop} 0",
+    "2048 1 zero",
+    "create hyper-img-x-1 --readonly --table 0 2049 snapshot /dev/mapper/hyper-img-x-0 {loop} P 8",
+])]
+fn img_activate_stacks_a_snapshot_per_delta_over_the_base_grown_to_the_device_as_root(
     work: Work,
     #[case] deltas: usize,
+    #[case] sectors: u64,
     #[case] calls: &[&str],
 ) {
     if !is_root() {
@@ -114,16 +129,42 @@ fn img_activate_stacks_a_snapshot_per_delta_sized_by_the_base_as_root(
         .map(|i| work.file(&format!("d{i}.img"), &vec![0; MIB / 4]))
         .collect();
 
-    let out = stdout_json(&run(&work.config, activate(&base, &deltas)).success());
+    let out = stdout_json(&run(&work.config, activate(&base, &deltas, sectors)).success());
 
     assert_eq!(work.calls(), calls);
-    let top = calls.last().unwrap().split(' ').nth(1).unwrap();
-    assert_eq!(out["device"], format!("/dev/mapper/{top}"));
     let names: Vec<String> = calls
         .iter()
-        .map(|call| call.split(' ').nth(1).unwrap().to_string())
+        .filter_map(|call| call.strip_prefix("create "))
+        .map(|call| call.split(' ').next().unwrap().to_string())
         .collect();
+    assert_eq!(
+        out["device"],
+        format!("/dev/mapper/{}", names.last().unwrap())
+    );
     assert_eq!(out["names"], json!(names));
+}
+
+#[rstest]
+#[case::empty(0)]
+#[case::one_sector_short(2047)]
+fn img_activate_refuses_a_device_smaller_than_its_base_before_building_one_as_root(
+    work: Work,
+    #[case] sectors: u64,
+) {
+    if !is_root() {
+        eprintln!("SKIP img_activate undersized: needs root to own the config");
+        return;
+    }
+    let base = work.file("base.img", &vec![0; MIB]);
+    let deltas = [work.file("d1.img", &vec![0; MIB / 4])];
+
+    run(&work.config, activate(&base, &deltas, sectors))
+        .code(2)
+        .stderr(predicates::str::contains(format!(
+            "a {sectors}-sector image device cannot hold its 2048-sector base"
+        )));
+
+    assert!(work.calls().is_empty(), "{:?}", work.calls());
 }
 
 #[rstest]
@@ -138,7 +179,7 @@ fn img_activate_removes_the_layers_it_built_when_one_fails_as_root(work: Work) {
         .collect();
     work.fail_create("hyper-img-x-3");
 
-    run(&work.config, activate(&base, &deltas)).code(2);
+    run(&work.config, activate(&base, &deltas, 2048)).code(2);
 
     let verbs: Vec<String> = work
         .calls()
@@ -148,11 +189,13 @@ fn img_activate_removes_the_layers_it_built_when_one_fails_as_root(work: Work) {
     assert_eq!(
         verbs,
         [
+            "create hyper-img-x-0 --readonly",
             "create hyper-img-x-1 --readonly",
             "create hyper-img-x-2 --readonly",
             "create hyper-img-x-3 --readonly",
             "remove --retry hyper-img-x-2",
             "remove --retry hyper-img-x-1",
+            "remove --retry hyper-img-x-0",
         ]
     );
 }
@@ -181,7 +224,7 @@ fn img_activate_refuses_any_layer_before_building_one_as_root(
         .flatten()
         .collect();
 
-    run(&work.config, activate(&at_work(base), &deltas)).code(2);
+    run(&work.config, activate(&at_work(base), &deltas, 2048)).code(2);
 
     assert!(work.calls().is_empty(), "{:?}", work.calls());
 }

@@ -222,7 +222,7 @@ fn launch_with(field: &str, value: Value) -> Value {
 
 fn volume_with_thin_id(id: Value) -> Value {
     json!({"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": id,
-        "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"})
+        "name": "hyper-v1", "origin": "/dev/mapper/hyper-img", "sectors": 2048})
 }
 
 #[proptest]

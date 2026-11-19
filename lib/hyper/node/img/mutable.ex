@@ -33,12 +33,13 @@ defmodule Hyper.Node.Img.Mutable do
     VM's writable root disk from, the VM it belongs to, and — for a fork — the
     VM whose disk to snapshot instead.
     """
-    @enforce_keys [:img_id, :vm_id]
-    defstruct [:img_id, :vm_id, fork_of: nil]
+    @enforce_keys [:img_id, :vm_id, :disk]
+    defstruct [:img_id, :vm_id, :disk, fork_of: nil]
 
     @type t :: %__MODULE__{
             img_id: Hyper.Img.id(),
             vm_id: Hyper.Vm.Id.t(),
+            disk: Unit.Information.t(),
             fork_of: Hyper.Vm.Id.t() | nil
           }
   end
@@ -52,6 +53,7 @@ defmodule Hyper.Node.Img.Mutable do
       :thin_name,
       :thin_id,
       :blk_path,
+      :disk,
       holders: %{},
       idle_ref: nil
     ]
@@ -63,6 +65,7 @@ defmodule Hyper.Node.Img.Mutable do
             thin_name: String.t(),
             thin_id: non_neg_integer(),
             blk_path: Path.t(),
+            disk: Unit.Information.t(),
             holders: %{pid() => reference()},
             idle_ref: reference() | nil
           }
@@ -85,7 +88,8 @@ defmodule Hyper.Node.Img.Mutable do
           thin_id: non_neg_integer(),
           blk_path: Path.t(),
           origin_dev: Path.t(),
-          img_server: GenServer.server()
+          img_server: GenServer.server(),
+          disk: Unit.Information.t()
         }
   def describe(server), do: GenServer.call(server, :describe)
 
@@ -105,21 +109,22 @@ defmodule Hyper.Node.Img.Mutable do
 
   @impl true
   @decorate with_span("Hyper.Node.Img.Mutable.init", include: [:img_id, :vm_id])
-  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: nil}) do
+  def init(%Opts{img_id: img_id, vm_id: vm_id, disk: disk, fork_of: nil}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)
 
     with {:ok, img_server} <- Img.activate(img_id),
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
-         {:ok, %{dev: dev, id: id}} <- ThinPool.create_volume(name, ro_dev) do
+         {:ok, %{dev: dev, id: id}} <- ThinPool.create_volume(name, ro_dev, disk) do
       state = %State{
         img_id: img_id,
         img_server: img_server,
         origin_dev: ro_dev,
         thin_name: name,
         thin_id: id,
-        blk_path: dev
+        blk_path: dev,
+        disk: disk
       }
 
       {:ok, arm_idle(state)}
@@ -131,7 +136,7 @@ defmodule Hyper.Node.Img.Mutable do
   @decorate with_span("Hyper.Node.Img.Mutable.init_fork",
               include: [:img_id, :vm_id, :parent_vm_id]
             )
-  def init(%Opts{img_id: img_id, vm_id: vm_id, fork_of: parent_vm_id}) do
+  def init(%Opts{img_id: img_id, vm_id: vm_id, disk: disk, fork_of: parent_vm_id}) do
     Process.flag(:trap_exit, true)
     name = dm_name(vm_id)
 
@@ -144,7 +149,7 @@ defmodule Hyper.Node.Img.Mutable do
          :ok <- Server.acquire(img_server),
          ro_dev = Server.blk_path(img_server),
          {:ok, %{dev: dev, id: id}} <-
-           ThinPool.create_volume(name, ro_dev, origin_name) do
+           ThinPool.create_volume(name, ro_dev, disk, origin_name) do
       release_parent(parent)
 
       state = %State{
@@ -153,7 +158,8 @@ defmodule Hyper.Node.Img.Mutable do
         origin_dev: ro_dev,
         thin_name: name,
         thin_id: id,
-        blk_path: dev
+        blk_path: dev,
+        disk: disk
       }
 
       {:ok, arm_idle(state)}
@@ -193,7 +199,8 @@ defmodule Hyper.Node.Img.Mutable do
       thin_id: state.thin_id,
       blk_path: state.blk_path,
       origin_dev: state.origin_dev,
-      img_server: state.img_server
+      img_server: state.img_server,
+      disk: state.disk
     }
 
     {:reply, reply, state}

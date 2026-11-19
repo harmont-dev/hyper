@@ -103,7 +103,9 @@ case "$1" in
       hyper-pool)
         if [ -e '{b}/linear' ]; then printf '0 100 linear 7:0 0\n'; else printf '0 100 thin-pool 7:3 7:1 128 0 0\n'; fi ;;
       hyper-vm1)
-        if [ -e '{b}/parent-linear' ]; then printf '0 2048 linear 7:0 0\n'; else printf '0 2048 thin 253:1 7\n'; fi ;;
+        if [ -e '{b}/parent-table' ]; then cat '{b}/parent-table'
+        elif [ -e '{b}/parent-linear' ]; then printf '0 2048 linear 7:0 0\n'
+        else printf '0 2048 thin 253:1 7\n'; fi ;;
       *) printf '0 2048 thin 253:1 {SCRATCH_ID}\n' ;;
     esac ;;
   info) printf '253:1\n' ;;
@@ -135,6 +137,10 @@ esac
 
     fn mark(&self, marker: &str) {
         fs::write(self.base.join(marker), b"").unwrap();
+    }
+
+    fn parent_table(&self, table: &str) {
+        fs::write(self.base.join("parent-table"), format!("{table}\n")).unwrap();
     }
 
     fn dmsetup_calls(&self) -> Vec<String> {
@@ -314,15 +320,78 @@ fn a_failed_copy_still_removes_the_copy_target_as_root(pool: Option<Pool>) {
 }
 
 #[rstest]
-#[case::not_a_thin_pool("linear", &[TABLE])]
-#[case::parent_not_a_thin_of_the_pool("parent-linear", &[TABLE, "table hyper-vm1", POOL_NUMBER])]
+fn a_parent_bigger_than_its_origin_is_copied_over_the_origin_grown_with_zeros_as_root(
+    pool: Option<Pool>,
+) {
+    let pool = require!(pool);
+    pool.parent_table("0 4096 thin 253:1 7");
+    sparse(&pool.base.join("cow.img"), 1 << 20);
+    let Some(_scratch) = MapperDevice::linear("hyper-scratch-11", &pool.base.join("origin.img"))
+    else {
+        eprintln!("SKIP: needs a real scratch device");
+        return;
+    };
+
+    pool.fork_delta(json!({"scratch_id": 11}))
+        .failure()
+        .stderr(contains("copying ranges"));
+
+    let calls = pool.dmsetup_calls();
+    let origin = pool.origin.path();
+    let creates: Vec<String> = calls
+        .iter()
+        .filter(|call| call.starts_with("create ") || call.ends_with(" zero"))
+        .map(|call| call.split(" /dev/loop").next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        creates,
+        [
+            format!(
+                "create hyper-scratch-11 --table 0 4096 thin /dev/mapper/hyper-pool 11 {origin}"
+            ),
+            format!("create hyper-grown-11 --readonly --table 0 2048 linear {origin} 0"),
+            "2048 2048 zero".to_string(),
+            "create hyper-copy-9 --table 0 4096 snapshot /dev/mapper/hyper-grown-11".to_string(),
+        ]
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("remove --retry hyper-"))
+            .collect::<Vec<_>>(),
+        [
+            "remove --retry hyper-copy-9",
+            "remove --retry hyper-grown-11",
+            "remove --retry hyper-scratch-11",
+        ]
+    );
+}
+
+#[rstest]
+#[case::not_a_thin_pool(Some("linear"), None, &[TABLE])]
+#[case::parent_not_a_thin_of_the_pool(
+    Some("parent-linear"),
+    None,
+    &[TABLE, "table hyper-vm1", POOL_NUMBER]
+)]
+#[case::parent_smaller_than_its_origin(
+    None,
+    Some("0 2047 thin 253:1 7"),
+    &[TABLE, "table hyper-vm1", POOL_NUMBER]
+)]
 fn nothing_is_snapshotted_unless_pool_and_parent_check_out_as_root(
     pool: Option<Pool>,
-    #[case] marker: &str,
+    #[case] marker: Option<&str>,
+    #[case] parent: Option<&str>,
     #[case] calls: &[&str],
 ) {
     let pool = require!(pool);
-    pool.mark(marker);
+    if let Some(marker) = marker {
+        pool.mark(marker);
+    }
+    if let Some(table) = parent {
+        pool.parent_table(table);
+    }
 
     pool.fork_delta(json!({})).failure();
 
@@ -445,6 +514,7 @@ fn forks_exactly_the_parents_provisioned_ranges_into_the_cow_store_as_root() {
     assert_eq!(stdout_json(&out)["written_chunks"], 2);
     for leftover in [
         format!("hyper-scratch-{REAL_POOL_SCRATCH_ID}"),
+        format!("hyper-grown-{REAL_POOL_SCRATCH_ID}"),
         format!("hyper-copy-{REAL_POOL_SCRATCH_ID}"),
     ] {
         assert!(

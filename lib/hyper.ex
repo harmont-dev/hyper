@@ -17,7 +17,9 @@ defmodule Hyper do
   """
   @spec create_vm(Hyper.Vm.Spec.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%Hyper.Vm.Spec{} = spec) do
-    with {:ok, arch} <- resolve_arch(spec.arch) do
+    with {:ok, arch} <- resolve_arch(spec.arch),
+         {:ok, layers} <- image_layers(spec.img_id),
+         :ok <- fits_disk(spec.img_id, spec.type) do
       vm_id = Hyper.Vm.Id.generate()
       spec = %{spec | arch: arch}
       instance_spec = Hyper.Vm.Instance.spec(spec.type)
@@ -25,19 +27,36 @@ defmodule Hyper do
       start_fun = fn -> Hyper.Node.start_image_vm(vm_id, spec) end
       stop_fun = fn pid -> Hyper.Node.stop_image_vm(pid) end
 
-      # Rank candidates by how many of the image's layer bytes they already
-      # have mounted; a fork's freshly published delta is resident nowhere yet,
-      # so its parent's base layers dominate the score — which is the point.
-      case Hyper.Img.Db.Image.chain_sizes(spec.img_id) do
-        [] ->
-          {:error, :unknown_image}
-
-        layers ->
-          case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
-            {:ok, {_node, pid}} -> {:ok, pid}
-            {:error, _} = err -> err
-          end
+      case Hyper.Cluster.Scheduler.run(instance_spec, layers, start_fun, stop_fun) do
+        {:ok, {_node, pid}} -> {:ok, pid}
+        {:error, _} = err -> err
       end
+    end
+  end
+
+  # Rank candidates by how many of the image's layer bytes they already
+  # have mounted; a fork's freshly published delta is resident nowhere yet,
+  # so its parent's base layers dominate the score — which is the point.
+  @spec image_layers(Hyper.Img.id()) ::
+          {:ok, Hyper.Cluster.Scheduler.layer_sizes()} | {:error, :unknown_image}
+  defp image_layers(img_id) do
+    case Hyper.Img.Db.Image.chain_sizes(img_id) do
+      [] -> {:error, :unknown_image}
+      layers -> {:ok, layers}
+    end
+  end
+
+  @spec fits_disk(Hyper.Img.id(), Hyper.Vm.Instance.t()) ::
+          :ok
+          | {:error, :unknown_image}
+          | {:error, {:image_exceeds_disk, Unit.Information.t(), Hyper.Vm.Instance.t()}}
+  defp fits_disk(img_id, type) do
+    disk = Hyper.Vm.Instance.spec(type).disk
+
+    with {:ok, size} <- Hyper.Img.Db.Image.device_size(img_id) do
+      if Unit.Information.as_bytes(size) <= Unit.Information.as_bytes(disk),
+        do: :ok,
+        else: {:error, {:image_exceeds_disk, size, type}}
     end
   end
 

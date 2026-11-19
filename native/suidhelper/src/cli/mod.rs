@@ -235,28 +235,32 @@ mod tests {
         "meta": "/dev/loop3", "src": "/dev/mapper/hyper-a", "origin": "/dev/mapper/hyper-img",
         "cow": "/srv/hyper/cow.img", "chunk_sectors": 8}))]
     #[case::thin_id_as_string(json!({"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": "1",
-        "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}))]
+        "name": "hyper-v1", "origin": "/dev/mapper/hyper-img", "sectors": 8}))]
     #[case::thin_id_past_24_bits(json!({"op": "thin_volume_create", "pool": "hyper-pool",
-        "thin_id": 16_777_216, "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}))]
+        "thin_id": 16_777_216, "name": "hyper-v1", "origin": "/dev/mapper/hyper-img",
+        "sectors": 8}))]
     #[case::thin_origin_by_name(json!({"op": "thin_volume_create", "pool": "hyper-pool", "thin_id": 1,
-        "name": "hyper-v1", "origin": "hyper-img"}))]
+        "name": "hyper-v1", "origin": "hyper-img", "sectors": 8}))]
+    #[case::thin_sectors_negative(json!({"op": "thin_volume_create", "pool": "hyper-pool",
+        "thin_id": 1, "name": "hyper-v1", "origin": "/dev/mapper/hyper-img", "sectors": -8}))]
     #[case::retired_thin_create_op(json!({"op": "thin_create", "pool": "hyper-pool", "thin_id": 1,
         "name": "hyper-v1", "origin": "/dev/mapper/hyper-img"}))]
     #[case::caller_named_parent_id(json!({"op": "thin_volume_create", "pool": "hyper-pool",
         "parent": "hyper-v1", "parent_id": 1, "thin_id": 2, "name": "hyper-v2",
-        "origin": "/dev/mapper/hyper-img"}))]
+        "origin": "/dev/mapper/hyper-img", "sectors": 8}))]
     #[case::foreign_parent(json!({"op": "thin_volume_create", "pool": "hyper-pool", "parent": "root",
-        "thin_id": 2, "name": "hyper-v2", "origin": "/dev/mapper/hyper-img"}))]
+        "thin_id": 2, "name": "hyper-v2", "origin": "/dev/mapper/hyper-img", "sectors": 8}))]
     #[case::caller_named_destroy_id(json!({"op": "thin_destroy", "pool": "hyper-pool",
         "name": "hyper-v1", "thin_id": 1}))]
     #[case::relative_delta(json!({"op": "img_activate", "name": "hyper-img-x",
-        "base": "/srv/hyper/base.img", "deltas": ["d1.img"], "chunk_sectors": 8}))]
-    #[case::caller_chosen_sectors(json!({"op": "img_activate", "name": "hyper-img-x", "sectors": 8,
-        "base": "/srv/hyper/base.img", "deltas": [], "chunk_sectors": 8}))]
+        "base": "/srv/hyper/base.img", "deltas": ["d1.img"], "chunk_sectors": 8, "sectors": 8}))]
     #[case::foreign_image_name(json!({"op": "img_activate", "name": "vg0-img",
-        "base": "/srv/hyper/base.img", "deltas": [], "chunk_sectors": 8}))]
+        "base": "/srv/hyper/base.img", "deltas": [], "chunk_sectors": 8, "sectors": 8}))]
     #[case::deltas_not_a_list(json!({"op": "img_activate", "name": "hyper-img-x",
-        "base": "/srv/hyper/base.img", "deltas": "/srv/hyper/d1.img", "chunk_sectors": 8}))]
+        "base": "/srv/hyper/base.img", "deltas": "/srv/hyper/d1.img", "chunk_sectors": 8,
+        "sectors": 8}))]
+    #[case::image_sectors_as_string(json!({"op": "img_activate", "name": "hyper-img-x",
+        "base": "/srv/hyper/base.img", "deltas": [], "chunk_sectors": 8, "sectors": "8"}))]
     #[case::retired_linear_op(json!({"op": "dm_linear", "name": "hyper-img",
         "origin": "/srv/hyper/base.img"}))]
     #[case::retired_snapshot_op(json!({"op": "dm_snapshot", "name": "hyper-v1",

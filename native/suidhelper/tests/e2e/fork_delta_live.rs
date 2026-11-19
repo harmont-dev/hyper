@@ -18,6 +18,7 @@ use pretty_assertions::assert_eq;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config as RunnerConfig, TestRunner};
+use rstest::rstest;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::fs;
@@ -49,6 +50,7 @@ fn sparse(path: &Path, bytes: u64) {
 
 struct Live {
     origin: MapperDevice,
+    origin_sectors: u64,
     pool: DmDevice,
     _data: LoopDevice,
     _meta: LoopDevice,
@@ -59,7 +61,7 @@ struct Live {
 }
 
 impl Live {
-    fn new(tag: &str) -> Option<Self> {
+    fn new(tag: &str, origin_blocks: u64) -> Option<Self> {
         let (dmsetup, thin_dump) = (system_bin("dmsetup")?, system_bin("thin_dump")?);
         let dir = TempDir::new().unwrap();
         let base = fs::canonicalize(dir.path()).unwrap();
@@ -81,7 +83,9 @@ impl Live {
 
         sparse(&base.join("meta.img"), 8 << 20);
         sparse(&base.join("data.img"), 64 << 20);
-        let origin_bytes: Vec<u8> = (0..SIZE).map(|i| (i % 241) as u8 | 0x80).collect();
+        let origin_bytes: Vec<u8> = (0..origin_blocks * BLOCK_BYTES)
+            .map(|i| (i % 241) as u8 | 0x80)
+            .collect();
         fs::write(base.join("origin.img"), origin_bytes).unwrap();
         let meta = LoopDevice::attach(&base.join("meta.img"))?;
         let data = LoopDevice::attach(&base.join("data.img"))?;
@@ -98,6 +102,7 @@ impl Live {
         let origin = MapperDevice::linear(&format!("{tag}-origin"), &base.join("origin.img"))?;
         Some(Self {
             origin,
+            origin_sectors: origin_blocks * BLOCK_SECTORS,
             pool,
             _data: data,
             _meta: meta,
@@ -144,14 +149,25 @@ impl Live {
 
     fn replay(&self, cow: &Path) -> Vec<u8> {
         let lo = LoopDevice::attach(cow).expect("cow loop");
+        let sectors = SIZE / 512;
+        let grown = (self.origin_sectors < sectors).then(|| {
+            DmDevice::create(
+                &format!("{}-replay-origin", self.tag),
+                &format!(
+                    "0 {o} linear {} 0\n{o} {} zero",
+                    self.origin.path(),
+                    sectors - self.origin_sectors,
+                    o = self.origin_sectors
+                ),
+            )
+            .expect("the origin grows with zeros")
+        });
+        let under = grown
+            .as_ref()
+            .map_or_else(|| self.origin.path(), DmDevice::path);
         let replay = DmDevice::create(
             &format!("{}-replay", self.tag),
-            &format!(
-                "0 {} snapshot {} {} P 8",
-                SIZE / 512,
-                self.origin.path(),
-                lo.path()
-            ),
+            &format!("0 {sectors} snapshot {under} {} P 8", lo.path()),
         )
         .expect("the cow store replays as a snapshot");
         fs::read(replay.path()).unwrap()
@@ -160,7 +176,7 @@ impl Live {
     fn assert_nothing_outlived(&self, scratch_id: u32) {
         let listed = Command::new("dmsetup").arg("ls").output().unwrap();
         let listed = String::from_utf8_lossy(&listed.stdout);
-        for prefix in ["hyper-scratch-", "hyper-copy-"] {
+        for prefix in ["hyper-scratch-", "hyper-grown-", "hyper-copy-"] {
             let leftover = format!("{prefix}{scratch_id}");
             assert!(
                 !listed
@@ -247,9 +263,14 @@ macro_rules! require {
     };
 }
 
-#[test]
-fn fork_delta_replays_any_divergence_exactly_and_leaves_nothing_behind_as_root() {
-    let live = require!(Live::new("prop"));
+#[rstest]
+#[case::origin_the_parents_size(BLOCKS)]
+#[case::origin_a_third_of_the_parent(BLOCKS / 3)]
+fn fork_delta_replays_any_divergence_exactly_and_leaves_nothing_behind_as_root(
+    #[case] origin_blocks: u64,
+) {
+    let live = require!(Live::new(&format!("prop{origin_blocks}"), origin_blocks));
+    let scratch_id = SCRATCH_ID + origin_blocks as u32;
     let mut runner = TestRunner::new(RunnerConfig {
         cases: 8,
         failure_persistence: None,
@@ -268,7 +289,7 @@ fn fork_delta_replays_any_divergence_exactly_and_leaves_nothing_behind_as_root()
         let before = fs::read(parent.path()).unwrap();
         let cow = live.base.join(format!("cow-{n}.img"));
 
-        let out = live.fork(&parent, SCRATCH_ID, &cow).success();
+        let out = live.fork(&parent, scratch_id, &cow).success();
 
         let diverged: BTreeSet<u64> = case.iter().map(Divergence::block).collect();
         let written = stdout_json(&out)["written_chunks"].as_u64().unwrap();
@@ -282,13 +303,13 @@ fn fork_delta_replays_any_divergence_exactly_and_leaves_nothing_behind_as_root()
             fs::read(parent.path()).unwrap() == before,
             "the fork changed the parent: {case:?}"
         );
-        live.assert_nothing_outlived(SCRATCH_ID);
+        live.assert_nothing_outlived(scratch_id);
     }
 }
 
 #[test]
 fn racing_forks_of_two_parents_each_get_their_own_divergence_as_root() {
-    let live = require!(Live::new("race"));
+    let live = require!(Live::new("race", BLOCKS));
     let (a, b) = (live.parent(20), live.parent(21));
     for block in [0, 7, BLOCKS - 1] {
         Divergence::Block { block, fill: 0x0a }.apply(&a.path());

@@ -101,7 +101,9 @@ defmodule Hyper.Node do
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
     with {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
-           acquire_or_release(uid, net_id, fn -> Img.create_mutable(spec.img_id, vm_id) end) do
+           acquire_or_release(uid, net_id, fn ->
+             Img.create_mutable(spec.img_id, vm_id, Hyper.Vm.Instance.spec(spec.type).disk)
+           end) do
       boot_with_mutable(vm_id, spec, uid, net_id, mutable)
     end
   end
@@ -125,7 +127,12 @@ defmodule Hyper.Node do
     with {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
            acquire_or_release(uid, net_id, fn ->
-             Img.create_fork(parent.img_id, parent.vm_id, child_vm_id)
+             Img.create_fork(
+               parent.img_id,
+               parent.vm_id,
+               child_vm_id,
+               Hyper.Vm.Instance.spec(parent.type).disk
+             )
            end) do
       boot_with_mutable(child_vm_id, spec, uid, net_id, mutable)
     end

@@ -22,7 +22,7 @@ defmodule Hyper.Img do
   # `Ecto.Multi` is an opaque struct; building it through the pipe trips
   # dialyzer's opacity check (a known Ecto false positive), so silence it for the
   # one function that assembles a Multi.
-  @dialyzer {:no_opaque, record: 3, record_derived: 4}
+  @dialyzer {:no_opaque, record: 3, record_derived: 3}
 
   @doc """
   Ingest the image file at `path` into the cluster and return its
@@ -63,10 +63,10 @@ defmodule Hyper.Img do
   idempotent while identical delta bytes over different parents still get
   distinct image rows.
   """
-  @spec derived_image_id(id(), String.t()) :: id()
-  def derived_image_id(parent_img_id, delta_blob_id) do
+  @spec derived_image_id(id(), String.t(), Unit.Information.t()) :: id()
+  def derived_image_id(parent_img_id, delta_blob_id, device_size) do
     :sha256
-    |> :crypto.hash("#{parent_img_id}:#{delta_blob_id}")
+    |> :crypto.hash("#{parent_img_id}:#{delta_blob_id}:#{Unit.Information.as_bytes(device_size)}")
     |> Base.encode16(case: :lower)
   end
 
@@ -92,19 +92,21 @@ defmodule Hyper.Img do
 
   `opts[:label]` sets the derived image's label (defaults to the file basename).
   """
-  @spec create_derived(id(), Path.t(), keyword()) :: {:ok, id()} | {:error, term()}
+  @spec create_derived(id(), Path.t(), Unit.Information.t(), keyword()) ::
+          {:ok, id()} | {:error, term()}
   @decorate with_span("Hyper.Img.create_derived", include: [:parent_img_id, :delta_path])
-  def create_derived(parent_img_id, delta_path, opts \\ []) do
+  def create_derived(parent_img_id, delta_path, device_size, opts \\ []) do
     label = Keyword.get(opts, :label, Path.basename(delta_path))
 
     with {:ok, parent_blob_ids} <- parent_chain(parent_img_id),
+         :ok <- holds_parent(parent_img_id, device_size),
          {:ok, %File.Stat{size: size}} <- File.stat(delta_path),
          {:ok, blob_id} <- content_id(delta_path),
          {:ok, final, origin} <- publish(delta_path, blob_id),
-         img_id = derived_image_id(parent_img_id, blob_id),
+         img_id = derived_image_id(parent_img_id, blob_id, device_size),
          :ok <-
            record_derived_or_rollback(
-             {img_id, label},
+             {img_id, label, device_size},
              {blob_id, size},
              parent_blob_ids,
              {final, origin}
@@ -121,6 +123,18 @@ defmodule Hyper.Img do
   defp check_label(label),
     do: if(Hyper.Img.Db.Repo.storable_text?(label), do: :ok, else: {:error, :bad_label})
 
+  @spec holds_parent(id(), Unit.Information.t()) ::
+          :ok
+          | {:error, :unknown_image}
+          | {:error, {:smaller_than_parent, Unit.Information.t(), Unit.Information.t()}}
+  defp holds_parent(parent_img_id, device_size) do
+    with {:ok, parent} <- Image.device_size(parent_img_id) do
+      if Unit.Information.as_bytes(device_size) >= Unit.Information.as_bytes(parent),
+        do: :ok,
+        else: {:error, {:smaller_than_parent, device_size, parent}}
+    end
+  end
+
   @spec parent_chain(id()) :: {:ok, [String.t()]} | {:error, {:unknown_parent_image, id()}}
   defp parent_chain(parent_img_id) do
     case Image.resolve_chain(parent_img_id) do
@@ -130,13 +144,13 @@ defmodule Hyper.Img do
   end
 
   @spec record_derived_or_rollback(
-          {id(), String.t()},
+          {id(), String.t(), Unit.Information.t()},
           {String.t(), non_neg_integer()},
           [String.t()],
           {Path.t(), :created | :reused}
         ) :: :ok | {:error, term()}
-  defp record_derived_or_rollback({img_id, label}, {blob_id, size}, parents, {final, origin}) do
-    case record_derived(img_id, label, {blob_id, size}, parents) do
+  defp record_derived_or_rollback(image, {blob_id, size}, parents, {final, origin}) do
+    case record_derived(image, {blob_id, size}, parents) do
       :ok ->
         :ok
 
@@ -148,9 +162,12 @@ defmodule Hyper.Img do
 
   # One transaction: delta blob, derived image, and the full chain rows. All
   # idempotent upserts, mirroring record/3.
-  @spec record_derived(id(), String.t(), {String.t(), non_neg_integer()}, [String.t()]) ::
-          :ok | {:error, term()}
-  defp record_derived(img_id, label, {blob_id, size}, parent_blob_ids) do
+  @spec record_derived(
+          {id(), String.t(), Unit.Information.t()},
+          {String.t(), non_neg_integer()},
+          [String.t()]
+        ) :: :ok | {:error, term()}
+  defp record_derived({img_id, label, device_size}, {blob_id, size}, parent_blob_ids) do
     rows = derived_layer_rows(img_id, parent_blob_ids, blob_id)
 
     multi =
@@ -163,7 +180,11 @@ defmodule Hyper.Img do
       )
       |> Ecto.Multi.insert(
         :image,
-        Image.changeset(%Image{}, %{id: img_id, label: label}),
+        Image.changeset(%Image{}, %{
+          id: img_id,
+          label: label,
+          device_size: Unit.Information.as_bytes(device_size)
+        }),
         on_conflict: :nothing,
         conflict_target: :id
       )
@@ -271,7 +292,7 @@ defmodule Hyper.Img do
       )
       |> Ecto.Multi.insert(
         :image,
-        Image.changeset(%Image{}, %{id: id, label: label}),
+        Image.changeset(%Image{}, %{id: id, label: label, device_size: size}),
         on_conflict: :nothing,
         conflict_target: :id
       )

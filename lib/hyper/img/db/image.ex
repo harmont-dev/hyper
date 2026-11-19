@@ -16,6 +16,7 @@ defmodule Hyper.Img.Db.Image do
   @primary_key {:id, :string, autogenerate: false}
   schema "images" do
     field :label, :string
+    field :device_size, :integer
 
     has_many :layers, ImageLayer,
       foreign_key: :image_id,
@@ -29,10 +30,19 @@ defmodule Hyper.Img.Db.Image do
 
   def changeset(image, attrs) do
     image
-    |> cast(attrs, [:id, :label])
-    |> validate_required([:id])
+    |> cast(attrs, [:id, :label, :device_size])
+    |> validate_required([:id, :device_size])
+    |> validate_number(:device_size, greater_than: 0)
     |> cast_assoc(:layers, with: &ImageLayer.changeset/2)
     |> unique_constraint(:id, name: :images_pkey)
+  end
+
+  @spec device_size(String.t()) :: {:ok, Information.t()} | {:error, :unknown_image}
+  def device_size(image_id) do
+    case Repo.one(from i in __MODULE__, where: i.id == ^image_id, select: i.device_size) do
+      nil -> {:error, :unknown_image}
+      bytes -> {:ok, Information.bytes(bytes)}
+    end
   end
 
   @doc "The image's ordered layers as `{blob_id, size}`, base first."
