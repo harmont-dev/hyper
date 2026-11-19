@@ -23,7 +23,8 @@ defmodule Hyper.Node.Img.ThinPoolTest do
     rows = [
       {"destroy fails", {:destroy, "hyper-v1", 5}, @failing, []},
       {"destroy succeeds", {:destroy, "hyper-v1", 5}, ~s(echo '{"result":"destroyed"}'), [5]},
-      {"create fails", {:create_volume, "hyper-v1", "/dev/mapper/hyper-img", "hyper-v0"},
+      {"create fails",
+       {:create_volume, "hyper-v1", "/dev/mapper/hyper-img", Unit.Information.gib(2), "hyper-v0"},
        @failing, []},
       {"fork failed", {:release_scratch, 5, {:error, {2, "boom"}}}, @failing, []},
       {"fork succeeded", {:release_scratch, 5, {:ok, %{scanned: 1, written: 1}}}, @failing, [5]}

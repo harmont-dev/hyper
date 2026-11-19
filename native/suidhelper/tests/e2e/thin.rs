@@ -119,11 +119,17 @@ macro_rules! require {
 }
 
 #[rstest]
-fn volume_allocates_the_id_then_activates_it_sized_by_its_origin_as_root(pool: Option<Pool>) {
+#[case::the_origins_size(2048)]
+#[case::past_the_origin(2049)]
+#[case::an_instance_disk(4 << 21)]
+fn volume_allocates_the_id_then_activates_it_at_the_requested_size_as_root(
+    pool: Option<Pool>,
+    #[case] sectors: u64,
+) {
     let pool = require!(pool);
     let request = pool.request(
         "thin_volume_create",
-        json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin()}),
+        json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin(), "sectors": sectors}),
     );
 
     let out = stdout_json(&run(&pool.config, request).success());
@@ -135,11 +141,47 @@ fn volume_allocates_the_id_then_activates_it_sized_by_its_origin_as_root(pool: O
             POOL.to_string(),
             "message hyper-pool 0 create_thin 7".to_string(),
             format!(
-                "create hyper-vm1 --table 0 2048 thin /dev/mapper/hyper-pool 7 {}",
+                "create hyper-vm1 --table 0 {sectors} thin /dev/mapper/hyper-pool 7 {}",
                 pool.origin()
             ),
         ]
     );
+}
+
+#[rstest]
+#[case::empty(0, None, &[], "a 0-sector volume cannot hold its 2048-sector origin")]
+#[case::one_sector_short_of_the_origin(
+    2047,
+    None,
+    &[],
+    "a 2047-sector volume cannot hold its 2048-sector origin"
+)]
+#[case::fork_short_of_its_parent(
+    4095,
+    Some("0 4096 thin 253:1 7"),
+    &[POOL, PARENT, POOL_NUMBER],
+    "a 4095-sector fork cannot hold its 4096-sector parent"
+)]
+fn a_volume_smaller_than_what_it_must_hold_is_refused_before_any_id_is_taken_as_root(
+    pool: Option<Pool>,
+    #[case] sectors: u64,
+    #[case] parent: Option<&str>,
+    #[case] calls: &[&str],
+    #[case] reason: &str,
+) {
+    let pool = require!(pool);
+    let mut fields = json!({"thin_id": 8, "name": "hyper-fork", "origin": pool.origin(),
+        "sectors": sectors});
+    if let Some(table) = parent {
+        pool.parent_table(table);
+        fields["parent"] = json!("hyper-vm1");
+    }
+
+    run(&pool.config, pool.request("thin_volume_create", fields))
+        .code(2)
+        .stderr(predicates::str::contains(reason));
+
+    assert_eq!(pool.calls(), calls);
 }
 
 #[rstest]
@@ -148,7 +190,7 @@ fn volume_frees_the_id_when_activation_fails_as_root(pool: Option<Pool>) {
     pool.fail("create");
     let request = pool.request(
         "thin_volume_create",
-        json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin()}),
+        json!({"thin_id": 7, "name": "hyper-vm1", "origin": pool.origin(), "sectors": 2048}),
     );
 
     run(&pool.config, request).code(2);
@@ -183,7 +225,8 @@ fn forked_volume_freezes_the_parent_only_around_create_snap_as_root(
     }
     let request = pool.request(
         "thin_volume_create",
-        json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin()}),
+        json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin(),
+            "sectors": 2048}),
     );
 
     let out = run(&pool.config, request);
@@ -232,7 +275,8 @@ fn forked_volume_refuses_a_parent_that_is_not_a_thin_of_the_pool_as_root(
     pool.parent_table(table);
     let request = pool.request(
         "thin_volume_create",
-        json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin()}),
+        json!({"parent": "hyper-vm1", "thin_id": 8, "name": "hyper-fork", "origin": pool.origin(),
+            "sectors": 2048}),
     );
 
     run(&pool.config, request).code(2);
@@ -279,13 +323,13 @@ fn thin_destroy_refuses_a_device_that_is_not_a_thin_of_the_pool_as_root(pool: Op
 
 #[rstest]
 #[case::foreign_pool("thin_volume_create", json!({"pool": "vg0-pool", "thin_id": 1, "name": "hyper-vm1",
-    "origin": "/dev/mapper/hyper-img"}))]
+    "origin": "/dev/mapper/hyper-img", "sectors": 2048}))]
 #[case::foreign_name("thin_volume_create", json!({"thin_id": 1, "name": "sda1",
-    "origin": "/dev/mapper/hyper-img"}))]
+    "origin": "/dev/mapper/hyper-img", "sectors": 2048}))]
 #[case::foreign_origin("thin_volume_create", json!({"thin_id": 1, "name": "hyper-vm1",
-    "origin": "/dev/mapper/root"}))]
+    "origin": "/dev/mapper/root", "sectors": 2048}))]
 #[case::foreign_parent("thin_volume_create", json!({"parent": "root", "thin_id": 2,
-    "name": "hyper-fork", "origin": "/dev/mapper/hyper-img"}))]
+    "name": "hyper-fork", "origin": "/dev/mapper/hyper-img", "sectors": 2048}))]
 #[case::foreign_destroy("thin_destroy", json!({"name": "root"}))]
 fn foreign_devices_are_refused_before_dmsetup_runs_as_root(
     pool: Option<Pool>,

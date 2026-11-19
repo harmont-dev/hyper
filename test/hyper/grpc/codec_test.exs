@@ -306,7 +306,8 @@ defmodule Hyper.Grpc.CodecTest do
       {:bad_boot_args, GRPC.Status.invalid_argument()},
       {:unknown_image, GRPC.Status.not_found()},
       {:stopping, GRPC.Status.failed_precondition()},
-      {:not_ready, GRPC.Status.failed_precondition()}
+      {:not_ready, GRPC.Status.failed_precondition()},
+      {{:image_exceeds_disk, Unit.Information.gib(3), :micro}, GRPC.Status.failed_precondition()}
     ]
 
     test "each domain reason maps to its promised gRPC status" do
@@ -322,6 +323,23 @@ defmodule Hyper.Grpc.CodecTest do
                status: ^status,
                message: "node is missing required image tools: umoci, skopeo"
              } = Codec.to_grpc({:error, {:missing_tools, ["umoci", "skopeo"]}})
+    end
+
+    test "an image too big for its instance type names both sizes and the fix" do
+      status = GRPC.Status.failed_precondition()
+
+      assert %GRPC.RPCError{
+               status: ^status,
+               message:
+                 "the image needs a 3073 MiB disk, more than a micro instance's 2048 MiB; " <>
+                   "pick a larger instance type"
+             } =
+               Codec.to_grpc(
+                 {:error,
+                  {:image_exceeds_disk,
+                   Unit.Information.bytes(Unit.Information.as_bytes(Unit.Information.gib(3)) + 1),
+                   :micro}}
+               )
     end
 
     test "an unrecognised reason falls back to INTERNAL and keeps its detail out of the reply" do

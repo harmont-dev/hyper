@@ -37,6 +37,10 @@ pub enum ThinError {
     Zero(#[source] std::io::Error),
     #[error("the pool table has no metadata device")]
     NoMetadata,
+    #[error("a {sectors}-sector volume cannot hold its {origin}-sector origin")]
+    SmallerThanOrigin { sectors: u64, origin: u64 },
+    #[error("a {sectors}-sector fork cannot hold its {parent}-sector parent")]
+    SmallerThanParent { sectors: u64, parent: u64 },
 }
 
 #[derive(Serialize)]
@@ -66,6 +70,7 @@ pub struct ThinVolumeCreate {
     #[serde_as(as = "MapperPath")]
     origin: HyperDmName,
     parent: Option<HyperDmName>,
+    sectors: u64,
 }
 
 #[derive(Deserialize)]
@@ -118,21 +123,36 @@ impl Op for ThinVolumeCreate {
     fn run(self, mut token: Unprivileged) -> Result<ThinOut, ThinError> {
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         let root = token.elevate()?;
-        let sectors = self.origin.sectors().map_err(DmError::from)?;
+        let origin = self.origin.sectors().map_err(DmError::from)?;
+        if self.sectors < origin {
+            return Err(ThinError::SmallerThanOrigin {
+                sectors: self.sectors,
+                origin,
+            });
+        }
         let pool = dm.thin_pool(&root, &self.pool)?;
         let thin = match &self.parent {
             None => pool.create_thin(self.thin_id)?,
-            Some(parent) => match pool.open_thin(parent)?.snapshot(self.thin_id) {
-                Ok(snapshot) => snapshot,
-                Err(e @ SnapshotError::Resume { created: true, .. }) => {
-                    let _ = pool.delete_thin(self.thin_id);
-                    return Err(e.into());
+            Some(parent) => {
+                let parent = pool.open_thin(parent)?;
+                if self.sectors < parent.sectors() {
+                    return Err(ThinError::SmallerThanParent {
+                        sectors: self.sectors,
+                        parent: parent.sectors(),
+                    });
                 }
-                Err(e) => return Err(e.into()),
-            },
+                match parent.snapshot(self.thin_id) {
+                    Ok(snapshot) => snapshot,
+                    Err(e @ SnapshotError::Resume { created: true, .. }) => {
+                        let _ = pool.delete_thin(self.thin_id);
+                        return Err(e.into());
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
         };
         let origin = Origin::Device((*self.origin).clone());
-        match thin.activate(&self.name, sectors, Some(origin)) {
+        match thin.activate(&self.name, self.sectors, Some(origin)) {
             Ok(volume) => Ok(ThinOut::Created {
                 device: volume.device().path().as_path().to_path_buf(),
             }),

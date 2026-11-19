@@ -296,6 +296,7 @@ fn fork_delta_with_a_scratch_id_in_use_leaves_that_volume_untouched_as_root(#[ca
 #[rstest]
 #[case::scratch_name("hyper-scratch", 701)]
 #[case::copy_target_name("hyper-copy", 702)]
+#[case::grown_origin_name("hyper-grown", 703)]
 fn fork_delta_never_removes_a_device_it_did_not_create_as_root(
     #[case] prefix: &str,
     #[case] scratch: u32,
@@ -318,12 +319,13 @@ fn fork_delta_never_removes_a_device_it_did_not_create_as_root(
         "{squatter_name} was removed or replaced; stderr: {stderr}"
     );
     assert!(read_all(&squatter.path()) == vec![0x99; 1 << 20]);
-    let other = if prefix == "hyper-scratch" {
-        format!("hyper-copy-{scratch}")
-    } else {
-        format!("hyper-scratch-{scratch}")
-    };
-    assert!(!dm_names().contains(&other), "{other} outlived the call");
+    for other in ["hyper-scratch", "hyper-grown", "hyper-copy"]
+        .iter()
+        .filter(|&&other| other != prefix)
+        .map(|other| format!("{other}-{scratch}"))
+    {
+        assert!(!dm_names().contains(&other), "{other} outlived the call");
+    }
     assert!(
         live.a.pool.message(&format!("create_thin {scratch}")),
         "scratch id {scratch} was not freed"
@@ -407,6 +409,7 @@ fn request(op: &str, files: &[PathBuf]) -> Value {
             "base": files[0],
             "deltas": files[1..],
             "chunk_sectors": 8,
+            "sectors": 4096,
         }),
         _ => json!({
             "op": "thin_pool_create",

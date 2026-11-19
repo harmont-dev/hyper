@@ -54,6 +54,12 @@ defmodule Hyper.E2e.VmLifecycleTest do
 
     assert out =~ "hello from guest"
 
+    assert {:ok, %{stdout: sectors, exit_code: 0}} =
+             await_exec(vm, ["/bin/cat", "/sys/block/vda/size"])
+
+    assert String.trim(sectors) ==
+             to_string(Unit.Information.as_sectors(Hyper.Vm.Instance.spec(:micro).disk))
+
     assert :ok = Hyper.Node.stop_image_vm(vm)
 
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),

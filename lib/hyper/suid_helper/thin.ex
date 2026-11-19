@@ -29,11 +29,24 @@ defmodule Hyper.SuidHelper.Thin do
     end
   end
 
-  @spec create_volume(String.t(), non_neg_integer(), String.t(), Path.t(), String.t() | nil) ::
-          {:ok, Path.t()} | {:error, err()}
+  @spec create_volume(
+          String.t(),
+          non_neg_integer(),
+          String.t(),
+          Path.t(),
+          Unit.Information.t(),
+          String.t() | nil
+        ) :: {:ok, Path.t()} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Thin.create_volume", include: [:name, :thin_id, :parent])
-  def create_volume(pool, thin_id, name, origin, parent) do
-    %{op: "thin_volume_create", pool: pool, thin_id: thin_id, name: name, origin: origin}
+  def create_volume(pool, thin_id, name, origin, size, parent) do
+    %{
+      op: "thin_volume_create",
+      pool: pool,
+      thin_id: thin_id,
+      name: name,
+      origin: origin,
+      sectors: Unit.Information.as_sectors(size)
+    }
     |> put_parent(parent)
     |> created()
   end

@@ -3,11 +3,13 @@ use crate::cli::Op;
 use crate::config::Config;
 use crate::dm::{HyperDmName, HyperDmTable, NameError};
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, LinearTable, Origin, Persistence, RemoveMode, Role, SnapshotTable,
+    self, DevPath, DmTable, LinearTable, Origin, PaddedTable, Persistence, RemoveMode, Role,
+    SnapshotTable,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::privilege::Unprivileged;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::path::PathBuf;
 use thiserror::Error as ThisError;
 
@@ -17,6 +19,8 @@ pub enum ImgError {
     Dm(#[from] DmError),
     #[error(transparent)]
     Name(#[from] NameError),
+    #[error("a {sectors}-sector image device cannot hold its {base}-sector base")]
+    Undersized { sectors: u64, base: u64 },
 }
 
 #[derive(Deserialize)]
@@ -26,6 +30,7 @@ pub struct ImgActivate {
     base: DevPath,
     deltas: Vec<DevPath>,
     chunk_sectors: u64,
+    sectors: u64,
 }
 
 #[derive(Serialize)]
@@ -40,15 +45,11 @@ impl Op for ImgActivate {
 
     fn run(self, mut token: Unprivileged) -> Result<ImgOut, ImgError> {
         let layers = self.layers()?;
-        let sectors = match layers.first() {
-            Some((_, base)) => base.backing_sectors(Role::Origin)?,
-            None => return Err(DmError::Unsized.into()),
-        };
         let dm = dm::Dmsetup::new(Config::get().dmsetup().map_err(DmError::from)?);
         let mut created: Vec<HyperDmName> = Vec::new();
         let mut device = PathBuf::new();
         for (name, table) in layers {
-            match table.create_sized(&name, Access::ReadOnly, sectors, &mut token) {
+            match table.create_sized(&name, Access::ReadOnly, self.sectors, &mut token) {
                 Ok(Created { device: path, .. }) => {
                     device = path;
                     created.push(name);
@@ -71,32 +72,42 @@ impl Op for ImgActivate {
 
 impl ImgActivate {
     fn layers(&self) -> Result<Vec<(HyperDmName, HyperDmTable)>, ImgError> {
-        if self.deltas.is_empty() {
-            let table = DmTable::Linear(LinearTable {
-                sectors: 0,
-                origin: Origin::Path(self.base.clone()),
-            });
-            return Ok(vec![(
-                self.layer(0)?,
-                HyperDmTable::new(table).map_err(DmError::from)?,
-            )]);
-        }
-        let mut origin = Origin::Path(self.base.clone());
-        let mut layers = Vec::with_capacity(self.deltas.len());
+        let origin = Origin::Path(self.base.clone());
+        let linear = HyperDmTable::new(DmTable::Linear(LinearTable {
+            sectors: 0,
+            origin: origin.clone(),
+        }))
+        .map_err(DmError::from)?;
+        let base = linear.backing_sectors(Role::Origin)?;
+        let base = match self.sectors.cmp(&base) {
+            Ordering::Less => {
+                return Err(ImgError::Undersized {
+                    sectors: self.sectors,
+                    base,
+                })
+            }
+            Ordering::Equal => linear,
+            Ordering::Greater => HyperDmTable::new(DmTable::Padded(PaddedTable {
+                sectors: self.sectors,
+                origin_sectors: base,
+                origin,
+            }))
+            .map_err(DmError::from)?,
+        };
+        let mut layers = vec![(self.layer(0)?, base)];
         for (idx, cow) in self.deltas.iter().enumerate() {
-            let name = self.layer(idx + 1)?;
+            let below = layers[idx].0.clone();
             let table = DmTable::Snapshot(SnapshotTable {
                 sectors: 0,
-                origin,
+                origin: Origin::Device((*below).clone()),
                 cow: cow.clone(),
                 persistence: Persistence::Persistent,
                 chunk: self.chunk_sectors,
             });
             layers.push((
-                name.clone(),
+                self.layer(idx + 1)?,
                 HyperDmTable::new(table).map_err(DmError::from)?,
             ));
-            origin = Origin::Device((*name).clone());
         }
         Ok(layers)
     }

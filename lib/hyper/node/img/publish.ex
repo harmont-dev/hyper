@@ -57,16 +57,9 @@ defmodule Hyper.Node.Img.Publish do
   end
 
   @spec materialize(map(), Hyper.Img.id()) :: {:ok, Hyper.Img.id()} | {:error, term()}
-  defp materialize(
-         %{
-           thin_name: origin_name,
-           origin_dev: ro_dev,
-           img_server: img_server
-         },
-         img_id
-       ) do
+  defp materialize(%{thin_name: origin_name, origin_dev: ro_dev, disk: disk}, img_id) do
     tmp = Hyper.Vm.Id.generate()
-    write_delta(tmp, origin_name, ro_dev, Img.Server.size(img_server), img_id)
+    write_delta(tmp, origin_name, ro_dev, disk, img_id)
   end
 
   # Build the writable dm-snapshot, fill its COW store with the divergence, then
@@ -85,7 +78,9 @@ defmodule Hyper.Node.Img.Publish do
     with :ok <- create_sparse(cow_path, cow_size(size)) do
       try do
         with {:ok, _stats} <- ThinPool.fork_delta(parent, ro_dev, cow_path) do
-          Hyper.Img.create_derived(parent_img_id, cow_path, label: "fork of #{parent_img_id}")
+          Hyper.Img.create_derived(parent_img_id, cow_path, size,
+            label: "fork of #{parent_img_id}"
+          )
         end
       after
         # create_derived consumes the file on success and removes it on failure;

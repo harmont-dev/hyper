@@ -7,16 +7,17 @@ defmodule Hyper.SuidHelper.Img do
 
   @type err :: SuidHelper.err()
 
-  @spec activate(String.t(), Path.t(), [Path.t()]) ::
+  @spec activate(String.t(), Path.t(), [Path.t()], Unit.Information.t()) ::
           {:ok, %{blk_path: Path.t(), dm_names: [String.t()]}} | {:error, err()}
   @decorate with_span("Hyper.SuidHelper.Img.activate", include: [:name])
-  def activate(name, base, deltas) do
+  def activate(name, base, deltas, size) do
     request = %{
       op: "img_activate",
       name: name,
       base: base,
       deltas: deltas,
-      chunk_sectors: Hyper.Cfg.Img.chunk_sectors()
+      chunk_sectors: Hyper.Cfg.Img.chunk_sectors(),
+      sectors: Unit.Information.as_sectors(size)
     }
 
     case SuidHelper.exec(request) do

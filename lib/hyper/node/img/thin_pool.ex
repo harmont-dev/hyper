@@ -35,12 +35,16 @@ defmodule Hyper.Node.Img.ThinPool do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @spec create_volume(String.t(), Path.t(), String.t() | nil) ::
+  @spec create_volume(String.t(), Path.t(), Information.t(), String.t() | nil) ::
           {:ok, %{dev: Path.t(), id: non_neg_integer()}} | {:error, term()}
   @decorate with_span("Hyper.Node.Img.ThinPool.create_volume", include: [:name, :parent])
-  def create_volume(name, origin_dev, parent \\ nil) do
+  def create_volume(name, origin_dev, size, parent \\ nil) do
     serialized_on(parent, fn ->
-      GenServer.call(__MODULE__, {:create_volume, name, origin_dev, parent}, :timer.seconds(30))
+      GenServer.call(
+        __MODULE__,
+        {:create_volume, name, origin_dev, size, parent},
+        :timer.seconds(30)
+      )
     end)
   end
 
@@ -88,10 +92,10 @@ defmodule Hyper.Node.Img.ThinPool do
   end
 
   @impl true
-  def handle_call({:create_volume, name, origin_dev, parent}, _from, state) do
+  def handle_call({:create_volume, name, origin_dev, size, parent}, _from, state) do
     {id, state} = id_alloc(state)
 
-    case SuidHelper.Thin.create_volume(@pool_name, id, name, origin_dev, parent) do
+    case SuidHelper.Thin.create_volume(@pool_name, id, name, origin_dev, size, parent) do
       {:ok, dev} -> {:reply, {:ok, %{dev: dev, id: id}}, state}
       {:error, _} = err -> {:reply, err, retire(state, id, err)}
     end

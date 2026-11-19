@@ -288,6 +288,15 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(:invalid_ref),
     do: GRPC.RPCError.exception(:invalid_argument, "image_ref is malformed")
 
+  defp rpc_error({:image_exceeds_disk, size, type}),
+    do:
+      GRPC.RPCError.exception(
+        :failed_precondition,
+        "the image needs a #{ceil_mib(size)} MiB disk, more than a #{type} instance's " <>
+          "#{Unit.Information.as_mib(Hyper.Vm.Instance.spec(type).disk)} MiB; " <>
+          "pick a larger instance type"
+      )
+
   defp rpc_error({:missing_tools, tools}),
     do:
       GRPC.RPCError.exception(
@@ -298,5 +307,11 @@ defmodule Hyper.Grpc.Codec do
   defp rpc_error(reason) do
     Logger.error("rpc failed: #{inspect(reason)}")
     GRPC.RPCError.exception(:internal, "internal error")
+  end
+
+  @spec ceil_mib(Unit.Information.t()) :: non_neg_integer()
+  defp ceil_mib(size) do
+    mib = Unit.Information.as_bytes(Unit.Information.mib(1))
+    div(Unit.Information.as_bytes(size) + mib - 1, mib)
   end
 end

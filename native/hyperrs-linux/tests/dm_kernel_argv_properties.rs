@@ -11,8 +11,8 @@
 //!     hands the kernel) are faithful for the whole dm-name charset.
 
 use hyperrs_linux::dm::{
-    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, Persistence, SnapshotTable, ThinId,
-    ThinMessage, ThinPoolTable, ThinTable,
+    DevPath, DmName, DmTable, LinearTable, NoSpace, Origin, PaddedTable, Persistence,
+    SnapshotTable, ThinId, ThinMessage, ThinPoolTable, ThinTable,
 };
 use hyperrs_linux::loopdev::LoopDevNum;
 use proptest::prelude::*;
@@ -94,6 +94,15 @@ fn operands(t: &DmTable) -> Vec<Vec<u8>> {
             ]);
             v.extend(t.origin.as_ref().map(origin_bytes));
         }
+        DmTable::Padded(p) => v.extend([
+            num(p.origin_sectors),
+            b"linear".to_vec(),
+            origin_bytes(&p.origin),
+            b"0".to_vec(),
+            num(p.origin_sectors),
+            num(p.sectors - p.origin_sectors),
+            b"zero".to_vec(),
+        ]),
     }
     v
 }
@@ -174,14 +183,33 @@ fn table(path: BoxedStrategy<DevPath>) -> impl Strategy<Value = DmTable> {
                     })
                 }
             ),
-        (any::<u64>(), dm_name(), thin_id(), prop::option::of(origin)).prop_map(
-            |(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
+        (
+            any::<u64>(),
+            dm_name(),
+            thin_id(),
+            prop::option::of(origin.clone())
+        )
+            .prop_map(|(sectors, pool, id, origin)| DmTable::Thin(ThinTable {
                 sectors,
                 pool,
                 id,
                 origin,
+            })),
+        (0..u64::MAX, origin)
+            .prop_flat_map(|(origin_sectors, origin)| {
+                (
+                    origin_sectors + 1..=u64::MAX,
+                    Just(origin_sectors),
+                    Just(origin),
+                )
             })
-        ),
+            .prop_map(|(sectors, origin_sectors, origin)| {
+                DmTable::Padded(PaddedTable {
+                    sectors,
+                    origin_sectors,
+                    origin,
+                })
+            }),
     ]
 }
 

@@ -17,6 +17,7 @@ pub enum DmTable {
     ThinPool(ThinPoolTable),
     /// `thin`: a thinly provisioned device inside a pool.
     Thin(ThinTable),
+    Padded(PaddedTable),
 }
 
 /// Which table argument a [`DevPath`] operand fills.
@@ -61,6 +62,17 @@ pub enum Persistence {
 #[display("0 {sectors} linear {origin} 0")]
 pub struct LinearTable {
     pub sectors: u64,
+    pub origin: Origin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display(
+    "0 {origin_sectors} linear {origin} 0\n{origin_sectors} {} zero",
+    sectors.saturating_sub(*origin_sectors)
+)]
+pub struct PaddedTable {
+    pub sectors: u64,
+    pub origin_sectors: u64,
     pub origin: Origin,
 }
 
@@ -145,7 +157,8 @@ impl DmTable {
     /// The non-dm block device operands, each with the table argument it fills.
     pub fn paths(&self) -> impl Iterator<Item = (Role, &DevPath)> {
         let (origin, first, second) = match self {
-            DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
+            DmTable::Linear(LinearTable { origin, .. })
+            | DmTable::Padded(PaddedTable { origin, .. }) => (Some(origin), None, None),
             DmTable::Snapshot(SnapshotTable { origin, cow, .. }) => {
                 (Some(origin), Some((Role::Cow, cow)), None)
             }
@@ -165,7 +178,8 @@ impl DmTable {
     /// [`Self::paths`], mutably.
     pub fn paths_mut(&mut self) -> impl Iterator<Item = (Role, &mut DevPath)> {
         let (origin, first, second) = match self {
-            DmTable::Linear(LinearTable { origin, .. }) => (Some(origin), None, None),
+            DmTable::Linear(LinearTable { origin, .. })
+            | DmTable::Padded(PaddedTable { origin, .. }) => (Some(origin), None, None),
             DmTable::Snapshot(SnapshotTable { origin, cow, .. }) => {
                 (Some(origin), Some((Role::Cow, cow)), None)
             }
@@ -186,6 +200,7 @@ impl DmTable {
     pub fn devices(&self) -> impl Iterator<Item = &DmName> {
         let (first, second) = match self {
             DmTable::Linear(LinearTable { origin, .. })
+            | DmTable::Padded(PaddedTable { origin, .. })
             | DmTable::Snapshot(SnapshotTable { origin, .. }) => {
                 (origin.try_unwrap_device_ref().ok(), None)
             }
@@ -220,6 +235,21 @@ impl FromStr for DmTable {
                 sectors: sectors.parse()?,
                 origin: origin.parse()?,
             }),
+            ["0", head, "linear", origin, "0", tail_start, tail, "zero"] => {
+                let origin_sectors: u64 = head.parse()?;
+                let sectors = tail
+                    .parse::<u64>()?
+                    .checked_add(origin_sectors)
+                    .filter(|&sectors| {
+                        sectors > origin_sectors && tail_start.parse() == Ok(origin_sectors)
+                    })
+                    .ok_or_else(|| ParseTableError::Malformed(s.into()))?;
+                DmTable::Padded(PaddedTable {
+                    sectors,
+                    origin_sectors,
+                    origin: origin.parse()?,
+                })
+            }
             ["0", sectors, "snapshot", origin, cow, persistence, chunk] => {
                 DmTable::Snapshot(SnapshotTable {
                     sectors: sectors.parse()?,
@@ -258,8 +288,8 @@ impl FromStr for DmTable {
 #[cfg(test)]
 mod tests {
     use super::{
-        DevPath, DmTable, LinearTable, NoSpace, Origin, ParseTableError, Persistence,
-        SnapshotTable, ThinPoolTable, ThinTable,
+        DevPath, DmTable, LinearTable, NoSpace, Origin, PaddedTable, ParseTableError, Persistence,
+        Role, SnapshotTable, ThinPoolTable, ThinTable,
     };
     use crate::dm::{DmName, ThinId};
     use proptest::prelude::*;
@@ -348,6 +378,21 @@ mod tests {
                     id,
                     origin,
                 })),
+            (0..u64::MAX, origin())
+                .prop_flat_map(|(origin_sectors, origin)| {
+                    (
+                        origin_sectors + 1..=u64::MAX,
+                        Just(origin_sectors),
+                        Just(origin),
+                    )
+                })
+                .prop_map(|(sectors, origin_sectors, origin)| {
+                    DmTable::Padded(PaddedTable {
+                        sectors,
+                        origin_sectors,
+                        origin,
+                    })
+                }),
         ]
     }
 
@@ -381,6 +426,38 @@ mod tests {
         prop_assert_eq!(devices, mapper);
     }
 
+    #[proptest]
+    fn paths_are_exactly_the_backing_file_operands(#[strategy(table())] t: DmTable) {
+        let rendered = t.to_string();
+        let files: Vec<&str> = rendered
+            .split_whitespace()
+            .filter(|tok| tok.starts_with('/') && !tok.starts_with("/dev/mapper/"))
+            .collect();
+        let paths: Vec<String> = t
+            .paths()
+            .map(|(_, p)| p.as_path().display().to_string())
+            .collect();
+        prop_assert_eq!(paths, files);
+    }
+
+    #[proptest]
+    fn paths_mut_rewrites_exactly_the_operands_paths_reads(#[strategy(table())] mut t: DmTable) {
+        let roles: Vec<Role> = t.paths().map(|(role, _)| role).collect();
+        for (i, (_, path)) in t.paths_mut().enumerate() {
+            *path = PathBuf::from(format!("/rewritten/{i}")).try_into().unwrap();
+        }
+        let rewritten: Vec<(Role, String)> = t
+            .paths()
+            .map(|(role, p)| (role, p.as_path().display().to_string()))
+            .collect();
+        let expected: Vec<(Role, String)> = roles
+            .into_iter()
+            .enumerate()
+            .map(|(i, role)| (role, format!("/rewritten/{i}")))
+            .collect();
+        prop_assert_eq!(rewritten, expected);
+    }
+
     #[rstest]
     #[case::unsupported_target("0 100 crypt /dev/loop0 /srv/hyper/a")]
     #[case::nonzero_linear_offset("0 100 linear /srv/hyper/a 8")]
@@ -399,6 +476,11 @@ mod tests {
     #[case::unsupported_pool_feature(
         "0 100 thin-pool /srv/hyper/m /srv/hyper/d 128 0 1 skip_block_zeroing"
     )]
+    #[case::empty_zero_tail("0 100 linear /srv/hyper/a 0\n100 0 zero")]
+    #[case::gap_before_the_zero_tail("0 100 linear /srv/hyper/a 0\n108 8 zero")]
+    #[case::overlapping_zero_tail("0 100 linear /srv/hyper/a 0\n92 8 zero")]
+    #[case::zero_tail_past_u64("0 100 linear /srv/hyper/a 0\n100 18446744073709551600 zero")]
+    #[case::zero_tail_first("0 8 zero\n8 100 linear /srv/hyper/a 0")]
     #[case::control_device("0 100 linear /dev/mapper/control 0")]
     #[case::empty("")]
     #[case::garbage("garbage")]

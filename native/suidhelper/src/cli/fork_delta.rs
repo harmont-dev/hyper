@@ -9,8 +9,8 @@ use hyperrs_linux::dm::thin_dump::{
     self as dump, DumpError, MappingsError, MetadataDump, ParseError, ThinMappings,
 };
 use hyperrs_linux::dm::{
-    self, DevPath, DmTable, OpenThinError, Origin, Persistence, RemoveMode, RunError,
-    SnapshotError, SnapshotTable, ThinId, ThinMessage, ThinPoolError,
+    self, DevPath, DmTable, LinearTable, OpenThinError, Origin, PaddedTable, Persistence,
+    RemoveMode, RunError, SnapshotError, SnapshotTable, ThinId, ThinMessage, ThinPoolError,
 };
 use hyperrs_linux::Access;
 use hyperrs_process::binary::RootSafeBinError;
@@ -19,6 +19,7 @@ use nix::fcntl::{Flock, FlockArg};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::serde_as;
+use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::num::NonZeroUsize;
@@ -79,8 +80,14 @@ pub enum ForkDeltaError {
     Activate(#[source] RunError),
     #[error("destroying the scratch snapshot: {0}")]
     Destroy(#[source] RunError),
-    #[error("removing the copy target: {0}")]
-    Remove(#[source] RunError),
+    #[error("removing {name}: {source}")]
+    Remove {
+        name: HyperDmName,
+        #[source]
+        source: RunError,
+    },
+    #[error("the parent's {parent}-sector volume is smaller than its {origin}-sector origin")]
+    SmallerThanOrigin { parent: u64, origin: u64 },
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -98,24 +105,44 @@ impl Op for ThinForkDelta {
         let dmsetup = dm::Dmsetup::new(config.dmsetup()?);
         let thin_dump = dump::ThinDump::new(config.thin_dump()?);
         let origin = Origin::Device((*self.origin).clone());
+        let grown: HyperDmName = format!("hyper-grown-{}", self.scratch_id).parse()?;
         let target = HyperDmTable::new(DmTable::Snapshot(SnapshotTable {
             sectors: 0,
-            origin: origin.clone(),
+            origin: Origin::Device((*grown).clone()),
             cow: self.cow.clone(),
             persistence: Persistence::Persistent,
             chunk: self.chunk_sectors,
         }))?;
         let scratch: HyperDmName = format!("hyper-scratch-{}", self.scratch_id).parse()?;
 
-        let meta = {
+        let (meta, sectors, grown_table) = {
             let root = token.elevate()?;
-            let sectors = self.origin.sectors().map_err(DmError::from)?;
+            let origin_sectors = self.origin.sectors().map_err(DmError::from)?;
             let pool = dmsetup.thin_pool(&root, &self.pool)?;
             let meta = SafeFile::<IsBlockDevice, Any, Any>::open_block(
                 pool.metadata(),
                 OpenFlags::RDONLY,
             )?;
-            let snapshot = match pool.open_thin(&self.parent)?.snapshot(self.scratch_id) {
+            let parent = pool.open_thin(&self.parent)?;
+            let sectors = parent.sectors();
+            let grown_table = HyperDmTable::new(match sectors.cmp(&origin_sectors) {
+                Ordering::Less => {
+                    return Err(ForkDeltaError::SmallerThanOrigin {
+                        parent: sectors,
+                        origin: origin_sectors,
+                    })
+                }
+                Ordering::Equal => DmTable::Linear(LinearTable {
+                    sectors,
+                    origin: origin.clone(),
+                }),
+                Ordering::Greater => DmTable::Padded(PaddedTable {
+                    sectors,
+                    origin_sectors,
+                    origin: origin.clone(),
+                }),
+            })?;
+            let snapshot = match parent.snapshot(self.scratch_id) {
                 Ok(snapshot) => snapshot,
                 Err(e @ SnapshotError::Resume { created: true, .. }) => {
                     let _ = pool.delete_thin(self.scratch_id);
@@ -127,10 +154,46 @@ impl Op for ThinForkDelta {
                 let _ = pool.delete_thin(self.scratch_id);
                 return Err(ForkDeltaError::Activate(e));
             }
-            meta
+            (meta, sectors, grown_table)
         };
 
-        let copied = self.copy_scratch(&scratch, target, &dmsetup, &thin_dump, &meta, &mut token);
+        let copied = (|| {
+            let (id, dumped) = {
+                let root = token.elevate()?;
+                self.dump_reserved(&root, &dmsetup, &thin_dump, &meta, &scratch)?
+            };
+            let mappings = dumped.parse()?.mappings(id)?;
+            let target_name: HyperDmName = format!("hyper-copy-{id}").parse()?;
+            let mut src = {
+                let _root = token.elevate()?;
+                File::open(scratch.path().as_path())?
+            };
+            self.within(
+                &dmsetup,
+                (&grown, grown_table, Access::ReadOnly),
+                sectors,
+                &mut token,
+                |token| {
+                    self.within(
+                        &dmsetup,
+                        (&target_name, target, Access::ReadWrite),
+                        sectors,
+                        token,
+                        |token| {
+                            let mut dst = {
+                                let _root = token.elevate()?;
+                                OpenOptions::new()
+                                    .write(true)
+                                    .open(target_name.path().as_path())?
+                            };
+                            let stats = copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?;
+                            dst.sync_all()?;
+                            Ok(stats)
+                        },
+                    )
+                },
+            )
+        })();
         let destroyed = (|| {
             let root = token.elevate()?;
             dmsetup
@@ -147,48 +210,29 @@ impl Op for ThinForkDelta {
 }
 
 impl ThinForkDelta {
-    fn copy_scratch(
+    fn within<T>(
         &self,
-        scratch: &HyperDmName,
-        target: HyperDmTable,
         dmsetup: &dm::Dmsetup,
-        thin_dump: &dump::ThinDump,
-        meta: &SafeFile<IsBlockDevice, Any, Any>,
+        (name, table, access): (&HyperDmName, HyperDmTable, Access),
+        sectors: u64,
         token: &mut Unprivileged,
-    ) -> Result<CopyStats, ForkDeltaError> {
-        let (id, dumped) = {
-            let root = token.elevate()?;
-            self.dump_reserved(&root, dmsetup, thin_dump, meta, scratch)?
-        };
-        let mappings = dumped.parse()?.mappings(id)?;
-
-        let target_name: HyperDmName = format!("hyper-copy-{id}").parse()?;
-        let mut src = {
-            let _root = token.elevate()?;
-            File::open(scratch.path().as_path())?
-        };
-        target.create(&target_name, Access::ReadWrite, token)?;
-        let copied = (|| {
-            let mut dst = {
-                let _root = token.elevate()?;
-                OpenOptions::new()
-                    .write(true)
-                    .open(target_name.path().as_path())?
-            };
-            let stats = copy_ranges(&mut src, &mut dst, &mappings, CHUNK_BYTES)?;
-            dst.sync_all()?;
-            Ok::<_, ForkDeltaError>(stats)
-        })();
+        body: impl FnOnce(&mut Unprivileged) -> Result<T, ForkDeltaError>,
+    ) -> Result<T, ForkDeltaError> {
+        table.create_sized(name, access, sectors, token)?;
+        let done = body(token);
         let removed = (|| {
             let root = token.elevate()?;
             dmsetup
-                .device(&root, &target_name)
+                .device(&root, name)
                 .remove(RemoveMode::Retry)
-                .map_err(ForkDeltaError::Remove)
+                .map_err(|source| ForkDeltaError::Remove {
+                    name: name.clone(),
+                    source,
+                })
         })();
-        let stats = copied?;
+        let value = done?;
         removed?;
-        Ok(stats)
+        Ok(value)
     }
 
     fn dump_reserved(

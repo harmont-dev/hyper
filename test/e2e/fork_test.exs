@@ -34,6 +34,20 @@ defmodule Hyper.E2e.ForkTest do
   @image System.get_env("HYPER_E2E_IMAGE", "public.ecr.aws/docker/library/alpine:3.19")
 
   alias Hyper.Img.Db.{Image, Repo}
+  alias Unit.Information
+
+  @past_end Information.gib(1)
+  @block Information.kib(64)
+
+  defp past_end_block(op) do
+    count = div(Information.as_bytes(@past_end), Information.as_bytes(@block))
+    dd = "dd bs=#{Information.as_bytes(@block)} count=1"
+
+    case op do
+      :write -> "#{dd} seek=#{count} if=/dev/urandom of=/dev/vda && sync"
+      :read -> "#{dd} skip=#{count} if=/dev/vda 2>/dev/null | sha256sum"
+    end
+  end
 
   # Boot :micro fillers until cluster placement refuses, so the next
   # fast_fork must hit a node-admission refusal.
@@ -46,6 +60,8 @@ defmodule Hyper.E2e.ForkTest do
 
   test "fast_fork isolates writes; published delta composes and boots" do
     assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
+    assert {:ok, image_size} = Image.device_size(img_id)
+    assert Information.as_bytes(image_size) < Information.as_bytes(@past_end)
 
     assert {:ok, parent} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(parent) end)
@@ -59,6 +75,11 @@ defmodule Hyper.E2e.ForkTest do
                :timer.minutes(3)
              )
 
+    assert {:ok, %{exit_code: 0}} = await_exec(parent, ["/bin/sh", "-c", past_end_block(:write)])
+
+    assert {:ok, %{stdout: past_end, exit_code: 0}} =
+             await_exec(parent, ["/bin/sh", "-c", past_end_block(:read)])
+
     assert {:ok, child} = Hyper.Vm.fast_fork(parent)
     on_exit(fn -> Hyper.Node.stop_image_vm(child) end)
 
@@ -71,6 +92,9 @@ defmodule Hyper.E2e.ForkTest do
              await_exec(child, ["/bin/cat", "/marker"], :timer.minutes(3))
 
     assert seen =~ "prefork"
+
+    assert {:ok, %{stdout: ^past_end, exit_code: 0}} =
+             await_exec(child, ["/bin/sh", "-c", past_end_block(:read)])
 
     # COW isolation, both directions: post-fork writes do not cross.
     assert {:ok, %{exit_code: 0}} =
@@ -97,6 +121,7 @@ defmodule Hyper.E2e.ForkTest do
     assert [base, delta] = Hyper.Img.Db.Image.resolve_chain(derived)
     assert base.kind == :base
     assert delta.kind == :delta
+    assert Image.device_size(derived) == {:ok, Hyper.Vm.Instance.spec(:micro).disk}
 
     # Free the budget (2 VMs is the node's ceiling) and prove reclaim before
     # booting from the derived image.
@@ -119,6 +144,9 @@ defmodule Hyper.E2e.ForkTest do
 
     assert {:ok, %{stdout: pw, exit_code: 0}} = await_exec(cousin, ["/bin/cat", "/parentfile"])
     assert pw =~ "parentwrite"
+
+    assert {:ok, %{stdout: ^past_end, exit_code: 0}} =
+             await_exec(cousin, ["/bin/sh", "-c", past_end_block(:read)])
 
     assert {:ok, %{exit_code: cousin_sees_childfile}} =
              await_exec(cousin, ["/bin/cat", "/childfile"])

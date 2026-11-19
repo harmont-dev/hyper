@@ -61,7 +61,7 @@ defmodule Hyper.Img.Db.Gc.PruneTest do
     blob_id = unique_id()
     img_id = unique_id()
     insert_blob!(blob_id, opts)
-    Repo.insert!(%Image{id: img_id, label: "gc-prune-test"})
+    Repo.insert!(%Image{id: img_id, label: "gc-prune-test", device_size: 1000})
     Repo.insert!(%ImageLayer{image_id: img_id, blob_id: blob_id, position: 0})
 
     on_exit(fn ->
