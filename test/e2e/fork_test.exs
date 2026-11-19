@@ -36,17 +36,11 @@ defmodule Hyper.E2e.ForkTest do
   alias Hyper.Img.Db.{Image, Repo}
   alias Unit.Information
 
-  @past_end Information.gib(1)
-  @block Information.kib(64)
+  @grown "/grown"
 
-  defp past_end_block(op) do
-    count = div(Information.as_bytes(@past_end), Information.as_bytes(@block))
-    dd = "dd bs=#{Information.as_bytes(@block)} count=1"
-
-    case op do
-      :write -> "#{dd} seek=#{count} if=/dev/urandom of=/dev/vda && sync"
-      :read -> "#{dd} skip=#{count} if=/dev/vda 2>/dev/null | sha256sum"
-    end
+  defp write_past(image_size) do
+    mib = Information.as_mib(image_size) + 64
+    "dd if=/dev/urandom of=#{@grown} bs=1M count=#{mib} 2>/dev/null && sync"
   end
 
   # Boot :micro fillers until cluster placement refuses, so the next
@@ -61,7 +55,6 @@ defmodule Hyper.E2e.ForkTest do
   test "fast_fork isolates writes; published delta composes and boots" do
     assert {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
     assert {:ok, image_size} = Image.device_size(img_id)
-    assert Information.as_bytes(image_size) < Information.as_bytes(@past_end)
 
     assert {:ok, parent} = Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro})
     on_exit(fn -> Hyper.Node.stop_image_vm(parent) end)
@@ -75,10 +68,11 @@ defmodule Hyper.E2e.ForkTest do
                :timer.minutes(3)
              )
 
-    assert {:ok, %{exit_code: 0}} = await_exec(parent, ["/bin/sh", "-c", past_end_block(:write)])
+    assert {:ok, %{exit_code: 0}} =
+             await_exec(parent, ["/bin/sh", "-c", write_past(image_size)], :timer.minutes(3))
 
-    assert {:ok, %{stdout: past_end, exit_code: 0}} =
-             await_exec(parent, ["/bin/sh", "-c", past_end_block(:read)])
+    assert {:ok, %{stdout: grown, exit_code: 0}} =
+             await_exec(parent, ["/bin/sh", "-c", "sha256sum #{@grown}"])
 
     assert {:ok, child} = Hyper.Vm.fast_fork(parent)
     on_exit(fn -> Hyper.Node.stop_image_vm(child) end)
@@ -93,8 +87,8 @@ defmodule Hyper.E2e.ForkTest do
 
     assert seen =~ "prefork"
 
-    assert {:ok, %{stdout: ^past_end, exit_code: 0}} =
-             await_exec(child, ["/bin/sh", "-c", past_end_block(:read)])
+    assert {:ok, %{stdout: ^grown, exit_code: 0}} =
+             await_exec(child, ["/bin/sh", "-c", "sha256sum #{@grown}"])
 
     # COW isolation, both directions: post-fork writes do not cross.
     assert {:ok, %{exit_code: 0}} =
@@ -145,8 +139,8 @@ defmodule Hyper.E2e.ForkTest do
     assert {:ok, %{stdout: pw, exit_code: 0}} = await_exec(cousin, ["/bin/cat", "/parentfile"])
     assert pw =~ "parentwrite"
 
-    assert {:ok, %{stdout: ^past_end, exit_code: 0}} =
-             await_exec(cousin, ["/bin/sh", "-c", past_end_block(:read)])
+    assert {:ok, %{stdout: ^grown, exit_code: 0}} =
+             await_exec(cousin, ["/bin/sh", "-c", "sha256sum #{@grown}"])
 
     assert {:ok, %{exit_code: cousin_sees_childfile}} =
              await_exec(cousin, ["/bin/cat", "/childfile"])

@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
 
 use hyper_guest_agent::net::GuestNet;
 use hyper_guest_agent::{agent, init, pb};
+use hyperrs_linux::ext4::Ext4Mount;
 
 const VSOCK_PORT: u32 = 1024;
 
@@ -36,14 +39,28 @@ fn main() -> ! {
         eprintln!("hyper-init: pid1 launch failed: {e}");
     }
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build();
+    let grown = (|| -> Result<Ext4Mount, Box<dyn std::error::Error>> {
+        let root = Ext4Mount::open(Path::new("/"))?;
+        root.grow_to_device()?;
+        Ok(root)
+    })();
+    let rt = match grown {
+        Err(e) => Err(format!("growing the root filesystem failed: {e}")),
+        Ok(root) => {
+            if let Err(e) = root.skip_inode_table_init() {
+                eprintln!("hyper-init: remounting / with noinit_itable failed: {e}");
+            }
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("runtime failed: {e}"))
+        }
+    };
     match rt {
         Ok(rt) => {
             let _ = rt.block_on(serve());
         }
-        Err(e) => eprintln!("hyper-init: runtime failed: {e}"),
+        Err(e) => eprintln!("hyper-init: {e}"),
     }
     // The re-exec'd child is not PID 1, but if it returned the pid1-rs parent
     // would exit and the kernel would panic (panic=1 → reboot loop). Park

@@ -60,6 +60,14 @@ defmodule Hyper.E2e.VmLifecycleTest do
     assert String.trim(sectors) ==
              to_string(Unit.Information.as_sectors(Hyper.Vm.Instance.spec(:micro).disk))
 
+    assert {:ok, %{stdout: statfs, exit_code: 0}} =
+             await_exec(vm, ["/bin/sh", "-c", "stat -f -c '%b %S %c' /"])
+
+    [blocks, block, inodes] = statfs |> String.split() |> Enum.map(&String.to_integer/1)
+    disk = Unit.Information.as_bytes(Hyper.Vm.Instance.spec(:micro).disk)
+    assert (blocks * block) in div(disk * 9, 10)..disk
+    assert inodes * Unit.Information.as_bytes(Unit.Information.kib(16)) >= blocks * block
+
     assert :ok = Hyper.Node.stop_image_vm(vm)
 
     assert poll_until(fn -> not MapSet.member?(dm_devices(), rw_dev) end, :timer.seconds(90)),
