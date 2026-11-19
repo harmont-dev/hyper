@@ -49,17 +49,15 @@ defmodule Hyper.Cfg.Grpc do
   @spec load() :: t()
   def load do
     %__MODULE__{
-      enabled: get_cfg(runtime: {__MODULE__, :enabled}, toml: "grpc.enabled", default: false),
-      port: get_cfg(runtime: {__MODULE__, :port}, toml: "grpc.port", default: @default_port),
-      cred: cred(get_cfg(runtime: {__MODULE__, :cred}, toml: "grpc.cred", default: nil)),
-      adapter_opts:
-        get_cfg(runtime: {__MODULE__, :adapter_opts}, toml: "grpc.adapter_opts", default: [])
+      enabled: get_cfg(toml: "grpc.enabled", default: false),
+      port: get_cfg(toml: "grpc.port", default: @default_port),
+      cred: cred(get_cfg(toml: "grpc.cred", default: nil)),
+      adapter_opts: get_cfg(toml: "grpc.adapter_opts", default: [])
     }
   end
 
   @spec cred(term()) :: cred() | nil
   defp cred(nil), do: nil
-  defp cred(%GRPC.Credential{} = c), do: c
 
   defp cred(%{"cert" => cert, "key" => key}),
     do: GRPC.Credential.new(ssl: [certfile: cert, keyfile: key])

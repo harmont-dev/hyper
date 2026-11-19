@@ -6,12 +6,22 @@ defmodule Hyper.Cfg.Img.Db do
   `Hyper.Img.Db.Repo` merges these over its compile-time defaults at init.
   """
 
-  @keys [:database, :username, :password, :hostname]
+  import Hyper.Cfg, only: [get_cfg: 1]
+
+  @keys [:database, :username, :hostname]
 
   @doc "Operator-set repo options (only the keys actually set), for `Repo.init/2`."
   @spec repo_opts :: keyword()
-  def repo_opts do
-    env = Application.get_env(:hyper, __MODULE__, [])
-    Enum.filter(env, fn {k, _} -> k in @keys end)
+  def repo_opts, do: opts(get_cfg(toml: "img.db", default: %{}))
+
+  @spec opts(map()) :: keyword()
+  defp opts(%{"password" => _}) do
+    raise ArgumentError,
+          "[img.db] password is not read from the world-readable config.toml; " <>
+            "set HYPER_DB_PASSWORD in the node's environment instead"
+  end
+
+  defp opts(table) do
+    for key <- @keys, {:ok, value} <- [Map.fetch(table, Atom.to_string(key))], do: {key, value}
   end
 end

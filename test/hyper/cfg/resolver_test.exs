@@ -3,29 +3,19 @@ defmodule Hyper.Cfg.ResolverTest do
 
   import Hyper.Cfg, only: [get_cfg: 1]
 
+  alias Hyper.Cfg.Toml
+
   setup do
-    on_exit(fn -> Application.delete_env(:hyper, :__cfg_test) end)
+    Toml.put_cache(%{"present" => "from_toml"})
+    on_exit(fn -> Toml.reload() end)
   end
 
-  test "list order is priority: runtime wins over toml wins over default" do
-    Application.put_env(:hyper, :__cfg_test, "from_runtime")
-
-    assert get_cfg(runtime: :__cfg_test, toml: "nope", default: "d") == "from_runtime"
+  test "list order is priority: toml wins over default" do
+    assert get_cfg(toml: "present", default: "d") == "from_toml"
   end
 
-  test "falls through absent runtime to the default" do
-    Application.delete_env(:hyper, :__cfg_test)
-
-    assert get_cfg(runtime: :__cfg_test, default: "d") == "d"
-  end
-
-  test "nested {mod, key} runtime source reads a keyword under the module env" do
-    Application.put_env(:hyper, __MODULE__, foo: "bar")
-
-    assert get_cfg(runtime: {__MODULE__, :foo}, default: "d") == "bar"
-    assert get_cfg(runtime: {__MODULE__, :absent}, default: "d") == "d"
-  after
-    Application.delete_env(:hyper, __MODULE__)
+  test "falls through absent toml to the default" do
+    assert get_cfg(toml: "absent", default: "d") == "d"
   end
 
   test "a required key (no default) with every source absent raises a named error" do
@@ -35,11 +25,8 @@ defmodule Hyper.Cfg.ResolverTest do
   end
 
   test "fetch_cfg/1 returns {:ok, value} or :error without raising" do
-    Application.put_env(:hyper, :__cfg_test, "v")
-    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test) == {:ok, "v"}
-    Application.delete_env(:hyper, :__cfg_test)
-    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test) == :error
+    assert Hyper.Cfg.fetch_cfg(toml: "present") == {:ok, "from_toml"}
     assert Hyper.Cfg.fetch_cfg(toml: "definitely.absent") == :error
-    assert Hyper.Cfg.fetch_cfg(runtime: :__cfg_test, default: "d") == {:ok, "d"}
+    assert Hyper.Cfg.fetch_cfg(toml: "definitely.absent", default: "d") == {:ok, "d"}
   end
 end

@@ -30,15 +30,13 @@ defmodule Hyper.SuidHelper.WirePropertiesTest do
   @moduletag skip: if(@helper, do: false, else: "no stamped helper; run mix compile")
 
   setup do
-    previous = Application.get_env(:hyper, Hyper.Cfg.Tools, [])
+    original = Hyper.Cfg.Toml.reload()
 
-    Application.put_env(
-      :hyper,
-      Hyper.Cfg.Tools,
-      Keyword.put(previous, :suidhelper, Path.expand(@helper))
+    Hyper.Cfg.Toml.put_cache(
+      put_in(original, [Access.key("tools", %{}), "suidhelper"], Path.expand(@helper))
     )
 
-    on_exit(fn -> Application.put_env(:hyper, Hyper.Cfg.Tools, previous) end)
+    on_exit(fn -> Hyper.Cfg.Toml.put_cache(original) end)
   end
 
   defp parsed?({:error, {2, "invalid request" <> _}}), do: false
