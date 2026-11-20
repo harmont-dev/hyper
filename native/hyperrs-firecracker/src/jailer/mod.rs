@@ -11,6 +11,7 @@ use hyperrs_process::privilege::{RootCommandExt, Unprivileged};
 use nix::unistd::{Gid, Uid};
 use std::num::NonZeroU64;
 use std::process::Command;
+use thiserror::Error as ThisError;
 
 const FIRECRACKER: &str = "firecracker";
 
@@ -27,17 +28,54 @@ pub struct CpuMax {
     pub period_us: NonZeroU64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Builder)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize),
-    serde(deny_unknown_fields)
+    serde(try_from = "RawCgroupLimits")
 )]
 pub struct CgroupLimits {
     /// The RAM usage, in bytes.
     memory_max: Option<NonZeroU64>,
+    memory_high: Option<NonZeroU64>,
     /// The CPU limits.
     cpu_max: Option<CpuMax>,
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCgroupLimits {
+    memory_max: Option<NonZeroU64>,
+    memory_high: Option<NonZeroU64>,
+    cpu_max: Option<CpuMax>,
+}
+
+#[derive(Debug, ThisError)]
+#[error("memory.high {high} is not below memory.max {max}")]
+pub struct MemoryHighNotBelowMax {
+    high: NonZeroU64,
+    max: NonZeroU64,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<RawCgroupLimits> for CgroupLimits {
+    type Error = MemoryHighNotBelowMax;
+
+    fn try_from(raw: RawCgroupLimits) -> Result<Self, Self::Error> {
+        if let Some((high, max)) = raw
+            .memory_high
+            .zip(raw.memory_max)
+            .filter(|(high, max)| high >= max)
+        {
+            return Err(MemoryHighNotBelowMax { high, max });
+        }
+        Ok(Self {
+            memory_max: raw.memory_max,
+            memory_high: raw.memory_high,
+            cpu_max: raw.cpu_max,
+        })
+    }
 }
 
 /// A fully-resolved jailer invocation.
@@ -91,6 +129,10 @@ impl Jailer<'_> {
 
         if let Some(bytes) = self.limits.memory_max {
             cmd.arg("--cgroup").arg(format!("memory.max={bytes}"));
+        }
+
+        if let Some(bytes) = self.limits.memory_high {
+            cmd.arg("--cgroup").arg(format!("memory.high={bytes}"));
         }
 
         if let Some(CpuMax {
@@ -207,13 +249,15 @@ mod tests {
         let nz = || (1u64..=u64::MAX).prop_map(|n| NonZeroU64::new(n).unwrap());
         (
             proptest::option::of(nz()),
+            proptest::option::of(nz()),
             proptest::option::of((nz(), nz()).prop_map(|(quota_us, period_us)| CpuMax {
                 quota_us,
                 period_us,
             })),
         )
-            .prop_map(|(memory_max, cpu_max)| CgroupLimits {
+            .prop_map(|(memory_max, memory_high, cpu_max)| CgroupLimits {
                 memory_max,
+                memory_high,
                 cpu_max,
             })
     }
@@ -269,6 +313,11 @@ mod tests {
             .memory_max
             .map(|m| format!("memory.max={m}").into())
             .into_iter()
+            .chain(
+                limits
+                    .memory_high
+                    .map(|m| format!("memory.high={m}").into()),
+            )
             .chain(
                 limits
                     .cpu_max
