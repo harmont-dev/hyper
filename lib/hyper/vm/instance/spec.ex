@@ -5,10 +5,11 @@ defmodule Hyper.Vm.Instance.Spec do
 
   alias Unit.Information
 
-  # Firecracker's heap and stacks plus the kernel's slab for the VM: 10 MiB measured on a :micro.
-  @vmm_overhead Information.mib(16)
+  # How much overhead does firecracker invoke. I measured it to be 10MB, so engineering 3x
+  # tolerance is like 32mb.
+  @vmm_overhead Information.mib(32)
   # Host page tables and EPT each take ~0.2% of guest RAM, so 1/64 leaves 4x margin.
-  @page_table_divisor 64
+  @page_table_coefficient 1 / 64
   # Slack for dirty host page cache in writeback: measured on a :micro, usage never got past
   # memory.high and dirty pages stayed under 4 MiB.
   @dirty_cache_headroom Information.mib(32)
@@ -42,7 +43,9 @@ defmodule Hyper.Vm.Instance.Spec do
   @doc "How much memory does the host need to reserve for this guest to run."
   @spec host_mem(t()) :: Unit.Information.t()
   def host_mem(spec) do
-    page_tables = Information.bytes(div(Information.as_bytes(spec.mem), @page_table_divisor))
+    page_tables =
+      Information.bytes(ceil(Information.as_bytes(spec.mem) * @page_table_coefficient))
+
     spec.mem + page_tables + @vmm_overhead
   end
 
