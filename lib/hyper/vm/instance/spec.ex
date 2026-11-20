@@ -39,6 +39,7 @@ defmodule Hyper.Vm.Instance.Spec do
     |> Config.memory_max(Information.as_bytes(high + @dirty_cache_headroom))
   end
 
+  @doc "How much memory does the host need to reserve for this guest to run."
   @spec host_mem(t()) :: Unit.Information.t()
   def host_mem(spec) do
     page_tables = Information.bytes(div(Information.as_bytes(spec.mem), @page_table_divisor))
