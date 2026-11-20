@@ -78,6 +78,7 @@ defmodule Hyper.Node.FireVMM.JailerTest do
              ~w(device firewall gid id kernel limits net_id op uid)
 
     assert request()["limits"]["memory_max"] == cgroup.memory_max
+    assert request()["limits"]["memory_high"] == cgroup.memory_high
 
     assert request()["limits"]["cpu_max"] == %{
              "quota_us" => cgroup.cpu_max.quota_us,

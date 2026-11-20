@@ -23,19 +23,35 @@ defmodule Sys.Linux.Cgroup.V2PropertiesTest do
     end
   end
 
-  property "memory_max renders as the byte string under :\"memory.max\"" do
-    check all(bytes <- pos()) do
-      linux = Config.new() |> Config.memory_max(bytes) |> Config.as_linux()
-      assert linux == %{"memory.max": "#{bytes}"}
+  property "each memory limit renders as the byte string under its own interface file" do
+    rows = [{&Config.memory_max/2, :"memory.max"}, {&Config.memory_high/2, :"memory.high"}]
+
+    check all({set, file} <- member_of(rows), bytes <- pos()) do
+      linux = Config.new() |> set.(bytes) |> Config.as_linux()
+      assert linux == %{file => "#{bytes}"}
     end
   end
 
-  property "both limits render independently, regardless of set order" do
-    check all(quota <- pos(), period <- pos(), bytes <- pos()) do
-      a = Config.new() |> Config.cpu_max(quota, period) |> Config.memory_max(bytes)
-      b = Config.new() |> Config.memory_max(bytes) |> Config.cpu_max(quota, period)
+  property "all limits render independently, regardless of set order" do
+    check all(quota <- pos(), period <- pos(), bytes <- pos(), high <- pos()) do
+      a =
+        Config.new()
+        |> Config.cpu_max(quota, period)
+        |> Config.memory_high(high)
+        |> Config.memory_max(bytes)
 
-      expected = %{"cpu.max": "#{quota} #{period}", "memory.max": "#{bytes}"}
+      b =
+        Config.new()
+        |> Config.memory_max(bytes)
+        |> Config.memory_high(high)
+        |> Config.cpu_max(quota, period)
+
+      expected = %{
+        "cpu.max": "#{quota} #{period}",
+        "memory.high": "#{high}",
+        "memory.max": "#{bytes}"
+      }
+
       assert Config.as_linux(a) == expected
       assert Config.as_linux(b) == expected
     end

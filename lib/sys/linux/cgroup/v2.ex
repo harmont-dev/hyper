@@ -17,11 +17,13 @@ defmodule Sys.Linux.Cgroup.V2 do
 
     @type t :: %{
             optional(:cpu_max) => cpu_spec(),
+            optional(:memory_high) => pos_integer(),
             optional(:memory_max) => pos_integer()
           }
 
     @type linux_t :: %{
             optional(:"cpu.max") => String.t(),
+            optional(:"memory.high") => String.t(),
             optional(:"memory.max") => String.t()
           }
 
@@ -35,6 +37,9 @@ defmodule Sys.Linux.Cgroup.V2 do
       Map.put(cfg, :cpu_max, %{quota_us: quota_us, period_us: period_us})
     end
 
+    @spec memory_high(t(), pos_integer()) :: t()
+    def memory_high(cfg, val), do: Map.put(cfg, :memory_high, val)
+
     @spec memory_max(t(), pos_integer()) :: t()
     def memory_max(cfg, val), do: Map.put(cfg, :memory_max, val)
 
@@ -43,6 +48,7 @@ defmodule Sys.Linux.Cgroup.V2 do
     def as_linux(cfg) do
       Map.new(cfg, fn
         {:cpu_max, %{quota_us: quota, period_us: period}} -> {:"cpu.max", "#{quota} #{period}"}
+        {:memory_high, bytes} -> {:"memory.high", to_string(bytes)}
         {:memory_max, bytes} -> {:"memory.max", to_string(bytes)}
       end)
     end
