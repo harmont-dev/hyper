@@ -17,6 +17,7 @@ defmodule Hyper.Node.Budget.Hard do
 
   alias Hyper.Cfg.Budget, as: Config
   alias Hyper.Vm.Instance
+  alias Hyper.Vm.Instance.Spec
 
   defmodule State do
     @moduledoc false
@@ -44,7 +45,7 @@ defmodule Hyper.Node.Budget.Hard do
     def bump(s, spec) do
       %{
         s
-        | mem_allocated: s.mem_allocated + spec.mem,
+        | mem_allocated: s.mem_allocated + Spec.host_mem(spec),
           disk_allocated: s.disk_allocated + spec.disk
       }
     end
@@ -54,7 +55,7 @@ defmodule Hyper.Node.Budget.Hard do
     def cut(s, spec) do
       %{
         s
-        | mem_allocated: s.mem_allocated - spec.mem,
+        | mem_allocated: s.mem_allocated - Spec.host_mem(spec),
           disk_allocated: s.disk_allocated - spec.disk
       }
     end
@@ -202,7 +203,7 @@ defmodule Hyper.Node.Budget.Hard do
     config = Config.get()
 
     cond do
-      state.mem_allocated + spec.mem > config.mem_max -> {:error, :mem_exhausted}
+      state.mem_allocated + Spec.host_mem(spec) > config.mem_max -> {:error, :mem_exhausted}
       state.disk_allocated + spec.disk > config.disk_max -> {:error, :disk_exhausted}
       true -> :ok
     end

@@ -80,7 +80,7 @@ defmodule Hyper.Node.Budget.NodeState do
 
   @spec hard_fits?(t(), Spec.t()) :: boolean()
   defp hard_fits?(state, spec) do
-    Information.as_bytes(spec.mem) <= Information.as_bytes(state.mem_free) and
+    Information.as_bytes(Spec.host_mem(spec)) <= Information.as_bytes(state.mem_free) and
       Information.as_bytes(spec.disk) <= Information.as_bytes(state.disk_free)
   end
 

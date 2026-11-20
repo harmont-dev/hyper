@@ -39,19 +39,22 @@ defmodule Hyper.Node.Budget.NodeStatePropertiesTest do
 
   # A spec whose demand sits within every ceiling of `st`.
   defp fitting_spec(st) do
-    gen all(
-          mem_gib <- integer(0..Information.as_gib(st.mem_free)),
-          disk_gib <- integer(0..Information.as_gib(st.disk_free)),
-          vcpus <- integer(0..st.cpu_capacity)
-        ) do
-      %Spec{
-        vcpus: vcpus,
-        mem: Information.gib(mem_gib),
-        disk: Information.gib(disk_gib),
-        disk_bw: Bandwidth.zero(),
-        net_bw: Bandwidth.zero()
-      }
-    end
+    specs =
+      gen all(
+            mem_mib <- integer(0..Information.as_mib(st.mem_free)),
+            disk_gib <- integer(0..Information.as_gib(st.disk_free)),
+            vcpus <- integer(0..st.cpu_capacity)
+          ) do
+        %Spec{
+          vcpus: vcpus,
+          mem: Information.mib(mem_mib),
+          disk: Information.gib(disk_gib),
+          disk_bw: Bandwidth.zero(),
+          net_bw: Bandwidth.zero()
+        }
+      end
+
+    filter(specs, &(Spec.host_mem(&1) <= st.mem_free))
   end
 
   property "a spec within every ceiling always fits" do
