@@ -211,6 +211,7 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
             launch.request(json!({
                 "limits": {
                     "memory_max": 1_048_576,
+                    "memory_high": 524_288,
                     "cpu_max": {"quota_us": 100_000, "period_us": 100_000},
                 },
             })),
@@ -240,6 +241,8 @@ fn execs_jailer_with_canonical_argv_and_empty_env_as_root(launch: Option<Launch>
             &format!("/run/netns/{}", launch.netns()),
             "--cgroup",
             "memory.max=1048576",
+            "--cgroup",
+            "memory.high=524288",
             "--cgroup",
             "cpu.max=100000 100000",
             "--",

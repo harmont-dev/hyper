@@ -38,7 +38,7 @@ defmodule Hyper.Node.Budget.HardStatePropertiesTest do
     check all(specs <- list_of(spec(), max_length: 20)) do
       state = Enum.reduce(specs, State.zero(), fn s, acc -> State.bump(acc, s) end)
 
-      total_mem = specs |> Enum.map(&Information.as_bytes(&1.mem)) |> Enum.sum()
+      total_mem = specs |> Enum.map(&Information.as_bytes(Spec.host_mem(&1))) |> Enum.sum()
       total_disk = specs |> Enum.map(&Information.as_bytes(&1.disk)) |> Enum.sum()
 
       assert Information.as_bytes(state.mem_allocated) == total_mem

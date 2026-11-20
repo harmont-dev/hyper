@@ -48,8 +48,14 @@ defmodule Hyper.Node.Budget.NodeStateTest do
   end
 
   test "memory demand exactly at free headroom still fits (<= boundary)" do
+    demand = spec(%{mem: Information.gib(2)})
+    state = roomy_state(%{mem_free: Spec.host_mem(demand)})
+    assert NodeState.fits?(state, demand)
+  end
+
+  test "free headroom covering only the guest's RAM is rejected" do
     state = roomy_state(%{mem_free: Information.gib(2)})
-    assert NodeState.fits?(state, spec(%{mem: Information.gib(2)}))
+    refute NodeState.fits?(state, spec(%{mem: Information.gib(2)}))
   end
 
   test "disk demand over free headroom is rejected" do

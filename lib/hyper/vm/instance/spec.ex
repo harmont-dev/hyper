@@ -1,6 +1,19 @@
 defmodule Hyper.Vm.Instance.Spec do
   @moduledoc "Resource bundle for one instance type."
 
+  use Unit.Operators
+
+  alias Unit.Information
+
+  # How much overhead does firecracker invoke. I measured it to be 10MB, so engineering 3x
+  # tolerance is like 32mb.
+  @vmm_overhead Information.mib(32)
+  # Host page tables and EPT each take ~0.2% of guest RAM, so 1/64 leaves 4x margin.
+  @page_table_coefficient 1 / 64
+  # Slack for dirty host page cache in writeback: measured on a :micro, usage never got past
+  # memory.high and dirty pages stayed under 4 MiB.
+  @dirty_cache_headroom Information.mib(32)
+
   @type t :: %__MODULE__{
           vcpus: number(),
           mem: Unit.Information.t(),
@@ -19,9 +32,21 @@ defmodule Hyper.Vm.Instance.Spec do
     period_us = Time.as_us(Hyper.Node.FireVMM.cpu_period())
     quota_us = round(spec.vcpus * period_us)
 
+    high = host_mem(spec)
+
     Config.new()
     |> Config.cpu_max(quota_us, period_us)
-    |> Config.memory_max(Unit.Information.as_bytes(spec.mem))
+    |> Config.memory_high(Information.as_bytes(high))
+    |> Config.memory_max(Information.as_bytes(high + @dirty_cache_headroom))
+  end
+
+  @doc "How much memory does the host need to reserve for this guest to run."
+  @spec host_mem(t()) :: Unit.Information.t()
+  def host_mem(spec) do
+    page_tables =
+      Information.bytes(ceil(Information.as_bytes(spec.mem) * @page_table_coefficient))
+
+    spec.mem + page_tables + @vmm_overhead
   end
 
   @doc """
