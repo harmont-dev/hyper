@@ -9,8 +9,8 @@ defmodule Hyper.Vm.Instance.Spec do
   @vmm_overhead Information.mib(16)
   # Host page tables and EPT each take ~0.2% of guest RAM, so 1/64 leaves 4x margin.
   @page_table_divisor 64
-  # Dirty host page cache that reclaim must write back before dropping it, while memory.high
-  # throttles the writer.
+  # Slack for dirty host page cache in writeback: measured on a :micro, usage never got past
+  # memory.high and dirty pages stayed under 4 MiB.
   @dirty_cache_headroom Information.mib(32)
 
   @type t :: %__MODULE__{
