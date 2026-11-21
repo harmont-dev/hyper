@@ -10,36 +10,31 @@ defmodule Hyper.Cfg.Otel do
   import Hyper.Cfg, only: [get_cfg: 1]
 
   @doc "Resolve the `:opentelemetry_exporter` options, or `:none`."
-  @spec exporter_options(keyword()) :: {:ok, keyword()} | :none
-  def exporter_options(exs) when is_list(exs) do
-    endpoint = pick(exs, :endpoint, "otel.endpoint") || env_endpoint()
-
-    case endpoint do
+  @spec exporter_options :: {:ok, keyword()} | :none
+  def exporter_options do
+    case pick("otel.endpoint") || env_endpoint() do
       nil ->
         :none
 
       ep ->
         {:ok,
          [
-           otlp_protocol: proto(pick(exs, :proto, "otel.proto")),
+           otlp_protocol: proto(pick("otel.proto")),
            otlp_endpoint: ep,
-           otlp_headers: headers(pick(exs, :headers, "otel.headers"))
+           otlp_headers: headers(pick("otel.headers"))
          ]}
     end
   end
 
-  # config.exs (the explicit `exs` keyword, since we run during boot) > [otel] toml.
-  @spec pick(keyword(), atom(), String.t()) :: term() | nil
-  defp pick(exs, key, toml), do: get_cfg(exs: {exs, key}, toml: toml, default: nil)
+  @spec pick(String.t()) :: term() | nil
+  defp pick(toml), do: get_cfg(toml: toml, default: nil)
 
   @spec proto(term()) :: :http_protobuf | :grpc
-  defp proto(p) when p in [:http_protobuf, :grpc], do: p
   defp proto("grpc"), do: :grpc
   defp proto(_), do: :http_protobuf
 
   @spec headers(term()) :: [{String.t(), String.t()}]
-  defp headers(h) when is_map(h), do: Enum.map(h, fn {k, v} -> {to_string(k), to_string(v)} end)
-  defp headers(h) when is_list(h), do: Enum.map(h, fn {k, v} -> {to_string(k), to_string(v)} end)
+  defp headers(h) when is_map(h), do: Enum.map(h, fn {k, v} -> {k, to_string(v)} end)
   defp headers(_), do: []
 
   @spec env_endpoint() :: String.t() | nil

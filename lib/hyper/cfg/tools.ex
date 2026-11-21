@@ -29,27 +29,26 @@ defmodule Hyper.Cfg.Tools do
 
   @doc "skopeo binary (node tool). config.exs > config.toml > `skopeo` on PATH."
   @spec skopeo :: String.t()
-  def skopeo, do: get_cfg(runtime: {__MODULE__, :skopeo}, toml: "tools.skopeo", default: "skopeo")
+  def skopeo, do: get_cfg(toml: "tools.skopeo", default: "skopeo")
 
   @doc "mke2fs binary (node tool). config.exs > config.toml > `mke2fs` on PATH."
   @spec mke2fs :: String.t()
-  def mke2fs, do: get_cfg(runtime: {__MODULE__, :mke2fs}, toml: "tools.mke2fs", default: "mke2fs")
+  def mke2fs, do: get_cfg(toml: "tools.mke2fs", default: "mke2fs")
 
   @doc "debugfs binary (node tool). config.exs > config.toml > `debugfs` on PATH."
   @spec debugfs :: String.t()
   def debugfs,
-    do: get_cfg(runtime: {__MODULE__, :debugfs}, toml: "tools.debugfs", default: "debugfs")
+    do: get_cfg(toml: "tools.debugfs", default: "debugfs")
 
   @doc "umoci binary (node tool), or `nil` to let Hyper download a pinned release."
   @spec umoci :: String.t() | nil
-  def umoci, do: get_cfg(runtime: {__MODULE__, :umoci}, toml: "tools.umoci", default: nil)
+  def umoci, do: get_cfg(toml: "tools.umoci", default: nil)
 
   @doc "setuid device helper (node tool). config.exs > config.toml > install default."
   @spec suidhelper :: String.t()
   def suidhelper,
     do:
       get_cfg(
-        runtime: {__MODULE__, :suidhelper},
         toml: "tools.suidhelper",
         default: "/usr/local/libexec/hyper/hyper-suidhelper"
       )

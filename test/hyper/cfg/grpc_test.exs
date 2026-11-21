@@ -1,8 +1,7 @@
 defmodule Hyper.Cfg.GrpcTest do
   @moduledoc """
   Contracts on top of plain resolution: a `[grpc]` toml `cred` inline table
-  (`{ cert = ..., key = ... }`) coerces into a `GRPC.Credential` while a
-  pre-built credential passes through untouched; `server_options/1` omits
+  (`{ cert = ..., key = ... }`) coerces into a `GRPC.Credential`; `server_options/1` omits
   `:cred` and `:adapter_opts` entirely at their plaintext defaults (a
   literal `cred: nil` reaching GRPC.Server.Supervisor is a different
   configuration than the key being absent) and carries them through when
@@ -14,15 +13,8 @@ defmodule Hyper.Cfg.GrpcTest do
   alias Hyper.Cfg.Toml
 
   setup do
-    Application.delete_env(:hyper, Grpc)
     Toml.put_cache(%{})
-
-    on_exit(fn ->
-      Application.delete_env(:hyper, Grpc)
-      Toml.reload()
-    end)
-
-    :ok
+    on_exit(fn -> Toml.reload() end)
   end
 
   test "a [grpc] toml table loads, with the cred inline table coerced to a GRPC.Credential" do
@@ -41,13 +33,6 @@ defmodule Hyper.Cfg.GrpcTest do
     assert %GRPC.Credential{ssl: ssl} = config.cred
     assert ssl[:certfile] == "/etc/hyper/cert.pem"
     assert ssl[:keyfile] == "/etc/hyper/key.pem"
-  end
-
-  test "a pre-built GRPC.Credential from config.exs passes through untouched" do
-    cred = GRPC.Credential.new(ssl: [certfile: "/c.pem", keyfile: "/k.pem"])
-    Application.put_env(:hyper, Grpc, cred: cred)
-
-    assert Grpc.load().cred == cred
   end
 
   test "with no cred configured, load returns nil (plaintext)" do

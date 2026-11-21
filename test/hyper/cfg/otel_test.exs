@@ -2,9 +2,9 @@ defmodule Hyper.Cfg.OtelTest do
   @moduledoc """
   Contract of OTLP exporter resolution: no endpoint in any source disables
   the exporter (`:none`, empty env var included); source order is
-  config.exs > [otel] toml > OTEL_EXPORTER_OTLP_ENDPOINT; `proto` coerces to
-  exactly `:grpc` or `:http_protobuf` (never a third value reaches the
-  exporter); headers normalize to string pairs from map or keyword form.
+  [otel] toml > OTEL_EXPORTER_OTLP_ENDPOINT; `proto` coerces to exactly
+  `:grpc` or `:http_protobuf` (never a third value reaches the exporter);
+  headers normalize to string pairs.
   """
   use ExUnit.Case, async: false
 
@@ -26,15 +26,19 @@ defmodule Hyper.Cfg.OtelTest do
     :ok
   end
 
+  defp otel(table), do: Toml.put_cache(%{"otel" => table})
+
   test "no endpoint in any source disables the exporter, empty env var included" do
-    assert Otel.exporter_options([]) == :none
+    assert Otel.exporter_options() == :none
 
     System.put_env(@env_var, "")
-    assert Otel.exporter_options([]) == :none
+    assert Otel.exporter_options() == :none
   end
 
   test "an endpoint alone gets the documented defaults: http_protobuf, no headers" do
-    assert Otel.exporter_options(endpoint: "http://collector:4318") ==
+    otel(%{"endpoint" => "http://collector:4318"})
+
+    assert Otel.exporter_options() ==
              {:ok,
               [
                 otlp_protocol: :http_protobuf,
@@ -43,29 +47,24 @@ defmodule Hyper.Cfg.OtelTest do
               ]}
   end
 
-  test "source precedence: config.exs > [otel] toml > env var" do
+  test "source precedence: [otel] toml > env var" do
     System.put_env(@env_var, "http://env:1")
-    assert {:ok, opts} = Otel.exporter_options([])
+    assert {:ok, opts} = Otel.exporter_options()
     assert opts[:otlp_endpoint] == "http://env:1"
 
-    Toml.put_cache(%{"otel" => %{"endpoint" => "http://toml:2"}})
-    assert {:ok, opts} = Otel.exporter_options([])
+    otel(%{"endpoint" => "http://toml:2"})
+    assert {:ok, opts} = Otel.exporter_options()
     assert opts[:otlp_endpoint] == "http://toml:2"
-
-    assert {:ok, opts} = Otel.exporter_options(endpoint: "http://exs:3")
-    assert opts[:otlp_endpoint] == "http://exs:3"
   end
 
   test "a full [otel] toml table maps through with proto and headers coerced" do
-    Toml.put_cache(%{
-      "otel" => %{
-        "endpoint" => "https://api.honeycomb.io",
-        "proto" => "grpc",
-        "headers" => %{"x-honeycomb-team" => "key"}
-      }
+    otel(%{
+      "endpoint" => "https://api.honeycomb.io",
+      "proto" => "grpc",
+      "headers" => %{"x-honeycomb-team" => "key"}
     })
 
-    assert Otel.exporter_options([]) ==
+    assert Otel.exporter_options() ==
              {:ok,
               [
                 otlp_protocol: :grpc,
@@ -74,21 +73,16 @@ defmodule Hyper.Cfg.OtelTest do
               ]}
   end
 
-  test "proto coercion: only grpc (atom or string) selects grpc, all else http_protobuf" do
+  test "proto coercion: only grpc selects grpc, all else http_protobuf" do
     for {given, expected} <- [
-          {:grpc, :grpc},
           {"grpc", :grpc},
-          {:http_protobuf, :http_protobuf},
+          {"http_protobuf", :http_protobuf},
           {"http/protobuf", :http_protobuf},
           {"bogus", :http_protobuf}
         ] do
-      assert {:ok, opts} = Otel.exporter_options(endpoint: "http://c:4318", proto: given)
+      otel(%{"endpoint" => "http://c:4318", "proto" => given})
+      assert {:ok, opts} = Otel.exporter_options()
       assert opts[:otlp_protocol] == expected, "proto #{inspect(given)}"
     end
-  end
-
-  test "headers accept keyword form, keys stringified" do
-    assert {:ok, opts} = Otel.exporter_options(endpoint: "http://c:4318", headers: ["x-a": "1"])
-    assert opts[:otlp_headers] == [{"x-a", "1"}]
   end
 end

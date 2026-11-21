@@ -14,7 +14,6 @@ defmodule Hyper.Node.VmlinuxTest do
   """
   use ExUnit.Case, async: false
 
-  alias Hyper.Cfg.VmLinux
   alias Hyper.Node.Vmlinux
 
   setup do
@@ -23,7 +22,6 @@ defmodule Hyper.Node.VmlinuxTest do
     Hyper.Cfg.Toml.put_cache(%{})
 
     on_exit(fn ->
-      Application.delete_env(:hyper, VmLinux)
       Hyper.Cfg.Toml.reload()
       File.rm_rf!(dir)
     end)
@@ -32,7 +30,7 @@ defmodule Hyper.Node.VmlinuxTest do
   end
 
   defp verdict(path) do
-    Application.put_env(:hyper, VmLinux, amd64: path, aarch64: path)
+    Hyper.Cfg.Toml.put_cache(%{"vmlinux" => %{"amd64" => path, "aarch64" => path}})
     Vmlinux.test_system()
   end
 
