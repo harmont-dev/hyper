@@ -38,7 +38,7 @@ defmodule Mix.Tasks.Firecracker.InstallTest do
     assert Bitwise.band(stat.mode, 0o7777) == 0o755
     refute stat.inode in Enum.map(victims, &File.stat!(&1).inode)
     {out, 0} = System.cmd(path, ["--version"], stderr_to_stdout: true)
-    assert out =~ "v1.16.0"
+    assert out =~ "v1.16.2"
   end
 
   test "planted links at the install paths are replaced, never written through", %{
