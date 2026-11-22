@@ -14,7 +14,7 @@ use hyperrs_fs::path::{
 };
 use nix::errno::Errno;
 use nix::sys::stat::{fstat, Mode};
-use nix::unistd::{getuid, Uid};
+use nix::unistd::{getuid, Gid, Uid};
 use std::fs::File;
 use std::io::{self, Seek};
 use std::os::unix::io::{AsFd, AsRawFd, OwnedFd};
@@ -43,6 +43,8 @@ const DIR_MODE: Mode = Mode::from_bits_truncate(0o755);
 
 /// Mode handed to the node: owner read/write only.
 const SOCKET_MODE: Mode = Mode::from_bits_truncate(0o600);
+
+const LINKED_SOCKET_MODE: Mode = Mode::from_bits_truncate(0o660);
 
 #[derive(Debug, ThisError)]
 pub enum KernelError {
@@ -92,6 +94,26 @@ pub enum GrantError {
     Chown(#[source] Errno),
     #[error("chmoding the file: {0}")]
     Chmod(#[source] Errno),
+}
+
+#[derive(Debug, ThisError)]
+pub enum LinkError {
+    #[error("the jail does not exist yet")]
+    Missing,
+    #[error("walking to the jail root: {0}")]
+    Walk(#[source] file::ValidationError),
+    #[error("removing what the jail holds under the name: {0}")]
+    Unlink(#[source] Errno),
+    #[error("counting the socket's names: {0}")]
+    Links(#[source] file::ValidationError),
+    #[error("the socket already has {0} names; refusing to give it another")]
+    Shared(nix::libc::nlink_t),
+    #[error("handing the socket to the jail's group: {0}")]
+    Chown(#[source] Errno),
+    #[error("chmoding the socket: {0}")]
+    Chmod(#[source] Errno),
+    #[error("linking the socket into the jail: {0}")]
+    Link(#[source] Errno),
 }
 
 #[derive(Debug, ThisError)]
@@ -210,6 +232,20 @@ impl<'a> JailLayout<'a> {
         root.grant::<IsSocket>(name, owner, SOCKET_MODE)
     }
 
+    pub fn link_socket<R, O>(
+        &self,
+        socket: &SafeFile<IsSocket, R, O>,
+        name: &StrictComponent,
+        group: Gid,
+    ) -> Result<(), LinkError> {
+        let root = match self.open_root() {
+            Ok(root) => root,
+            Err(file::ValidationError::Open(Errno::ENOENT)) => return Err(LinkError::Missing),
+            Err(e) => return Err(LinkError::Walk(e)),
+        };
+        root.link_socket(socket, name, group)
+    }
+
     /// Recursively remove the per-VM chroot `<base>/<exec>/<id>`, fd-relative
     /// after an `O_NOFOLLOW` walk from `base`. Idempotent on a missing target.
     pub fn remove(&self) -> Result<(), RemoveError> {
@@ -299,20 +335,39 @@ impl JailRoot {
 
         Ok(file)
     }
+
+    pub fn link_socket<R, O>(
+        &self,
+        socket: &SafeFile<IsSocket, R, O>,
+        name: &StrictComponent,
+        group: Gid,
+    ) -> Result<(), LinkError> {
+        match self.0.unlinkat(name) {
+            Ok(()) | Err(Errno::ENOENT) => {}
+            Err(e) => return Err(LinkError::Unlink(e)),
+        }
+        match socket.links().map_err(LinkError::Links)? {
+            1 => {}
+            links => return Err(LinkError::Shared(links)),
+        }
+        socket.chown(None, Some(group)).map_err(LinkError::Chown)?;
+        socket.chmod(LINKED_SOCKET_MODE).map_err(LinkError::Chmod)?;
+        self.0.linkat(socket, name).map_err(LinkError::Link)
+    }
 }
 
 type BlockDevice = SafeFile<IsBlockDevice, Any, Any>;
 
 #[cfg(test)]
 mod tests {
-    use super::{GrantError, JailLayout, JailRoot, KernelError, KernelImage};
+    use super::{GrantError, JailLayout, JailRoot, KernelError, KernelImage, LinkError};
     use crate::VmId;
     use assert_fs::fixture::ChildPath;
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
     use hyperrs_fs::file;
     use hyperrs_fs::file::Owner;
-    use hyperrs_fs::file::{Any, IsBlockDevice, OpenFlags, SafeFile};
+    use hyperrs_fs::file::{Any, IsBlockDevice, IsSocket, OpenFlags, SafeFile};
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
     use nix::errno::Errno;
     use nix::unistd::{Gid, Uid};
@@ -323,7 +378,7 @@ mod tests {
     use std::assert_matches;
     use std::fs;
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-    use std::os::unix::net::UnixListener;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use test_strategy::proptest;
@@ -763,6 +818,88 @@ mod tests {
         fs::set_permissions(&jail, fs::Permissions::from_mode(0o755)).unwrap();
 
         assert_matches!(res, Err(GrantError::Walk(_)));
+    }
+
+    const GUEST_LINK: &StrictComponent = StrictComponent::from_static("vsock.sock_1100");
+
+    struct HostSocket {
+        listener: UnixListener,
+        path: PathBuf,
+    }
+
+    impl HostSocket {
+        fn bind(dir: &Path) -> Self {
+            let path = dir.join("host.sock");
+            Self {
+                listener: UnixListener::bind(&path).unwrap(),
+                path,
+            }
+        }
+
+        fn link_into(&self, jail_base: &Path) -> Result<(), LinkError> {
+            let socket =
+                SafeFile::<IsSocket, Any, Any>::open(&strict(&self.path), OpenFlags::PATH).unwrap();
+            JailLayout::new(&strict(jail_base), &vm()).link_socket(
+                &socket,
+                GUEST_LINK,
+                Gid::current(),
+            )
+        }
+    }
+
+    #[rstest]
+    fn link_socket_puts_the_host_listener_in_the_jail_for_the_group_alone(jail: Jail) {
+        let host = HostSocket::bind(jail.base());
+
+        host.link_into(jail.base())
+            .expect("a lone socket must link");
+
+        let linked = jail.root_dir.join("vsock.sock_1100");
+        let meta = fs::symlink_metadata(&linked).unwrap();
+        assert!(meta.file_type().is_socket());
+        assert_eq!(meta.ino(), fs::symlink_metadata(&host.path).unwrap().ino());
+        assert_eq!(
+            (meta.mode() & 0o777, meta.gid()),
+            (0o660, Gid::current().as_raw())
+        );
+        UnixStream::connect(&linked).unwrap();
+        host.listener
+            .accept()
+            .expect("the jail's name reaches the host listener");
+    }
+
+    #[rstest]
+    fn link_socket_replaces_whatever_the_jail_holds_under_the_name(jail: Jail) {
+        let host = HostSocket::bind(jail.base());
+        jail.root_dir
+            .child("vsock.sock_1100")
+            .write_str("planted")
+            .unwrap();
+
+        host.link_into(jail.base()).unwrap();
+        host.link_into(jail.base())
+            .expect("relinking the same socket must succeed");
+
+        let meta = fs::symlink_metadata(jail.root_dir.join("vsock.sock_1100")).unwrap();
+        assert_eq!(meta.ino(), fs::symlink_metadata(&host.path).unwrap().ino());
+        assert_eq!(meta.nlink(), 2);
+    }
+
+    #[rstest]
+    fn link_socket_refuses_a_socket_that_already_has_another_name(jail: Jail) {
+        let host = HostSocket::bind(jail.base());
+        fs::hard_link(&host.path, jail.base().join("alias.sock")).unwrap();
+
+        assert_matches!(host.link_into(jail.base()), Err(LinkError::Shared(2)));
+        jail.root_dir
+            .child("vsock.sock_1100")
+            .assert(predicate::path::missing());
+    }
+
+    #[rstest]
+    fn link_socket_before_the_jail_exists_is_missing(tmp: TempDir) {
+        let host = HostSocket::bind(tmp.path());
+        assert_matches!(host.link_into(tmp.path()), Err(LinkError::Missing));
     }
 
     #[rstest]
