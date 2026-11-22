@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.Firecracker.Install do
   @shortdoc "Download, verify, and install the pinned Firecracker release"
   @moduledoc """
-  Downloads, verifies, and installs the pinned Firecracker release (v1.16.0)
+  Downloads, verifies, and installs the pinned Firecracker release (v1.16.2)
   for the current CPU architecture.
 
       mix firecracker.install [--prefix DIR]
@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Firecracker.Install do
        and `<prefix>/jailer` using the **bare basenames** `firecracker` and
        `jailer`. The setuid helper validates binaries via `SafeBin<"firecracker">`
        and `SafeBin<"jailer">`, which match on basename only — version-stamped
-       names such as `firecracker-v1.16.0-x86_64` are rejected unconditionally.
+       names such as `firecracker-v1.16.2-x86_64` are rejected unconditionally.
     4. Marks both binaries executable (`0o755`).
     5. Prints the `/etc/hyper/config.toml` snippet the operator needs to paste.
 
@@ -38,7 +38,7 @@ defmodule Mix.Tasks.Firecracker.Install do
 
   use Mix.Task
 
-  @version "1.16.0"
+  @version "1.16.2"
   @default_prefix "/opt/firecracker"
 
   @impl Mix.Task
@@ -76,7 +76,7 @@ defmodule Mix.Tasks.Firecracker.Install do
       url:
         "https://github.com/firecracker-microvm/firecracker/releases/download/" <>
           "v#{@version}/firecracker-v#{@version}-x86_64.tgz",
-      sha256: "bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6",
+      sha256: "32e3cdcd4081f91fe2b024a266f57dcb3b4e5fec5033e0cb22467ad7f7820bda",
       firecracker_path: "release-v#{@version}-x86_64/firecracker-v#{@version}-x86_64",
       jailer_path: "release-v#{@version}-x86_64/jailer-v#{@version}-x86_64"
     }
@@ -87,7 +87,7 @@ defmodule Mix.Tasks.Firecracker.Install do
       url:
         "https://github.com/firecracker-microvm/firecracker/releases/download/" <>
           "v#{@version}/firecracker-v#{@version}-aarch64.tgz",
-      sha256: "531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7",
+      sha256: "751365040ca3dde7616c5a1d97cc1304674fae469ce02993104eab22f5961950",
       firecracker_path: "release-v#{@version}-aarch64/firecracker-v#{@version}-aarch64",
       jailer_path: "release-v#{@version}-aarch64/jailer-v#{@version}-aarch64"
     }

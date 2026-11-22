@@ -470,7 +470,7 @@ defmodule Mix.Tasks.Compile.FirecrackerGen do
 
   use Mix.Task.Compiler
 
-  @spec_path "priv/firecracker/firecracker-v1.16.0.openapi.json"
+  @spec_path "priv/firecracker/firecracker-v1.16.2.openapi.json"
   @out "lib/hyper/firecracker/api/operations/operations.ex"
 
   @config [
