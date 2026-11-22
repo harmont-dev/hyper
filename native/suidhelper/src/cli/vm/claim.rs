@@ -10,10 +10,11 @@ use derive_more::Constructor;
 use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::SafeDir;
-use hyperrs_fs::file::{self, Any, IsSocket, OpenFlags, Owner, SafeFile};
+use hyperrs_fs::file::{self, Any, CallerOwned, IsSocket, OpenFlags, Owner, SafeFile};
 use hyperrs_fs::path::{ComponentError, StrictComponent};
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::errno::Errno;
+use nix::sys::stat::Mode;
 use serde::Deserialize;
 use thiserror::Error as ThisError;
 
@@ -63,6 +64,18 @@ impl SocketPin<'_> {
             Ok(()) | Err(Errno::ENOENT) => Ok(()),
             Err(e) => Err(PinError::Unlink(e)),
         }
+    }
+
+    pub fn open(
+        &self,
+        dir: &SafeDir,
+    ) -> Result<SafeFile<IsSocket, CallerOwned, Any>, file::ValidationError> {
+        let name = self.name();
+        let name: &StrictComponent = name
+            .as_str()
+            .try_into()
+            .expect("fc-<vm id>-<socket> is a strict path component");
+        dir.openat(name, OpenFlags::PATH, Mode::empty())
     }
 
     fn name(&self) -> String {

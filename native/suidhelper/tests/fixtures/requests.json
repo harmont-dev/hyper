@@ -6,6 +6,7 @@
       "outbound_blocked": [{"protocol": "tcp", "ports": [25, 25]}]}},
   "vm_claim_api_socket": {"op": "vm_claim_api_socket", "id": "v1"},
   "vm_claim_vsock_socket": {"op": "vm_claim_vsock_socket", "id": "v1"},
+  "vm_link_guest_socket": {"op": "vm_link_guest_socket", "id": "v1", "gid": 900001},
   "vm_teardown": {"op": "vm_teardown", "id": "v1"},
   "vm_firewall": {"op": "vm_firewall", "id": "v1",
     "firewall": {"inbound": [{"protocol": "udp", "ports": [6000, 6010]}], "outbound_blocked": []}},
