@@ -14,13 +14,21 @@ defmodule Hyper.Vm.Spec do
   alias Hyper.Vm.Instance
 
   @enforce_keys [:img_id]
-  defstruct [:img_id, :arch, :boot_args, type: :base, firewall: Firewall.default()]
+  defstruct [
+    :img_id,
+    :arch,
+    :boot_args,
+    type: :base,
+    firewall: Firewall.default(),
+    guest_services: []
+  ]
 
   @type t :: %__MODULE__{
           img_id: Hyper.Img.id(),
           type: Instance.t(),
           arch: Instance.arch() | nil,
           boot_args: String.t() | nil,
-          firewall: Firewall.t()
+          firewall: Firewall.t(),
+          guest_services: [Hyper.GuestService.t()]
         }
 end
