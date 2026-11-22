@@ -1,4 +1,4 @@
-defmodule Hyper.Node.FireVMM.GuestServices do
+defmodule Hyper.Node.FireVMM.GuestServices.Supervisor do
   @moduledoc false
 
   use Supervisor

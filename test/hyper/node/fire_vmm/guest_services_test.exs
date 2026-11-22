@@ -62,7 +62,7 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
   defp start(services) do
     {:ok, services} = GuestService.resolve_all(services)
     opts = %FireVMM.Opts{vm_id: @vm_id, gid: @gid, guest_services: services}
-    start_supervised!({GuestServices, opts})
+    start_supervised!({GuestServices.Supervisor, opts})
   end
 
   defp echo(overrides \\ []),
@@ -160,7 +160,7 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
     socks = for _ <- 1..3, do: guest("echo\0")
     for sock <- socks, do: assert(ask(sock, "up") == {:ok, "up"})
 
-    :ok = stop_supervised(GuestServices)
+    :ok = stop_supervised(GuestServices.Supervisor)
 
     for sock <- socks, do: assert(:gen_tcp.recv(sock, 0, 2_000) == {:error, :closed})
     for _ <- socks, do: assert_receive({:terminated, :shutdown})

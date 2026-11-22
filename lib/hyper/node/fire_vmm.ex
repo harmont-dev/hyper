@@ -135,7 +135,7 @@ defmodule Hyper.Node.FireVMM do
 
   @spec guest_services(Opts.t()) :: [Supervisor.child_spec() | {module(), Opts.t()}]
   defp guest_services(%Opts{guest_services: []}), do: []
-  defp guest_services(%Opts{} = opts), do: [{GuestServices, opts}]
+  defp guest_services(%Opts{} = opts), do: [{GuestServices.Supervisor, opts}]
 
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}
