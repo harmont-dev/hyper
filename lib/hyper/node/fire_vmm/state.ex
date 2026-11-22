@@ -340,6 +340,8 @@ defmodule Hyper.Node.FireVMM.State do
     defp do_claim_vsock_socket(id, data) do
       case Hyper.SuidHelper.Vm.claim_vsock_socket(id) do
         :ok ->
+          :ok = link_guest_services(data.opts)
+
           case instance_start(id) do
             :ok ->
               Logger.info("vm #{id}: configured, guest starting")
@@ -356,6 +358,21 @@ defmodule Hyper.Node.FireVMM.State do
         {:error, reason} ->
           Logger.warning("vm #{id}: claim-vsock-socket failed: #{inspect(reason)}")
           keep_claiming(id, data, {:claim_vsock_socket, reason})
+      end
+    end
+
+    @spec link_guest_services(Opts.t()) :: :ok
+    defp link_guest_services(%Opts{guest_services: []}), do: :ok
+
+    defp link_guest_services(%Opts{vm_id: id, gid: gid}) do
+      case Hyper.SuidHelper.Vm.link_guest_socket(id, gid) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "vm #{id}: guest services unavailable: linking failed: #{inspect(reason)}"
+          )
       end
     end
 

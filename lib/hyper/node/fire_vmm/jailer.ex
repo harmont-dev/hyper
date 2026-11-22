@@ -32,6 +32,8 @@ defmodule Hyper.Node.FireVMM.Jailer do
   # firecracker's vsock Unix-domain socket path *inside* the chroot.
   @jail_vsock "vsock.sock"
 
+  @guest_socket "guest.sock"
+
   @type t :: %{binary: String.t(), args: [String.t()], host_socket: Path.t()}
 
   defmodule Checks do
@@ -174,6 +176,9 @@ defmodule Hyper.Node.FireVMM.Jailer do
   """
   @spec host_vsock(Hyper.Vm.Id.t()) :: Path.t()
   def host_vsock(id), do: pinned_socket(id, @jail_vsock)
+
+  @spec host_guest_socket(Hyper.Vm.Id.t()) :: Path.t()
+  def host_guest_socket(id), do: pinned_socket(id, @guest_socket)
 
   defp pinned_socket(id, socket), do: Path.join(Hyper.Cfg.Dirs.socket_dir(), "fc-#{id}-#{socket}")
 

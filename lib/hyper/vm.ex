@@ -96,7 +96,8 @@ defmodule Hyper.Vm do
                 type: type,
                 arch: arch,
                 boot_args: boot_args,
-                firewall: firewall
+                firewall: firewall,
+                guest_services: guest_services
               }} <-
                publish_on_owner(node(vm), vm_id) do
           Hyper.create_vm(%Hyper.Vm.Spec{
@@ -104,7 +105,8 @@ defmodule Hyper.Vm do
             type: type,
             arch: arch,
             boot_args: boot_args,
-            firewall: firewall
+            firewall: firewall,
+            guest_services: guest_services
           })
         end
     end

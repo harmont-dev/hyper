@@ -18,9 +18,10 @@ defmodule Hyper do
   @spec create_vm(Hyper.Vm.Spec.t()) :: {:ok, Hyper.Vm.t()} | {:error, term()}
   def create_vm(%Hyper.Vm.Spec{} = spec) do
     with {:ok, arch} <- resolve_arch(spec.arch),
+         {:ok, guest_services} <- Hyper.GuestService.resolve_all(spec.guest_services),
          :ok <- fits_disk(spec.img_id, spec.type) do
       vm_id = Hyper.Vm.Id.generate()
-      spec = %{spec | arch: arch}
+      spec = %{spec | arch: arch, guest_services: guest_services}
       instance_spec = Hyper.Vm.Instance.spec(spec.type)
 
       start_fun = fn -> Hyper.Node.start_image_vm(vm_id, spec) end
