@@ -11,7 +11,8 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 use serde_json::{json, Value};
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{chown, symlink, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -112,6 +113,24 @@ impl Launch {
     fn recorded_argv(&self) -> Option<Vec<String>> {
         let body = fs::read_to_string(self.tmp.path().join("argv.json")).ok()?;
         Some(serde_json::from_str(&body).unwrap())
+    }
+
+    fn socks(&self) -> PathBuf {
+        let socks = self.work.join("socks");
+        fs::create_dir_all(&socks).unwrap();
+        socks
+    }
+
+    fn guest_listener(&self) -> PathBuf {
+        self.socks().join(format!("fc-{}-guest.sock", self.id))
+    }
+
+    fn listen(&self) -> UnixListener {
+        UnixListener::bind(self.guest_listener()).unwrap()
+    }
+
+    fn guest_link(&self) -> Option<fs::Metadata> {
+        fs::symlink_metadata(self.root().join("vsock.sock_1100")).ok()
     }
 
     fn recorded_environ(&self) -> Vec<u8> {
@@ -511,5 +530,80 @@ fn a_launch_that_never_gets_the_vm_lock_stages_nothing_and_never_execs_as_root(
         (false, true, true, false),
         "{}",
         String::from_utf8_lossy(&out.get_output().stderr)
+    );
+}
+
+#[rstest]
+#[case::listening(true)]
+#[case::not_listening(false)]
+fn launch_links_the_nodes_guest_listener_into_the_jail_for_the_vm_group_as_root(
+    launch: Option<Launch>,
+    #[case] listening: bool,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let _listener = listening.then(|| launch.listen());
+
+    launch
+        .run(&cfg, launch.request(json!({})))
+        .code(RECORDER_EXIT);
+
+    let expected = listening.then(|| {
+        let host = fs::symlink_metadata(launch.guest_listener()).unwrap();
+        (true, host.ino(), 0o660, 900_002, 2)
+    });
+    let linked = launch.guest_link().map(|meta| {
+        (
+            meta.file_type().is_socket(),
+            meta.ino(),
+            meta.mode() & 0o7777,
+            meta.gid(),
+            meta.nlink(),
+        )
+    });
+    assert_eq!(linked, expected);
+}
+
+fn second_name_of_another_socket(launch: &Launch) -> UnixListener {
+    let other = launch.socks().join("other.sock");
+    let listener = UnixListener::bind(&other).unwrap();
+    fs::hard_link(&other, launch.guest_listener()).unwrap();
+    listener
+}
+
+fn symlink_to_another_socket(launch: &Launch) -> UnixListener {
+    let other = launch.socks().join("other.sock");
+    let listener = UnixListener::bind(&other).unwrap();
+    symlink(&other, launch.guest_listener()).unwrap();
+    listener
+}
+
+fn owned_by_another_user(launch: &Launch) -> UnixListener {
+    let listener = launch.listen();
+    chown(launch.guest_listener(), Some(900_001), None).unwrap();
+    listener
+}
+
+#[rstest]
+#[case::second_name_of_another_socket(second_name_of_another_socket)]
+#[case::symlink_to_another_socket(symlink_to_another_socket)]
+#[case::owned_by_another_user(owned_by_another_user)]
+fn a_guest_listener_that_is_not_the_callers_lone_socket_fails_the_launch_as_root(
+    launch: Option<Launch>,
+    #[case] plant: fn(&Launch) -> UnixListener,
+) {
+    let launch = require!(launch);
+    let cfg = launch.config("");
+    let _listener = plant(&launch);
+
+    launch.run(&cfg, launch.request(json!({}))).failure();
+
+    assert!(
+        launch.recorded_argv().is_none(),
+        "the jailer must never run"
+    );
+    assert!(
+        launch.guest_link().is_none(),
+        "nothing may be linked into the jail"
     );
 }

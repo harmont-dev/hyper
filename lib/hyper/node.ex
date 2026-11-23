@@ -99,7 +99,8 @@ defmodule Hyper.Node do
   @spec start_image_vm(Hyper.Vm.Id.t(), Hyper.Vm.Spec.t()) :: {:ok, pid()} | {:error, term()}
   @decorate with_span("Hyper.Node.start_image_vm", include: [:vm_id, :spec])
   def start_image_vm(vm_id, %Hyper.Vm.Spec{} = spec) do
-    with {:ok, uid, net_id} <- claim_ids(),
+    with :ok <- Hyper.GuestService.ensure_loaded(spec.guest_services),
+         {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
            acquire_or_release(uid, net_id, fn ->
              Img.create_mutable(spec.img_id, vm_id, Hyper.Vm.Instance.spec(spec.type).disk)
@@ -121,10 +122,12 @@ defmodule Hyper.Node do
       type: parent.type,
       arch: parent.arch,
       boot_args: parent.boot_args,
-      firewall: parent.firewall
+      firewall: parent.firewall,
+      guest_services: parent.guest_services
     }
 
-    with {:ok, uid, net_id} <- claim_ids(),
+    with :ok <- Hyper.GuestService.ensure_loaded(spec.guest_services),
+         {:ok, uid, net_id} <- claim_ids(),
          {:ok, mutable} <-
            acquire_or_release(uid, net_id, fn ->
              Img.create_fork(
@@ -279,7 +282,8 @@ defmodule Hyper.Node do
              type: Hyper.Vm.Instance.t(),
              arch: Hyper.Vm.Instance.arch(),
              boot_args: String.t() | nil,
-             firewall: Hyper.Vm.Firewall.t()
+             firewall: Hyper.Vm.Firewall.t(),
+             guest_services: [Hyper.GuestService.t()]
            }}
           | {:error, term()}
   @decorate with_span("Hyper.Node.publish_fork_image", include: [:vm_id])
@@ -294,7 +298,8 @@ defmodule Hyper.Node do
            type: parent.type,
            arch: parent.arch,
            boot_args: parent.boot_args,
-           firewall: parent.firewall
+           firewall: parent.firewall,
+           guest_services: parent.guest_services
          }}
       end
     end
@@ -318,6 +323,7 @@ defmodule Hyper.Node do
       gid: uid,
       net_id: net_id,
       firewall: spec.firewall,
+      guest_services: spec.guest_services,
       type: spec.type,
       arch: spec.arch,
       img_id: spec.img_id,

@@ -28,6 +28,7 @@ defmodule Hyper.Node.FireVMM do
   alias Hyper.Node.FireVMM.Agent.Relay
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.Core
+  alias Hyper.Node.FireVMM.GuestServices.Listener
   alias Hyper.Node.FireVMM.Jailer
   alias Hyper.Node.FireVMM.Meter
   alias Hyper.Node.FireVMM.Policy
@@ -55,7 +56,8 @@ defmodule Hyper.Node.FireVMM do
       :mutable,
       :kernel,
       :boot_args,
-      :firewall
+      :firewall,
+      guest_services: []
     ]
 
     @type t :: %__MODULE__{
@@ -69,7 +71,8 @@ defmodule Hyper.Node.FireVMM do
             mutable: pid(),
             kernel: Path.t(),
             boot_args: String.t() | nil,
-            firewall: Hyper.Vm.Firewall.t()
+            firewall: Hyper.Vm.Firewall.t(),
+            guest_services: [Hyper.GuestService.t()]
           }
   end
 
@@ -98,26 +101,30 @@ defmodule Hyper.Node.FireVMM do
     # incarnation - decline the start and let the supervisor retry clean.
     case Hyper.Cluster.Routing.register_self({opts.vm_id, :supervisor}) do
       :ok ->
-        children = [
-          # Client must be registered before Core: Core starts the State machine,
-          # which calls Client.run while waiting for the daemon's API. Client
-          # depends only on vm_id (an independent peer), so no reverse dependency.
-          {Client, %Client.Opts{vm_id: opts.vm_id}},
-          # Before Core: its Daemon launches under the current policy, and a
-          # firecracker crash restarts Core without resetting what was set since.
-          {Policy, opts},
-          {Core, opts},
-          {Relay,
-           %{
-             vm_id: opts.vm_id,
-             vsock_uds: Jailer.host_vsock(opts.vm_id),
-             listen_path: Agent.relay_socket_path(opts.vm_id)
-           }},
-          # Last on purpose: children stop in reverse start order, so the meter
-          # stops first at teardown and flushes its final usage window while
-          # Core's Daemon (and the cgroup it removes) is still alive.
-          {Meter, %Meter.Opts{vm_id: opts.vm_id, cgroup_dir: Jailer.cgroup_dir(opts.vm_id)}}
-        ]
+        children =
+          [
+            # Client must be registered before Core: Core starts the State machine,
+            # which calls Client.run while waiting for the daemon's API. Client
+            # depends only on vm_id (an independent peer), so no reverse dependency.
+            {Client, %Client.Opts{vm_id: opts.vm_id}},
+            # Before Core: its Daemon launches under the current policy, and a
+            # firecracker crash restarts Core without resetting what was set since.
+            {Policy, opts}
+          ] ++
+            guest_services(opts) ++
+            [
+              {Core, opts},
+              {Relay,
+               %{
+                 vm_id: opts.vm_id,
+                 vsock_uds: Jailer.host_vsock(opts.vm_id),
+                 listen_path: Agent.relay_socket_path(opts.vm_id)
+               }},
+              # Last on purpose: children stop in reverse start order, so the meter
+              # stops first at teardown and flushes its final usage window while
+              # Core's Daemon (and the cgroup it removes) is still alive.
+              {Meter, %Meter.Opts{vm_id: opts.vm_id, cgroup_dir: Jailer.cgroup_dir(opts.vm_id)}}
+            ]
 
         Supervisor.init(children, strategy: :one_for_one)
 
@@ -125,6 +132,12 @@ defmodule Hyper.Node.FireVMM do
         :ignore
     end
   end
+
+  @spec guest_services(Opts.t()) :: [{module(), Listener.Opts.t()}]
+  defp guest_services(%Opts{guest_services: []}), do: []
+
+  defp guest_services(%Opts{vm_id: vm_id, guest_services: services}),
+    do: [{Listener, %Listener.Opts{vm_id: vm_id, services: services}}]
 
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}

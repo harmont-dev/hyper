@@ -128,6 +128,9 @@ defmodule Hyper.Node.Reclaim do
 
   @spec stale_socket?(String.t()) :: boolean()
   defp stale_socket?("grpc-" <> rest), do: String.ends_with?(rest, ".sock")
-  defp stale_socket?("fc-" <> rest), do: String.ends_with?(rest, ["-vsock.sock", "-api.socket"])
+
+  defp stale_socket?("fc-" <> rest),
+    do: String.ends_with?(rest, ["-vsock.sock", "-api.socket", "-guest.sock"])
+
   defp stale_socket?(_), do: false
 end

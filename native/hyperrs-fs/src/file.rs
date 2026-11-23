@@ -35,6 +35,8 @@ pub enum ValidationError {
     WrongFileType,
     #[error("file is not owned by root:root")]
     NotRootOwned,
+    #[error("file is not owned by the caller")]
+    NotCallerOwned,
     #[error("file is writable by group or other")]
     GroupOrOtherWritable,
     #[error("fstat failed: {0}")]
@@ -56,6 +58,8 @@ pub struct IsSocket;
 pub struct IsDirectory;
 /// Require `root:root` owner (uid 0, gid 0).
 pub struct RootOwner;
+/// Require the caller as owner: the real uid, so under setuid it is the invoking user, not root.
+pub struct CallerOwned;
 /// Require the file not be writable by group or other.
 pub struct OwnerOnlyWritable;
 /// Require the file not be writable by group or other, unless it is sticky: group and other may
@@ -166,6 +170,16 @@ impl Ownership for RootOwner {
     }
 }
 
+impl Ownership for CallerOwned {
+    fn check(stat: &FileStat) -> Result<(), ValidationError> {
+        if stat.st_uid == getuid().as_raw() {
+            Ok(())
+        } else {
+            Err(ValidationError::NotCallerOwned)
+        }
+    }
+}
+
 impl Writability for OwnerOnlyWritable {
     fn check(stat: &FileStat) -> Result<(), ValidationError> {
         if stat.st_mode & 0o022 == 0 {
@@ -223,6 +237,12 @@ impl<T, R, O> SafeFile<T, R, O> {
         let path = PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()));
         // The FollowSymlink here is necessary because glibc can't not follow symlinks
         fchmodat(None, &path, mode, FchmodatFlags::FollowSymlink)
+    }
+
+    pub fn links(&self) -> Result<nix::libc::nlink_t, ValidationError> {
+        Ok(fstat(self.0.as_raw_fd())
+            .map_err(ValidationError::Fstat)?
+            .st_nlink)
     }
 
     pub fn chown(&self, owner: Option<Uid>, group: Option<Gid>) -> nix::Result<()> {
@@ -416,8 +436,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        Any, FileType, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags, OwnerOnlyWritable,
-        RootOwner, SafeFile, ValidationError,
+        Any, CallerOwned, FileType, IsBlockDevice, IsDirectory, IsRegularFile, OpenFlags,
+        OwnerOnlyWritable, RootOwner, SafeFile, ValidationError,
     };
     use crate::dir::SafeDir;
     use crate::path::{IsAbsolute, SafePathBuf, StrictComponent, StrictComponents};
@@ -506,6 +526,32 @@ mod tests {
         let got =
             SafeFile::<IsRegularFile, Any, OwnerOnlyWritable>::open(&safe(&f), OpenFlags::PATH);
         assert_eq!(got.is_ok(), accepted, "{mode:o}: {got:?}");
+    }
+
+    #[rstest]
+    fn safefile_caller_owner_axis_accepts_only_the_callers_files(plain: (TempDir, ChildPath)) {
+        let (_tmp, f) = plain;
+        let open =
+            |p: &Strict| SafeFile::<Any, CallerOwned, Any>::open(p, OpenFlags::PATH).map(drop);
+        assert_matches!(open(&safe(&f)), Ok(()));
+        let foreign = if nix::unistd::getuid().is_root() {
+            nix::unistd::chown(f.path(), Some(nix::unistd::Uid::from_raw(65_534)), None).unwrap();
+            safe(&f)
+        } else {
+            safe(Path::new("/"))
+        };
+        assert_matches!(open(&foreign), Err(ValidationError::NotCallerOwned));
+    }
+
+    #[rstest]
+    fn safefile_links_counts_every_name_of_the_open_file(plain: (TempDir, ChildPath)) {
+        let (tmp, f) = plain;
+        let file = SafeFile::<IsRegularFile, Any, Any>::open(&safe(&f), OpenFlags::PATH).unwrap();
+        assert_eq!(file.links().unwrap(), 1);
+        fs::hard_link(&f, tmp.child("alias")).unwrap();
+        assert_eq!(file.links().unwrap(), 2);
+        fs::remove_file(&f).unwrap();
+        assert_eq!(file.links().unwrap(), 1);
     }
 
     #[rstest]
