@@ -1,5 +1,22 @@
 defmodule Hyper.GuestService do
-  @moduledoc false
+  @moduledoc """
+  Guest services are a mechanism for Hyper VMs to communicate with the hypervisor.
+
+  Think of guest services as little servers, injected from the hypervisor to the guest, that the
+  guest can query at any point.
+
+  You can implement guest services however you like. See `Hyper.GuestService.Handler` for a guide
+  on how to implement services. You can inject multiple guest services into a VM. Each guest
+  service has a name, and an associated interface (defined in `Hyper.GuestService.Handler`) which
+  must be implemented.
+
+  Guest services communicate between the hypervisor and the guest over an `AF_SOCK` vsock, passed
+  through to the VM. This is a req-rep mechanism. Each request over this socket must contain the
+  name of the service "my-guest-service\0", followed by a null character (up to 256 characters,
+  including NUL). Passing the name allows the hypervisor to route the request to the appropriate
+  service handler. From then, any arbitrary binary data can be passed in the request. There are
+  no further constraints in the protocol.
+  """
 
   alias Hyper.GuestService.Header
   alias Unit.Time

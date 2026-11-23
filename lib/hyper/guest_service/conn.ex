@@ -1,5 +1,5 @@
 defmodule Hyper.GuestService.Conn do
-  @moduledoc false
+  @moduledoc "Struct which models an active connection for a guest service."
 
   @enforce_keys [:vm_id, :service]
   defstruct [:vm_id, :service]
