@@ -58,6 +58,7 @@ pub struct IsSocket;
 pub struct IsDirectory;
 /// Require `root:root` owner (uid 0, gid 0).
 pub struct RootOwner;
+/// Require the caller as owner: the real uid, so under setuid it is the invoking user, not root.
 pub struct CallerOwned;
 /// Require the file not be writable by group or other.
 pub struct OwnerOnlyWritable;
