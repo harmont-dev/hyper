@@ -33,7 +33,6 @@ defmodule Hyper.E2e.GuestServicesTest do
     {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
     served = for _ <- 1..2, do: boot(img_id, [%Hyper.GuestService{handler: {Echo, nil}}])
     bare = boot(img_id, [])
-    on_exit(fn -> Enum.each([bare | served], &Hyper.Node.stop_image_vm/1) end)
     %{served: served, bare: bare}
   end
 
@@ -41,8 +40,11 @@ defmodule Hyper.E2e.GuestServicesTest do
     {:ok, vm} =
       Hyper.create_vm(%Hyper.Vm.Spec{img_id: img_id, type: :micro, guest_services: services})
 
+    on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
+    {:ok, %{exit_code: 0}} = await_exec(vm, ["/bin/true"])
+
     {:ok, %{exit_code: 0}} =
-      await_exec(vm, ["/sbin/apk", "add", "--no-cache", "socat"], :timer.minutes(3))
+      Hyper.exec(vm, ["/sbin/apk", "add", "--no-cache", "socat"], timeout: :timer.minutes(3))
 
     vm
   end
