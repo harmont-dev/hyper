@@ -84,10 +84,6 @@ name = "e2e_socket_pin"
 path = "tests/e2e/socket_pin.rs"
 
 [[test]]
-name = "e2e_guest_link"
-path = "tests/e2e/guest_link.rs"
-
-[[test]]
 name = "e2e_lock_dir_hostile"
 path = "tests/e2e/lock_dir_hostile.rs"
 

@@ -27,8 +27,6 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
   alias Hyper.Node.FireVMM.State.Configuring
   alias Hyper.Test.SuidHelperStub
 
-  import ExUnit.CaptureLog
-
   defmodule ClientStub do
     @moduledoc false
     use GenServer
@@ -46,26 +44,6 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     def handle_call({:run, _op_fun}, _from, test_pid) do
       send(test_pid, :instance_start_requested)
       {:reply, :ok, test_pid}
-    end
-  end
-
-  defmodule OrderStub do
-    @moduledoc false
-    use GenServer
-
-    def start_link({vm_id, test_pid, record}),
-      do: GenServer.start_link(__MODULE__, {vm_id, test_pid, record})
-
-    @impl true
-    def init({vm_id, test_pid, record}) do
-      :ok = Hyper.Cluster.Routing.register_self({vm_id, :client})
-      {:ok, {test_pid, record}}
-    end
-
-    @impl true
-    def handle_call({:run, _op_fun}, _from, {test_pid, record} = state) do
-      send(test_pid, {:instance_start_after, File.read!(record)})
-      {:reply, :ok, state}
     end
   end
 
@@ -165,53 +143,6 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
       assert {:stop, {:shutdown, {:boot_failed, {:vsock_claim_timeout, reason}}}, _} = result
       assert reason == expected_reason
-    end
-  end
-
-  test "guest services are linked into the jail after the claim and before InstanceStart, " <>
-         "and a failed link still boots the VM",
-       %{tmp: tmp} do
-    service = %Hyper.GuestService{name: "svc", handler: {__MODULE__, nil}}
-    linked = ~s(echo '{"result":"linked"}')
-    claim = "vm_claim_vsock_socket"
-    link = "vm_link_guest_socket"
-
-    rows = [
-      {[], linked, [claim]},
-      {[service], linked, [claim, link]},
-      {[service], "echo boom >&2; exit 3", [claim, link]}
-    ]
-
-    for {services, link_script, ops} <- rows do
-      vm_id = Hyper.Vm.Id.generate()
-      record = Path.join(tmp, "ops-#{vm_id}")
-      File.touch!(record)
-
-      SuidHelperStub.install!(tmp, """
-      printf '%s\\n' "$1" >> "#{record}"
-      case "$1" in
-        *vm_link_guest_socket*) #{link_script} ;;
-        *) echo '{"result":"claimed"}' ;;
-      esac
-      """)
-
-      start_supervised!(Supervisor.child_spec({OrderStub, {vm_id, self(), record}}, id: vm_id))
-      await_client(vm_id)
-
-      data = %{
-        data(vm_id, 60_000)
-        | opts: %Opts{vm_id: vm_id, gid: 900_001, guest_services: services}
-      }
-
-      _ =
-        capture_log(fn ->
-          assert {:next_state, :running, _} =
-                   Configuring.handle(:state_timeout, :claim_vsock_socket, data)
-        end)
-
-      assert_received {:instance_start_after, seen}
-      sent = seen |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!(&1)["op"])
-      assert sent == ops
     end
   end
 

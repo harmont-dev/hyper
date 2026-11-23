@@ -57,7 +57,6 @@ pub enum Request {
     VmLaunch(vm::launch::Launch),
     VmClaimApiSocket(vm::claim::ClaimApiSocket),
     VmClaimVsockSocket(vm::claim::ClaimVsockSocket),
-    VmLinkGuestSocket(vm::link::LinkGuestSocket),
     VmTeardown(vm::teardown::Teardown),
     VmFirewall(vm::firewall::SetFirewall),
     ImgActivate(img::ImgActivate),
@@ -218,9 +217,6 @@ mod tests {
         "firewall": {"inbound": [{"protocol": "tcp", "ports": [0, 22]}], "outbound_blocked": []}}))]
     #[case::firewall_without_policy(json!({"op": "vm_firewall", "id": "v1"}))]
     #[case::teardown_names_a_net_id(json!({"op": "vm_teardown", "id": "v1", "net_id": 0}))]
-    #[case::link_gid_as_string(json!({"op": "vm_link_guest_socket", "id": "v1", "gid": "900001"}))]
-    #[case::link_traversing_vm_id(json!({"op": "vm_link_guest_socket", "id": "../v1",
-        "gid": 900_001}))]
     #[case::retired_net_prepare_op(json!({"op": "net_prepare", "id": "v1"}))]
     #[case::retired_net_ip_prepare_op(json!({"op": "net_ip_prepare", "id": "v1", "uid": 900_001}))]
     #[case::retired_prepare_op(json!({"op": "vm_prepare", "id": "v1", "uid": 900_001}))]

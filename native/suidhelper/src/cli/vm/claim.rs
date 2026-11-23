@@ -69,13 +69,17 @@ impl SocketPin<'_> {
     pub fn open(
         &self,
         dir: &SafeDir,
-    ) -> Result<SafeFile<IsSocket, CallerOwned, Any>, file::ValidationError> {
+    ) -> Result<Option<SafeFile<IsSocket, CallerOwned, Any>>, file::ValidationError> {
         let name = self.name();
         let name: &StrictComponent = name
             .as_str()
             .try_into()
             .expect("fc-<vm id>-<socket> is a strict path component");
-        dir.openat(name, OpenFlags::PATH, Mode::empty())
+        match dir.openat(name, OpenFlags::PATH, Mode::empty()) {
+            Ok(socket) => Ok(Some(socket)),
+            Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     fn name(&self) -> String {
@@ -111,5 +115,65 @@ impl<const SOCKET: &'static str> Op for Claim<SOCKET> {
         let dir = SafeDir::open(&config.socket_dir(), OpenFlags::RDONLY).map_err(PinError::Open)?;
         SocketPin::new(&self.id, SOCKET).pin(&dir, &socket)?;
         Ok(VmOut::Claimed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SocketPin;
+    use crate::cli::vm::GUEST_SOCKET;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
+    use hyperrs_firecracker::VmId;
+    use hyperrs_fs::dir::SafeDir;
+    use hyperrs_fs::file::OpenFlags;
+    use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
+    use rstest::rstest;
+    use std::os::unix::fs::symlink;
+    use std::os::unix::net::UnixListener;
+    use std::path::Path;
+
+    fn dir(path: &Path) -> SafeDir {
+        let path: SafePathBuf<IsAbsolute, StrictComponents> =
+            path.to_path_buf().try_into().unwrap();
+        SafeDir::open(&path, OpenFlags::RDONLY).unwrap()
+    }
+
+    fn pin(id: &VmId) -> SocketPin<'_> {
+        SocketPin::new(id, GUEST_SOCKET)
+    }
+
+    #[rstest]
+    fn open_finds_the_callers_socket_and_reports_a_missing_one_as_none() {
+        let tmp = TempDir::new().unwrap();
+        let (present, absent): (VmId, VmId) = ("v1".parse().unwrap(), "v2".parse().unwrap());
+        let _listener = UnixListener::bind(tmp.child("fc-v1-guest.sock")).unwrap();
+
+        let dir = dir(tmp.path());
+        assert!(pin(&present).open(&dir).unwrap().is_some());
+        assert!(pin(&absent).open(&dir).unwrap().is_none());
+    }
+
+    fn symlink_to_a_socket(tmp: &TempDir) {
+        let target = tmp.child("elsewhere.sock");
+        UnixListener::bind(&target).unwrap();
+        symlink(target.path(), tmp.child("fc-v1-guest.sock")).unwrap();
+    }
+
+    fn regular_file(tmp: &TempDir) {
+        tmp.child("fc-v1-guest.sock")
+            .write_str("not a socket")
+            .unwrap();
+    }
+
+    #[rstest]
+    #[case::symlink_to_a_socket(symlink_to_a_socket)]
+    #[case::regular_file(regular_file)]
+    fn open_refuses_a_name_that_is_not_a_socket_itself(#[case] plant: fn(&TempDir)) {
+        let tmp = TempDir::new().unwrap();
+        plant(&tmp);
+        let id: VmId = "v1".parse().unwrap();
+
+        assert!(pin(&id).open(&dir(tmp.path())).is_err());
     }
 }

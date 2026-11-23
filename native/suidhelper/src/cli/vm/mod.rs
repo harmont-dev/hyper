@@ -2,7 +2,6 @@
 pub mod claim;
 pub mod firewall;
 pub mod launch;
-pub mod link;
 pub mod teardown;
 
 use hyperrs_fs::path::StrictComponent;
@@ -18,7 +17,6 @@ pub const GUEST_LINK: &StrictComponent = StrictComponent::from_static("vsock.soc
 pub enum VmOut {
     Claimed,
     Pending,
-    Linked,
     ToreDown,
     FirewallSet,
 }

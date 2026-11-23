@@ -61,18 +61,6 @@ defmodule Hyper.SuidHelper.Vm do
     end
   end
 
-  @spec link_guest_socket(Hyper.Vm.Id.t(), Hyper.Node.Users.id()) ::
-          :ok | {:error, :jail_pending | {:unexpected_output, map()}} | {:error, err()}
-  @decorate with_span("Hyper.SuidHelper.Vm.link_guest_socket", include: [:vm_id])
-  def link_guest_socket(vm_id, gid) do
-    case SuidHelper.exec(%{op: "vm_link_guest_socket", id: vm_id, gid: gid}) do
-      {:ok, %{"result" => "linked"}} -> :ok
-      {:ok, %{"result" => "pending"}} -> {:error, :jail_pending}
-      {:ok, out} -> {:error, {:unexpected_output, out}}
-      {:error, _} = err -> err
-    end
-  end
-
   @spec run(map()) :: :ok | {:error, err()}
   defp run(request) do
     case SuidHelper.exec(request) do

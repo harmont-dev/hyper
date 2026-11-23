@@ -28,7 +28,7 @@ defmodule Hyper.Node.FireVMM do
   alias Hyper.Node.FireVMM.Agent.Relay
   alias Hyper.Node.FireVMM.Client
   alias Hyper.Node.FireVMM.Core
-  alias Hyper.Node.FireVMM.GuestServices
+  alias Hyper.Node.FireVMM.GuestServices.Listener
   alias Hyper.Node.FireVMM.Jailer
   alias Hyper.Node.FireVMM.Meter
   alias Hyper.Node.FireVMM.Policy
@@ -133,9 +133,11 @@ defmodule Hyper.Node.FireVMM do
     end
   end
 
-  @spec guest_services(Opts.t()) :: [Supervisor.child_spec() | {module(), Opts.t()}]
+  @spec guest_services(Opts.t()) :: [{module(), Listener.Opts.t()}]
   defp guest_services(%Opts{guest_services: []}), do: []
-  defp guest_services(%Opts{} = opts), do: [{GuestServices.Supervisor, opts}]
+
+  defp guest_services(%Opts{vm_id: vm_id, guest_services: services}),
+    do: [{Listener, %Listener.Opts{vm_id: vm_id, services: services}}]
 
   @doc "Test whether the system can run firecracker VMMs."
   @spec test_system() :: :ok | {:error, term()}

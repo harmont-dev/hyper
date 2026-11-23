@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 //! Spawn a jailer instance.
 
+use super::claim::SocketPin;
 use super::teardown::{Teardown, TeardownError};
-use super::VmOut;
+use super::{VmOut, GUEST_LINK, GUEST_SOCKET};
 use crate::cli::{MapperPath, Op};
 use crate::config::{BinError, Config, NetUnconfigured};
 use crate::dm::HyperDmName;
@@ -11,14 +12,18 @@ use crate::lock::{Locks, LocksError};
 use crate::net::firewall::Firewall;
 use crate::net::vm::VmNetError;
 use crate::net::NetId;
-use hyperrs_firecracker::jailer::chroot::{BuildError, JailLayout, KernelError, KernelImage};
+use hyperrs_firecracker::jailer::chroot::{
+    BuildError, JailLayout, KernelError, KernelImage, LinkError,
+};
 use hyperrs_firecracker::jailer::{CgroupLimits, Jailer};
 use hyperrs_firecracker::VmId;
-use hyperrs_fs::dir::DirError;
+use hyperrs_fs::dir::{DirError, SafeDir};
+use hyperrs_fs::file::{self, OpenFlags};
 use hyperrs_fs::path::{IsAbsolute, SafePath, SafePathBuf, StrictComponent, StrictComponents};
 use hyperrs_linux::dm::OpenDeviceError;
 use hyperrs_linux::net::nft::Nft;
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
+use nix::errno::Errno;
 use serde::Deserialize;
 use serde_with::serde_as;
 use thiserror::Error as ThisError;
@@ -39,6 +44,10 @@ pub enum LaunchError {
     Device(#[from] OpenDeviceError),
     #[error(transparent)]
     Build(#[from] BuildError),
+    #[error("opening the guest socket: {0}")]
+    GuestSocket(#[source] file::ValidationError),
+    #[error("guest socket: {0}")]
+    GuestLink(#[from] LinkError),
     #[error(transparent)]
     Privilege(#[from] PrivilegeError),
     #[error(transparent)]
@@ -80,6 +89,12 @@ impl Op for Launch {
         let uid = range.uid(self.uid)?;
         let gid = range.gid(self.gid)?;
         let kernel = KernelImage::open(&self.kernel)?;
+        let guest_socket = match SafeDir::open(&config.socket_dir(), OpenFlags::RDONLY) {
+            Ok(dir) => SocketPin::new(&self.id, GUEST_SOCKET).open(&dir),
+            Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
+            Err(e) => Err(e),
+        }
+        .map_err(LaunchError::GuestSocket)?;
 
         let layout = JailLayout::new(&jail_base, &self.id);
         let api_sock =
@@ -96,12 +111,14 @@ impl Op for Launch {
         let staged = (|| -> Result<_, LaunchError> {
             let root = token.elevate()?;
             let device = self.device.open()?;
-            layout
-                .create_root()?
-                .builder(JailOwner { uid, gid }.into())
+            let jail = layout.create_root()?;
+            jail.builder(JailOwner { uid, gid }.into())
                 .kernel(&kernel)
                 .rootfs(&device)
                 .build()?;
+            if let Some(socket) = &guest_socket {
+                jail.link_socket(socket, GUEST_LINK, gid.into())?;
+            }
             Ok(teardown
                 .net()
                 .prepare(

@@ -6,13 +6,10 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
   import ExUnit.CaptureLog
 
   alias Hyper.GuestService
-  alias Hyper.Node.FireVMM
-  alias Hyper.Node.FireVMM.GuestServices
+  alias Hyper.Node.FireVMM.GuestServices.Listener
   alias Hyper.Node.FireVMM.Jailer
-  alias Hyper.Test.SuidHelperStub
 
   @vm_id "vguestsvc"
-  @gid 900_001
 
   defmodule Echo do
     @moduledoc false
@@ -49,21 +46,12 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
     :ok = Hyper.Cfg.Toml.put_cache(Map.put(original, "work_dir", tmp))
     on_exit(fn -> Hyper.Cfg.Toml.reload() end)
     File.mkdir_p!(Hyper.Cfg.Dirs.socket_dir())
-
-    record = Path.join(tmp, "requests")
-
-    SuidHelperStub.install!(
-      tmp,
-      ~s(printf '%s\\n' "$1" >> "#{record}"\necho '{"result":"pending"}')
-    )
-
-    %{record: record}
+    :ok
   end
 
   defp start(services) do
     {:ok, services} = GuestService.resolve_all(services)
-    opts = %FireVMM.Opts{vm_id: @vm_id, gid: @gid, guest_services: services}
-    start_supervised!({GuestServices.Supervisor, opts})
+    start_supervised!({Listener, %Listener.Opts{vm_id: @vm_id, services: services}})
   end
 
   defp echo(overrides \\ []),
@@ -80,18 +68,6 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
   defp ask(sock, data) do
     :ok = :gen_tcp.send(sock, data)
     :gen_tcp.recv(sock, 0, 2_000)
-  end
-
-  test "the listener asks the helper to link it into the VM's jail", %{record: record} do
-    start([echo()])
-
-    assert [request] = record |> File.read!() |> String.split("\n", trim: true)
-
-    assert Jason.decode!(request) == %{
-             "op" => "vm_link_guest_socket",
-             "id" => @vm_id,
-             "gid" => @gid
-           }
   end
 
   test "a guest naming an attached service talks to its handler, from the bytes behind the name" do
@@ -161,7 +137,7 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
     socks = for _ <- 1..3, do: guest("echo\0")
     for sock <- socks, do: assert(ask(sock, "up") == {:ok, "up"})
 
-    :ok = stop_supervised(GuestServices.Supervisor)
+    :ok = stop_supervised(Listener)
 
     for sock <- socks, do: assert(:gen_tcp.recv(sock, 0, 2_000) == {:error, :closed})
     for _ <- socks, do: assert_receive({:terminated, :shutdown})

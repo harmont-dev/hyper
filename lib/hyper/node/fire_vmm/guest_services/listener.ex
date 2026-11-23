@@ -1,11 +1,12 @@
 defmodule Hyper.Node.FireVMM.GuestServices.Listener do
   @moduledoc false
 
-  use GenServer
+  use GenServer, restart: :temporary, shutdown: 10_000
 
   alias Hyper.GuestService
   alias Hyper.Node.FireVMM.GuestServices.Connection
   alias Hyper.Node.FireVMM.Jailer
+  alias Unit.Time
 
   require Logger
 
@@ -13,16 +14,16 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
   @accepts_per_second 32
   @backlog 1024
   @send_timeout_ms 30_000
+  @accept_backoff Time.ms(100)
 
   defmodule Opts do
     @moduledoc false
 
-    @enforce_keys [:vm_id, :gid, :services]
-    defstruct [:vm_id, :gid, :services]
+    @enforce_keys [:vm_id, :services]
+    defstruct [:vm_id, :services]
 
     @type t :: %__MODULE__{
             vm_id: Hyper.Vm.Id.t(),
-            gid: Hyper.Node.Users.id(),
             services: [GuestService.t()]
           }
   end
@@ -34,7 +35,7 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
   def admit(listener, name), do: GenServer.call(listener, {:admit, name})
 
   @impl GenServer
-  def init(%Opts{vm_id: vm_id, gid: gid, services: services}) do
+  def init(%Opts{vm_id: vm_id, services: services}) do
     Process.flag(:trap_exit, true)
     path = Jailer.host_guest_socket(vm_id)
     _ = File.rm(path)
@@ -54,8 +55,6 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
     {:ok, conns} =
       DynamicSupervisor.start_link(strategy: :one_for_one, max_children: @max_connections)
 
-    :ok = relink(vm_id, gid)
-
     {:ok,
      %{
        vm_id: vm_id,
@@ -70,7 +69,7 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
   @impl GenServer
   def handle_continue(:accept, state) do
     listener = self()
-    _ = spawn_link(fn -> accept_loop(state, listener, {nil, 0}) end)
+    _ = spawn_link(fn -> accept_loop(state, listener, {nil, 0}, false) end)
     {:noreply, state}
   end
 
@@ -110,24 +109,8 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
     end
   end
 
-  @spec relink(Hyper.Vm.Id.t(), Hyper.Node.Users.id()) :: :ok
-  defp relink(vm_id, gid) do
-    case Hyper.SuidHelper.Vm.link_guest_socket(vm_id, gid) do
-      :ok ->
-        :ok
-
-      {:error, :jail_pending} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "vm #{vm_id}: guest services: linking the listener failed: #{inspect(reason)}"
-        )
-    end
-  end
-
-  @spec accept_loop(map(), pid(), {integer() | nil, non_neg_integer()}) :: :ok
-  defp accept_loop(%{listen: listen, conns: conns} = state, listener, window) do
+  @spec accept_loop(map(), pid(), {integer() | nil, non_neg_integer()}, boolean()) :: :ok
+  defp accept_loop(%{listen: listen, conns: conns} = state, listener, window, failing?) do
     case :gen_tcp.accept(listen) do
       {:ok, socket} ->
         {window, allowed?} = tick(window, System.monotonic_time(:second))
@@ -137,15 +120,23 @@ defmodule Hyper.Node.FireVMM.GuestServices.Listener do
             do: hand_off(socket, conns, listener, state.vm_id),
             else: :gen_tcp.close(socket)
 
-        accept_loop(state, listener, window)
+        accept_loop(state, listener, window, false)
 
       {:error, :closed} ->
         :ok
 
       {:error, reason} ->
-        exit({:accept_error, reason})
+        :ok = report_accept_error(state.vm_id, reason, failing?)
+        Process.sleep(Time.as_ms(@accept_backoff))
+        accept_loop(state, listener, window, true)
     end
   end
+
+  @spec report_accept_error(Hyper.Vm.Id.t(), term(), boolean()) :: :ok
+  defp report_accept_error(_vm_id, _reason, true), do: :ok
+
+  defp report_accept_error(vm_id, reason, false),
+    do: Logger.warning("vm #{vm_id}: guest services: accept failing: #{inspect(reason)}")
 
   @spec tick({integer() | nil, non_neg_integer()}, integer()) ::
           {{integer(), non_neg_integer()}, boolean()}

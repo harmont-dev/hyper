@@ -141,7 +141,6 @@ const OPS: &[&str] = &[
     "vm_launch",
     "vm_claim_api_socket",
     "vm_claim_vsock_socket",
-    "vm_link_guest_socket",
     "vm_teardown",
     "vm_firewall",
     "img_activate",
