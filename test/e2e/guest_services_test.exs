@@ -17,8 +17,25 @@ defmodule Hyper.E2e.GuestServicesTest do
   @moduletag :integration
   @moduletag timeout: :timer.minutes(10)
 
-  @image System.get_env("HYPER_E2E_IMAGE", "public.ecr.aws/docker/library/alpine:3.19")
-  @port 1100
+  @image System.get_env(
+           "HYPER_E2E_PYTHON_IMAGE",
+           "public.ecr.aws/docker/library/python:3.12-alpine3.19"
+         )
+
+  @client """
+  import socket, sys
+  s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+  s.settimeout(3)
+  s.connect((2, 1100))
+  s.sendall(sys.argv[1].encode() + b"\\0" + sys.argv[2].encode())
+  out = b""
+  try:
+      while chunk := s.recv(4096):
+          out += chunk
+  except TimeoutError:
+      pass
+  sys.stdout.write(out.decode())
+  """
 
   defmodule Echo do
     @moduledoc false
@@ -42,21 +59,11 @@ defmodule Hyper.E2e.GuestServicesTest do
 
     on_exit(fn -> Hyper.Node.stop_image_vm(vm) end)
     {:ok, %{exit_code: 0}} = await_exec(vm, ["/bin/true"])
-
-    {:ok, %{exit_code: 0}} =
-      Hyper.exec(vm, ["/sbin/apk", "add", "--no-cache", "socat"], timeout: :timer.minutes(3))
-
     vm
   end
 
   defp talk(vm, name, payload) do
-    {:ok, result} =
-      await_exec(vm, [
-        "/bin/sh",
-        "-c",
-        "printf '#{name}\\000#{payload}' | /usr/bin/socat -t 3 - VSOCK-CONNECT:2:#{@port}"
-      ])
-
+    {:ok, result} = await_exec(vm, ["/usr/local/bin/python3", "-c", @client, name, payload])
     result
   end
 
