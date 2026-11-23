@@ -1,5 +1,6 @@
 defmodule Hyper.Node.FireVMM.GuestServicesTest do
   @moduledoc false
+  # async: false -- the helper stub and the work_dir cache are process-global.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog

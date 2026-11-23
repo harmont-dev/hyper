@@ -1,3 +1,13 @@
+//! `vm_link_guest_socket`, observed through the binary: the node's listener at
+//! `<work_dir>/socks/fc-<id>-guest.sock` is hard-linked into the VM's jail as `vsock.sock_1100`.
+//!
+//! Laws:
+//! - a listener with no other name is linked: the jail's entry is the same inode, `0660`, in the
+//!   requested group, and relinking leaves exactly one jail entry;
+//! - before the jail exists the op is `pending`, and with no listener it fails;
+//! - a listener name that is a second name of another socket, or a symlink, is refused and nothing
+//!   lands in the jail;
+//! - a gid outside the jail range is refused before anything is touched.
 #![cfg(feature = "insecure_mode")]
 
 use assert_fs::TempDir;

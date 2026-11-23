@@ -1,5 +1,15 @@
 defmodule Hyper.E2e.GuestServicesTest do
-  @moduledoc false
+  @moduledoc """
+  Guest services against real guests on one node.
+
+  Laws:
+
+    * a guest reaches a service attached to its VM over vsock by name, and the
+      handler gets the bytes that follow the name;
+    * each VM's handler is told that VM's id, never another's;
+    * a name not attached to the VM is hung up on without a byte;
+    * a VM with no services attached cannot connect at all.
+  """
   use ExUnit.Case, async: false
 
   import Hyper.E2e

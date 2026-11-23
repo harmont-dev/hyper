@@ -1,5 +1,14 @@
 defmodule Hyper.GuestService.HeaderPropertiesTest do
-  @moduledoc false
+  @moduledoc """
+  Laws of the guest-service name header, `name <> <<0>>` within 256 bytes:
+
+    * a valid name followed by NUL parses to that name, and every byte after the
+      NUL is the service's, untouched;
+    * every strict prefix of a valid header is `:more`;
+    * 256 bytes with no NUL among them is `:too_long`, whatever they are;
+    * a byte outside `[a-z0-9_-]` before the NUL, or an empty name, is
+      `:bad_name`, as soon as it arrives.
+  """
   use ExUnit.Case, async: true
   use ExUnitProperties
 
