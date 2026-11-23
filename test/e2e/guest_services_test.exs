@@ -48,10 +48,10 @@ defmodule Hyper.E2e.GuestServicesTest do
 
   setup_all do
     {:ok, img_id} = Hyper.Img.OciLoader.load(@image)
-    served = for _ <- 1..2, do: boot(img_id, [%Hyper.GuestService{handler: {Echo, nil}}])
-    bare = boot(img_id, [])
-    %{served: served, bare: bare}
+    %{img_id: img_id, served: boot(img_id, [echo()])}
   end
+
+  defp echo, do: %Hyper.GuestService{handler: {Echo, nil}}
 
   defp boot(img_id, services) do
     {:ok, vm} =
@@ -68,23 +68,23 @@ defmodule Hyper.E2e.GuestServicesTest do
   end
 
   test "a guest reaches an attached service by name, starting from the bytes behind it",
-       %{served: [vm | _]} do
+       %{served: vm} do
     assert %{exit_code: 0, stdout: "hello"} = talk(vm, "echo", "hello")
   end
 
-  test "each VM's handler is told that VM's id", %{served: served} do
-    for vm <- served do
+  test "each VM's handler is told that VM's id", %{img_id: img_id, served: vm} do
+    for vm <- [vm, boot(img_id, [echo()])] do
       assert %{stdout: id} = talk(vm, "echo", "whoami")
       assert id == Hyper.id(vm)
     end
   end
 
-  test "a name the VM was not given is hung up on without a byte", %{served: [vm | _]} do
+  test "a name the VM was not given is hung up on without a byte", %{served: vm} do
     assert %{stdout: ""} = talk(vm, "nope", "hello")
   end
 
-  test "a VM with no services attached cannot connect", %{bare: vm} do
-    assert %{exit_code: code} = talk(vm, "echo", "hello")
+  test "a VM with no services attached cannot connect", %{img_id: img_id} do
+    assert %{exit_code: code} = talk(boot(img_id, []), "echo", "hello")
     assert code != 0
   end
 end
