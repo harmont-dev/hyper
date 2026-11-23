@@ -11,7 +11,7 @@ use hyperrs_firecracker::jailer::chroot::{GrantError, JailLayout};
 use hyperrs_firecracker::VmId;
 use hyperrs_fs::dir::SafeDir;
 use hyperrs_fs::file::{self, Any, CallerOwned, IsSocket, OpenFlags, Owner, SafeFile};
-use hyperrs_fs::path::{ComponentError, StrictComponent};
+use hyperrs_fs::path::{ComponentError, StrictComponent, StrictComponentBuf};
 use hyperrs_process::privilege::{PrivilegeError, Unprivileged};
 use nix::errno::Errno;
 use nix::sys::stat::Mode;
@@ -34,6 +34,8 @@ pub enum PinError {
     Open(#[source] file::ValidationError),
     #[error("naming the pinned socket: {0}")]
     Name(#[from] ComponentError),
+    #[error("opening the node's socket: {0}")]
+    Socket(#[source] file::ValidationError),
     #[error("removing the stale pinned socket: {0}")]
     Unlink(#[source] Errno),
     #[error("pinning the socket: {0}")]
@@ -53,14 +55,11 @@ impl SocketPin<'_> {
         socket: &SafeFile<IsSocket, Any, Any>,
     ) -> Result<(), PinError> {
         self.unpin(dir)?;
-        let name = self.name();
-        dir.linkat(socket, name.as_str().try_into()?)
-            .map_err(PinError::Link)
+        dir.linkat(socket, &self.name()?).map_err(PinError::Link)
     }
 
     pub fn unpin(&self, dir: &SafeDir) -> Result<(), PinError> {
-        let name = self.name();
-        match dir.unlinkat(name.as_str().try_into()?) {
+        match dir.unlinkat(&self.name()?) {
             Ok(()) | Err(Errno::ENOENT) => Ok(()),
             Err(e) => Err(PinError::Unlink(e)),
         }
@@ -69,21 +68,17 @@ impl SocketPin<'_> {
     pub fn open(
         &self,
         dir: &SafeDir,
-    ) -> Result<Option<SafeFile<IsSocket, CallerOwned, Any>>, file::ValidationError> {
-        let name = self.name();
-        let name: &StrictComponent = name
-            .as_str()
-            .try_into()
-            .expect("fc-<vm id>-<socket> is a strict path component");
-        match dir.openat(name, OpenFlags::PATH, Mode::empty()) {
+    ) -> Result<Option<SafeFile<IsSocket, CallerOwned, Any>>, PinError> {
+        match dir.openat(&self.name()?, OpenFlags::PATH, Mode::empty()) {
             Ok(socket) => Ok(Some(socket)),
             Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(PinError::Socket(e)),
         }
     }
 
-    fn name(&self) -> String {
-        format!("fc-{}-{}", self.id, self.socket)
+    fn name(&self) -> Result<StrictComponentBuf, ComponentError> {
+        let name = format!("fc-{}-{}", self.id, self.socket);
+        <&StrictComponent>::try_from(name.as_str()).map(ToOwned::to_owned)
     }
 }
 
@@ -120,7 +115,7 @@ impl<const SOCKET: &'static str> Op for Claim<SOCKET> {
 
 #[cfg(test)]
 mod tests {
-    use super::SocketPin;
+    use super::{PinError, SocketPin};
     use crate::cli::vm::GUEST_SOCKET;
     use assert_fs::prelude::*;
     use assert_fs::TempDir;
@@ -129,6 +124,7 @@ mod tests {
     use hyperrs_fs::file::OpenFlags;
     use hyperrs_fs::path::{IsAbsolute, SafePathBuf, StrictComponents};
     use rstest::rstest;
+    use std::assert_matches;
     use std::os::unix::fs::symlink;
     use std::os::unix::net::UnixListener;
     use std::path::Path;
@@ -174,6 +170,17 @@ mod tests {
         plant(&tmp);
         let id: VmId = "v1".parse().unwrap();
 
-        assert!(pin(&id).open(&dir(tmp.path())).is_err());
+        assert_matches!(pin(&id).open(&dir(tmp.path())), Err(PinError::Socket(_)));
+    }
+
+    #[rstest]
+    fn a_socket_name_that_is_not_one_component_is_an_error_not_a_panic() {
+        let tmp = TempDir::new().unwrap();
+        let id: VmId = "v1".parse().unwrap();
+
+        assert_matches!(
+            SocketPin::new(&id, "a/b").open(&dir(tmp.path())),
+            Err(PinError::Name(_))
+        );
     }
 }

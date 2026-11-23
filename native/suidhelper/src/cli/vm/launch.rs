@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Spawn a jailer instance.
 
-use super::claim::SocketPin;
+use super::claim::{PinError, SocketPin};
 use super::teardown::{Teardown, TeardownError};
 use super::{VmOut, GUEST_LINK, GUEST_SOCKET};
 use crate::cli::{MapperPath, Op};
@@ -44,8 +44,8 @@ pub enum LaunchError {
     Device(#[from] OpenDeviceError),
     #[error(transparent)]
     Build(#[from] BuildError),
-    #[error("opening the guest socket: {0}")]
-    GuestSocket(#[source] file::ValidationError),
+    #[error("guest socket: {0}")]
+    GuestSocket(#[from] PinError),
     #[error("guest socket: {0}")]
     GuestLink(#[from] LinkError),
     #[error(transparent)]
@@ -92,9 +92,8 @@ impl Op for Launch {
         let guest_socket = match SafeDir::open(&config.socket_dir(), OpenFlags::RDONLY) {
             Ok(dir) => SocketPin::new(&self.id, GUEST_SOCKET).open(&dir),
             Err(file::ValidationError::Open(Errno::ENOENT)) => Ok(None),
-            Err(e) => Err(e),
-        }
-        .map_err(LaunchError::GuestSocket)?;
+            Err(e) => Err(PinError::Open(e)),
+        }?;
 
         let layout = JailLayout::new(&jail_base, &self.id);
         let api_sock =
