@@ -44,7 +44,7 @@ defmodule Hyper.GuestService do
   @spec resolve_all([t()]) :: {:ok, [t()]} | {:error, resolve_error()}
   def resolve_all(services) do
     with {:ok, resolved} <- resolve_each(services),
-         :ok <- unique(resolved, MapSet.new()) do
+         :ok <- unique(resolved) do
       {:ok, resolved}
     end
   end
@@ -97,12 +97,13 @@ defmodule Hyper.GuestService do
     end
   end
 
-  defp unique([], _seen), do: :ok
+  defp unique(services) do
+    names = Enum.map(services, & &1.name)
 
-  defp unique([%__MODULE__{name: name} | rest], seen) do
-    if MapSet.member?(seen, name),
-      do: {:error, {:duplicate_guest_service, name}},
-      else: unique(rest, MapSet.put(seen, name))
+    case names -- Enum.uniq(names) do
+      [] -> :ok
+      [name | _] -> {:error, {:duplicate_guest_service, name}}
+    end
   end
 
   defp handler?(mod) do

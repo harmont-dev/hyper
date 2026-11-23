@@ -23,12 +23,13 @@ defmodule Hyper.Node.FireVMM.GuestServices.Connection do
   def init({listener, vm_id}) do
     Process.flag(:trap_exit, true)
 
-    Process.flag(:max_heap_size, %{
-      size: div(Information.as_bytes(@max_heap), :erlang.system_info(:wordsize)),
-      kill: true,
-      error_logger: false,
-      include_shared_binaries: true
-    })
+    _ =
+      Process.flag(:max_heap_size, %{
+        size: div(Information.as_bytes(@max_heap), :erlang.system_info(:wordsize)),
+        kill: true,
+        error_logger: false,
+        include_shared_binaries: true
+      })
 
     timer = Process.send_after(self(), :header_timeout, Time.as_ms(@header_timeout))
 
