@@ -26,7 +26,8 @@ defmodule Hyper.Node.FireVMM.GuestServices.Connection do
     Process.flag(:max_heap_size, %{
       size: div(Information.as_bytes(@max_heap), :erlang.system_info(:wordsize)),
       kill: true,
-      error_logger: false
+      error_logger: false,
+      include_shared_binaries: true
     })
 
     timer = Process.send_after(self(), :header_timeout, Time.as_ms(@header_timeout))

@@ -8,6 +8,7 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
   alias Hyper.GuestService
   alias Hyper.Node.FireVMM.GuestServices.Listener
   alias Hyper.Node.FireVMM.Jailer
+  alias Unit.Information
 
   @vm_id "vguestsvc"
 
@@ -35,6 +36,14 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
     def name, do: "crash"
     def init(_conn, test), do: {:ok, test}
     def handle_data(data, _test), do: raise(ArgumentError, "unparseable request: " <> data)
+  end
+
+  defmodule Hoard do
+    @moduledoc false
+    @behaviour Hyper.GuestService.Handler
+    def name, do: "hoard"
+    def init(_conn, _arg), do: {:ok, ""}
+    def handle_data(data, held), do: {:continue, held <> data}
   end
 
   setup do
@@ -112,6 +121,26 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
 
     assert log =~ "guest service crash: handler failed"
     assert byte_size(log) < 2_000
+    assert ask(guest("echo\0"), "still here") == {:ok, "still here"}
+  end
+
+  test "a handler holding more guest bytes than the heap cap is killed, and only its own " <>
+         "connection drops" do
+    start([echo(), %GuestService{handler: {Hoard, nil}}])
+    sock = guest("hoard\0")
+    chunk = :binary.copy("x", Information.as_bytes(Information.mib(1)))
+
+    capture_log(fn ->
+      Enum.reduce_while(1..96, :ok, fn _mib, :ok ->
+        case :gen_tcp.send(sock, chunk) do
+          :ok -> {:cont, :ok}
+          {:error, _closed} -> {:halt, :ok}
+        end
+      end)
+
+      assert :gen_tcp.recv(sock, 0, 5_000) == {:error, :closed}
+    end)
+
     assert ask(guest("echo\0"), "still here") == {:ok, "still here"}
   end
 
