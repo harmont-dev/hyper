@@ -9,13 +9,18 @@ defmodule Hyper.Img do
   into `Hyper.Cfg.Dirs.layer_dir/0` at `layer_<id>.img`, then records it as a
   one-layer base image (`blobs` + `images` + `image_layers`). Producers of image
   files stay decoupled from the store and DB: they hand a path to `create/2`.
+
+  `delete/1` is the inverse: it drops an image no VM leases, then every blob of
+  its chain that no other image still references, file and row.
   """
 
   use OpenTelemetryDecorator
 
+  import Ecto.Query
+
   require Logger
 
-  alias Hyper.Img.Db.{Blob, Image, ImageLayer, Repo}
+  alias Hyper.Img.Db.{Blob, Image, ImageLayer, Lease, Repo}
 
   @type id :: String.t()
 
@@ -119,6 +124,97 @@ defmodule Hyper.Img do
     end
   end
 
+  @doc """
+  Delete image `img_id`: its `images` row, then every blob of its chain that no
+  other image references -- the blob's file in the media store, then its row.
+
+  Refused with `{:error, :in_use}` while a VM holds an unexpired lease on the
+  image; a lapsed lease is dead, as `Hyper.Img.Db.Lease` defines it. Once the row
+  is gone no VM can lease the image, so none can start from it. Images derived
+  from `img_id` keep working: the blobs their chains share stay. `{:error,
+  :unknown_image}` when no image has that id, so a repeated delete is harmless.
+
+  A blob whose file cannot be removed keeps its row, and the failure is logged:
+  a row is never dropped while its bytes may still be on the medium.
+  """
+  @spec delete(id()) :: :ok | {:error, :in_use | :unknown_image}
+  @decorate with_span("Hyper.Img.delete", include: [:img_id])
+  def delete(img_id) do
+    with {:ok, chain} <- forget(img_id) do
+      Enum.each(chain, &drop_blob/1)
+    end
+  end
+
+  # The row lock serialises this against `Lease.bump/3`: a new lease's foreign-key
+  # check waits on it, then finds the image gone. A lease taken first is seen by
+  # the check, which runs after the lock is held.
+  @spec forget(id()) :: {:ok, [String.t()]} | {:error, :in_use | :unknown_image}
+  defp forget(img_id) do
+    image = from(i in Image, where: i.id == ^img_id, lock: "FOR UPDATE", select: i.id)
+    chain = from(l in ImageLayer, where: l.image_id == ^img_id, select: l.blob_id)
+
+    Repo.transaction(fn ->
+      leased =
+        from(l in Lease, where: l.image_id == ^img_id and l.expires_at > ^DateTime.utc_now())
+
+      cond do
+        Repo.one(image) == nil ->
+          Repo.rollback(:unknown_image)
+
+        Repo.exists?(leased) ->
+          Repo.rollback(:in_use)
+
+        true ->
+          blob_ids = Repo.all(chain)
+          {1, _} = Repo.delete_all(from(i in Image, where: i.id == ^img_id))
+          blob_ids
+      end
+    end)
+  end
+
+  # Lock the blob before asking whether a layer still references it: the
+  # reference check is a later statement, so it sees every layer committed before
+  # the lock, and a layer inserted after waits on the lock and then fails its
+  # foreign key. `record/3` takes the same lock before it trusts a blob's file.
+  # The file goes first: a commit that then fails leaves an unreferenced row
+  # with no file, which `Hyper.Img.Db.Gc` prunes.
+  @spec drop_blob(String.t()) :: :ok
+  defp drop_blob(blob_id) do
+    blob = from(b in Blob, where: b.id == ^blob_id, lock: "FOR UPDATE", select: b.id)
+    referenced = from(l in ImageLayer, where: l.blob_id == ^blob_id)
+
+    result =
+      Repo.transaction(fn ->
+        with ^blob_id <- Repo.one(blob),
+             false <- Repo.exists?(referenced),
+             :ok <- remove_file(final_path(blob_id)) do
+          {1, _} = Repo.delete_all(from(b in Blob, where: b.id == ^blob_id))
+          :dropped
+        else
+          nil -> :already_gone
+          true -> :shared
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, _outcome} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("image blob #{blob_id} kept: its file could not be removed: #{reason}")
+    end
+  end
+
+  @spec remove_file(Path.t()) :: :ok | {:error, File.posix()}
+  defp remove_file(path) do
+    case File.rm(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
   @spec check_label(String.t()) :: :ok | {:error, :bad_label}
   defp check_label(label),
     do: if(Hyper.Img.Db.Repo.storable_text?(label), do: :ok, else: {:error, :bad_label})
@@ -178,6 +274,7 @@ defmodule Hyper.Img do
         on_conflict: :nothing,
         conflict_target: :id
       )
+      |> Ecto.Multi.run(:blob_file, fn repo, _changes -> backed(repo, blob_id) end)
       |> Ecto.Multi.insert(
         :image,
         Image.changeset(%Image{}, %{
@@ -290,6 +387,7 @@ defmodule Hyper.Img do
         on_conflict: :nothing,
         conflict_target: :id
       )
+      |> Ecto.Multi.run(:blob_file, fn repo, _changes -> backed(repo, id) end)
       |> Ecto.Multi.insert(
         :image,
         Image.changeset(%Image{}, %{id: id, label: label, device_size: size}),
@@ -307,5 +405,17 @@ defmodule Hyper.Img do
       {:ok, _} -> :ok
       {:error, step, reason, _changes} -> {:error, {:record_failed, step, reason}}
     end
+  end
+
+  # The blob row may predate this publish, and `delete/1` may be removing it. Hold
+  # the row against `drop_blob/1`'s lock, then check the file is still there, so
+  # no image is ever recorded over a blob whose file is gone.
+  @spec backed(Ecto.Repo.t(), String.t()) :: {:ok, :present} | {:error, :file_removed}
+  defp backed(repo, blob_id) do
+    held = from(b in Blob, where: b.id == ^blob_id, lock: "FOR KEY SHARE", select: b.id)
+
+    if repo.one(held) == blob_id and File.exists?(final_path(blob_id)),
+      do: {:ok, :present},
+      else: {:error, :file_removed}
   end
 end

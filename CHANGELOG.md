@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `Hyper.Img.delete/1` removes an image no VM leases, along with the layer
+  files and blob rows no other image shares. Recording an image now checks,
+  under a lock, that its blob's file is still in the media store, so a
+  concurrent delete of the same bytes can never leave an image without its
+  file.
+
 ### Changed
 - **Breaking:** the gRPC package was promoted `hyper.grpc.v0` -> `hyper.grpc.v1`.
   `google.protobuf.Empty` is replaced by dedicated `StopVmResponse` and
