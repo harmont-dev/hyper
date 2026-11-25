@@ -89,8 +89,12 @@ defmodule Hyper.Http.Router do
   end
 
   get "/v1/vms/:id" do
-    conn
-    |> send_resp(201, "Get vms per id ")
+
+    case Integer.parse(id) |> Hyper.whereis(id) do
+      vm -> send_json_response(conn, 200, %{status: "found", vm: vm})
+      nil -> send_json_response(conn, 404, %{status: "Not Found"})
+    end
+
   end
 
   post "/v1/vms/:id/fork" do
