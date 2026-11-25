@@ -81,6 +81,7 @@ defmodule Hyper.MixProject do
       # still use their native lexers; this fills the rest in one dep.
       {:makeup_syntect, "~> 0.1", only: :dev, runtime: false},
       {:ecto_sql, "~> 3.13"},
+      {:plug_cowboy, "~> 2.7"},
       {:grpc, "~> 1.1"},
       {:gun, "~> 2.0"},
       {:grpc_server, "~> 1.1"},

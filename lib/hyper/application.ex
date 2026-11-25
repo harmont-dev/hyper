@@ -27,7 +27,7 @@ defmodule Hyper.Application do
         # registries on boot.
         Hyper.Cluster,
         Hyper.Node
-      ] ++ Hyper.Grpc.server_children()
+      ] ++ Hyper.Grpc.server_children() ++ Hyper.Http.server_children()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Hyper.Supervisor)
   end

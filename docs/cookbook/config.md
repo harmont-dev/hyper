@@ -176,6 +176,8 @@ cred = { cert = "/etc/hyper/tls/cert.pem", key = "/etc/hyper/tls/key.pem" }
 ```
 <!-- tabs close -->
 
+# add server config here
+
 ## Telemetry Configuration
 
 You can configure telemetry with Hyper by adding this section to your
