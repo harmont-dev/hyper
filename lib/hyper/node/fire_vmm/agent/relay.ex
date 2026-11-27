@@ -60,6 +60,22 @@ defmodule Hyper.Node.FireVMM.Agent.Relay do
   @spec listen_path(GenServer.server()) :: Path.t()
   def listen_path(server), do: GenServer.call(server, :listen_path)
 
+  @doc """
+  Whether the guest agent behind firecracker's vsock socket `vsock_uds` accepts a connection
+  within `timeout_ms`. A VM still booting refuses one until its agent listens.
+  """
+  @spec agent_listening?(Path.t(), non_neg_integer()) :: boolean()
+  def agent_listening?(vsock_uds, timeout_ms) do
+    case RelayDialer.dial(vsock_uds, @vsock_port, timeout_ms) do
+      {:ok, sock} ->
+        _ = :socket.close(sock)
+        true
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
   @impl GenServer
   def init(%{vsock_uds: vsock_uds, listen_path: listen_path, vm_id: vm_id}) do
     Process.flag(:trap_exit, true)

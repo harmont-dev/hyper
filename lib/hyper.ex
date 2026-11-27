@@ -75,7 +75,9 @@ defmodule Hyper do
   id/owning node is gone), `:node_unreachable` if the owning node cannot be
   reached over the cluster.
   `opts`: `:env` (map `%{String.t() => String.t()}`), `:cwd` (string), `:timeout`
-  (ms, deadline for the whole call, also sent to the guest; default 30 000).
+  (ms, deadline for the whole call, also sent to the guest; default 30 000), and
+  `:wait_for_agent` (ms to wait for a VM still booting to bring up its agent
+  before running `argv`, rather than answering `:agent_unavailable`; default 0).
 
   `argv` is executed directly, not through a shell. Use an **absolute** `argv`
   head (`["/bin/echo", "hi"]`): the guest runs as PID 1 with a near-empty
