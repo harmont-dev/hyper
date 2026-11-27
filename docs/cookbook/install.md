@@ -224,7 +224,9 @@ sudo sysctl -p /etc/sysctl.d/90-hyper.conf
 ```
 
 The helper refuses to start with either off. It turns on proxy NDP on the uplink
-itself.
+itself, and has it answer at once (`net.ipv6.neigh.<uplink>.proxy_delay = 0`):
+the router drops what it holds for a new VM's address while it waits, and the
+default delay, up to 0.8 s, costs a VM's first inbound connection its SYN.
 
 #### Finding the uplink and its prefix
 
