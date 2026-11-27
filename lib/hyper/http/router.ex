@@ -10,7 +10,7 @@ defmodule Hyper.Http.Router do
       and optional `arch` and `label`.
     * `GET /v0/vms/:id` - get one VM.
     * `POST /v0/vms/:id/fork` - fork a VM.
-    * `DELETE /v0/vms/:id` - stop a VM.
+    * `POST /v0/vms/:id` - stop a VM.
     * `PUT /v0/vms/:id/firewall` - set a VM firewall.
     * `GET /v0/vms/:id/usage` - metered usage for a VM.
     * `POST /v0/vms/:id/exec` - execute a command in the guest.
@@ -70,18 +70,23 @@ defmodule Hyper.Http.Router do
       {:ok, vms, next_token} ->
         send_json_response(conn, 200, %{vms: vms, next_page_token: next_token})
 
-      :error ->
-        send_json_response(conn, 503, %{error: "Could not fetch VMs. Try again later"})
+      {:error, bad_page_token}->
+        send_json_response(conn, 400, %{error: "Could not fetch VMs. Bad page token #{bad_page_token}"})
     end
   end
 
   post "/v0/vms" do
-    case Hyper.Http.Server.create_vm(conn.body_params) do
+    case Hyper.Http.Server.create_vm(conn) do
       {:created, vm_id, node_id, ipv6} ->
-        send_json_response(conn, 201, %{status: "created", vm_id: vm_id, node: node_id, ip_address: ipv6})
+        send_json_response(conn, 201, %{
+          status: "created",
+          vm_id: vm_id,
+          node: node_id,
+          ip_address: ipv6
+        })
 
       {:error, :machine_unreachable} ->
-        send_json_response(conn, 404, %{status: "Machine Unreachable"})
+        send_json_response(conn, 503, %{status: "Machine Unreachable"})
 
       {:error, _reason} ->
         send_json_response(conn, 503, %{error: "Could not create VM, Try again later"})
@@ -89,32 +94,68 @@ defmodule Hyper.Http.Router do
   end
 
   get "/v0/vms/:id" do
-
-    case Integer.parse(id) |> Hyper.whereis(id) do
-      vm -> send_json_response(conn, 200, %{status: "Found", vm: vm})
+    case Hyper.whereis(id) do
       nil -> send_json_response(conn, 404, %{status: "Not Found"})
+      vm -> send_json_response(conn, 200, %{status: "Found", vm: vm})
+    end
+  end
+
+  post "/v0/vms/:vm_id/fork" do
+    case Hyper.fork_vm(vm_id) do
+      {:ok, vm_id} ->
+        id = Hyper.id(vm_id)
+
+        if id == nil do
+          send_json_response(conn, 503, %{status: "Machine Unreachable"})
+        else
+          send_json_response(conn, 201, %{status: "Forked", vm: node(vm_id)})
+        end
+
+      {:error, _} ->
+        send_json_response(conn, 503, %{status: "Could not fork vm, try again later"})
+    end
+  end
+
+  post "/v0/vms/:vm_id/stop" do
+    case Hyper.stop_vm(vm_id) do
+      :ok ->
+        send_json_response(conn, 200, %{status: "Machine Stopped"})
+
+      {:error, :not_found} ->
+        send_json_response(conn, 404, %{status: "Machine with #{vm_id} not found"})
+
+      {:error, :unreachable} ->
+        send_json_response(conn, 404, %{status: "Machine Unreachable"})
+    end
+  end
+
+  put "/v0/vms/:vm_id/set_firewall" do
+
+    get_firewall = Map.get(conn.body_params, "firewall")
+
+    case Hyper.Http.Server.set_firewall(vm_id, get_firewall) do
+     :ok ->
+        send_json_response(conn, 200, %{status: "Firewall set"})
+
+     :not_found ->
+        send_json_response(conn, 404, %{status: "Machine with #{vm_id} not found"})
+
+     :unreachable ->
+        send_json_response(conn, 404, %{status: "Machine Unreachable"})
     end
 
   end
 
-  post "/v0/vms/:id/fork" do
-    conn
-    |> send_resp(201, "Get vms per id ")
-  end
-
-  delete "/v0/vms/:id" do
-    conn
-    |> send_resp(201, "Get vms per id ")
-  end
-
-  put "/v0/vms/:id/firewall" do
-    conn
-    |> send_resp(201, "Get vms per id ")
-  end
-
   get "/v0/vms/:id/usage" do
-    conn
-    |> send_resp(201, "Get vms per id ")
+
+    case Hyper.usage(id) do
+      {:ok, vm_usage} ->
+        send_json_response(conn, 200, %{vm_usage: vm_usage})
+
+      {:error, :not_found} ->
+        send_json_response(conn, 404, %{status: "Machine with #{id} not found"})
+    end
+
   end
 
   post "/v0/vms/:id/exec" do
