@@ -42,8 +42,8 @@ pub struct HostNet<'a> {
 }
 
 impl HostNet<'_> {
-    /// Forward and proxy NDP for VMs, masquerade their IPv4 out of `uplink`, and
-    /// firewall them off from the host, its network, and inbound connections.
+    /// Forward and proxy NDP for VMs, answering at once, masquerade their IPv4 out of
+    /// `uplink`, and firewall them off from the host, its network, and inbound connections.
     pub fn init(&self, root: &Root<'_>, nft: &Nft) -> Result<(), HostNetError> {
         if Rtnl::open()?.link(self.uplink)?.is_none() {
             return Err(HostNetError::NoUplink(self.uplink.clone()));
@@ -64,6 +64,14 @@ impl HostNet<'_> {
             .ipv6()
             .conf(self.uplink)
             .proxy_ndp(true)
+            .write()?;
+        // The uplink's router asks for each new VM's address and drops what it holds for it
+        // meanwhile. Answered after the default random delay of up to 0.8 s, a VM's first inbound
+        // connection loses its SYN and waits a second for TCP to send it again.
+        Sysctl::net()
+            .ipv6()
+            .neigh(self.uplink)
+            .no_proxy_delay()
             .write()?;
 
         nft.replace_table(root, &self.table())?;

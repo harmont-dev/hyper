@@ -28,6 +28,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   value is now rejected with `INVALID_ARGUMENT`; `ListVms` is now paginated
   (`page_size` / `page_token` / `next_page_token`).
 
+### Fixed
+- A new VM's first inbound connection no longer waits a second. The host answers
+  for VM addresses by proxy NDP, which Linux delays by a random time up to 0.8 s;
+  the router dropped the SYN it held meanwhile, and TCP resent it after its 1 s
+  timeout. `host_init` now sets the uplink's `proxy_delay` to 0.
+
 ## [0.1.0]
 
 First public release: a distributed orchestrator for Firecracker microVMs on the

@@ -105,6 +105,15 @@ impl Ipv6 {
         self.conf_dir(link.as_component())
     }
 
+    /// `net/ipv6/neigh/<link>/`.
+    pub fn neigh(self, link: &IfName) -> Ipv6Neigh {
+        Ipv6Neigh(
+            self.0
+                .child(StrictComponent::from_static("neigh"))
+                .child(link.as_component()),
+        )
+    }
+
     fn conf_dir(self, dir: &StrictComponent) -> Ipv6Conf {
         Ipv6Conf(
             self.0
@@ -149,6 +158,20 @@ impl Ipv6Conf {
             .trim()
             .parse()
             .map_err(|_| SysctlError::Unknown(key, value))
+    }
+}
+
+/// `net/ipv6/neigh/<link>/`.
+pub struct Ipv6Neigh(SysctlKey);
+
+impl Ipv6Neigh {
+    /// `net/ipv6/neigh/<link>/proxy_delay` at 0: a neighbour advertisement the link answers by
+    /// proxy goes out at once, not after a random delay of up to the default 0.8 s.
+    pub fn no_proxy_delay(self) -> Setting {
+        Setting {
+            key: self.0.child(StrictComponent::from_static("proxy_delay")),
+            value: "0",
+        }
     }
 }
 
@@ -285,6 +308,30 @@ mod tests {
         let flipped = if host_on { "0" } else { "1" };
         assert_eq!(values, [host.as_str(), flipped]);
         assert_eq!(read(path), host);
+    }
+
+    #[rstest]
+    fn no_proxy_delay_zeroes_only_the_namespace_it_is_written_in_as_root() {
+        let Some(ns) = ScratchNs::new("sysctl-proxy-delay") else {
+            return;
+        };
+        let path = "net/ipv6/neigh/lo/proxy_delay";
+        let host = read(path);
+
+        let written = ns
+            .get()
+            .scoped(|| {
+                Sysctl::net()
+                    .ipv6()
+                    .neigh(&"lo".parse().unwrap())
+                    .no_proxy_delay()
+                    .write()
+                    .unwrap();
+                read(path)
+            })
+            .unwrap();
+
+        assert_eq!((written.as_str(), read(path)), ("0", host));
     }
 
     #[rstest]
