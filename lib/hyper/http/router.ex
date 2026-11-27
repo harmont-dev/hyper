@@ -4,17 +4,17 @@ defmodule Hyper.Http.Router do
 
     * `GET /health` - liveness probe; no dependency checks.
     * `GET /ready` - readiness probe for the database and cluster.
-    * `GET /v1/vms` - list VMs using `page_size` and `page_token`; responds with
+    * `GET /v0/vms` - list VMs using `page_size` and `page_token`; responds with
       `vms` and `next_page_token`.
-    * `POST /v1/vms` - create a VM from `image`, `instance_type`, `boot_args`,
+    * `POST /v0/vms` - create a VM from `image`, `instance_type`, `boot_args`,
       and optional `arch` and `label`.
-    * `GET /v1/vms/:id` - get one VM.
-    * `POST /v1/vms/:id/fork` - fork a VM.
-    * `DELETE /v1/vms/:id` - stop a VM.
-    * `PUT /v1/vms/:id/firewall` - set a VM firewall.
-    * `GET /v1/vms/:id/usage` - metered usage for a VM.
-    * `POST /v1/vms/:id/exec` - execute a command in the guest.
-    * `POST /v1/images` - load an OCI image.
+    * `GET /v0/vms/:id` - get one VM.
+    * `POST /v0/vms/:id/fork` - fork a VM.
+    * `DELETE /v0/vms/:id` - stop a VM.
+    * `PUT /v0/vms/:id/firewall` - set a VM firewall.
+    * `GET /v0/vms/:id/usage` - metered usage for a VM.
+    * `POST /v0/vms/:id/exec` - execute a command in the guest.
+    * `POST /v0/images` - load an OCI image.
   """
 
   use Plug.Router
@@ -32,7 +32,7 @@ defmodule Hyper.Http.Router do
 
   plug(VerifyRequest,
     create_vm_fields: ["image", "instance_type", "boot_args"],
-    paths: ["/v1/vms"]
+    paths: ["/v0/vms"]
   )
 
   plug(:dispatch)
@@ -55,7 +55,7 @@ defmodule Hyper.Http.Router do
 
   # TODO - create a vm router and forward all requests that come from path /vm to it
 
-  get "/v1/vms" do
+  get "/v0/vms" do
     params = conn.query_params
 
     page_size =
@@ -75,7 +75,7 @@ defmodule Hyper.Http.Router do
     end
   end
 
-  post "/v1/vms" do
+  post "/v0/vms" do
     case Hyper.Http.Server.create_vm(conn.body_params) do
       {:created, vm_id, node_id, ipv6} ->
         send_json_response(conn, 201, %{status: "created", vm_id: vm_id, node: node_id, ip_address: ipv6})
@@ -88,41 +88,41 @@ defmodule Hyper.Http.Router do
     end
   end
 
-  get "/v1/vms/:id" do
+  get "/v0/vms/:id" do
 
     case Integer.parse(id) |> Hyper.whereis(id) do
-      vm -> send_json_response(conn, 200, %{status: "found", vm: vm})
+      vm -> send_json_response(conn, 200, %{status: "Found", vm: vm})
       nil -> send_json_response(conn, 404, %{status: "Not Found"})
     end
 
   end
 
-  post "/v1/vms/:id/fork" do
+  post "/v0/vms/:id/fork" do
     conn
     |> send_resp(201, "Get vms per id ")
   end
 
-  delete "/v1/vms/:id" do
+  delete "/v0/vms/:id" do
     conn
     |> send_resp(201, "Get vms per id ")
   end
 
-  put "/v1/vms/:id/firewall" do
+  put "/v0/vms/:id/firewall" do
     conn
     |> send_resp(201, "Get vms per id ")
   end
 
-  get "/v1/vms/:id/usage" do
+  get "/v0/vms/:id/usage" do
     conn
     |> send_resp(201, "Get vms per id ")
   end
 
-  post "/v1/vms/:id/exec" do
+  post "/v0/vms/:id/exec" do
     conn
     |> send_resp(201, "Get vms per id ")
   end
 
-  # post "/v1/images" do
+  # post "/v0/images" do
   #   conn
   #   |> send_resp(201, "Get vms per id ")
   # end
