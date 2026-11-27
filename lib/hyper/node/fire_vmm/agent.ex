@@ -7,7 +7,10 @@ defmodule Hyper.Node.FireVMM.Agent do
   path from it, so both sides agree without a process-registry lookup.
   """
 
+  use OpenTelemetryDecorator
+
   alias Hyper.Agent.V1.{ExecRequest, ExecResponse, GuestAgent}
+  alias OpenTelemetry.Tracer
 
   # GRPC.Status codes stored as module attributes so they can be used in
   # guard-equivalent pattern matches without calling functions at match time.
@@ -58,6 +61,7 @@ defmodule Hyper.Node.FireVMM.Agent do
     - `:timeout` — deadline for the whole call in milliseconds (default: #{@default_timeout})
   """
   @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) :: result()
+  @decorate with_span("Hyper.Node.FireVMM.Agent.exec", include: [:vm_id, :timeout])
   def exec(vm_id, argv, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
     deadline = System.monotonic_time(:millisecond) + timeout
@@ -81,13 +85,25 @@ defmodule Hyper.Node.FireVMM.Agent do
         http2_opts: %{closing_timeout: 1}
       })
 
-    try do
-      call(conn, req, timeout, deadline)
-    after
-      _ = :gun.close(conn)
-      :gun.flush(conn)
-    end
+    result =
+      try do
+        call(conn, req, timeout, deadline)
+      after
+        _ = :gun.close(conn)
+        :gun.flush(conn)
+      end
+
+    Tracer.set_attribute(:outcome, outcome(result))
+    result
   end
+
+  # What the span records of a call: never its output, which can hold anything.
+  @spec outcome(result()) :: atom()
+  defp outcome({:ok, _executed}), do: :ok
+  defp outcome({:error, reason}) when is_atom(reason), do: reason
+  defp outcome({:error, {reason, _detail}}) when is_atom(reason), do: reason
+  defp outcome({:error, %GRPC.RPCError{}}), do: :grpc_error
+  defp outcome({:error, _reason}), do: :error
 
   @spec call(pid(), ExecRequest.t(), non_neg_integer(), integer()) :: result()
   defp call(conn, req, timeout, deadline) do
