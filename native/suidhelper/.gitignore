@@ -2,3 +2,4 @@
 # LLVM source-based coverage drops these at the crate root during instrumented
 # test runs (see the xtask coverage pipeline); they are never committed.
 *.profraw
+*.idea
