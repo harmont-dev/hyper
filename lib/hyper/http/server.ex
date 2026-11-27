@@ -1,5 +1,6 @@
 defmodule Hyper.Http.Server do
   require Logger
+
   def ready do
     result =
       case Application.get_env(:hyper, __MODULE__, [])[:ready] do
@@ -27,7 +28,8 @@ defmodule Hyper.Http.Server do
            fn {vm_id, node} -> %{vm_id: vm_id, node: to_string(node)} end
          ), next}
 
-      {:error, bad_page_token} ->  {:error, bad_page_token}
+      {:error, bad_page_token} ->
+        {:error, bad_page_token}
     end
   end
 
@@ -67,10 +69,9 @@ defmodule Hyper.Http.Server do
   end
 
   def set_firewall(vm_id, get_firewall) do
-
     firewall = %Hyper.Vm.Firewall{
       inbound: Map.get(get_firewall, "inbound"),
-      outbound_blocked: Map.get(get_firewall, "outbound"),
+      outbound_blocked: Map.get(get_firewall, "outbound")
     }
 
     Hyper.set_vm_firewall(vm_id, firewall)
@@ -78,6 +79,5 @@ defmodule Hyper.Http.Server do
     e ->
       Logger.error("Failed to set firewall: #{Exception.message(e)}")
       {:error, :runtime_error}
-
   end
 end

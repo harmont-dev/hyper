@@ -70,8 +70,10 @@ defmodule Hyper.Http.Router do
       {:ok, vms, next_token} ->
         send_json_response(conn, 200, %{vms: vms, next_page_token: next_token})
 
-      {:error, bad_page_token}->
-        send_json_response(conn, 400, %{error: "Could not fetch VMs. Bad page token #{bad_page_token}"})
+      {:error, bad_page_token} ->
+        send_json_response(conn, 400, %{
+          error: "Could not fetch VMs. Bad page token #{bad_page_token}"
+        })
     end
   end
 
@@ -130,24 +132,21 @@ defmodule Hyper.Http.Router do
   end
 
   put "/v0/vms/:vm_id/set_firewall" do
-
     get_firewall = Map.get(conn.body_params, "firewall")
 
     case Hyper.Http.Server.set_firewall(vm_id, get_firewall) do
-     :ok ->
+      :ok ->
         send_json_response(conn, 200, %{status: "Firewall set"})
 
-     :not_found ->
+      :not_found ->
         send_json_response(conn, 404, %{status: "Machine with #{vm_id} not found"})
 
-     :unreachable ->
+      :unreachable ->
         send_json_response(conn, 404, %{status: "Machine Unreachable"})
     end
-
   end
 
   get "/v0/vms/:id/usage" do
-
     case Hyper.usage(id) do
       {:ok, vm_usage} ->
         send_json_response(conn, 200, %{vm_usage: vm_usage})
@@ -155,12 +154,35 @@ defmodule Hyper.Http.Router do
       {:error, :not_found} ->
         send_json_response(conn, 404, %{status: "Machine with #{id} not found"})
     end
-
   end
 
   post "/v0/vms/:id/exec" do
-    conn
-    |> send_resp(201, "Get vms per id ")
+    get_argv = Map.get(conn.body_params, "argv")
+    get_opts = Map.get(conn.body_params, "opts")
+
+    case Hyper.exec(id, get_argv, get_opts) do
+      {:ok, output} ->
+        %{stdout: stdout, stderr: stderr, exit_code: code} = output
+
+        if stderr do
+          send_json_response(conn, 200, %{
+            status: "output is stderr",
+            output: stderr,
+            exit_code: code
+          })
+        end
+
+        send_json_response(conn, 200, %{
+          status: "output is stderr",
+          output: stdout,
+          exit_code: code
+        })
+
+      {:error, _} ->
+        send_json_response(conn, 503, %{
+          status: "Could not execute request on Machine with #{id}, Please try again later"
+        })
+    end
   end
 
   # post "/v0/images" do
