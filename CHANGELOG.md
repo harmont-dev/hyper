@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `exec` takes `:wait_for_agent` (ms): an exec on a VM still booting waits for
+  its guest agent to come up, probing every 2 ms, and runs as soon as it
+  listens, instead of answering `:agent_unavailable` and leaving the caller to
+  poll. `:timeout` starts once the agent answers, and the wait is its own span,
+  `Hyper.Node.FireVMM.Agent.wait_for_agent`. Without the option, `exec` is
+  unchanged.
 - Spans from calls that cross nodes join the caller's trace. `Hyper.Rpc.call/5`
   carries the caller's OpenTelemetry context over `:erpc`, and every one of
   Hyper's own `:erpc` hops goes through it; callers outside Hyper do the same

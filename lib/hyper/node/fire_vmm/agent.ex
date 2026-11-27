@@ -10,6 +10,8 @@ defmodule Hyper.Node.FireVMM.Agent do
   use OpenTelemetryDecorator
 
   alias Hyper.Agent.V1.{ExecRequest, ExecResponse, GuestAgent}
+  alias Hyper.Node.FireVMM.Agent.Relay
+  alias Hyper.Node.FireVMM.Jailer
   alias OpenTelemetry.Tracer
 
   # GRPC.Status codes stored as module attributes so they can be used in
@@ -23,6 +25,10 @@ defmodule Hyper.Node.FireVMM.Agent do
   @wire_units [{"m", 1}, {"S", 1_000}, {"M", 60_000}, {"H", 3_600_000}]
 
   @default_timeout 30_000
+
+  # How often a VM still booting is probed for its agent: what an exec that waits for it adds at
+  # most, against a probe's cost, a Unix-socket connect and one CONNECT line to firecracker.
+  @agent_probe_ms 2
 
   @type result ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}} | {:error, term()}
@@ -59,12 +65,14 @@ defmodule Hyper.Node.FireVMM.Agent do
     - `:env` — environment map `%{String.t() => String.t()}` for the guest process
     - `:cwd` — working directory inside the guest (`nil` → not set)
     - `:timeout` — deadline for the whole call in milliseconds (default: #{@default_timeout})
+    - `:wait_for_agent` — how long, in milliseconds, to wait for the guest agent to come up
+      before running `argv` (default: 0, not at all). A VM still booting then answers as soon as
+      its agent listens, rather than with `:agent_unavailable`; `:timeout` starts once it does.
   """
   @spec exec(Hyper.Vm.Id.t(), [String.t()], keyword()) :: result()
   @decorate with_span("Hyper.Node.FireVMM.Agent.exec", include: [:vm_id, :timeout])
   def exec(vm_id, argv, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
-    deadline = System.monotonic_time(:millisecond) + timeout
 
     req = %ExecRequest{
       argv: argv,
@@ -72,6 +80,18 @@ defmodule Hyper.Node.FireVMM.Agent do
       cwd: opts[:cwd]
     }
 
+    result =
+      with :ok <- await_agent(vm_id, Keyword.get(opts, :wait_for_agent, 0)) do
+        request(vm_id, req, timeout)
+      end
+
+    Tracer.set_attribute(:outcome, outcome(result))
+    result
+  end
+
+  @spec request(Hyper.Vm.Id.t(), ExecRequest.t(), non_neg_integer()) :: result()
+  defp request(vm_id, req, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
     path = vm_id |> relay_socket_path() |> String.to_charlist()
 
     # The caller owns the connection: gun monitors its owner, so a killed
@@ -85,16 +105,39 @@ defmodule Hyper.Node.FireVMM.Agent do
         http2_opts: %{closing_timeout: 1}
       })
 
-    result =
-      try do
-        call(conn, req, timeout, deadline)
-      after
-        _ = :gun.close(conn)
-        :gun.flush(conn)
-      end
+    try do
+      call(conn, req, timeout, deadline)
+    after
+      _ = :gun.close(conn)
+      :gun.flush(conn)
+    end
+  end
 
-    Tracer.set_attribute(:outcome, outcome(result))
-    result
+  @spec await_agent(Hyper.Vm.Id.t(), non_neg_integer()) :: :ok | {:error, :agent_unavailable}
+  defp await_agent(_vm_id, 0), do: :ok
+  defp await_agent(vm_id, wait_ms), do: wait_for_agent(vm_id, wait_ms)
+
+  # Its own span: how long a VM took, past the call, to answer.
+  @spec wait_for_agent(Hyper.Vm.Id.t(), pos_integer()) :: :ok | {:error, :agent_unavailable}
+  @decorate with_span("Hyper.Node.FireVMM.Agent.wait_for_agent", include: [:vm_id, :wait_ms])
+  defp wait_for_agent(vm_id, wait_ms),
+    do: probe(Jailer.host_vsock(vm_id), System.monotonic_time(:millisecond) + wait_ms)
+
+  # Nothing tells the host when the guest agent starts listening; firecracker refuses a CONNECT
+  # to a guest port nothing listens on at once, so the agent is probed until it answers.
+  @spec probe(Path.t(), integer()) :: :ok | {:error, :agent_unavailable}
+  defp probe(vsock, deadline) do
+    cond do
+      Relay.agent_listening?(vsock, remaining(deadline)) ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:error, :agent_unavailable}
+
+      true ->
+        Process.sleep(@agent_probe_ms)
+        probe(vsock, deadline)
+    end
   end
 
   # What the span records of a call: never its output, which can hold anything.
