@@ -39,7 +39,7 @@ defmodule Hyper.Vm do
 
       vm_id ->
         try do
-          :erpc.call(node(vm), Hyper.Node, :fork_vm_local, [vm_id])
+          Hyper.Rpc.call(node(vm), Hyper.Node, :fork_vm_local, [vm_id])
         catch
           :error, {:erpc, _} -> {:error, :node_unreachable}
         end
@@ -116,7 +116,7 @@ defmodule Hyper.Vm do
   # :erpc's default (infinity) is correct for a transfer proportional to writes.
   @spec publish_on_owner(node(), Hyper.Vm.Id.t()) :: {:ok, map()} | {:error, term()}
   defp publish_on_owner(node, vm_id) do
-    :erpc.call(node, Hyper.Node, :publish_fork_image, [vm_id])
+    Hyper.Rpc.call(node, Hyper.Node, :publish_fork_image, [vm_id])
   catch
     :error, {:erpc, _} -> {:error, :node_unreachable}
   end

@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Spans from calls that cross nodes join the caller's trace. `Hyper.Rpc.call/5`
+  carries the caller's OpenTelemetry context over `:erpc`, and every one of
+  Hyper's own `:erpc` hops goes through it; callers outside Hyper do the same
+  by calling `Hyper.Rpc.run/4` with `:otel_propagator_text_map.inject([])`.
+  `exec` gains spans too: `Hyper.exec` and `Hyper.Node.FireVMM.Agent.exec`,
+  which records the call's `outcome` (`ok`, `agent_unavailable`, `timeout`,
+  ...) but never its output.
 - `Hyper.Img.delete/1` removes an image no VM leases, along with the layer
   files and blob rows no other image shares. Recording an image now checks,
   under a lock, that its blob's file is still in the media store, so a

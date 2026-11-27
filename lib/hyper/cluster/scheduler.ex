@@ -91,7 +91,7 @@ defmodule Hyper.Cluster.Scheduler do
           {:ok, pid()} | {:error, term()}
   defp try_on(target, spec, start_fun, stop_fun) do
     if target == node() or target in Node.list() do
-      :erpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
+      Hyper.Rpc.call(target, Hyper.Node, :try_run, [spec, start_fun, stop_fun])
     else
       {:error, :node_unreachable}
     end

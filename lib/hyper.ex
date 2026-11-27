@@ -3,6 +3,8 @@ defmodule Hyper do
   `Hyper` is a distrubuted elixir virtual machine orchestrator.
   """
 
+  use OpenTelemetryDecorator
+
   defmodule Layer do
     @moduledoc "A content-addressed image layer."
     @type id :: String.t()
@@ -106,8 +108,9 @@ defmodule Hyper do
   @spec route(node(), Hyper.Vm.Id.t(), [String.t()], keyword()) ::
           {:ok, %{stdout: binary(), stderr: binary(), exit_code: integer()}}
           | {:error, term()}
+  @decorate with_span("Hyper.exec", include: [:node, :vm_id])
   defp route(node, vm_id, argv, opts) do
-    :erpc.call(node, Hyper.Node, :exec, [vm_id, argv, opts])
+    Hyper.Rpc.call(node, Hyper.Node, :exec, [vm_id, argv, opts])
   catch
     :error, {:erpc, _} -> {:error, :node_unreachable}
   end
@@ -147,7 +150,7 @@ defmodule Hyper do
   defp unflushed_on(nil, _vm_id), do: Unit.Time.zero()
 
   defp unflushed_on(node, vm_id) do
-    :erpc.call(node, Hyper.Node, :unflushed_usage, [vm_id])
+    Hyper.Rpc.call(node, Hyper.Node, :unflushed_usage, [vm_id])
   catch
     :error, {:erpc, _} -> Unit.Time.zero()
   end
@@ -185,7 +188,7 @@ defmodule Hyper do
   @spec address_on(node(), Hyper.Vm.Id.t()) ::
           {:ok, :inet.ip6_address()} | {:error, :not_found | :node_unreachable}
   defp address_on(node, vm_id) do
-    :erpc.call(node, Hyper.Node, :address, [vm_id])
+    Hyper.Rpc.call(node, Hyper.Node, :address, [vm_id])
   catch
     :error, {:erpc, _} -> {:error, :node_unreachable}
   end
@@ -210,7 +213,7 @@ defmodule Hyper do
   def stop_vm(vm_id) when is_binary(vm_id) do
     case Hyper.Cluster.Routing.supervisor_of(vm_id) do
       nil -> {:error, :not_found}
-      pid -> :erpc.call(node(pid), Hyper.Node, :stop_image_vm, [pid])
+      pid -> Hyper.Rpc.call(node(pid), Hyper.Node, :stop_image_vm, [pid])
     end
   catch
     :error, {:erpc, _} -> {:error, :machine_unreachable}
@@ -228,7 +231,7 @@ defmodule Hyper do
   def set_vm_firewall(vm_id, %Hyper.Vm.Firewall{} = firewall) when is_binary(vm_id) do
     case Hyper.Cluster.Routing.supervisor_of(vm_id) do
       nil -> {:error, :not_found}
-      pid -> :erpc.call(node(pid), Hyper.Node.FireVMM.State, :set_firewall, [vm_id, firewall])
+      pid -> Hyper.Rpc.call(node(pid), Hyper.Node.FireVMM.State, :set_firewall, [vm_id, firewall])
     end
   catch
     :error, {:erpc, _} -> {:error, :machine_unreachable}
@@ -260,7 +263,7 @@ defmodule Hyper do
   """
   @spec id(Hyper.Vm.t()) :: Hyper.Vm.Id.t() | nil
   def id(pid) when is_pid(pid) do
-    :erpc.call(node(pid), Hyper.Cluster.Routing, :id_for, [pid])
+    Hyper.Rpc.call(node(pid), Hyper.Cluster.Routing, :id_for, [pid])
   catch
     :error, {:erpc, _} -> nil
   end
