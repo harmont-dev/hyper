@@ -55,7 +55,6 @@ defmodule Hyper.Cfg.Img do
   def store,
     do:
       get_cfg(
-        runtime: {__MODULE__, :store},
         toml: "img.store",
         default: Path.join(Hyper.Cfg.Dirs.work_dir(), "layers")
       )

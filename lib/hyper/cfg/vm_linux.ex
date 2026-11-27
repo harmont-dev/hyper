@@ -17,5 +17,5 @@ defmodule Hyper.Cfg.VmLinux do
 
   @spec resolve(atom()) :: {:ok, Path.t()} | :error
   defp resolve(doc_key),
-    do: fetch_cfg(runtime: {__MODULE__, doc_key}, toml: "vmlinux.#{doc_key}")
+    do: fetch_cfg(toml: "vmlinux.#{doc_key}")
 end

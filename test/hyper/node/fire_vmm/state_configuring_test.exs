@@ -76,23 +76,21 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     # Seed the documented Toml test-hook cache only when the key is absent; a
     # dev box with /etc/hyper/config.toml keeps its real value.
     original = Hyper.Cfg.Toml.reload()
+    bin = "/usr/local/bin/firecracker"
 
-    unless get_in(original, ["tools", "firecracker"]) do
-      bin = "/usr/local/bin/firecracker"
+    toml =
+      Map.update(original, "tools", %{"firecracker" => bin}, &Map.put_new(&1, "firecracker", bin))
 
-      Hyper.Cfg.Toml.put_cache(
-        Map.update(original, "tools", %{"firecracker" => bin}, &Map.put(&1, "firecracker", bin))
-      )
+    Hyper.Cfg.Toml.put_cache(toml)
+    on_exit(fn -> Hyper.Cfg.Toml.put_cache(original) end)
 
-      on_exit(fn -> Hyper.Cfg.Toml.put_cache(original) end)
-    end
-
-    Map.put(context, :tmp, tmp)
+    Map.merge(context, %{tmp: tmp, toml: toml})
   end
 
-  test "claimed: InstanceStart is issued and the VM advances to :running", %{tmp: tmp} do
+  test "claimed: InstanceStart is issued and the VM advances to :running",
+       %{tmp: tmp, toml: toml} do
     vm_id = Hyper.Vm.Id.generate()
-    SuidHelperStub.install!(tmp, @claimed_script)
+    SuidHelperStub.install!(tmp, @claimed_script, toml)
     start_supervised!({ClientStub, {vm_id, self()}})
     await_client(vm_id)
 
@@ -102,7 +100,8 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     assert_received :instance_start_requested
   end
 
-  test "pending and hard errors before the deadline re-arm the claim timer", %{tmp: tmp} do
+  test "pending and hard errors before the deadline re-arm the claim timer",
+       %{tmp: tmp, toml: toml} do
     # Two rows, one assertion shape: the classification (retry, not fail) is
     # the behavior; the concrete interval is a tunable, so only its presence
     # and target are pinned. No ClientStub is running, so an erroneous
@@ -115,7 +114,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     for {label, script} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      SuidHelperStub.install!(tmp, script)
+      SuidHelperStub.install!(tmp, script, toml)
 
       result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, 60_000))
 
@@ -126,7 +125,8 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
     end
   end
 
-  test "a lapsed deadline stops the boot surfacing the last real reason", %{tmp: tmp} do
+  test "a lapsed deadline stops the boot surfacing the last real reason",
+       %{tmp: tmp, toml: toml} do
     # The surfaced reason distinguishes "socket never appeared" from "the
     # grant itself kept failing (exit 3, stderr text)" — the diagnostic an
     # operator gets for a boot that never came up.
@@ -137,7 +137,7 @@ defmodule Hyper.Node.FireVMM.StateConfiguringTest do
 
     for {script, expected_reason} <- rows do
       vm_id = Hyper.Vm.Id.generate()
-      SuidHelperStub.install!(tmp, script)
+      SuidHelperStub.install!(tmp, script, toml)
 
       result = Configuring.handle(:state_timeout, :claim_vsock_socket, data(vm_id, -1))
 

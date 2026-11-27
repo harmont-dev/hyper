@@ -57,7 +57,7 @@ defmodule Hyper.Cfg.Budget do
         mem_max: mem_max,
         disk_max: disk_max,
         cpu_max_load: cpu_max_load,
-        cpu_max_cap: optional_number(:cpu_max_cap, "budget.cpu_max_cap", @default_cpu_max_cap),
+        cpu_max_cap: optional_number("budget.cpu_max_cap", @default_cpu_max_cap),
         disk_bw_cap: disk_bw_cap,
         disk_bw_max_load: disk_bw_max_load,
         net_bw_cap: net_bw_cap,
@@ -101,9 +101,9 @@ defmodule Hyper.Cfg.Budget do
   # `cpu_max_cap: nil` in config.exs to disable the cap outright, so a
   # non-number resolution (including that explicit nil) falls through to nil
   # rather than failing the whole load.
-  @spec optional_number(atom(), String.t(), number()) :: number() | nil
-  defp optional_number(key, toml, default) do
-    case fetch_cfg(runtime: {__MODULE__, key}, toml: toml, default: default) do
+  @spec optional_number(String.t(), number()) :: number() | nil
+  defp optional_number(toml, default) do
+    case fetch_cfg(toml: toml, default: default) do
       {:ok, n} when is_number(n) -> n
       _ -> nil
     end
@@ -111,7 +111,7 @@ defmodule Hyper.Cfg.Budget do
 
   @spec required(atom(), String.t(), term()) :: {:ok, term()} | {:error, term()}
   defp required(key, toml, default) do
-    case fetch_cfg(runtime: {__MODULE__, key}, toml: toml, default: default) do
+    case fetch_cfg(toml: toml, default: default) do
       {:ok, v} -> {:ok, v}
       :error -> {:error, {:missing, key}}
     end

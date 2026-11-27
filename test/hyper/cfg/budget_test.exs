@@ -5,11 +5,9 @@ defmodule Hyper.Cfg.BudgetTest do
   alias Hyper.Cfg.Toml
 
   setup do
-    Application.delete_env(:hyper, Budget)
     Toml.put_cache(%{})
 
     on_exit(fn ->
-      Application.delete_env(:hyper, Budget)
       Toml.reload()
       # load/0 caches the struct; erase it so no later test observes this
       # test's budget by accident.
@@ -19,7 +17,7 @@ defmodule Hyper.Cfg.BudgetTest do
     :ok
   end
 
-  test "load/0 with no app env and no TOML table returns the documented built-in defaults" do
+  test "load/0 with no TOML table returns the documented built-in defaults" do
     assert {:ok, config} = Budget.load()
 
     assert config == %Budget{
@@ -44,16 +42,8 @@ defmodule Hyper.Cfg.BudgetTest do
     assert config.disk_max == Unit.Information.gib(4)
   end
 
-  test "an app-env override (config.exs) wins over a conflicting TOML value" do
-    Toml.put_cache(%{"budget" => %{"cpu_max_load" => 0.5}})
-    Application.put_env(:hyper, Budget, cpu_max_load: 0.9)
-
-    assert {:ok, config} = Budget.load()
-    assert config.cpu_max_load == 0.9
-  end
-
-  test "cpu_max_cap can be explicitly disabled via app env, overriding its default" do
-    Application.put_env(:hyper, Budget, cpu_max_cap: nil)
+  test "cpu_max_cap can be explicitly disabled in TOML, overriding its default" do
+    Toml.put_cache(%{"budget" => %{"cpu_max_cap" => false}})
 
     assert {:ok, config} = Budget.load()
     assert config.cpu_max_cap == nil
@@ -63,16 +53,16 @@ defmodule Hyper.Cfg.BudgetTest do
   # error naming the offending key, never silently coerce or crash. Table-driven:
   # one assertion shape, rows differ only in the bad env and expected error.
   @bad_budgets [
-    {[mem_max: 123], {:error, {:bad_value, :mem_max, 123}}},
-    {[mem_max: "notabytes"], {:error, {:bad_value, :mem_max, "notabytes"}}},
-    {[cpu_max_load: "high"], {:error, {:not_a_number, :cpu_max_load, "high"}}}
+    {%{"mem_max" => 123}, {:error, {:bad_value, :mem_max, 123}}},
+    {%{"mem_max" => "notabytes"}, {:error, {:bad_value, :mem_max, "notabytes"}}},
+    {%{"cpu_max_load" => "high"}, {:error, {:not_a_number, :cpu_max_load, "high"}}}
   ]
 
-  for {env, expected} <- @bad_budgets do
-    @env env
+  for {table, expected} <- @bad_budgets do
+    @table table
     @expected expected
-    test "load/0 rejects #{inspect(@env)} with #{inspect(@expected)}" do
-      Application.put_env(:hyper, Budget, @env)
+    test "load/0 rejects #{inspect(@table)} with #{inspect(@expected)}" do
+      Toml.put_cache(%{"budget" => @table})
       assert @expected = Budget.load()
     end
   end
