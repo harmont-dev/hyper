@@ -6,6 +6,7 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
   import ExUnit.CaptureLog
 
   alias Hyper.GuestService
+  alias Hyper.GuestService.{Conn, Relay}
   alias Hyper.Node.FireVMM.GuestServices.Listener
   alias Hyper.Node.FireVMM.Jailer
   alias Unit.Information
@@ -171,5 +172,40 @@ defmodule Hyper.Node.FireVMM.GuestServicesTest do
     for sock <- socks, do: assert(:gen_tcp.recv(sock, 0, 2_000) == {:error, :closed})
     for _ <- socks, do: assert_receive({:terminated, :shutdown})
     refute File.exists?(Jailer.host_guest_socket(@vm_id))
+  end
+
+  test "a relay carries the guest's bytes to its target, and the target's replies back" do
+    start([%GuestService{handler: {Relay, self()}}])
+    sock = guest("relay\0hello")
+
+    assert_receive {:guest_service_open, relay, %Conn{vm_id: @vm_id, service: "relay"}}
+    assert_receive {:guest_service_data, ^relay, "hello"}
+    send(relay, {:guest_service_reply, "hi"})
+    assert :gen_tcp.recv(sock, 0, 2_000) == {:ok, "hi"}
+
+    :ok = :gen_tcp.send(sock, "again")
+    assert_receive {:guest_service_data, ^relay, "again"}
+  end
+
+  test "a relay's target closing hangs up the guest" do
+    start([%GuestService{handler: {Relay, self()}}])
+    sock = guest("relay\0")
+
+    assert_receive {:guest_service_open, relay, _conn}
+    send(relay, :guest_service_close)
+    assert :gen_tcp.recv(sock, 0, 2_000) == {:error, :closed}
+  end
+
+  test "a relay whose target is down hangs up the guest instead of leaving it waiting" do
+    gone = spawn(fn -> :ok end)
+
+    start([
+      %GuestService{name: "gone", handler: {Relay, gone}},
+      %GuestService{name: "unregistered", handler: {Relay, {:nobody, node()}}}
+    ])
+
+    for name <- ["gone", "unregistered"] do
+      assert :gen_tcp.recv(guest(name <> "\0"), 0, 2_000) == {:error, :closed}, name
+    end
   end
 end
